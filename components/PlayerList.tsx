@@ -180,8 +180,8 @@ export default function PlayerList({ active, inactive }: Props) {
               className="rounded-2xl overflow-hidden mb-3"
               style={{
                 background: 'rgba(248,248,252,0.62)',
-                backdropFilter: 'blur(80px) saturate(220%) brightness(1.08)',
-                WebkitBackdropFilter: 'blur(80px) saturate(220%) brightness(1.08)',
+                backdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
+                WebkitBackdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
                 border: '1px solid rgba(255,255,255,0.90)',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 1px 0 rgba(255,255,255,0.95) inset',
               }}
@@ -235,8 +235,8 @@ export default function PlayerList({ active, inactive }: Props) {
               className="w-full py-4 rounded-2xl font-semibold text-gray-700"
               style={{
                 background: 'rgba(248,248,252,0.62)',
-                backdropFilter: 'blur(80px) saturate(220%) brightness(1.08)',
-                WebkitBackdropFilter: 'blur(80px) saturate(220%) brightness(1.08)',
+                backdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
+                WebkitBackdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
                 border: '1px solid rgba(255,255,255,0.90)',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 1px 0 rgba(255,255,255,0.95) inset',
               }}

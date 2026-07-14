@@ -191,8 +191,8 @@ export default function TrainingAttendance({ eventId, players, initialStatuses }
             className={`relative rounded-t-3xl overflow-hidden transition-transform duration-300 ease-out w-full max-w-lg mx-auto ${sheetVisible ? 'translate-y-0' : 'translate-y-full'}`}
             style={{
               background: 'rgba(248, 248, 252, 0.55)',
-              backdropFilter: 'blur(80px) saturate(220%) brightness(1.08)',
-              WebkitBackdropFilter: 'blur(80px) saturate(220%) brightness(1.08)',
+              backdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
+              WebkitBackdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
               boxShadow: '0 -8px 60px rgba(0,0,0,0.18), 0 -1px 0 rgba(255,255,255,0.9) inset, 0 1px 0 rgba(255,255,255,0.4) inset',
             }}
           >

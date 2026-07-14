@@ -160,7 +160,7 @@ export default async function EventDetailPage({ params }: Props) {
 
         {/* Metadata row */}
         {(event.time || event.location || (isMatch && event.home_away)) && (
-          <div className="flex items-center gap-4 text-sm opacity-70 mb-5 pb-5 border-b border-white/20 flex-wrap">
+          <div className="flex items-center gap-4 text-sm opacity-85 mb-5 pb-5 border-b border-white/20 flex-wrap">
             {event.time && (
               <span className="flex items-center gap-1.5">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -191,21 +191,21 @@ export default async function EventDetailPage({ params }: Props) {
               <span className="text-4xl font-bold leading-none">{fieldPresentCount}</span>
               <span className="text-xl font-semibold opacity-40 mb-0.5">/{fieldPlayers.length}</span>
             </div>
-            <div className="text-xs opacity-60 mt-1.5 font-medium uppercase tracking-wide">{t.event.fieldPlayers}</div>
+            <div className="text-xs opacity-75 mt-1.5 font-medium uppercase tracking-wide">{t.event.fieldPlayers}</div>
           </div>
           <div className="border-l border-white/20 pl-4">
             <div className="flex items-end gap-1">
               <span className="text-4xl font-bold leading-none">{keeperPresentCount}</span>
               <span className="text-xl font-semibold opacity-40 mb-0.5">/{keeperPlayers.length}</span>
             </div>
-            <div className="text-xs opacity-60 mt-1.5 font-medium uppercase tracking-wide">{t.players.groups['Keepers']}</div>
+            <div className="text-xs opacity-75 mt-1.5 font-medium uppercase tracking-wide">{t.players.groups['Keepers']}</div>
           </div>
         </div>
 
         {/* Progress bar */}
         {allPlayers.length > 0 && (
           <div>
-            <div className="flex justify-between text-xs opacity-50 mb-1.5">
+            <div className="flex justify-between text-xs opacity-70 mb-1.5">
               <span>{presentCount} {t.event.presentStat.toLowerCase()}</span>
               <span>{absentCount} {t.event.absentStat.toLowerCase()} · {unknownCount} {t.event.unknownStat.toLowerCase()}</span>
             </div>
@@ -220,7 +220,7 @@ export default async function EventDetailPage({ params }: Props) {
 
         {event.notes && (
           <div className="mt-5 pt-5 border-t border-white/20">
-            <div className="text-xs opacity-60 mb-1 font-medium uppercase tracking-wide">{t.event.notes}</div>
+            <div className="text-xs opacity-75 mb-1 font-medium uppercase tracking-wide">{t.event.notes}</div>
             <div className="text-sm opacity-90">{event.notes}</div>
           </div>
         )}

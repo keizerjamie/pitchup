@@ -4,8 +4,8 @@
   "description": "Aanwezigheid en opstellingen voor je voetbalteam",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#16a34a",
+  "background_color": "#edf4f2",
+  "theme_color": "#0d3d38",
   "orientation": "portrait",
   "icons": [
     {

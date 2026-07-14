@@ -54,9 +54,9 @@ export default function Navigation() {
       <div
         className="relative rounded-2xl overflow-hidden"
         style={{
-          background: 'rgba(255,255,255,0.58)',
-          backdropFilter: 'blur(48px) saturate(220%) brightness(1.04)',
-          WebkitBackdropFilter: 'blur(48px) saturate(220%) brightness(1.04)',
+          background: 'rgba(255,255,255,0.90)',
+          backdropFilter: 'blur(24px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
           boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 1px 0 rgba(255,255,255,0.95) inset, 0 -1px 0 rgba(0,0,0,0.04)',
           border: '1px solid rgba(255,255,255,0.80)',
         }}

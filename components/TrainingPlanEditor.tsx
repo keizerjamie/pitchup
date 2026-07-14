@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import Link from 'next/link'
 import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES } from '@/lib/types'
 import { saveDoelstelling, addOefening, updateOefening, deleteOefening, OefeningInput } from '@/app/actions/training-plan'
@@ -41,7 +41,12 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   const [oefeningen, setOefeningen] = useState<Oefening[]>(initialOefeningen)
 
   // Sync when server revalidates and parent sends fresh data
-  useEffect(() => { setOefeningen(initialOefeningen) }, [initialOefeningen])
+  // (adjust-state-during-render pattern instead of a cascading effect)
+  const [prevInitial, setPrevInitial] = useState(initialOefeningen)
+  if (prevInitial !== initialOefeningen) {
+    setPrevInitial(initialOefeningen)
+    setOefeningen(initialOefeningen)
+  }
   const [showForm, setShowForm] = useState(false)
   const [formState, setFormState] = useState<FormState>(EMPTY_FORM)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)

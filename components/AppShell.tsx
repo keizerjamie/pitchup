@@ -10,7 +10,8 @@ import GlobalFab from '@/components/GlobalFab'
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const isAuthPage = pathname === '/login' || pathname === '/register'
+  const isAuthPage = pathname === '/login' || pathname === '/register' ||
+    pathname === '/forgot-password' || pathname === '/reset-password'
 
   // Auth pages render full-screen without app chrome — otherwise the hidden
   // sidebar (incl. its logout form) stays in the DOM and tab order.
@@ -55,9 +56,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className="flex items-center px-4 h-14 gap-3"
           style={{
-            background: 'rgba(10, 46, 42, 0.72)',
-            backdropFilter: 'blur(40px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+            background: 'rgba(10, 46, 42, 0.94)',
+            backdropFilter: 'blur(20px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(160%)',
             boxShadow: '0 1px 0 rgba(255,255,255,0.08)',
             borderBottom: '1px solid rgba(255,255,255,0.07)',
           }}

@@ -11,6 +11,11 @@ const geist = Geist({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Pitchup',
   description: 'Aanwezigheid, opstellingen en trainingen voor jouw team',
+  manifest: '/manifest.json',
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/apple-touch-icon.png',
+  },
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Pitchup' },
 }
 

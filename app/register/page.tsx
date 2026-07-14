@@ -16,7 +16,7 @@ export default function RegisterPage() {
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.png" alt="Pitchup" width={64} height={64} className="rounded-2xl mb-4" />
           <h1 className="text-2xl font-bold text-white">Pitchup</h1>
-          <p className="text-white/50 text-sm mt-1">{t.auth.registerTitle}</p>
+          <p className="text-white/75 text-sm mt-1">{t.auth.registerTitle}</p>
         </div>
 
         <form action={action} className="space-y-4">
@@ -53,7 +53,7 @@ export default function RegisterPage() {
           </button>
         </form>
 
-        <p className="text-center text-white/40 text-sm mt-6">
+        <p className="text-center text-white/60 text-sm mt-6">
           {t.auth.hasAccount}{' '}
           <Link href="/login" className="text-accent font-medium hover:text-accent/80">
             {t.auth.loginLink}

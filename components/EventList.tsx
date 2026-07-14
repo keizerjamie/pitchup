@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { FootballEvent, MATCH_TYPE_COLORS } from '@/lib/types'
-import { formatTime } from '@/lib/utils'
+import { addDays, formatTime, todayLocal } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
 
 interface Props {
@@ -147,14 +147,27 @@ export default function EventList({ upcoming, past, attendanceMap }: Props) {
         <>
           {/* Side-by-side columns on desktop, stacked on mobile */}
           <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
-            {filteredUpcoming.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">{t.calendar.upcoming}</h2>
-                <div className="flex flex-col gap-2 stagger">
-                  {filteredUpcoming.map(e => <EventRow key={e.id} event={e} />)}
+            {filteredUpcoming.length > 0 && (() => {
+              const today = todayLocal()
+              const weekEnd = addDays(today, 7)
+              const groups = [
+                { label: t.calendar.today, accent: 'text-brand', events: filteredUpcoming.filter(e => e.date === today) },
+                { label: t.calendar.thisWeek, accent: 'text-gray-500', events: filteredUpcoming.filter(e => e.date > today && e.date <= weekEnd) },
+                { label: t.calendar.later, accent: 'text-gray-500', events: filteredUpcoming.filter(e => e.date > weekEnd) },
+              ].filter(g => g.events.length > 0)
+              return (
+                <div className="space-y-6">
+                  {groups.map(group => (
+                    <div key={group.label}>
+                      <h2 className={`text-sm font-semibold uppercase tracking-wide mb-3 ${group.accent}`}>{group.label}</h2>
+                      <div className="flex flex-col gap-2 stagger">
+                        {group.events.map(e => <EventRow key={e.id} event={e} />)}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {filteredPast.length > 0 && (
               <div>

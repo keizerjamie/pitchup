@@ -66,6 +66,14 @@ export default async function DashboardPage() {
           </svg>
           <p className="text-gray-500 font-medium">{t.dashboard.noUpcoming}</p>
           <p className="text-gray-400 text-sm mt-1">{t.dashboard.noUpcomingHint}</p>
+          <div className="flex gap-2 justify-center mt-4">
+            <Link href="/events/new?type=training" className="bg-brand text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-brand-dark transition-colors">
+              {t.dashboard.addTraining}
+            </Link>
+            <Link href="/events/new?type=match" className="border-2 border-brand text-brand px-4 py-2 rounded-xl text-sm font-semibold hover:bg-brand-light transition-colors">
+              {t.dashboard.addMatch}
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="grid gap-3 lg:gap-5 lg:grid-cols-2 stagger">

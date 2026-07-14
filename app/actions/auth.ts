@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
@@ -49,6 +50,22 @@ export async function signUp(_prevState: { error: string } | null, formData: For
 
   revalidatePath('/', 'layout')
   redirect('/')
+}
+
+export async function requestPasswordReset(_prevState: { sent: boolean } | null, formData: FormData) {
+  const supabase = await createClient()
+  const email = ((formData.get('email') as string) ?? '').trim()
+
+  if (email) {
+    const origin = (await headers()).get('origin') ?? ''
+    // Deliberately ignore the result: the response must not reveal whether
+    // the address exists (user enumeration).
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/reset-password`,
+    })
+  }
+
+  return { sent: true }
 }
 
 export async function signOut() {

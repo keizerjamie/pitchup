@@ -4,6 +4,7 @@ export const es: Dict = {
   locale: 'es' as const,
   browserLocale: 'es-ES',
   nav: {
+    back: 'Atrás',
     periodization: 'Periodización', dashboard: 'Inicio', players: 'Jugadores', calendar: 'Calendario', settings: 'Configuración' },
   dashboard: {
     title: 'Inicio', activePlayers: 'jugadores activos', addTraining: '+ Entrenamiento', addMatch: '+ Partido',
@@ -14,6 +15,9 @@ export const es: Dict = {
     inDays: 'En {n} días', training: 'Entrenamiento',
   },
   calendar: {
+    today: 'Hoy',
+    thisWeek: 'Esta semana',
+    later: 'Más adelante',
     title: 'Calendario', addTraining: '+ Entrenamiento', addMatch: '+ Partido',
     upcoming: 'Próximos', past: 'Pasados', noEvents: 'Aún no hay eventos',
     noEventsHint: 'Añade un entrenamiento o partido para empezar',
@@ -147,6 +151,18 @@ export const es: Dict = {
     title: 'Crear',
   },
   auth: {
+    forgotPassword: '¿Olvidaste tu contraseña?',
+    forgotTitle: 'Contraseña olvidada',
+    forgotHint: 'Introduce tu correo y te enviaremos un enlace para establecer una nueva contraseña.',
+    sendResetLink: 'Enviar enlace',
+    sending: 'Enviando...',
+    resetSent: 'Si este correo es conocido, se ha enviado un enlace. Revisa tu bandeja de entrada.',
+    resetTitle: 'Establecer nueva contraseña',
+    newPassword: 'Nueva contraseña',
+    updatePassword: 'Guardar contraseña',
+    updating: 'Guardando...',
+    passwordUpdated: '¡Contraseña actualizada! Redirigiendo...',
+    backToLogin: 'Volver a iniciar sesión',
     loginTitle: 'Iniciar sesión en tu equipo', email: 'Correo electrónico', emailPlaceholder: 'nombre@email.es',
     password: 'Contraseña', passwordPlaceholder: '••••••••', login: 'Iniciar sesión', loggingIn: 'Iniciando...',
     noAccount: '¿No tienes cuenta?', createTeamLink: 'Crear equipo',

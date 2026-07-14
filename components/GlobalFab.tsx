@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useDict } from '@/lib/i18n-context'
@@ -35,13 +35,14 @@ const ChevronRight = () => (
   </svg>
 )
 
+const emptySubscribe = () => () => {}
+
 export default function GlobalFab() {
   const t = useDict()
   const [open, setOpen] = useState(false)
   const [visible, setVisible] = useState(false)
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => { setMounted(true) }, [])
+  // true after hydration on the client, false during SSR — portal-safe
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
 
   function openMenu() {
     setOpen(true)
@@ -108,8 +109,8 @@ export default function GlobalFab() {
           zIndex: 401,
           minWidth: 238,
           background: 'rgba(248,248,252,0.78)',
-          backdropFilter: 'blur(80px) saturate(180%) brightness(1.06)',
-          WebkitBackdropFilter: 'blur(80px) saturate(180%) brightness(1.06)',
+          backdropFilter: 'blur(40px) saturate(180%) brightness(1.06)',
+          WebkitBackdropFilter: 'blur(40px) saturate(180%) brightness(1.06)',
           border: '1px solid rgba(255,255,255,0.92)',
           borderRadius: 20,
           boxShadow: '0 8px 40px rgba(0,0,0,0.20), 0 2px 0 rgba(255,255,255,0.95) inset',

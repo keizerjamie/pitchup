@@ -16,7 +16,7 @@ export default function LoginPage() {
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.png" alt="Pitchup" width={64} height={64} className="rounded-2xl mb-4" />
           <h1 className="text-2xl font-bold text-white">Pitchup</h1>
-          <p className="text-white/50 text-sm mt-1">{t.auth.loginTitle}</p>
+          <p className="text-white/75 text-sm mt-1">{t.auth.loginTitle}</p>
         </div>
 
         <form action={action} className="space-y-4">
@@ -44,9 +44,15 @@ export default function LoginPage() {
             className="w-full py-3 rounded-xl bg-accent text-white font-semibold hover:bg-accent/90 active:scale-95 transition-all disabled:opacity-60 mt-2">
             {pending ? t.auth.loggingIn : t.auth.login}
           </button>
+
+          <p className="text-center">
+            <Link href="/forgot-password" className="text-white/60 text-sm hover:text-accent transition-colors">
+              {t.auth.forgotPassword}
+            </Link>
+          </p>
         </form>
 
-        <p className="text-center text-white/40 text-sm mt-6">
+        <p className="text-center text-white/60 text-sm mt-6">
           {t.auth.noAccount}{' '}
           <Link href="/register" className="text-accent font-medium hover:text-accent/80">
             {t.auth.createTeamLink}

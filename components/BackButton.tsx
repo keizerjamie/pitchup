@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
+import { useDict } from '@/lib/i18n-context'
 
 interface Props {
   fallback: string
@@ -10,6 +11,7 @@ interface Props {
 
 export default function BackButton({ fallback, className, children }: Props) {
   const router = useRouter()
+  const t = useDict()
 
   function handleBack() {
     if (window.history.length > 1) {
@@ -20,7 +22,7 @@ export default function BackButton({ fallback, className, children }: Props) {
   }
 
   return (
-    <button type="button" onClick={handleBack} className={className}>
+    <button type="button" onClick={handleBack} className={className} aria-label={t.nav.back}>
       {children}
     </button>
   )

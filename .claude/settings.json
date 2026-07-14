@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm run lint)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm audit)",
+      "mcp__Claude_Browser__preview_screenshot",
+      "mcp__Claude_Browser__preview_logs",
+      "mcp__Claude_Browser__preview_console_logs",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__preview_resize",
+      "mcp__ccd_session__mark_chapter"
+    ]
+  }
+}
