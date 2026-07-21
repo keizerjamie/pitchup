@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function signIn(_prevState: { error: string } | null, formData: FormData) {
   const supabase = await createClient()
@@ -70,6 +71,33 @@ export async function requestPasswordReset(_prevState: { sent: boolean } | null,
 
 export async function signOut() {
   const supabase = await createClient()
+  await supabase.auth.signOut()
+  revalidatePath('/', 'layout')
+  redirect('/login')
+}
+
+// AVG / right to erasure: wipes all of the team's data and, when the
+// service-role key is configured, the auth account itself.
+export async function deleteAccount() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  // Delete all data owned by this team. RLS restricts each delete to the
+  // caller's own rows; events/players cascade to attendance, lineups,
+  // metingen and oefeningen, but we clear every table explicitly to be sure.
+  for (const table of ['oefeningen', 'metingen', 'attendance', 'lineups', 'events', 'players', 'settings']) {
+    const { error } = await supabase.from(table).delete().eq('team_id', user.id)
+    if (error) throw new Error(`Verwijderen van ${table} mislukt: ${error.message}`)
+  }
+
+  // Remove the auth account itself. Needs the service-role key; without it the
+  // data is gone but the (email-only) auth row remains until the key is set.
+  const admin = createAdminClient()
+  if (admin) {
+    await admin.auth.admin.deleteUser(user.id)
+  }
+
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
   redirect('/login')

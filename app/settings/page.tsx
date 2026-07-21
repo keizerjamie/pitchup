@@ -5,6 +5,7 @@ import { getDict } from '@/lib/i18n'
 import { signOut } from '@/app/actions/auth'
 import TrainingScheduleForm from '@/components/TrainingScheduleForm'
 import LanguageSwitcher from '@/components/LanguageSwitcher'
+import DeleteAccountSection from '@/components/DeleteAccountSection'
 
 export default async function SettingsPage() {
   const [settings, t] = await Promise.all([
@@ -135,6 +136,9 @@ export default async function SettingsPage() {
           {t.settings.logout}
         </button>
       </form>
+
+      {/* Danger zone: delete team + account (AVG) */}
+      <DeleteAccountSection />
 
       </div>{/* end right column */}
       </div>{/* end grid */}

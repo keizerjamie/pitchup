@@ -12,10 +12,8 @@ export const metadata: Metadata = {
   title: 'Pitchup',
   description: 'Aanwezigheid, opstellingen en trainingen voor jouw team',
   manifest: '/manifest.json',
-  icons: {
-    icon: '/icon-192.png',
-    apple: '/apple-touch-icon.png',
-  },
+  // Favicon/apple-icon are handled by app/icon.png and app/apple-icon.png
+  // (file convention); manifest keeps the 192/512 PWA icons.
   appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'Pitchup' },
 }
 
