@@ -51,18 +51,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* ── Mobile header ── */}
       <div
         className="anchor-mobile-header md:hidden fixed top-0 left-0 right-0 z-40"
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+          background: '#0a2e2a',
+          borderBottom: '1px solid rgba(255,255,255,0.07)',
+        }}
       >
-        <div
-          className="flex items-center px-4 h-14 gap-3"
-          style={{
-            background: 'rgba(10, 46, 42, 0.94)',
-            backdropFilter: 'blur(20px) saturate(160%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(160%)',
-            boxShadow: '0 1px 0 rgba(255,255,255,0.08)',
-            borderBottom: '1px solid rgba(255,255,255,0.07)',
-          }}
-        >
+        <div className="flex items-center px-4 h-14 gap-3">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 ring-1 ring-white/20">
               <Image src="/logo.png" alt="Pitchup" width={32} height={32} />
@@ -74,7 +69,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* ── Main content ── */}
       <div className="md:ml-64">
-        <main className="min-h-screen pb-40 md:pb-8 pt-14 md:pt-0">
+        <main className="min-h-screen pb-40 md:pb-8 pt-[calc(env(safe-area-inset-top)_+_3.5rem)] md:pt-0">
           <PageTransition>
             {children}
           </PageTransition>
