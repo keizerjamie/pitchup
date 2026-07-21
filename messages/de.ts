@@ -23,6 +23,7 @@ export const de: Dict = {
     noEventsHint: 'Füge ein Training oder Spiel hinzu', homeLabel: 'Heim', awayLabel: 'Auswärts', trainingLabel: 'Training',
   },
   event: {
+    editAttendance: 'Anwesenheit ändern',
     newTitle: 'Neues Event', training: 'Training', match: 'Spiel', date: 'Datum', time: 'Uhrzeit',
     location: 'Ort', optional: 'optional', opponent: 'Gegner', matchType: 'Spieltyp',
     homeAway: 'Heim/Auswärts', home: '🏠 Heim', away: '🚌 Auswärts', notes: 'Notizen',
@@ -39,6 +40,8 @@ export const de: Dict = {
     unknownStat: 'Unbekannt',
     fieldPlayers: 'Feldspieler',
     trainingPlan: 'Trainingsplaner', trainingPlanHint: 'Übungen und Struktur für dieses Training planen', trainingPlanCta: 'Erstelle dein Training!',
+    trainingPlanView: 'Trainingsplan ansehen',
+    trainingPlanViewHint: 'Trainingsplan ist fertig',
     lineup: 'Aufstellung erstellen', lineupHint: 'Formation und Aufstellung festlegen', lineupCta: 'Erstelle deine Aufstellung!',
     lineupView: 'Aufstellung ansehen', lineupViewHint: 'Aufstellung wurde bereits erstellt',
     attendance: 'Anwesenheit', markAllPresent: 'Alle anwesend', deleteEvent: 'Event löschen',
@@ -69,6 +72,7 @@ export const de: Dict = {
     } as Record<string, string>,
   },
   trainingPlan: {
+    autoSaveHint: 'Alles wird automatisch gespeichert',
     objective: 'Trainingsziel', objectivePlaceholder: 'z.B. hohes Pressing, Ballbesitz in engen Räumen',
     addExercise: '+ Übung hinzufügen', exerciseName: 'Name der Übung', exerciseNamePlaceholder: 'z.B. 4v4 Positionsspiel',
     exerciseDescription: 'Beschreibung / Coaching-Punkte', exerciseDescriptionPlaceholder: 'z.B. Ballbesitz halten, schnelles Umschalten...',

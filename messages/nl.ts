@@ -39,6 +39,7 @@ export const nl = {
     trainingLabel: 'Training',
   },
   event: {
+    editAttendance: 'Aanwezigheid wijzigen',
     newTitle: 'Nieuw event',
     training: 'Training',
     match: 'Wedstrijd',
@@ -71,6 +72,8 @@ export const nl = {
     trainingPlan: 'Trainingsplanner',
     trainingPlanHint: 'Plan oefeningen en structuur voor deze training',
     trainingPlanCta: 'Maak je training!',
+    trainingPlanView: 'Bekijk trainingsplan',
+    trainingPlanViewHint: 'Trainingsplan is al gemaakt',
     lineup: 'Opstelling maken',
     lineupHint: 'Stel formatie en opstelling in',
     lineupCta: 'Maak je opstelling!',
@@ -138,6 +141,7 @@ export const nl = {
     } as Record<string, string>,
   },
   trainingPlan: {
+    autoSaveHint: 'Alles wordt automatisch opgeslagen',
     objective: 'Doelstelling',
     objectivePlaceholder: 'Bijv. druk zetten hoog op het veld, positiespel in kleine ruimte',
     addExercise: '+ Oefening toevoegen',

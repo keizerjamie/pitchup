@@ -1,9 +1,11 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { Player } from '@/lib/types'
 import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
 import BackButton from '@/components/BackButton'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
+import AttendanceSummary from '@/components/AttendanceSummary'
 import { getDict } from '@/lib/i18n'
 
 interface Props {
@@ -24,6 +26,17 @@ export default async function TrainingPlanPage({ params }: Props) {
     .single()
 
   if (!event || event.type !== 'training') notFound()
+
+  // ── Attendance overview: who is present / not present for this training ──
+  const [{ data: playersData }, { data: attendanceData }] = await Promise.all([
+    supabase.from('players').select('*').eq('team_id', user.id).eq('active', true)
+      .order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
+    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
+  ])
+  const activePlayers: Player[] = playersData ?? []
+  const presentIds = new Set((attendanceData ?? []).filter((a) => a.status === 'present').map((a) => a.player_id))
+  const presentPlayers = activePlayers.filter((p) => presentIds.has(p.id))
+  const absentPlayers = activePlayers.filter((p) => !presentIds.has(p.id))
 
   // ── Find latest meting event before this training ──
   const { data: metingEvents } = await supabase
@@ -67,7 +80,7 @@ export default async function TrainingPlanPage({ params }: Props) {
     : null
 
   return (
-    <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
+    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
 
       <div className="flex items-center gap-3">
         <BackButton fallback={`/events/${id}`} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
@@ -81,14 +94,29 @@ export default async function TrainingPlanPage({ params }: Props) {
         </div>
       </div>
 
-      <TrainingPlanEditor
-        eventId={id}
-        initialDoelstelling={event.doelstelling ?? null}
-        initialOefeningen={oefeningen}
-        currentSteps={currentSteps}
-        hasNulmeting={!!latestMeting}
-        suggestion={suggestion}
-      />
+      {/* Desktop: planner left, attendance overview right (sticky). Mobile: overview on top. */}
+      <div className="lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
+        <div className="lg:order-2">
+          <AttendanceSummary
+            present={presentPlayers}
+            absent={absentPlayers}
+            eventId={id}
+            t={t}
+            className="lg:sticky lg:top-10"
+          />
+        </div>
+
+        <div className="lg:order-1 min-w-0">
+          <TrainingPlanEditor
+            eventId={id}
+            initialDoelstelling={event.doelstelling ?? null}
+            initialOefeningen={oefeningen}
+            currentSteps={currentSteps}
+            hasNulmeting={!!latestMeting}
+            suggestion={suggestion}
+          />
+        </div>
+      </div>
 
     </div>
   )

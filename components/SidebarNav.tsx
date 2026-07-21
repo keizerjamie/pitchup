@@ -71,24 +71,6 @@ export default function SidebarNav() {
         })}
       </nav>
 
-      <div className="px-3 pb-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-        <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest px-3 pt-4 pb-2">{t.fab.title}</p>
-        {[
-          { href: '/events/new?type=training', label: t.event.createTraining, color: 'text-green-400' },
-          { href: '/events/new?type=match',    label: t.event.createMatch,    color: 'text-blue-400' },
-          { href: '/players/new',              label: t.players.add,          color: 'text-purple-400' },
-        ].map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-white/10 ${item.color}`}
-          >
-            <span className="text-base leading-none">+</span>
-            <span>{item.label}</span>
-          </Link>
-        ))}
-      </div>
-
       <div className="px-3 pb-5" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
         <form action={signOut} className="pt-4">
           <button

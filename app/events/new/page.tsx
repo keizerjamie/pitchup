@@ -39,7 +39,7 @@ function NewEventForm() {
     : t.event.createTraining
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6">
+    <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
       <div className="flex items-center gap-3 mb-6">
         <BackButton fallback="/events" className="text-gray-400 hover:text-gray-600">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

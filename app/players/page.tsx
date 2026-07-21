@@ -23,9 +23,16 @@ export default async function PlayersPage() {
 
   return (
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
-      <div>
-        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t.players.title}</h1>
-        <p className="text-sm text-gray-500">{active.length} {t.players.activeCount} • {inactive.length} {t.players.inactiveCount}</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t.players.title}</h1>
+          <p className="text-sm text-gray-500">{active.length} {t.players.activeCount} • {inactive.length} {t.players.inactiveCount}</p>
+        </div>
+        {/* Desktop create action — mobile uses the FAB */}
+        <Link href="/players/new" transitionTypes={['nav-forward']}
+          className="hidden md:inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand hover:bg-brand-dark active:scale-95 transition-all flex-shrink-0">
+          <span className="text-base leading-none">+</span> {t.players.add}
+        </Link>
       </div>
 
       {active.length === 0 ? (

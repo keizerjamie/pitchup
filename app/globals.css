@@ -17,6 +17,19 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Scale the whole UI up on large external monitors. Every size in the app is
+   rem-based, so raising the root font-size grows text, spacing and the
+   max-width containers together. Laptops (< 1700px wide) keep the default. */
+@media (min-width: 1700px) {
+  html { font-size: 17.5px; }
+}
+@media (min-width: 2100px) {
+  html { font-size: 19px; }
+}
+@media (min-width: 2560px) {
+  html { font-size: 20.5px; }
+}
+
 body {
   background: #edf4f2;
   color: #1e293b;

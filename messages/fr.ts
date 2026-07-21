@@ -24,6 +24,7 @@ export const fr: Dict = {
     homeLabel: 'Domicile', awayLabel: 'Extérieur', trainingLabel: 'Entraînement',
   },
   event: {
+    editAttendance: 'Modifier les présences',
     newTitle: 'Nouvel événement', training: 'Entraînement', match: 'Match', date: 'Date',
     time: 'Heure', location: 'Lieu', optional: 'optionnel', opponent: 'Adversaire',
     matchType: 'Type de match', homeAway: 'Dom./Ext.', home: '🏠 Domicile', away: '🚌 Extérieur',
@@ -40,6 +41,8 @@ export const fr: Dict = {
     unknownStat: 'Inconnu',
     fieldPlayers: 'Joueurs de champ',
     trainingPlan: 'Planificateur', trainingPlanHint: 'Planifier les exercices et la structure de la séance', trainingPlanCta: 'Prépare ta séance !',
+    trainingPlanView: 'Voir le plan',
+    trainingPlanViewHint: "Le plan d'entraînement est prêt",
     lineup: 'Créer la composition', lineupHint: 'Définir la formation et la composition', lineupCta: 'Crée ta composition !',
     lineupView: 'Voir la composition', lineupViewHint: 'La composition a déjà été créée',
     attendance: 'Présences', markAllPresent: 'Tous présents', deleteEvent: "Supprimer l'événement",
@@ -70,6 +73,7 @@ export const fr: Dict = {
     } as Record<string, string>,
   },
   trainingPlan: {
+    autoSaveHint: 'Tout est enregistré automatiquement',
     objective: 'Objectif', objectivePlaceholder: 'Ex. pressing haut, conservation du ballon en espace réduit',
     addExercise: '+ Ajouter exercice', exerciseName: "Nom de l'exercice", exerciseNamePlaceholder: 'Ex. 4v4 jeu de position',
     exerciseDescription: 'Description / points de coaching', exerciseDescriptionPlaceholder: 'Ex. conserver le ballon, transitions rapides...',

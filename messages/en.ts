@@ -41,6 +41,7 @@ export const en: Dict = {
     trainingLabel: 'Training',
   },
   event: {
+    editAttendance: 'Edit attendance',
     newTitle: 'New event',
     training: 'Training',
     match: 'Match',
@@ -73,6 +74,8 @@ export const en: Dict = {
     trainingPlan: 'Training planner',
     trainingPlanHint: 'Plan drills and structure for this session',
     trainingPlanCta: 'Plan your session!',
+    trainingPlanView: 'View training plan',
+    trainingPlanViewHint: 'Training plan is ready',
     lineup: 'Create lineup',
     lineupHint: 'Set formation and lineup',
     lineupCta: 'Set up your lineup!',
@@ -136,6 +139,7 @@ export const en: Dict = {
     } as Record<string, string>,
   },
   trainingPlan: {
+    autoSaveHint: 'Everything is saved automatically',
     objective: 'Objective',
     objectivePlaceholder: 'E.g. press high, keep possession in tight spaces',
     addExercise: '+ Add exercise',

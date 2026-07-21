@@ -145,6 +145,14 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   return (
     <div className="space-y-6">
 
+      {/* Auto-save reassurance — there is no explicit save button */}
+      <p className="flex items-center gap-1.5 text-xs text-gray-400 -mb-2">
+        <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {t.trainingPlan.autoSaveHint}
+      </p>
+
       {/* Doelstelling */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center justify-between">

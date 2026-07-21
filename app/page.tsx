@@ -32,10 +32,17 @@ export default async function DashboardPage() {
   const nextTraining = upcoming.find((e) => e.type === 'training') ?? null
   const nextMatch = upcoming.find((e) => e.type === 'match') ?? null
 
-  const { data: lineupData } = nextMatch
-    ? await supabase.from('lineups').select('id').eq('team_id', user.id).eq('event_id', nextMatch.id).maybeSingle()
-    : { data: null }
+  const [{ data: lineupData }, { data: trainingPlanOefeningen }] = await Promise.all([
+    nextMatch
+      ? supabase.from('lineups').select('id').eq('team_id', user.id).eq('event_id', nextMatch.id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    nextTraining
+      ? supabase.from('oefeningen').select('id').eq('team_id', user.id).eq('event_id', nextTraining.id).limit(1)
+      : Promise.resolve({ data: null }),
+  ])
   const hasLineup = !!lineupData
+  // A training counts as "planned" once it has an objective or an exercise.
+  const hasTrainingPlan = !!nextTraining && (!!nextTraining.doelstelling || (trainingPlanOefeningen?.length ?? 0) > 0)
 
   const heroEvents = [nextTraining, nextMatch]
     .filter((e): e is FootballEvent => e !== null)
@@ -85,11 +92,11 @@ export default async function DashboardPage() {
               : diff === 1 ? t.dashboard.tomorrow
               : diff <= 7 ? t.dashboard.inDays.replace('{n}', String(diff))
               : null
-            const stripDone = isMatch ? hasLineup : false
+            const stripDone = isMatch ? hasLineup : hasTrainingPlan
             const stripHref = isMatch ? `/events/${event.id}/lineup` : `/events/${event.id}/training-plan`
             const stripLabel = isMatch
               ? (hasLineup ? t.event.lineupView : t.event.lineupCta)
-              : t.event.trainingPlanCta
+              : (hasTrainingPlan ? t.event.trainingPlanView : t.event.trainingPlanCta)
 
             return (
               <div key={event.id} className="group rounded-2xl overflow-hidden shadow-lg transition-transform duration-200 ease-out hover:scale-[1.025] hover:shadow-xl">
