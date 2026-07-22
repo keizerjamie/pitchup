@@ -21,7 +21,7 @@ export const es: Dict = {
     title: 'Calendario', addTraining: '+ Entrenamiento', addMatch: '+ Partido',
     upcoming: 'Próximos', past: 'Pasados', noEvents: 'Aún no hay eventos',
     noEventsHint: 'Añade un entrenamiento o partido para empezar',
-    homeLabel: 'Casa', awayLabel: 'Fuera', trainingLabel: 'Entrenamiento',
+    homeLabel: 'Casa', awayLabel: 'Fuera', trainingLabel: 'Entrenamiento', prevMonth: 'Mes anterior', nextMonth: 'Mes siguiente', moreEvents: '+{n} más',
   },
   event: {
     editAttendance: 'Editar asistencia',

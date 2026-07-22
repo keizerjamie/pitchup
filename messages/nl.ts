@@ -37,6 +37,9 @@ export const nl = {
     homeLabel: 'Thuis',
     awayLabel: 'Uit',
     trainingLabel: 'Training',
+    prevMonth: 'Vorige maand',
+    nextMonth: 'Volgende maand',
+    moreEvents: '+{n} meer',
   },
   event: {
     editAttendance: 'Aanwezigheid wijzigen',

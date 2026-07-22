@@ -39,6 +39,9 @@ export const en: Dict = {
     homeLabel: 'Home',
     awayLabel: 'Away',
     trainingLabel: 'Training',
+    prevMonth: 'Previous month',
+    nextMonth: 'Next month',
+    moreEvents: '+{n} more',
   },
   event: {
     editAttendance: 'Edit attendance',

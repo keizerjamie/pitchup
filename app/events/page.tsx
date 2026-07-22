@@ -3,8 +3,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { FootballEvent } from '@/lib/types'
 import { getDict } from '@/lib/i18n'
-import { todayLocal } from '@/lib/utils'
-import EventList from '@/components/EventList'
+import CalendarView from '@/components/CalendarView'
 
 export default async function EventsPage() {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
@@ -19,10 +18,6 @@ export default async function EventsPage() {
   const allEvents: FootballEvent[] = events ?? []
   const allAttendance = attendance ?? []
 
-  const today = todayLocal()
-  const upcoming = allEvents.filter((e) => e.date >= today).reverse()
-  const past = allEvents.filter((e) => e.date < today)
-
   const attendanceMap: Record<string, { present: number; total: number }> = {}
   for (const event of allEvents) {
     const records = allAttendance.filter(a => a.event_id === event.id)
@@ -33,8 +28,8 @@ export default async function EventsPage() {
   }
 
   return (
-    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6 md:space-y-0 md:gap-6 md:h-[calc(100dvh-2rem)] md:flex md:flex-col">
+      <div className="flex items-center justify-between gap-4 flex-shrink-0">
         <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t.calendar.title}</h1>
         {/* Desktop create actions — mobile uses the FAB */}
         <div className="hidden md:flex gap-2 flex-shrink-0">
@@ -48,7 +43,9 @@ export default async function EventsPage() {
           </Link>
         </div>
       </div>
-      <EventList upcoming={upcoming} past={past} attendanceMap={attendanceMap} />
+      <div className="md:flex-1 md:min-h-0 md:flex md:flex-col">
+        <CalendarView events={allEvents} attendanceMap={attendanceMap} />
+      </div>
     </div>
   )
 }

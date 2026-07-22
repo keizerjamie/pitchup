@@ -47,6 +47,15 @@ async function run() {
       `status ${res.status}, type ${res.headers.get('content-type')}`)
   }
 
+  // 5. Calendar page is auth-guarded — unauthenticated /events redirects to /login
+  {
+    const res = await fetch(`${BASE}/events`, { redirect: 'manual' })
+    const location = res.headers.get('location') ?? ''
+    check('unauthenticated /events redirects to /login',
+      [302, 303, 307].includes(res.status) && location.includes('/login'),
+      `status ${res.status}, location "${location}"`)
+  }
+
   console.log(`\n${failures === 0 ? 'All smoke checks passed.' : `${failures} check(s) failed.`}`)
   process.exit(failures === 0 ? 0 : 1)
 }
