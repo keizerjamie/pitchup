@@ -10,6 +10,7 @@ export interface AvailabilityItem {
   num: number | null
   pos: string
   status: AttendanceStatus
+  injured: boolean
 }
 
 // Translucent backgrounds read on both light (white) and dark (teal) cards;
@@ -51,7 +52,19 @@ export default function Availability({ items, t }: { items: AvailabilityItem[]; 
                   {p.initials}
                 </div>
                 <div className="flex-1 flex flex-col leading-tight" style={{ minWidth: 0 }}>
-                  <span className="text-[13.5px] font-bold text-ink truncate">{p.name}</span>
+                  <span className="flex items-center gap-1 min-w-0">
+                    <span className="text-[13.5px] font-bold text-ink truncate">{p.name}</span>
+                    {p.injured && (
+                      <span
+                        className="ms text-[15px] flex-shrink-0"
+                        style={{ color: 'var(--chip-red-fg)' }}
+                        title={t.players.injuredBadge}
+                        aria-label={t.players.injuredBadge}
+                      >
+                        healing
+                      </span>
+                    )}
+                  </span>
                   <span className="text-[11.5px] font-semibold text-faint">
                     {p.num != null ? `#${p.num} · ` : ''}{p.pos}
                   </span>

@@ -112,6 +112,7 @@ export default async function DashboardPage() {
     num: p.jersey_number,
     pos: POSITION_ABBREVIATIONS[p.position] ?? p.position,
     status: heroAttendance.get(p.id) ?? 'unknown',
+    injured: p.injured,
   }))
 
   const heroStats = heroEvent ? statsFor(heroEvent.id) : { present: 0, absent: 0, total: 0 }
@@ -183,9 +184,19 @@ export default async function DashboardPage() {
           </div>
         </StatCard>
         <StatCard label={t.home.statActivePlayers} icon="groups" value={totalActive}>
-          <span className="text-[11.5px] font-semibold text-faint">
-            {fitCount} {t.home.fit} · {injuredCount} {t.home.injured} ({injuredPct}%)
-          </span>
+          <div className="flex flex-col gap-2">
+            <div className="h-[7px] rounded-full overflow-hidden flex" style={{ background: 'var(--track)' }}>
+              {totalActive > 0 && fitCount > 0 && (
+                <div style={{ width: `${(fitCount / totalActive) * 100}%`, background: '#16a34a' }} />
+              )}
+              {totalActive > 0 && injuredCount > 0 && (
+                <div style={{ width: `${(injuredCount / totalActive) * 100}%`, background: '#ef4444' }} />
+              )}
+            </div>
+            <span className="text-[11.5px] font-semibold text-faint">
+              {fitCount} {t.home.fit} · {injuredCount} {t.home.injured} ({injuredPct}%)
+            </span>
+          </div>
         </StatCard>
         <StatCard label={t.home.statUpcoming} icon="event" value={upcoming.length} />
         <StatCard label={t.home.statThisWeek} icon="date_range" value={thisWeekCount} />
