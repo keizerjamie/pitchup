@@ -134,21 +134,25 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
     <div className="space-y-4">
       <div>
         <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-medium text-gray-700">{t.lineup.formation}</label>
-          <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-accent text-white hover:bg-accent/90 active:scale-95 transition-all">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+          <label className="block text-[13px] font-bold text-muted">{t.lineup.formation}</label>
+          <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition-all" style={{ background: 'var(--color-accent)' }}>
+            <span className="ms text-[17px]">bolt</span>
             {t.lineup.autoLineup}
           </button>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {Object.keys(FORMATIONS).map((f) => (
-            <button key={f} onClick={() => handleFormationChange(f)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold border-2 transition-colors ${formation === f ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-200 hover:border-accent'}`}>
-              {f}
-            </button>
-          ))}
+          {Object.keys(FORMATIONS).map((f) => {
+            const active = formation === f
+            return (
+              <button key={f} onClick={() => handleFormationChange(f)}
+                className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-colors"
+                style={active
+                  ? { background: 'var(--color-brand)', color: '#fff' }
+                  : { background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}>
+                {f}
+              </button>
+            )
+          })}
         </div>
       </div>
 
@@ -361,11 +365,11 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
       {/* Bench */}
       {assignedPlayerIds.size > 0 && availablePlayers.length > 0 && (
         <div>
-          <h3 className="text-sm font-medium text-gray-600 mb-2">{t.lineup.bench} ({availablePlayers.length})</h3>
+          <h3 className="text-[13px] font-bold text-muted mb-2">{t.lineup.bench} ({availablePlayers.length})</h3>
           <div className="flex flex-wrap gap-2">
             {availablePlayers.map((p) => (
-              <span key={p.id} className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-full text-xs text-gray-600">
-                <span className="font-medium">{p.jersey_number ?? '#'}</span>
+              <span key={p.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold text-muted bg-surface-sunken" style={{ border: '1px solid var(--border-soft)' }}>
+                <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
                 {p.name.split(' ')[0]}
               </span>
             ))}
@@ -374,7 +378,8 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
       )}
 
       <button onClick={handleSave} disabled={isPending}
-        className={`w-full py-3 rounded-xl font-semibold text-white transition-all ${saved ? 'bg-green-500' : isPending ? 'bg-gray-400' : 'bg-brand hover:bg-brand-dark active:scale-95'}`}>
+        className="w-full py-3 rounded-xl font-bold text-white transition-all active:scale-95"
+        style={{ background: saved ? '#22c55e' : isPending ? 'var(--faint)' : 'var(--primary)' }}>
         {saved ? t.lineup.saved : isPending ? t.lineup.saving : t.lineup.save}
       </button>
     </div>

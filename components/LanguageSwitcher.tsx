@@ -20,7 +20,7 @@ export default function LanguageSwitcher() {
             className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-sm font-semibold transition-all ${
               locale === current
                 ? 'bg-accent/10 border-accent text-accent'
-                : 'bg-white border-gray-200 text-gray-600 hover:border-accent/50'
+                : 'bg-surface border-[var(--border-soft)] text-muted hover:border-accent/50'
             }`}
           >
             <span>{FLAGS[locale]}</span>

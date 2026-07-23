@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Player, AttendanceStatus, MATCH_TYPE_COLORS } from '@/lib/types'
+import { Player, AttendanceStatus } from '@/lib/types'
 import { formatDateLong, formatTime } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
 import MetingEditor from '@/components/MetingEditor'
@@ -31,9 +31,7 @@ export default async function EventDetailPage({ params }: Props) {
 
   if (!event) notFound()
 
-  // A training counts as "planned" once it has an objective or an exercise.
   const hasTrainingPlan = !!event.doelstelling || (oefeningen?.length ?? 0) > 0
-
   const isMatch = event.type === 'match'
   const isTraining = event.type === 'training'
   const isMeting = event.type === 'meting'
@@ -44,70 +42,43 @@ export default async function EventDetailPage({ params }: Props) {
     redirect('/events')
   }
 
-  // ──────────────────────────────────────────────
-  // Meting detail
-  // ──────────────────────────────────────────────
+  const backIcon = (
+    <span className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
+      <span className="ms text-[22px]">arrow_back</span>
+    </span>
+  )
+
+  const metaLine = [
+    event.time ? formatTime(event.time) : null,
+    event.location || null,
+    isMatch && event.home_away ? (event.home_away === 'home' ? t.calendar.homeLabel : t.calendar.awayLabel) : null,
+  ].filter(Boolean).join(' · ')
+
+  // ── Meting detail ──
   if (isMeting) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
         <div className="flex items-center gap-3">
-          <BackButton fallback="/events" className="text-gray-400 hover:text-gray-600 flex-shrink-0">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </BackButton>
+          <BackButton fallback="/events">{backIcon}</BackButton>
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              <span className="text-purple-600">◆</span> {t.event.meting}
+            <h1 className="font-display text-[22px] font-bold text-ink flex items-center gap-2">
+              <span style={{ color: '#8b5cf6' }}>◆</span>{t.event.meting}
             </h1>
-            <p className="text-sm text-gray-500">{formatDateLong(event.date, t.browserLocale)}</p>
+            <p className="text-[13px] font-semibold text-faint capitalize">{formatDateLong(event.date, t.browserLocale)}</p>
           </div>
-          <span className="flex-shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700">
-            {t.event.meting}
-          </span>
         </div>
-
-        {(event.time || event.location || event.notes) && (
-          <div className="bg-purple-50 rounded-2xl p-4 space-y-1 border border-purple-100">
-            {event.time && (
-              <p className="text-sm text-purple-700 flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {formatTime(event.time)}
-              </p>
-            )}
-            {event.location && (
-              <p className="text-sm text-purple-700 flex items-center gap-2">
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                </svg>
-                {event.location}
-              </p>
-            )}
-            {event.notes && <p className="text-sm text-purple-700 pt-1">{event.notes}</p>}
-          </div>
-        )}
-
+        {metaLine && <div className="surface-card px-4 py-3 text-[13.5px] font-semibold text-muted">{metaLine}</div>}
+        {event.notes && <div className="surface-card px-4 py-3 text-[13.5px] text-muted">{event.notes}</div>}
         <MetingEditor eventId={id} initialMeting={meting} />
-
-        <DeleteButton
-          label={t.event.deleteEvent}
-          confirmMessage={`${t.event.deleteEvent}?`}
-          action={handleDelete}
-        />
+        <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
       </div>
     )
   }
 
-  // ──────────────────────────────────────────────
-  // Training / Match detail
-  // ──────────────────────────────────────────────
+  // ── Training / Match detail ──
   const allPlayers: Player[] = players ?? []
   const attendanceMap = new Map<string, AttendanceStatus>()
-  for (const a of (attendance ?? [])) {
-    attendanceMap.set(a.player_id, a.status)
-  }
+  for (const a of (attendance ?? [])) attendanceMap.set(a.player_id, a.status)
 
   const missingPlayers = allPlayers.filter((p) => !attendanceMap.has(p.id))
   if (missingPlayers.length > 0) {
@@ -117,239 +88,95 @@ export default async function EventDetailPage({ params }: Props) {
     for (const p of missingPlayers) attendanceMap.set(p.id, 'unknown')
   }
 
-  const presentCount = [...attendanceMap.values()].filter((s) => s === 'present').length
-  const absentCount  = [...attendanceMap.values()].filter((s) => s === 'absent').length
-  const unknownCount = [...attendanceMap.values()].filter((s) => s === 'unknown').length
-
-  const keeperPlayers      = allPlayers.filter(p => p.position === 'Keeper')
-  const fieldPlayers       = allPlayers.filter(p => p.position !== 'Keeper')
-  const keeperPresentCount = keeperPlayers.filter(p => attendanceMap.get(p.id) === 'present').length
-  const fieldPresentCount  = fieldPlayers.filter(p => attendanceMap.get(p.id) === 'present').length
-
   const initialStatuses = Object.fromEntries(attendanceMap) as Record<string, AttendanceStatus>
-
-  const bannerBg = isMatch
-    ? 'linear-gradient(135deg, #4338ca 0%, #312e81 100%)'
-    : 'linear-gradient(135deg, #0d3d38 0%, #0a2e2a 100%)'
+  const title = isMatch && event.opponent ? `vs ${event.opponent}` : t.event.training
 
   return (
-    <div className="max-w-2xl lg:max-w-5xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
-
+    <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <BackButton fallback="/events" className="text-gray-400 hover:text-gray-600 flex-shrink-0">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </BackButton>
+        <BackButton fallback="/events">{backIcon}</BackButton>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-gray-900 truncate">
-            {isMatch && event.opponent ? `vs ${event.opponent}` : t.event.training}
-          </h1>
-          <p className="text-sm text-gray-500">{formatDateLong(event.date, t.browserLocale)}</p>
+          <h1 className="font-display text-[22px] lg:text-[26px] font-bold text-ink truncate">{title}</h1>
+          <p className="text-[13px] font-semibold text-faint capitalize">
+            {formatDateLong(event.date, t.browserLocale)}{metaLine && ` · ${metaLine}`}
+          </p>
         </div>
         {isMatch && event.match_type && (
-          <span className={`flex-shrink-0 text-xs font-semibold px-2.5 py-1 rounded-full ${MATCH_TYPE_COLORS[event.match_type as keyof typeof MATCH_TYPE_COLORS]}`}>
+          <span className="flex-shrink-0 text-[11px] font-extrabold px-3 py-1.5 rounded-full text-brand-accent"
+            style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)' }}>
             {t.event.matchTypes[event.match_type as keyof typeof t.event.matchTypes]}
           </span>
         )}
       </div>
 
-      {/* Two columns on desktop: info left, attendance right */}
-      <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
-      <div className="space-y-6">
-
-      {/* Stats banner */}
-      <div className="rounded-2xl p-5 text-white" style={{ background: bannerBg }}>
-
-        {/* Metadata row */}
-        {(event.time || event.location || (isMatch && event.home_away)) && (
-          <div className="flex items-center gap-4 text-sm opacity-85 mb-5 pb-5 border-b border-white/20 flex-wrap">
-            {event.time && (
-              <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {formatTime(event.time)}
-              </span>
-            )}
-            {event.location && (
-              <span className="flex items-center gap-1.5 min-w-0">
-                <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                <span className="truncate">{event.location}</span>
-              </span>
-            )}
-            {isMatch && event.home_away && (
-              <span>{event.home_away === 'home' ? t.event.homeDetail : t.event.awayDetail}</span>
-            )}
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-4 mb-5">
-          <div>
-            <div className="flex items-end gap-1">
-              <span className="text-4xl font-bold leading-none">{fieldPresentCount}</span>
-              <span className="text-xl font-semibold opacity-40 mb-0.5">/{fieldPlayers.length}</span>
-            </div>
-            <div className="text-xs opacity-75 mt-1.5 font-medium uppercase tracking-wide">{t.event.fieldPlayers}</div>
-          </div>
-          <div className="border-l border-white/20 pl-4">
-            <div className="flex items-end gap-1">
-              <span className="text-4xl font-bold leading-none">{keeperPresentCount}</span>
-              <span className="text-xl font-semibold opacity-40 mb-0.5">/{keeperPlayers.length}</span>
-            </div>
-            <div className="text-xs opacity-75 mt-1.5 font-medium uppercase tracking-wide">{t.players.groups['Keepers']}</div>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        {allPlayers.length > 0 && (
-          <div>
-            <div className="flex justify-between text-xs opacity-70 mb-1.5">
-              <span>{presentCount} {t.event.presentStat.toLowerCase()}</span>
-              <span>{absentCount} {t.event.absentStat.toLowerCase()} · {unknownCount} {t.event.unknownStat.toLowerCase()}</span>
-            </div>
-            <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-accent-green rounded-full transition-all duration-500"
-                style={{ width: `${(presentCount / allPlayers.length) * 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {event.notes && (
-          <div className="mt-5 pt-5 border-t border-white/20">
-            <div className="text-xs opacity-75 mb-1 font-medium uppercase tracking-wide">{t.event.notes}</div>
-            <div className="text-sm opacity-90">{event.notes}</div>
-          </div>
-        )}
-      </div>
-
-      {/* Lineup button (match only) */}
+      {/* Lineup / training-plan action */}
       {isMatch && (
-        <Link href={`/events/${id}/lineup`} transitionTypes={['nav-forward']}>
-          {lineup ? (
-            <div className="rounded-xl p-4 border-2 border-green-300 bg-green-50 flex items-center gap-4 hover:border-green-400 transition-colors">
-              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center text-xl flex-shrink-0">✅</div>
-              <div className="flex-1">
-                <div className="font-semibold text-green-800">{t.event.lineupView}</div>
-                <div className="text-sm text-green-600">{t.event.lineupViewHint}</div>
-              </div>
-              <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          ) : (
-            <div className="rounded-xl overflow-hidden border-2 border-orange-300 hover:border-orange-400 transition-colors">
-              <div className="bg-white px-4 pt-4 pb-3 flex items-center gap-4">
-                <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <svg className="w-6 h-6 text-orange-500 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-                    <rect x="2" y="4" width="20" height="16" rx="0.5" />
-                    <line x1="12" y1="4" x2="12" y2="20" />
-                    <circle cx="12" cy="12" r="3" />
-                    <rect x="2" y="8" width="5" height="8" />
-                    <rect x="17" y="8" width="5" height="8" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-gray-900">{t.event.lineup}</div>
-                  <div className="text-xs text-gray-400">{t.event.lineupHint}</div>
-                </div>
-                <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-              <div className="bg-orange-500 px-4 py-2.5 flex items-center gap-2">
-                <svg className="w-4 h-4 text-white/70 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span className="text-white font-semibold text-sm">{t.event.lineupCta}</span>
-              </div>
-            </div>
-          )}
-        </Link>
+        <ActionCard href={`/events/${id}/lineup`} done={!!lineup} icon="dashboard"
+          title={t.event.lineup} hint={t.event.lineupHint}
+          viewLabel={t.event.lineupView} viewHint={t.event.lineupViewHint} cta={t.event.lineupCta} />
       )}
-
-      {/* Training planner button (training only) */}
       {isTraining && (
-        <Link href={`/events/${id}/training-plan`} transitionTypes={['nav-forward']}>
-          {hasTrainingPlan ? (
-            <div className="rounded-xl p-4 border-2 border-green-300 bg-green-50 flex items-center gap-4 hover:border-green-400 transition-colors">
-              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <div className="font-semibold text-green-800">{t.event.trainingPlanView}</div>
-                <div className="text-sm text-green-600">{t.event.trainingPlanViewHint}</div>
-              </div>
-              <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          ) : (
-            <div className="rounded-xl overflow-hidden border-2 border-orange-300 hover:border-orange-400 transition-colors">
-              <div className="bg-white px-4 pt-4 pb-3 flex items-center gap-4">
-                <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-gray-900">{t.event.trainingPlan}</div>
-                  <div className="text-xs text-gray-400">{t.event.trainingPlanHint}</div>
-                </div>
-                <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-              <div className="bg-orange-500 px-4 py-2.5 flex items-center gap-2">
-                <svg className="w-4 h-4 text-white/70 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <span className="text-white font-semibold text-sm">{t.event.trainingPlanCta}</span>
-              </div>
-            </div>
-          )}
-        </Link>
+        <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
+          title={t.event.trainingPlan} hint={t.event.trainingPlanHint}
+          viewLabel={t.event.trainingPlanView} viewHint={t.event.trainingPlanViewHint} cta={t.event.trainingPlanCta} />
       )}
 
-      {/* Delete — desktop only (left column) */}
-      <div className="hidden lg:block">
-        <DeleteButton
-          label={t.event.deleteEvent}
-          confirmMessage={`${t.event.deleteEvent}?`}
-          action={handleDelete}
-        />
-      </div>
+      {/* Attendance (stat cards + list) */}
+      <TrainingAttendance eventId={id} players={allPlayers} initialStatuses={initialStatuses} />
 
-      </div>{/* end left column */}
+      {/* Notes */}
+      {event.notes && (
+        <div className="surface-card p-4">
+          <div className="text-[11px] font-extrabold uppercase tracking-wider text-faint mb-1">{t.event.notes}</div>
+          <div className="text-[14px] text-muted">{event.notes}</div>
+        </div>
+      )}
 
-      <div className="space-y-6">
-      {/* Attendance */}
-      <TrainingAttendance
-        eventId={id}
-        players={allPlayers}
-        initialStatuses={initialStatuses}
-      />
-
-      {/* Delete — mobile only (below attendance) */}
-      <div className="lg:hidden">
-        <DeleteButton
-          label={t.event.deleteEvent}
-          confirmMessage={`${t.event.deleteEvent}?`}
-          action={handleDelete}
-        />
-      </div>
-      </div>{/* end right column */}
-
-      </div>{/* end grid */}
+      <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
     </div>
+  )
+}
+
+function ActionCard({
+  href, done, icon, title, hint, viewLabel, viewHint, cta,
+}: {
+  href: string; done: boolean; icon: string; title: string; hint: string
+  viewLabel: string; viewHint: string; cta: string
+}) {
+  if (done) {
+    return (
+      <Link href={href} className="surface-card rounded-2xl p-4 flex items-center gap-4 hover:bg-surface-sunken transition-colors"
+        style={{ borderColor: 'color-mix(in srgb, var(--primary) 45%, var(--border-soft))' }}>
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'color-mix(in srgb, var(--primary) 14%, transparent)', color: 'var(--brand-accent)' }}>
+          <span className="ms text-[24px]">check_circle</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-ink">{viewLabel}</div>
+          <div className="text-[13px] font-semibold text-faint">{viewHint}</div>
+        </div>
+        <span className="ms text-[22px] text-faint">chevron_right</span>
+      </Link>
+    )
+  }
+  return (
+    <Link href={href} className="rounded-2xl overflow-hidden block" style={{ border: '1px solid color-mix(in srgb, var(--primary) 35%, var(--border-soft))' }}>
+      <div className="bg-surface flex items-center gap-4 p-4">
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'color-mix(in srgb, var(--color-brand) 12%, transparent)', color: 'var(--brand-accent)' }}>
+          <span className="ms text-[24px]">{icon}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-ink">{title}</div>
+          <div className="text-[13px] font-semibold text-faint">{hint}</div>
+        </div>
+        <span className="ms text-[22px] text-faint">chevron_right</span>
+      </div>
+      <div className="px-4 py-2.5 flex items-center gap-2 text-white" style={{ background: 'var(--primary)' }}>
+        <span className="ms text-[18px]">bolt</span>
+        <span className="font-bold text-[13.5px]">{cta}</span>
+      </div>
+    </Link>
   )
 }

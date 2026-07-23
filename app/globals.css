@@ -1,13 +1,74 @@
 @import "tailwindcss";
 
 @theme {
+  /* Existing brand tokens — kept as-is; referenced across the app. */
   --color-brand: #0d3d38;
   --color-brand-dark: #092c28;
   --color-brand-mid: #1a6b63;
   --color-brand-light: #e6f4f2;
   --color-accent: #14b8a6;
   --color-accent-green: #4ade80;
+
+  /* Redesign semantic tokens. Values point at runtime CSS variables (below)
+     so a single `:root[data-theme="dark"]` block can flip the whole theme
+     later without touching any component. */
+  --color-ink: var(--ink);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border-soft: var(--border-soft);
+  --color-bg: var(--bg);
+  /* Theme-aware green pop for accent icons/links (distinct from the fixed
+     legacy --color-accent teal still used by older pages). */
+  --color-brand-accent: var(--brand-accent);
 }
+
+/* Light theme values. --primary stays constant across themes because it is a
+   button background that pairs with white text; accents that must brighten on
+   dark use --brand-accent instead. */
+:root {
+  --ink: #0a2e2a;
+  --primary: #16a34a;
+  --primary-strong: #14655c;
+  --muted: #3f615b;
+  --faint: #8aa39d;
+  --surface: #ffffff;
+  --surface-sunken: #f6faf8;
+  --border-soft: #e0ebe7;
+  --bg: #e5ede9;
+  --bg-glow: #f0f6f3;
+  --track: #eaf2ee;
+  --brand-btn: #0d3d38;
+  --brand-accent: #16a34a;
+  --chip-green-fg: #14655c;
+  --chip-red-fg: #b91c1c;
+  --chip-amber-fg: #b45309;
+}
+
+/* Dark theme — flips every runtime token above. Set on <html> by the
+   no-FOUC script in layout.tsx and toggled by ThemeToggle. */
+:root[data-theme='dark'] {
+  --ink: #eaf4f1;
+  --muted: #9fc2bb;
+  --faint: #6f938c;
+  --surface: #0d3d38;
+  --surface-sunken: #0a2e2a;
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --bg: #06231f;
+  --bg-glow: #0a332c;
+  --track: rgba(255, 255, 255, 0.10);
+  --brand-btn: #16a34a;
+  --brand-accent: #4ade80;
+  --chip-green-fg: #4ade80;
+  --chip-red-fg: #f87171;
+  --chip-amber-fg: #fbbf24;
+}
+
+/* Follow the OS preference until the user makes an explicit choice (the script
+   only sets data-theme when a stored choice exists or to seed system pref). */
 
 * {
   -webkit-tap-highlight-color: transparent;
@@ -31,8 +92,55 @@ html {
 }
 
 body {
-  background: #edf4f2;
-  color: #1e293b;
+  background: radial-gradient(1200px 600px at 20% -5%, var(--bg-glow), var(--bg));
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+/* ─────────────────────────────────────────────────
+   Redesign helpers
+───────────────────────────────────────────────── */
+
+/* Display font (Space Grotesk) for headings and numbers. */
+.font-display {
+  font-family: var(--font-display), system-ui, sans-serif;
+}
+
+/* Material Symbols Rounded — self-hosted from public/fonts (no external request,
+   so it works inside sandboxed previews). block display prevents ligature-text
+   flashing while the font loads. */
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
+}
+
+/* Material Symbols Rounded icon base. Usage: <span class="ms">groups</span> */
+.ms {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Standard content card surface (white, soft border, gentle shadow). */
+.surface-card {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(10, 46, 42, 0.04), 0 10px 30px -24px rgba(10, 46, 42, 0.35);
 }
 
 /* Decorative background blobs — give glass elements something to blur */

@@ -1,27 +1,23 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Player, POSITION_COLORS, POSITION_GROUPS, POSITION_ABBREVIATIONS } from '@/lib/types'
+import { Player, POSITION_GROUPS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 
-const EditIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-  </svg>
-)
+const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 
-const AbsenceIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5m-9-6h.008v.008H12v-.008zm0 2.25h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zm-3.75-4.5h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V15zm0 2.25h.008v.008H8.25v-.008zm7.5-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008z" />
-  </svg>
-)
-
-const ChevronRight = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-  </svg>
-)
+function initialsOf(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return '?'
+  return (words.length >= 2 ? words[0][0] + words[words.length - 1][0] : words[0].slice(0, 2)).toUpperCase()
+}
+function avatarBg(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return AVATAR_BG[h % AVATAR_BG.length]
+}
 
 interface Props {
   active: Player[]
@@ -33,17 +29,26 @@ export default function PlayerList({ active, inactive }: Props) {
   const router = useRouter()
   const [selected, setSelected] = useState<Player | null>(null)
   const [sheetVisible, setSheetVisible] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const q = query.trim().toLowerCase()
+  const filteredActive = useMemo(
+    () => (q ? active.filter((p) => p.name.toLowerCase().includes(q)) : active),
+    [active, q],
+  )
+  const filteredInactive = useMemo(
+    () => (q ? inactive.filter((p) => p.name.toLowerCase().includes(q)) : inactive),
+    [inactive, q],
+  )
 
   function openSheet(player: Player) {
     setSelected(player)
     requestAnimationFrame(() => requestAnimationFrame(() => setSheetVisible(true)))
   }
-
   function closeSheet() {
     setSheetVisible(false)
     setTimeout(() => setSelected(null), 300)
   }
-
   function navigate(href: string) {
     closeSheet()
     setTimeout(() => router.push(href), 260)
@@ -61,112 +66,150 @@ export default function PlayerList({ active, inactive }: Props) {
   }, [selected])
 
   const actions = selected ? [
-    {
-      label: t.players.editLabel,
-      icon: <EditIcon />,
-      color: '#0d3d38',
-      bg: 'rgba(13,61,56,0.10)',
-      onClick: () => navigate(`/players/${selected.id}/edit`),
-    },
-    {
-      label: t.players.signOff,
-      icon: <AbsenceIcon />,
-      color: '#dc2626',
-      bg: 'rgba(220,38,38,0.10)',
-      onClick: () => navigate(`/players/${selected.id}/absence`),
-    },
+    { label: t.players.editLabel, icon: 'edit',        tone: 'ink' as const,    href: `/players/${selected.id}/edit` },
+    { label: t.players.signOff,   icon: 'event_busy',  tone: 'danger' as const, href: `/players/${selected.id}/absence` },
   ] : []
 
+  const hasAny = active.length > 0 || inactive.length > 0
+
+  function PlayerRow({ player, dimmed }: { player: Player; dimmed?: boolean }) {
+    return (
+      <button
+        type="button"
+        onClick={() => openSheet(player)}
+        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-sunken ${dimmed ? 'opacity-55' : ''}`}
+      >
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[13px] font-bold font-display flex-shrink-0"
+          style={{ background: dimmed ? 'var(--faint)' : avatarBg(player.name) }}
+          aria-hidden="true"
+        >
+          {initialsOf(player.name)}
+        </div>
+        <div className="flex-1 min-w-0 flex flex-col leading-tight">
+          <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+          <span className="text-[12px] font-semibold text-faint">
+            {t.players.positions[player.position] ?? player.position}
+          </span>
+        </div>
+        {player.rating != null && (
+          <span className="text-[11.5px] font-extrabold text-brand-accent px-2 py-0.5 rounded-full flex-shrink-0"
+            style={{ background: 'color-mix(in srgb, var(--brand-accent) 14%, transparent)' }}>
+            {player.rating}
+          </span>
+        )}
+        <span className="w-9 text-center font-display text-[15px] font-bold text-muted flex-shrink-0">
+          {player.jersey_number ?? '–'}
+        </span>
+        <span className="ms text-[20px] text-faint flex-shrink-0">chevron_right</span>
+      </button>
+    )
+  }
+
   return (
-    <>
-      {/* Active players grouped by position */}
-      <div className="space-y-5 stagger">
-        {POSITION_GROUPS.map((group) => {
-          const groupPlayers = active.filter((p) => group.positions.includes(p.position))
-          if (groupPlayers.length === 0) return null
-          return (
-            <div key={group.label}>
-              <div className="flex items-center gap-2 mb-2">
-                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-                  {t.players.groups[group.label] ?? group.label}
-                </h2>
-                <span className="text-xs text-gray-400">({groupPlayers.length})</span>
+    <div className="flex flex-col gap-5">
+      {/* Header */}
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <div className="flex flex-col leading-tight">
+          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.players.title}</h1>
+          <p className="text-[13.5px] font-semibold text-faint mt-0.5">
+            {active.length} {t.players.activeCount}
+            {inactive.length > 0 && ` · ${inactive.length} ${t.players.inactiveCount}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <span className="ms text-[19px] text-faint absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t.players.searchPlaceholder}
+              className="h-[42px] w-[180px] sm:w-[220px] rounded-xl bg-surface text-ink text-[13.5px] font-semibold pl-10 pr-3 placeholder:text-faint placeholder:font-semibold focus:outline-none focus:ring-2 focus:ring-brand-accent/40"
+              style={{ border: '1px solid var(--border-soft)' }}
+            />
+          </div>
+          <Link
+            href="/players/new"
+            className="h-[42px] rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0"
+            style={{ background: 'var(--primary)' }}
+          >
+            <span className="ms text-[19px]">person_add</span>
+            <span className="hidden sm:inline">{t.players.add}</span>
+          </Link>
+        </div>
+      </div>
+
+      {!hasAny ? (
+        <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
+          <span className="ms text-[40px] text-faint">groups</span>
+          <p className="text-ink font-bold">{t.players.noPlayers}</p>
+          <p className="text-faint text-sm">{t.players.noPlayersHint}</p>
+          <Link href="/players/new" className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white" style={{ background: 'var(--primary)' }}>
+            <span className="ms text-[19px]">person_add</span>{t.players.add}
+          </Link>
+        </div>
+      ) : (
+        <>
+          {/* Active players grouped by position */}
+          {POSITION_GROUPS.map((group) => {
+            const groupPlayers = filteredActive.filter((p) => group.positions.includes(p.position))
+            if (groupPlayers.length === 0) return null
+            return (
+              <div key={group.label} className="flex flex-col gap-2.5">
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[11.5px] font-extrabold uppercase tracking-wider text-faint">
+                    {t.players.groups[group.label] ?? group.label}
+                  </span>
+                  <span className="text-[11.5px] font-bold text-faint/70">{groupPlayers.length}</span>
+                </div>
+                <div className="surface-card overflow-hidden">
+                  {groupPlayers.map((player, i) => (
+                    <div key={player.id} style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
+                      <PlayerRow player={player} />
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {groupPlayers.map((player) => (
-                  <button
-                    key={player.id}
-                    type="button"
-                    onClick={() => openSheet(player)}
-                    className="glass-card-raised rounded-xl w-full flex items-center gap-3 p-4 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 text-left active:scale-[0.99]"
-                  >
-                    <div className="flex-shrink-0 w-10 h-10 bg-brand-light rounded-full flex items-center justify-center font-bold text-brand text-sm">
-                      {player.jersey_number ?? '#'}
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold text-gray-900">{player.name}</div>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {player.rating && (
-                        <span className="text-xs font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-full">
-                          {player.rating}
-                        </span>
-                      )}
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${POSITION_COLORS[player.position] ?? 'bg-gray-100 text-gray-700'}`}>
-                        {POSITION_ABBREVIATIONS[player.position] ?? player.position}
-                      </span>
-                    </div>
-                    <span className="text-gray-300 flex-shrink-0"><ChevronRight /></span>
-                  </button>
+            )
+          })}
+
+          {/* Inactive players */}
+          {filteredInactive.length > 0 && (
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-[11.5px] font-extrabold uppercase tracking-wider text-faint">{t.players.inactiveLabel}</span>
+                <span className="text-[11.5px] font-bold text-faint/70">{filteredInactive.length}</span>
+              </div>
+              <div className="surface-card overflow-hidden">
+                {filteredInactive.map((player, i) => (
+                  <div key={player.id} style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
+                    <PlayerRow player={player} dimmed />
+                  </div>
                 ))}
               </div>
             </div>
-          )
-        })}
-      </div>
+          )}
 
-      {/* Inactive players */}
-      {inactive.length > 0 && (
-        <div className="mt-6">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-2">{t.players.inactiveLabel} ({inactive.length})</h2>
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {inactive.map((player) => (
-              <button
-                key={player.id}
-                type="button"
-                onClick={() => openSheet(player)}
-                className="glass-card-raised rounded-xl w-full p-4 flex items-center gap-4 opacity-50 hover:opacity-70 transition-opacity text-left"
-              >
-                <div className="flex-shrink-0 w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-500 text-sm">
-                  {player.jersey_number ?? '#'}
-                </div>
-                <div className="flex-1">
-                  <div className="font-semibold text-gray-700">{player.name}</div>
-                </div>
-                <span className="text-xs text-gray-400 px-2 py-0.5 rounded-full bg-gray-100">{t.players.inactiveLabel}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+          {q && filteredActive.length === 0 && filteredInactive.length === 0 && (
+            <p className="text-center text-faint text-sm py-6">{t.players.noPlayers}</p>
+          )}
+        </>
       )}
 
       {/* Bottom sheet */}
       {selected && (
         <>
-          {/* Backdrop */}
           <div
             className="fixed inset-0 z-[290]"
             onClick={closeSheet}
             style={{
-              background: 'rgba(0,0,0,0.20)',
-              backdropFilter: sheetVisible ? 'blur(8px)' : 'blur(0px)',
-              WebkitBackdropFilter: sheetVisible ? 'blur(8px)' : 'blur(0px)',
+              background: 'rgba(0,0,0,0.28)',
+              backdropFilter: sheetVisible ? 'blur(6px)' : 'blur(0px)',
+              WebkitBackdropFilter: sheetVisible ? 'blur(6px)' : 'blur(0px)',
               opacity: sheetVisible ? 1 : 0,
-              transition: 'opacity 0.25s ease, backdrop-filter 0.25s ease, -webkit-backdrop-filter 0.25s ease',
+              transition: 'opacity 0.25s ease, backdrop-filter 0.25s ease',
             }}
           />
-
-          {/* Sheet */}
           <div
             className="fixed left-0 right-0 z-[300] px-4 max-w-md mx-auto"
             style={{
@@ -175,77 +218,53 @@ export default function PlayerList({ active, inactive }: Props) {
               transition: 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
             }}
           >
-            {/* Main card */}
-            <div
-              className="rounded-2xl overflow-hidden mb-3"
-              style={{
-                background: 'rgba(248,248,252,0.62)',
-                backdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
-                WebkitBackdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
-                border: '1px solid rgba(255,255,255,0.90)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 1px 0 rgba(255,255,255,0.95) inset',
-              }}
-            >
-              {/* Specular highlight */}
-              <div aria-hidden="true" style={{
-                position: 'absolute', inset: 0, pointerEvents: 'none', borderRadius: 'inherit',
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.30) 0%, transparent 50%)',
-              }} />
-
-              {/* Player header */}
-              <div className="px-5 py-4" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-brand-light rounded-full flex items-center justify-center font-bold text-brand text-sm flex-shrink-0">
-                    {selected.jersey_number ?? '#'}
-                  </div>
-                  <div>
-                    <div className="font-semibold text-gray-900">{selected.name}</div>
-                    <div className="text-xs text-gray-500">{t.players.positions[selected.position] ?? selected.position}</div>
-                  </div>
+            <div className="surface-card rounded-2xl overflow-hidden mb-3">
+              <div className="px-5 py-4 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                <div
+                  className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[13px] font-bold font-display flex-shrink-0"
+                  style={{ background: avatarBg(selected.name) }}
+                  aria-hidden="true"
+                >
+                  {initialsOf(selected.name)}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-ink truncate">{selected.name}</div>
+                  <div className="text-xs font-semibold text-faint">{t.players.positions[selected.position] ?? selected.position}</div>
                 </div>
               </div>
-
-              {/* Actions */}
               {actions.map((action, i) => (
                 <button
                   key={i}
                   type="button"
-                  onClick={action.onClick}
-                  className="w-full flex items-center gap-4 px-5 py-4 active:bg-black/5 transition-colors text-left"
-                  style={{ borderBottom: i < actions.length - 1 ? '1px solid rgba(0,0,0,0.055)' : undefined }}
+                  onClick={() => navigate(action.href)}
+                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-surface-sunken transition-colors text-left"
+                  style={i < actions.length - 1 ? { borderBottom: '1px solid var(--border-soft)' } : undefined}
                 >
-                  <div style={{
-                    width: 38, height: 38, borderRadius: 11,
-                    background: action.bg,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: action.color, flexShrink: 0,
-                  }}>
-                    {action.icon}
+                  <div
+                    className="w-[38px] h-[38px] rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={
+                      action.tone === 'danger'
+                        ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626' }
+                        : { background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--brand-accent)' }
+                    }
+                  >
+                    <span className="ms text-[20px]">{action.icon}</span>
                   </div>
-                  <span className="font-semibold text-gray-900 flex-1">{action.label}</span>
-                  <span className="text-gray-300"><ChevronRight /></span>
+                  <span className="font-bold text-ink flex-1">{action.label}</span>
+                  <span className="ms text-[20px] text-faint">chevron_right</span>
                 </button>
               ))}
             </div>
-
-            {/* Cancel button */}
             <button
               type="button"
               onClick={closeSheet}
-              className="w-full py-4 rounded-2xl font-semibold text-gray-700"
-              style={{
-                background: 'rgba(248,248,252,0.62)',
-                backdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
-                WebkitBackdropFilter: 'blur(40px) saturate(220%) brightness(1.08)',
-                border: '1px solid rgba(255,255,255,0.90)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 1px 0 rgba(255,255,255,0.95) inset',
-              }}
+              className="surface-card w-full py-4 rounded-2xl font-bold text-ink"
             >
               {t.players.cancel ?? 'Annuleren'}
             </button>
           </div>
         </>
       )}
-    </>
+    </div>
   )
 }

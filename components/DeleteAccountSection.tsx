@@ -34,8 +34,8 @@ export default function DeleteAccountSection() {
         <h2 className="font-semibold text-red-800">{t.settings.dangerZone}</h2>
       </div>
       <div className="px-5 py-4">
-        <h3 className="font-semibold text-gray-900 text-sm">{t.settings.deleteAccountTitle}</h3>
-        <p className="text-sm text-gray-600 mt-1">{t.settings.deleteAccountHint}</p>
+        <h3 className="font-semibold text-ink text-sm">{t.settings.deleteAccountTitle}</h3>
+        <p className="text-sm text-muted mt-1">{t.settings.deleteAccountHint}</p>
 
         {!open ? (
           <button
@@ -47,7 +47,7 @@ export default function DeleteAccountSection() {
           </button>
         ) : (
           <div className="mt-4 space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
+            <label className="block text-sm font-medium text-muted">
               {t.settings.deleteConfirmPrompt}
             </label>
             <input
@@ -57,7 +57,7 @@ export default function DeleteAccountSection() {
               autoComplete="off"
               autoCapitalize="characters"
               placeholder={word}
-              className="w-full px-4 py-3 rounded-xl border border-red-200 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 text-gray-900 placeholder-gray-300"
+              className="w-full px-4 py-3 rounded-xl border border-red-200 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 text-ink placeholder:text-faint"
             />
             {error && (
               <div className="bg-red-100 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>
@@ -66,7 +66,7 @@ export default function DeleteAccountSection() {
               <button
                 type="button"
                 onClick={() => { setOpen(false); setConfirm(''); setError(null) }}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-gray-600 border border-gray-200 hover:border-gray-300 active:scale-95 transition-all"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-muted border border-[var(--border-soft)] hover:text-ink active:scale-95 transition-all"
               >
                 {t.trainingPlan.cancel}
               </button>

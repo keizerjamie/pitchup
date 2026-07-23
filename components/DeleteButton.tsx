@@ -15,7 +15,8 @@ export default function DeleteButton({ label, confirmMessage, action }: Props) {
     >
       <button
         type="submit"
-        className="w-full py-3 rounded-xl font-semibold text-red-500 border border-red-100 hover:bg-red-50 active:scale-95 transition-all text-sm"
+        className="w-full py-3 rounded-xl font-semibold active:scale-95 transition-all text-sm"
+        style={{ color: '#ef4444', border: '1px solid color-mix(in srgb, #ef4444 30%, transparent)', background: 'color-mix(in srgb, #ef4444 6%, transparent)' }}
       >
         {label}
       </button>

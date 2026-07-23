@@ -79,23 +79,23 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
     <form onSubmit={handleSave} className="space-y-5">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.schedule.seasonStart}</label>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.schedule.seasonStart}</label>
           <input name="season_start" type="date" value={seasonStart} onChange={(e) => setSeasonStart(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink text-sm" />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.schedule.seasonEnd}</label>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.schedule.seasonEnd}</label>
           <input name="season_end" type="date" value={seasonEnd} onChange={(e) => setSeasonEnd(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink text-sm" />
         </div>
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-2">{t.schedule.trainingDays}</label>
+        <label className="block text-sm font-semibold text-muted mb-2">{t.schedule.trainingDays}</label>
         <div className="flex gap-2">
           {DAYS.map((day) => (
             <button key={day.value} type="button" onClick={() => toggleDay(day.value)}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${selectedDays.includes(day.value) ? 'bg-brand text-white border-brand' : 'bg-white text-gray-500 border-gray-200 hover:border-accent'}`}>
+              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${selectedDays.includes(day.value) ? 'bg-brand text-white border-brand' : 'bg-surface text-faint border-[var(--border-soft)] hover:border-accent'}`}>
               {day.label}
             </button>
           ))}
@@ -105,18 +105,18 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-            {t.schedule.time} <span className="text-gray-400 font-normal">({t.schedule.optional})</span>
+          <label className="block text-sm font-semibold text-muted mb-1.5">
+            {t.schedule.time} <span className="text-faint font-normal">({t.schedule.optional})</span>
           </label>
           <input name="training_time" type="time" defaultValue={initialTime}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink text-sm" />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-            {t.schedule.location} <span className="text-gray-400 font-normal">({t.schedule.optional})</span>
+          <label className="block text-sm font-semibold text-muted mb-1.5">
+            {t.schedule.location} <span className="text-faint font-normal">({t.schedule.optional})</span>
           </label>
           <input name="training_location" type="text" defaultValue={initialLocation} placeholder="Sportpark de Meent"
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400 text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder:text-faint text-sm" />
         </div>
       </div>
 

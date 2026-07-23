@@ -6,6 +6,19 @@ import { signOut } from '@/app/actions/auth'
 import TrainingScheduleForm from '@/components/TrainingScheduleForm'
 import LanguageSwitcher from '@/components/LanguageSwitcher'
 import DeleteAccountSection from '@/components/DeleteAccountSection'
+import ThemeSelect from '@/components/ThemeSelect'
+
+function SectionCard({ icon, title, children }: { icon: string; title: string; children: React.ReactNode }) {
+  return (
+    <div className="surface-card p-5 flex flex-col gap-4">
+      <div className="flex items-center gap-2.5">
+        <span className="ms text-[20px] text-primary-strong">{icon}</span>
+        <span className="font-display text-[16px] font-bold text-ink">{title}</span>
+      </div>
+      {children}
+    </div>
+  )
+}
 
 export default async function SettingsPage() {
   const [settings, t] = await Promise.all([
@@ -26,122 +39,109 @@ export default async function SettingsPage() {
     redirect('/settings')
   }
 
+  const radioLabel = 'flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-colors border-[var(--border-soft)] has-[:checked]:border-brand-accent has-[:checked]:bg-surface-sunken'
+
   return (
-    <div className="max-w-lg lg:max-w-5xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
+    <div className="max-w-lg lg:max-w-5xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <div>
-        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t.settings.title}</h1>
-        <p className="text-sm text-gray-500 mt-1">{t.settings.subtitle}</p>
+        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.settings.title}</h1>
+        <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.settings.subtitle}</p>
       </div>
 
-      <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
-      <div className="space-y-6">
+      <div className="lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start flex flex-col gap-5">
+        <div className="flex flex-col gap-5">
 
-      {/* Attendance default */}
-      <form action={handleSave} className="space-y-4">
-        <div className="glass-card rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/50">
-            <h2 className="font-semibold text-gray-800">{t.settings.attendanceSection}</h2>
-          </div>
-          <div className="px-5 py-4">
-            <p className="text-sm text-gray-600 mb-4">{t.settings.attendanceQuestion}</p>
-            <div className="space-y-3">
-              <label className="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-colors has-[:checked]:border-accent has-[:checked]:bg-brand-light border-gray-200">
-                <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-green-600" />
-                <div>
-                  <div className="font-semibold text-gray-800 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
-                    {t.settings.everyonePresent}
-                  </div>
-                  <div className="text-sm text-gray-500 mt-0.5">{t.settings.everyonePresentHint}</div>
-                </div>
-              </label>
-              <label className="flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-colors has-[:checked]:border-gray-400 has-[:checked]:bg-gray-50 border-gray-200">
-                <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-gray-600" />
-                <div>
-                  <div className="font-semibold text-gray-800 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center text-xs font-bold">?</span>
-                    {t.settings.everyoneUnknown}
-                  </div>
-                  <div className="text-sm text-gray-500 mt-0.5">{t.settings.everyoneUnknownHint}</div>
-                </div>
-              </label>
+          {/* Display: theme + language */}
+          <SectionCard icon="palette" title={t.settings.displaySection}>
+            <div>
+              <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.themeLabel}</div>
+              <ThemeSelect />
             </div>
+            <div>
+              <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.languageSection}</div>
+              <LanguageSwitcher />
+            </div>
+          </SectionCard>
+
+          {/* Attendance default */}
+          <form action={handleSave} className="flex flex-col gap-4">
+            <SectionCard icon="how_to_reg" title={t.settings.attendanceSection}>
+              <p className="text-[13.5px] font-medium text-muted -mt-1">{t.settings.attendanceQuestion}</p>
+              <div className="flex flex-col gap-3">
+                <label className={radioLabel}>
+                  <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-green-600" />
+                  <div>
+                    <div className="font-bold text-ink flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                      {t.settings.everyonePresent}
+                    </div>
+                    <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
+                  </div>
+                </label>
+                <label className={radioLabel}>
+                  <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-gray-600" />
+                  <div>
+                    <div className="font-bold text-ink flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold" style={{ background: 'var(--faint)' }}>?</span>
+                      {t.settings.everyoneUnknown}
+                    </div>
+                    <div className="text-[13px] text-faint mt-0.5">{t.settings.everyoneUnknownHint}</div>
+                  </div>
+                </label>
+              </div>
+            </SectionCard>
+            <button type="submit" className="w-full py-3 rounded-xl font-bold text-white active:scale-95 transition-all" style={{ background: 'var(--primary)' }}>
+              {t.settings.save}
+            </button>
+          </form>
+
+          {/* Periodization — mobile entry point */}
+          <Link href="/periodisering" className="block lg:hidden">
+            <div className="surface-card px-5 py-4 flex items-center gap-3 hover:bg-surface-sunken transition-colors">
+              <span className="ms text-[22px] text-primary-strong flex-shrink-0">monitoring</span>
+              <div className="flex-1">
+                <h2 className="font-bold text-ink text-[15px]">{t.settings.periodizationSection}</h2>
+                <p className="text-[13px] text-faint">{t.settings.periodizationHint}</p>
+              </div>
+              <span className="ms text-[20px] text-faint">chevron_right</span>
+            </div>
+          </Link>
+
+        </div>
+
+        <div className="flex flex-col gap-5">
+
+          {/* Training schedule */}
+          <SectionCard icon="calendar_month" title={t.settings.scheduleSection}>
+            <p className="text-[13px] text-faint -mt-2">{t.settings.scheduleHint}</p>
+            <TrainingScheduleForm
+              initialSeasonStart={seasonStart}
+              initialSeasonEnd={seasonEnd}
+              initialDays={trainingDays}
+              initialTime={trainingTime}
+              initialLocation={trainingLocation}
+            />
+          </SectionCard>
+
+          {/* About */}
+          <div className="surface-card px-5 py-4">
+            <h2 className="font-display text-[15px] font-bold text-ink mb-0.5">{t.settings.aboutSection}</h2>
+            <p className="text-[13px] text-faint">{t.settings.version}</p>
           </div>
-        </div>
-        <button type="submit" className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-95 transition-all">
-          {t.settings.save}
-        </button>
-      </form>
 
-      {/* Periodization — mobile entry point (desktop has the sidebar item) */}
-      <Link href="/periodisering" transitionTypes={['nav-forward']} className="block lg:hidden">
-        <div className="glass-card rounded-2xl px-5 py-4 flex items-center gap-3 hover:shadow-lg transition-shadow">
-          <svg className="w-5 h-5 text-brand flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
-          </svg>
-          <div className="flex-1">
-            <h2 className="font-semibold text-gray-800">{t.settings.periodizationSection}</h2>
-            <p className="text-sm text-gray-500">{t.settings.periodizationHint}</p>
-          </div>
-          <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </div>
-      </Link>
+          {/* Danger zone */}
+          <form action={signOut}>
+            <button type="submit" className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm active:scale-95 transition-all"
+              style={{ color: '#ef4444', border: '1px solid color-mix(in srgb, #ef4444 30%, transparent)', background: 'color-mix(in srgb, #ef4444 6%, transparent)' }}>
+              <span className="ms text-[19px]">logout</span>
+              {t.settings.logout}
+            </button>
+          </form>
 
-      {/* Language */}
-      <div className="glass-card rounded-2xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-white/50">
-          <h2 className="font-semibold text-gray-800">{t.settings.languageSection}</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{t.settings.languageHint}</p>
-        </div>
-        <div className="px-5 py-4">
-          <LanguageSwitcher />
+          <DeleteAccountSection />
+
         </div>
       </div>
-
-      </div>{/* end left column */}
-
-      <div className="space-y-6">
-
-      {/* Training schedule */}
-      <div className="glass-card rounded-2xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-white/50">
-          <h2 className="font-semibold text-gray-800">{t.settings.scheduleSection}</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{t.settings.scheduleHint}</p>
-        </div>
-        <div className="px-5 py-5">
-          <TrainingScheduleForm
-            initialSeasonStart={seasonStart}
-            initialSeasonEnd={seasonEnd}
-            initialDays={trainingDays}
-            initialTime={trainingTime}
-            initialLocation={trainingLocation}
-          />
-        </div>
-      </div>
-
-      {/* About */}
-      <div className="glass-card rounded-2xl px-5 py-4">
-        <h2 className="font-semibold text-gray-800 mb-1">{t.settings.aboutSection}</h2>
-        <p className="text-sm text-gray-500">{t.settings.version}</p>
-      </div>
-
-      {/* Logout */}
-      <form action={signOut}>
-        <button type="submit" className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-red-500 border border-red-100 hover:bg-red-50 active:scale-95 transition-all text-sm">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-          </svg>
-          {t.settings.logout}
-        </button>
-      </form>
-
-      {/* Danger zone: delete team + account (AVG) */}
-      <DeleteAccountSection />
-
-      </div>{/* end right column */}
-      </div>{/* end grid */}
     </div>
   )
 }

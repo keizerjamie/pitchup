@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { PERIODIZATION_CATEGORIES, MetingData } from '@/lib/types'
-import { cycleWeekFor, computeCurrentSteps, getTrainingLog, TrainingLogEntry, LastDoneEntry } from '@/lib/periodization'
+import { cycleWeekFor, computeCurrentSteps, getTrainingLog, TrainingLogEntry, LastDoneEntry, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
 import { addDays, formatDate, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import NulmetingManager from '@/components/NulmetingManager'
@@ -78,46 +78,49 @@ export default async function PeriodizationPage() {
   const metingCategories = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
 
   return (
-    <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
+    <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <div>
-        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">{t.periodization.pageTitle}</h1>
-        <p className="text-sm text-gray-500 mt-1">{t.periodization.pageSubtitle}</p>
+        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.periodization.pageTitle}</h1>
+        <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.periodization.pageSubtitle}</p>
       </div>
 
       {latestEvent && latestMeting ? (
-        <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
-          <div className="space-y-6">
-            {/* Current status */}
-            <div className="glass-card rounded-2xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-white/50">
-                <h2 className="font-semibold text-gray-800">{t.periodization.currentSteps}</h2>
-                <p className="text-sm text-gray-500 mt-0.5">
+        <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start flex flex-col gap-5">
+          <div className="flex flex-col gap-5">
+            {/* Current cycle phase */}
+            {cycleWeek !== null && (
+              <div className="rounded-2xl p-5 text-white" style={{ background: 'linear-gradient(135deg,#0a2e2a,#14655c)' }}>
+                <div className="text-[11px] font-extrabold tracking-[.1em] uppercase" style={{ color: '#4ade80' }}>{t.periodization.cycleTitle}</div>
+                <div className="font-display text-[30px] font-bold mt-1.5">{t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</div>
+                <div className="text-[13.5px] font-semibold mt-1" style={{ color: '#9fd8cd' }}>
                   {t.periodization.nulmetingLabel}: {formatDate(latestEvent.date, t.browserLocale)}
-                  {cycleWeek !== null && <> · {t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</>}
-                </p>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden mt-3.5" style={{ background: 'rgba(255,255,255,.14)' }}>
+                  <div className="h-full rounded-full" style={{ width: `${Math.round((cycleWeek / CYCLE_LENGTH_WEEKS) * 100)}%`, background: '#4ade80' }} />
+                </div>
               </div>
-              <div className="px-5 py-4 space-y-4">
+            )}
+
+            {/* Current steps per category */}
+            <div className="surface-card overflow-hidden">
+              <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                <h2 className="font-display text-[16px] font-bold text-ink">{t.periodization.currentSteps}</h2>
+              </div>
+              <div className="px-5 py-4 flex flex-col gap-4">
                 {metingCategories.map((cat) => {
                   const step = currentSteps[cat.key]
-                  const pct = step !== null && step !== undefined
-                    ? Math.min(100, Math.round((step / cat.maxStap) * 100))
-                    : 0
+                  const pct = step !== null && step !== undefined ? Math.min(100, Math.round((step / cat.maxStap) * 100)) : 0
                   const last = lastByCategory[cat.key]
                   return (
                     <div key={cat.key}>
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-sm font-medium text-gray-800">{t.periodization.categories[cat.key] ?? cat.label}</span>
-                        <span className="text-xs text-gray-500">
-                          {t.periodization.step} {step ?? '–'}/{cat.maxStap}
-                        </span>
+                        <span className="text-[13.5px] font-bold text-ink">{t.periodization.categories[cat.key] ?? cat.label}</span>
+                        <span className="text-xs font-semibold text-faint">{t.periodization.step} {step ?? '–'}/{cat.maxStap}</span>
                       </div>
-                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%`, background: BAR_COLORS[cat.key] ?? '#0d3d38' }}
-                        />
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--track)' }}>
+                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: BAR_COLORS[cat.key] ?? '#0d3d38' }} />
                       </div>
-                      <p className="text-xs mt-1 text-gray-400">
+                      <p className="text-xs mt-1 text-faint">
                         {last
                           ? <>{t.periodization.lastDone}: {formatDate(last.date, t.browserLocale)}{last.step !== null && <> · {t.periodization.step} {last.step}</>}</>
                           : t.periodization.notDoneYet}
@@ -128,36 +131,28 @@ export default async function PeriodizationPage() {
               </div>
             </div>
 
-            {/* Training log: what was actually done per training */}
+            {/* Training log */}
             {trainingLog.length > 0 && (
-              <div className="glass-card rounded-2xl overflow-hidden">
-                <div className="px-5 py-4 border-b border-white/50">
-                  <h2 className="font-semibold text-gray-800">{t.periodization.recentTrainings}</h2>
+              <div className="surface-card overflow-hidden">
+                <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                  <h2 className="font-display text-[16px] font-bold text-ink">{t.periodization.recentTrainings}</h2>
                 </div>
-                <div className="divide-y divide-gray-100">
-                  {trainingLog.map((entry) => (
-                    <Link
-                      key={entry.eventId}
-                      href={`/events/${entry.eventId}/training-plan`}
-                      transitionTypes={['nav-forward']}
-                      className="block px-5 py-3 hover:bg-white/40 transition-colors"
-                    >
+                <div>
+                  {trainingLog.map((entry, i) => (
+                    <Link key={entry.eventId} href={`/events/${entry.eventId}/training-plan`}
+                      className="block px-5 py-3 hover:bg-surface-sunken transition-colors"
+                      style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className="text-sm font-semibold text-gray-900">{formatDate(entry.date, t.browserLocale)}</span>
-                        <svg className="w-3.5 h-3.5 text-gray-300 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
+                        <span className="text-[13.5px] font-bold text-ink">{formatDate(entry.date, t.browserLocale)}</span>
+                        <span className="ms text-[18px] text-faint ml-auto">chevron_right</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
-                        {entry.items.map((item) => {
-                          const catMeta = PERIODIZATION_CATEGORIES.find((c) => c.key === item.key)
-                          return (
-                            <span key={item.key} className={`text-xs font-semibold px-2 py-0.5 rounded-full ${catMeta?.color ?? 'bg-gray-100 text-gray-700'}`}>
-                              {t.periodization.categories[item.key] ?? item.key}
-                              {item.step !== null && <> · {t.periodization.step} {item.step}</>}
-                            </span>
-                          )
-                        })}
+                        {entry.items.map((item) => (
+                          <span key={item.key} className="text-xs font-bold px-2 py-0.5 rounded-full text-muted bg-surface-sunken" style={{ border: '1px solid var(--border-soft)' }}>
+                            {t.periodization.categories[item.key] ?? item.key}
+                            {item.step !== null && <> · {t.periodization.step} {item.step}</>}
+                          </span>
+                        ))}
                       </div>
                     </Link>
                   ))}
@@ -166,21 +161,19 @@ export default async function PeriodizationPage() {
             )}
 
             {/* Steigerungs note */}
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-              <p className="text-xs text-emerald-700">{t.periodization.steigerungsNote}</p>
+            <div className="rounded-xl p-3" style={{ background: 'color-mix(in srgb, var(--primary) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 25%, transparent)' }}>
+              <p className="text-xs font-semibold text-muted">{t.periodization.steigerungsNote}</p>
             </div>
           </div>
 
           <NulmetingManager history={history} />
         </div>
       ) : (
-        <div className="max-w-lg space-y-6">
-          <div className="glass-card rounded-2xl p-8 text-center border border-dashed border-white/60">
-            <svg className="w-10 h-10 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
-            </svg>
-            <p className="text-gray-500 font-medium">{t.periodization.noMeting}</p>
-            <p className="text-gray-400 text-sm mt-1">{t.periodization.noMetingHint}</p>
+        <div className="max-w-lg flex flex-col gap-5">
+          <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
+            <span className="ms text-[40px] text-faint">monitoring</span>
+            <p className="text-ink font-bold">{t.periodization.noMeting}</p>
+            <p className="text-faint text-sm">{t.periodization.noMetingHint}</p>
           </div>
           <NulmetingManager history={[]} />
         </div>
