@@ -1,10 +1,19 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Player, POSITION_GROUPS } from '@/lib/types'
+import { markInjured, markRecovered } from '@/app/actions/players'
 import { useDict } from '@/lib/i18n-context'
+
+type SheetAction = {
+  label: string
+  icon: string
+  tone: 'ink' | 'danger'
+  href?: string
+  onClick?: () => void
+}
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 
@@ -30,6 +39,7 @@ export default function PlayerList({ active, inactive }: Props) {
   const [selected, setSelected] = useState<Player | null>(null)
   const [sheetVisible, setSheetVisible] = useState(false)
   const [query, setQuery] = useState('')
+  const [isPending, startTransition] = useTransition()
 
   const q = query.trim().toLowerCase()
   const filteredActive = useMemo(
@@ -53,6 +63,13 @@ export default function PlayerList({ active, inactive }: Props) {
     closeSheet()
     setTimeout(() => router.push(href), 260)
   }
+  function runAction(fn: () => Promise<void>) {
+    startTransition(async () => {
+      await fn()
+      router.refresh()
+      closeSheet()
+    })
+  }
 
   useEffect(() => {
     if (!selected) return
@@ -65,9 +82,12 @@ export default function PlayerList({ active, inactive }: Props) {
     }
   }, [selected])
 
-  const actions = selected ? [
-    { label: t.players.editLabel, icon: 'edit',        tone: 'ink' as const,    href: `/players/${selected.id}/edit` },
-    { label: t.players.signOff,   icon: 'event_busy',  tone: 'danger' as const, href: `/players/${selected.id}/absence` },
+  const actions: SheetAction[] = selected ? [
+    { label: t.players.editLabel, icon: 'edit',        tone: 'ink',    href: `/players/${selected.id}/edit` },
+    { label: t.players.signOff,   icon: 'event_busy',  tone: 'danger', href: `/players/${selected.id}/absence` },
+    selected.injured
+      ? { label: t.players.reportRecovered, icon: 'check_circle', tone: 'ink',    onClick: () => runAction(() => markRecovered(selected.id)) }
+      : { label: t.players.reportInjury,    icon: 'healing',      tone: 'danger', onClick: () => runAction(() => markInjured(selected.id)) },
   ] : []
 
   const hasAny = active.length > 0 || inactive.length > 0
@@ -87,7 +107,19 @@ export default function PlayerList({ active, inactive }: Props) {
           {initialsOf(player.name)}
         </div>
         <div className="flex-1 min-w-0 flex flex-col leading-tight">
-          <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+            {player.injured && (
+              <span
+                className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-1 flex-shrink-0"
+                style={{ background: 'rgba(239,68,68,0.14)', color: 'var(--chip-red-fg)' }}
+                title={t.players.injuredBadge}
+              >
+                <span className="ms text-[13px]" aria-hidden="true">healing</span>
+                {t.players.injuredBadge}
+              </span>
+            )}
+          </span>
           <span className="text-[12px] font-semibold text-faint">
             {t.players.positions[player.position] ?? player.position}
           </span>
@@ -236,8 +268,9 @@ export default function PlayerList({ active, inactive }: Props) {
                 <button
                   key={i}
                   type="button"
-                  onClick={() => navigate(action.href)}
-                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-surface-sunken transition-colors text-left"
+                  disabled={isPending}
+                  onClick={() => (action.href ? navigate(action.href) : action.onClick?.())}
+                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-surface-sunken transition-colors text-left disabled:opacity-55 disabled:pointer-events-none"
                   style={i < actions.length - 1 ? { borderBottom: '1px solid var(--border-soft)' } : undefined}
                 >
                   <div

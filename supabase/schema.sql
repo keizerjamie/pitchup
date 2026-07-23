@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS players (
   jersey_number INT,
   rating INT CHECK (rating BETWEEN 1 AND 10),
   active BOOLEAN DEFAULT true,
+  injured BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   event_id UUID REFERENCES events(id) ON DELETE CASCADE NOT NULL,
   player_id UUID REFERENCES players(id) ON DELETE CASCADE NOT NULL,
   status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('present', 'absent', 'unknown')),
+  injury_set BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(event_id, player_id)
 );

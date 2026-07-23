@@ -27,7 +27,7 @@ export default async function DashboardPage() {
 
   const [{ data: upcomingEvents }, { data: playerRows }, { data: teamNameRow }] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
-    supabase.from('players').select('id, name, position, jersey_number').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
+    supabase.from('players').select('id, name, position, jersey_number, injured').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
     supabase.from('settings').select('value').eq('team_id', user.id).eq('key', 'team_name').maybeSingle(),
   ])
 
@@ -35,6 +35,10 @@ export default async function DashboardPage() {
   const upcoming: FootballEvent[] = upcomingEvents ?? []
   const players = playerRows ?? []
   const squadSize = players.length
+  const totalActive = players.length
+  const injuredCount = players.filter((p) => p.injured).length
+  const fitCount = totalActive - injuredCount
+  const injuredPct = totalActive > 0 ? Math.round((injuredCount / totalActive) * 100) : 0
 
   const allEventIds = upcoming.map((e) => e.id)
   const { data: attendanceRows } = allEventIds.length > 0
@@ -178,7 +182,11 @@ export default async function DashboardPage() {
             <div className="h-full" style={{ width: `${attendancePct ?? 0}%`, background: 'linear-gradient(90deg,#16a34a,#4ade80)' }} />
           </div>
         </StatCard>
-        <StatCard label={t.home.statActivePlayers} icon="groups" value={squadSize} />
+        <StatCard label={t.home.statActivePlayers} icon="groups" value={totalActive}>
+          <span className="text-[11.5px] font-semibold text-faint">
+            {fitCount} {t.home.fit} · {injuredCount} {t.home.injured} ({injuredPct}%)
+          </span>
+        </StatCard>
         <StatCard label={t.home.statUpcoming} icon="event" value={upcoming.length} />
         <StatCard label={t.home.statThisWeek} icon="date_range" value={thisWeekCount} />
       </div>

@@ -50,6 +50,7 @@ export interface Player {
   secondary_positions: Position[]
   jersey_number: number | null
   active: boolean
+  injured: boolean
   rating: number | null
   created_at: string
 }
@@ -142,6 +143,7 @@ export interface Attendance {
   event_id: string
   player_id: string
   status: AttendanceStatus
+  injury_set: boolean
   created_at: string
 }
 
