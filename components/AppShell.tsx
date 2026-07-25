@@ -85,6 +85,19 @@ export default function AppShell({
         </main>
       </div>
 
+      {/* Mobile bottom fade — laat de content naar de thema-achtergrond vervagen
+          richting de zwevende navigatiebalk, zodat er niets scherp leesbaar
+          achter/naast de balk doorschemert. Ligt boven de content maar onder de
+          nav (z-50) en de FAB (z-402); pointer-events uit zodat taps doorgaan. */}
+      <div
+        aria-hidden="true"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 pointer-events-none"
+        style={{
+          height: 'calc(env(safe-area-inset-bottom, 0px) + 140px)',
+          background: 'linear-gradient(to top, var(--bg) 0%, var(--bg) 52%, transparent 100%)',
+        }}
+      />
+
       <Navigation />
       <GlobalFab />
     </>
