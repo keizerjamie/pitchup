@@ -43,6 +43,10 @@
   --track: #eaf2ee;
   --brand-btn: #0d3d38;
   --brand-accent: #16a34a;
+  /* Oranje accent voor "nog te doen"-acties (bv. analyse nog niet ingevuld).
+     Constant over beide thema's — het is een knop-achtergrond met witte tekst,
+     net als --primary. */
+  --warning: #ea580c;
   --chip-green-fg: #14655c;
   --chip-red-fg: #b91c1c;
   --chip-amber-fg: #b45309;

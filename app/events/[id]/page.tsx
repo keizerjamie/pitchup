@@ -128,7 +128,8 @@ export default async function EventDetailPage({ params }: Props) {
       {isMatch && (
         <ActionCard href={`/events/${id}/analysis`} done={analyseBestaat} icon="scoreboard"
           title={t.event.analysis} hint={t.event.analysisHint}
-          viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta} />
+          viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta}
+          accent="var(--warning)" />
       )}
       {isTraining && (
         <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
@@ -153,10 +154,10 @@ export default async function EventDetailPage({ params }: Props) {
 }
 
 function ActionCard({
-  href, done, icon, title, hint, viewLabel, viewHint, cta,
+  href, done, icon, title, hint, viewLabel, viewHint, cta, accent,
 }: {
   href: string; done: boolean; icon: string; title: string; hint: string
-  viewLabel: string; viewHint: string; cta: string
+  viewLabel: string; viewHint: string; cta: string; accent?: string
 }) {
   if (done) {
     return (
@@ -174,11 +175,20 @@ function ActionCard({
       </Link>
     )
   }
+  // Default groen (--primary/--brand-accent); een optioneel accent (bv. oranje
+  // voor "nog invullen") kleurt rand, icoon en CTA-balk zonder de andere kaarten
+  // te raken.
+  const borderCol = `color-mix(in srgb, ${accent ?? 'var(--primary)'} 35%, var(--border-soft))`
+  const iconBg = accent
+    ? `color-mix(in srgb, ${accent} 14%, transparent)`
+    : 'color-mix(in srgb, var(--color-brand) 12%, transparent)'
+  const iconColor = accent ?? 'var(--brand-accent)'
+  const barBg = accent ?? 'var(--primary)'
   return (
-    <Link href={href} className="rounded-2xl overflow-hidden block" style={{ border: '1px solid color-mix(in srgb, var(--primary) 35%, var(--border-soft))' }}>
+    <Link href={href} className="rounded-2xl overflow-hidden block" style={{ border: `1px solid ${borderCol}` }}>
       <div className="bg-surface flex items-center gap-4 p-4">
         <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: 'color-mix(in srgb, var(--color-brand) 12%, transparent)', color: 'var(--brand-accent)' }}>
+          style={{ background: iconBg, color: iconColor }}>
           <span className="ms text-[24px]">{icon}</span>
         </div>
         <div className="flex-1 min-w-0">
@@ -187,7 +197,7 @@ function ActionCard({
         </div>
         <span className="ms text-[22px] text-faint">chevron_right</span>
       </div>
-      <div className="px-4 py-2.5 flex items-center gap-2 text-white" style={{ background: 'var(--primary)' }}>
+      <div className="px-4 py-2.5 flex items-center gap-2 text-white" style={{ background: barBg }}>
         <span className="ms text-[18px]">bolt</span>
         <span className="font-bold text-[13.5px]">{cta}</span>
       </div>
