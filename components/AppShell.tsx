@@ -93,8 +93,8 @@ export default function AppShell({
         aria-hidden="true"
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 pointer-events-none"
         style={{
-          height: 'calc(env(safe-area-inset-bottom, 0px) + 140px)',
-          background: 'linear-gradient(to top, var(--bg) 0%, var(--bg) 52%, transparent 100%)',
+          height: 'calc(env(safe-area-inset-bottom, 0px) + 112px)',
+          background: 'linear-gradient(to top, var(--bg) 0%, var(--bg) 64%, transparent 100%)',
         }}
       />
 
