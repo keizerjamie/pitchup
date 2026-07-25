@@ -6,6 +6,7 @@ import { daysUntil, formatTime, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import DashboardHero from '@/components/dashboard/DashboardHero'
 import StatCard from '@/components/dashboard/StatCard'
+import NextMatch from '@/components/dashboard/NextMatch'
 import WeekEvents, { WeekItem } from '@/components/dashboard/WeekEvents'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
 import QuickActions from '@/components/dashboard/QuickActions'
@@ -53,9 +54,10 @@ export default async function DashboardPage() {
     return { present, absent, total: records.length }
   }
 
+  // Hero = the chronologically next activity (training or match). The upcoming
+  // list is already sorted ascending by date. The next match gets its own card.
   const nextMatch = upcoming.find((e) => e.type === 'match') ?? null
-  const nextTraining = upcoming.find((e) => e.type === 'training') ?? null
-  const heroEvent = nextMatch ?? nextTraining ?? upcoming[0] ?? null
+  const heroEvent = upcoming[0] ?? null
 
   // ── Greeting + date line ──
   const hour = new Date().getHours()
@@ -74,8 +76,6 @@ export default async function DashboardPage() {
   const attendancePct = totalPresent + totalAbsent > 0
     ? Math.round((totalPresent / (totalPresent + totalAbsent)) * 100)
     : null
-  const thisWeekCount = upcoming.filter((e) => daysUntil(e.date) <= 7).length
-
   // ── "This week" rows ──
   const weekItems: WeekItem[] = upcoming
     .filter((e) => daysUntil(e.date) <= 7)
@@ -199,7 +199,7 @@ export default async function DashboardPage() {
           </div>
         </StatCard>
         <StatCard label={t.home.statUpcoming} icon="event" value={upcoming.length} />
-        <StatCard label={t.home.statThisWeek} icon="date_range" value={thisWeekCount} />
+        <NextMatch match={nextMatch} t={t} />
       </div>
 
       {/* Two columns */}
