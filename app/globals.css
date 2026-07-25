@@ -115,7 +115,7 @@ body {
   font-style: normal;
   font-weight: 100 700;
   font-display: block;
-  src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
+  src: url('/fonts/material-symbols-rounded.woff2?v=2') format('woff2');
 }
 
 /* Material Symbols Rounded icon base. Usage: <span class="ms">groups</span> */

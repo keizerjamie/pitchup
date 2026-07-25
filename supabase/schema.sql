@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS events (
   home_away TEXT CHECK (home_away IN ('home', 'away')),
   notes TEXT,
   doelstelling TEXT,
+  goals_for SMALLINT,
+  goals_against SMALLINT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -59,6 +61,28 @@ CREATE TABLE IF NOT EXISTS lineups (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Wedstrijd-rating per speler (apart van players.rating) — zie match-analysis.sql.
+CREATE TABLE IF NOT EXISTS match_ratings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 10),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(event_id, player_id)
+);
+
+-- Losse wedstrijdgebeurtenissen (meerdere per speler) — zie match-analysis.sql.
+CREATE TABLE IF NOT EXISTS match_events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('goal','assist','yellow','red')),
+  minute SMALLINT CHECK (minute IS NULL OR minute BETWEEN 0 AND 130),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date DESC);
 CREATE INDEX IF NOT EXISTS idx_events_team ON events(team_id);
@@ -66,9 +90,15 @@ CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_player ON attendance(player_id);
 CREATE INDEX IF NOT EXISTS idx_players_active ON players(active);
 CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);
+CREATE INDEX IF NOT EXISTS idx_match_ratings_event ON match_ratings(event_id);
+CREATE INDEX IF NOT EXISTS idx_match_ratings_team  ON match_ratings(team_id);
+CREATE INDEX IF NOT EXISTS idx_match_events_event  ON match_events(event_id);
+CREATE INDEX IF NOT EXISTS idx_match_events_team   ON match_events(team_id);
 
 -- Row Level Security MUST be enabled — see rls.sql for the policies.
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lineups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE match_ratings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE match_events ENABLE ROW LEVEL SECURITY;

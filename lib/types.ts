@@ -135,6 +135,29 @@ export interface FootballEvent {
   home_away: HomeAway | null
   notes: string | null
   doelstelling: string | null
+  goals_for: number | null
+  goals_against: number | null
+  created_at: string
+}
+
+export type MatchEventKind = 'goal' | 'assist' | 'yellow' | 'red'
+
+export const MATCH_EVENT_KINDS: MatchEventKind[] = ['goal', 'assist', 'yellow', 'red']
+
+export interface MatchRating {
+  id: string
+  event_id: string
+  player_id: string
+  rating: number
+  created_at: string
+}
+
+export interface MatchEvent {
+  id: string
+  event_id: string
+  player_id: string
+  kind: MatchEventKind
+  minute: number | null
   created_at: string
 }
 

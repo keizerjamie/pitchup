@@ -14,6 +14,8 @@ CREATE INDEX IF NOT EXISTS idx_lineups_team ON lineups(team_id);
 CREATE INDEX IF NOT EXISTS idx_settings_team ON settings(team_id);
 CREATE INDEX IF NOT EXISTS idx_metingen_team ON metingen(team_id);
 CREATE INDEX IF NOT EXISTS idx_oefeningen_team ON oefeningen(team_id);
+CREATE INDEX IF NOT EXISTS idx_match_ratings_team ON match_ratings(team_id);
+CREATE INDEX IF NOT EXISTS idx_match_events_team ON match_events(team_id);
 
 -- Verificatie: toon alle indexen per tabel
 -- select tablename, indexname from pg_indexes

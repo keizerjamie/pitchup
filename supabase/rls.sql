@@ -36,6 +36,22 @@ create policy "lineups: team_id = auth.uid()"
   using (team_id = auth.uid())
   with check (team_id = auth.uid());
 
+-- ── match_ratings ────────────────────────────────────────────
+alter table match_ratings enable row level security;
+
+create policy "match_ratings: own team only"
+  on match_ratings for all
+  using (team_id = auth.uid())
+  with check (team_id = auth.uid());
+
+-- ── match_events ─────────────────────────────────────────────
+alter table match_events enable row level security;
+
+create policy "match_events: own team only"
+  on match_events for all
+  using (team_id = auth.uid())
+  with check (team_id = auth.uid());
+
 -- ── settings (if exists) ─────────────────────────────────────
 alter table settings enable row level security;
 

@@ -9,6 +9,7 @@ import BackButton from '@/components/BackButton'
 import DeleteButton from '@/components/DeleteButton'
 import { deleteEvent } from '@/app/actions/events'
 import { getDict } from '@/lib/i18n'
+import { analyseBestaat as computeAnalyseBestaat } from '@/lib/match-analysis.mjs'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -20,18 +21,26 @@ export default async function EventDetailPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }] = await Promise.all([
+  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
     supabase.from('players').select('*').eq('team_id', user.id).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', user.id),
     supabase.from('lineups').select('id').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
     supabase.from('metingen').select('*').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
     supabase.from('oefeningen').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
+    supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', user.id),
+    supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', user.id),
   ])
 
   if (!event) notFound()
 
   const hasTrainingPlan = !!event.doelstelling || (oefeningen?.length ?? 0) > 0
+  const analyseBestaat = computeAnalyseBestaat({
+    goals_for: event.goals_for,
+    goals_against: event.goals_against,
+    ratingCount: (matchRatings?.length ?? 0),
+    eventCount: (matchEvents?.length ?? 0),
+  })
   const isMatch = event.type === 'match'
   const isTraining = event.type === 'training'
   const isMeting = event.type === 'meting'
@@ -115,6 +124,11 @@ export default async function EventDetailPage({ params }: Props) {
         <ActionCard href={`/events/${id}/lineup`} done={!!lineup} icon="dashboard"
           title={t.event.lineup} hint={t.event.lineupHint}
           viewLabel={t.event.lineupView} viewHint={t.event.lineupViewHint} cta={t.event.lineupCta} />
+      )}
+      {isMatch && (
+        <ActionCard href={`/events/${id}/analysis`} done={analyseBestaat} icon="scoreboard"
+          title={t.event.analysis} hint={t.event.analysisHint}
+          viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta} />
       )}
       {isTraining && (
         <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
