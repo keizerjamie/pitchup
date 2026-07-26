@@ -35,8 +35,6 @@ export const fr: Dict = {
     fit: 'En forme',
     injured: 'Blessé',
     statUpcoming: 'Événements à venir',
-    statThisWeek: 'Cette semaine',
-    thisWeek: 'Cette semaine',
     availability: 'Disponibilité',
     seeAll: 'Tout',
     quickActions: 'Actions rapides',
@@ -49,6 +47,14 @@ export const fr: Dict = {
     themeDark: 'Sombre',
     empty: 'Aucun événement',
     emptyHint: 'Ajoutez un entraînement ou un match pour commencer',
+  },
+  todo: {
+    title: 'À faire',
+    empty: 'Aucune tâche cette semaine',
+    taskLineup: 'Composer la sélection et la compo',
+    taskAnalysis: "Remplir l'analyse du match",
+    taskTraining: "Créer l'entraînement",
+    overdue: 'En retard',
   },
   calendar: {
     today: "Aujourd'hui",

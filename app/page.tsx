@@ -2,16 +2,22 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS } from '@/lib/types'
-import { daysUntil, formatTime, todayLocal } from '@/lib/utils'
+import { addDays, daysUntil, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import DashboardHero from '@/components/dashboard/DashboardHero'
 import StatCard from '@/components/dashboard/StatCard'
 import NextMatch from '@/components/dashboard/NextMatch'
-import WeekEvents, { WeekItem } from '@/components/dashboard/WeekEvents'
+import TodoList, { TaskType, TodoItem } from '@/components/dashboard/TodoList'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
 import QuickActions from '@/components/dashboard/QuickActions'
+import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
+import { analyseBestaat } from '@/lib/match-analysis.mjs'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
+// AANNAME A1 (goedgekeurd): backward-fetchhorizon voor To-do kandidaat-events —
+// ruim genoeg zodat wedstrijden/trainingen met een nog open taak niet gemist
+// worden, ook als hun event-datum ver vóór vandaag ligt (bv. late analyse-deadline).
+const FETCH_HORIZON_DAYS = 30
 
 function initialsOf(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean)
@@ -25,11 +31,25 @@ export default async function DashboardPage() {
   if (!user) redirect('/login')
 
   const today = todayLocal()
+  const windowEnd = addDays(today, FORWARD)
+  const fetchStart = addDays(today, -FETCH_HORIZON_DAYS)
 
-  const [{ data: upcomingEvents }, { data: playerRows }, { data: teamNameRow }] = await Promise.all([
+  const [
+    { data: upcomingEvents },
+    { data: playerRows },
+    { data: teamNameRow },
+    { data: todoCandidateEvents },
+    { data: trainingDateRows },
+  ] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
     supabase.from('players').select('id, name, position, jersey_number, injured').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
     supabase.from('settings').select('value').eq('team_id', user.id).eq('key', 'team_name').maybeSingle(),
+    // Kandidaat-events voor de To-do: alles binnen het venster, ongeacht status
+    // (zichtbaarheid wordt verderop bepaald door isTaskVisible).
+    supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', fetchStart).lte('date', windowEnd).order('date', { ascending: true }),
+    // Trainingsdatums voor de live analyse-deadline — bewust ONbegrensd naar
+    // voren (geen lte windowEnd): never-miss, zie lib/todos.mjs isTaskVisible.
+    supabase.from('events').select('date').eq('team_id', user.id).eq('type', 'training').gte('date', fetchStart).order('date', { ascending: true }),
   ])
 
   const teamName = teamNameRow?.value?.trim() || null
@@ -76,26 +96,111 @@ export default async function DashboardPage() {
   const attendancePct = totalPresent + totalAbsent > 0
     ? Math.round((totalPresent / (totalPresent + totalAbsent)) * 100)
     : null
-  // ── "This week" rows ──
-  const weekItems: WeekItem[] = upcoming
-    .filter((e) => daysUntil(e.date) <= 7)
-    .slice(0, 4)
-    .map((e) => {
-      const isMatch = e.type === 'match'
-      const d = new Date(e.date + 'T00:00:00')
-      const s = statsFor(e.id)
-      return {
-        id: e.id,
-        day: d.toLocaleDateString(t.browserLocale, { weekday: 'short' }).replace('.', '').slice(0, 2).toUpperCase(),
-        date: String(d.getDate()),
-        typeLabel: isMatch ? t.event.match : t.event.training,
-        accent: isMatch ? '#16a34a' : '#14655c',
-        title: isMatch ? (e.opponent ? `vs ${e.opponent}` : t.event.match) : t.event.training,
-        time: formatTime(e.time),
-        place: e.location ?? '',
-        pct: squadSize > 0 && s.total > 0 ? Math.round((s.present / squadSize) * 100) : null,
+  // ── To-do (open opstelling/analyse/trainingsplan-taken) ──
+  const todoCandidates: FootballEvent[] = todoCandidateEvents ?? []
+  const trainingDates: string[] = (trainingDateRows ?? []).map((r: { date: string }) => r.date)
+  const matchCandidateIds = todoCandidates.filter((e) => e.type === 'match').map((e) => e.id)
+  const trainingCandidateIds = todoCandidates.filter((e) => e.type === 'training').map((e) => e.id)
+  const allCandidateIds = todoCandidates.map((e) => e.id)
+
+  const [
+    { data: lineupRows },
+    { data: matchRatingRows },
+    { data: matchEventRows },
+    { data: oefeningRows },
+    { data: overrideRows },
+  ] = await Promise.all([
+    matchCandidateIds.length > 0
+      ? supabase.from('lineups').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      : Promise.resolve({ data: [] }),
+    matchCandidateIds.length > 0
+      ? supabase.from('match_ratings').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      : Promise.resolve({ data: [] }),
+    matchCandidateIds.length > 0
+      ? supabase.from('match_events').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      : Promise.resolve({ data: [] }),
+    trainingCandidateIds.length > 0
+      ? supabase.from('oefeningen').select('event_id').eq('team_id', user.id).in('event_id', trainingCandidateIds)
+      : Promise.resolve({ data: [] }),
+    allCandidateIds.length > 0
+      ? supabase.from('task_overrides').select('event_id, task_type').eq('team_id', user.id).in('event_id', allCandidateIds)
+      : Promise.resolve({ data: [] }),
+  ])
+
+  const lineupSet = new Set<string>((lineupRows ?? []).map((r: { event_id: string }) => r.event_id))
+  const manualSet = new Set<string>(
+    (overrideRows ?? []).map((r: { event_id: string; task_type: string }) => `${r.event_id}:${r.task_type}`)
+  )
+  function countByEvent(rows: { event_id: string }[] | null): Map<string, number> {
+    const m = new Map<string, number>()
+    for (const r of rows ?? []) m.set(r.event_id, (m.get(r.event_id) ?? 0) + 1)
+    return m
+  }
+  const ratingCountMap = countByEvent(matchRatingRows)
+  const matchEventCountMap = countByEvent(matchEventRows)
+  const oefCountMap = countByEvent(oefeningRows)
+
+  interface RawTask {
+    eventId: string
+    taskType: TaskType
+    opponent: string | null
+    deadline: string
+    eventDate: string
+    auto: boolean
+    manual: boolean
+    effective: boolean
+  }
+  const rawTasks: RawTask[] = []
+
+  for (const e of todoCandidates) {
+    if (e.type === 'match') {
+      const lineupAuto = lineupSet.has(e.id)
+      const lineupManual = manualSet.has(`${e.id}:lineup`)
+      const lineupEffective = effectiveDone(lineupAuto, lineupManual)
+      if (isTaskVisible({ taskType: 'lineup', done: lineupEffective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: 0 })) {
+        rawTasks.push({
+          eventId: e.id, taskType: 'lineup', opponent: e.opponent, deadline: e.date, eventDate: e.date,
+          auto: lineupAuto, manual: lineupManual, effective: lineupEffective,
+        })
       }
-    })
+
+      const analysisAuto = analyseBestaat({
+        goals_for: e.goals_for,
+        goals_against: e.goals_against,
+        ratingCount: ratingCountMap.get(e.id) ?? 0,
+        eventCount: matchEventCountMap.get(e.id) ?? 0,
+      })
+      const analysisManual = manualSet.has(`${e.id}:analysis`)
+      const analysisEffective = effectiveDone(analysisAuto, analysisManual)
+      const deadline = analysisDeadline(e.date, trainingDates)
+      if (isTaskVisible({ taskType: 'analysis', done: analysisEffective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: daysUntil(deadline) })) {
+        rawTasks.push({
+          eventId: e.id, taskType: 'analysis', opponent: e.opponent, deadline, eventDate: e.date,
+          auto: analysisAuto, manual: analysisManual, effective: analysisEffective,
+        })
+      }
+    } else if (e.type === 'training') {
+      const auto = hasTrainingPlanDone(e.doelstelling, oefCountMap.get(e.id) ?? 0)
+      const manual = manualSet.has(`${e.id}:training_plan`)
+      const effective = effectiveDone(auto, manual)
+      if (isTaskVisible({ taskType: 'training_plan', done: effective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: 0 })) {
+        rawTasks.push({
+          eventId: e.id, taskType: 'training_plan', opponent: null, deadline: e.date, eventDate: e.date,
+          auto, manual, effective,
+        })
+      }
+    }
+  }
+
+  const todoItems: TodoItem[] = sortTasks(rawTasks).map((task) => ({
+    eventId: task.eventId,
+    taskType: task.taskType,
+    opponent: task.opponent,
+    deadline: task.deadline,
+    eventDate: task.eventDate,
+    auto: task.auto,
+    manual: task.manual,
+  }))
 
   // ── Availability for the next event ──
   const heroAttendance = new Map<string, AttendanceStatus>()
@@ -204,7 +309,7 @@ export default async function DashboardPage() {
 
       {/* Two columns */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
-        <WeekEvents items={weekItems} t={t} />
+        <TodoList items={todoItems} />
         <div className="flex flex-col gap-4">
           <Availability items={availabilityItems} t={t} />
           <QuickActions t={t} />

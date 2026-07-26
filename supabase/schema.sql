@@ -83,6 +83,16 @@ CREATE TABLE IF NOT EXISTS match_events (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Handmatig afgevinkte taken per event (To-do) — zie task-overrides.sql.
+CREATE TABLE IF NOT EXISTS task_overrides (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  task_type TEXT NOT NULL CHECK (task_type IN ('lineup','analysis','training_plan')),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (team_id, event_id, task_type)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date DESC);
 CREATE INDEX IF NOT EXISTS idx_events_team ON events(team_id);
@@ -94,6 +104,8 @@ CREATE INDEX IF NOT EXISTS idx_match_ratings_event ON match_ratings(event_id);
 CREATE INDEX IF NOT EXISTS idx_match_ratings_team  ON match_ratings(team_id);
 CREATE INDEX IF NOT EXISTS idx_match_events_event  ON match_events(event_id);
 CREATE INDEX IF NOT EXISTS idx_match_events_team   ON match_events(team_id);
+CREATE INDEX IF NOT EXISTS idx_task_overrides_event ON task_overrides(event_id);
+CREATE INDEX IF NOT EXISTS idx_task_overrides_team  ON task_overrides(team_id);
 
 -- Row Level Security MUST be enabled — see rls.sql for the policies.
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
@@ -102,3 +114,4 @@ ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lineups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_ratings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE task_overrides ENABLE ROW LEVEL SECURITY;

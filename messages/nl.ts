@@ -44,8 +44,6 @@ export const nl = {
     fit: 'Fit',
     injured: 'Geblesseerd',
     statUpcoming: 'Aankomende events',
-    statThisWeek: 'Deze week',
-    thisWeek: 'Deze week',
     availability: 'Beschikbaarheid',
     seeAll: 'Alles',
     quickActions: 'Snelle acties',
@@ -58,6 +56,14 @@ export const nl = {
     themeDark: 'Donker',
     empty: 'Nog geen events',
     emptyHint: 'Voeg een training of wedstrijd toe om te beginnen',
+  },
+  todo: {
+    title: 'To-do',
+    empty: 'Geen taken deze week',
+    taskLineup: 'Wedstrijdselectie en opstelling maken',
+    taskAnalysis: 'Wedstrijdanalyse invullen',
+    taskTraining: 'Training maken',
+    overdue: 'Te laat',
   },
   calendar: {
     today: 'Vandaag',
