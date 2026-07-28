@@ -2,14 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { OefeningCategorie } from '@/lib/types'
-
-const VALID_CATEGORIES: OefeningCategorie[] = [
-  'partijen_groot', 'partijen_midden', 'partijen_klein',
-  'sprints_weinig_rust', 'sprints_veel_rust', 'steigerungs', 'overig',
-]
-const VALID_ORIENTATIES = ['breedte', 'lengte', 'vrij'] as const
-const VALID_VELDZONES = ['links', 'midden', 'rechts', 'strafschopgebied_links', 'strafschopgebied_rechts'] as const
+import { assertOwnEvent, assertOwnOefening } from '@/lib/authz'
+import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 
 // ────────────────────────────────────────────────
 // Meting
@@ -144,112 +138,180 @@ export async function saveDoelstelling(eventId: string, doelstelling: string) {
 }
 
 // ────────────────────────────────────────────────
-// Oefeningen
+// Oefeningen koppelen aan een training (via training_oefeningen)
 // ────────────────────────────────────────────────
 
-export interface OefeningInput {
-  naam: string
-  beschrijving?: string | null
-  categorie: OefeningCategorie
-  duur_min?: number | null
-  breedte_m?: number | null
-  lengte_m?: number | null
-  orientatie?: 'breedte' | 'lengte' | 'vrij'
-  veldzone?: 'links' | 'midden' | 'rechts' | 'strafschopgebied_links' | 'strafschopgebied_rechts' | null
-  aantal_teams?: number
-  stap_override?: number | null
-  genest_in?: string | null
-}
-
-export async function addOefening(eventId: string, input: OefeningInput) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
-
-  const naam = input.naam.trim().slice(0, 200)
-  if (!naam) throw new Error('Naam verplicht')
-  if (!VALID_CATEGORIES.includes(input.categorie)) throw new Error('Ongeldige categorie')
-  if (input.orientatie && !VALID_ORIENTATIES.includes(input.orientatie)) throw new Error('Ongeldige oriëntatie')
-  if (input.veldzone && !VALID_VELDZONES.includes(input.veldzone)) throw new Error('Ongeldige veldzone')
-
-  // Check event belongs to team
-  const { data: event } = await supabase
-    .from('events').select('id').eq('id', eventId).eq('team_id', user.id).single()
-  if (!event) throw new Error('Event niet gevonden')
-
-  // Get max volgorde for this event
+// Volgende volgorde-waarde binnen een training (max + 1).
+async function nextVolgordeForEvent(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  eventId: string,
+  teamId: string,
+): Promise<number> {
   const { data: last } = await supabase
-    .from('oefeningen')
+    .from('training_oefeningen')
     .select('volgorde')
     .eq('event_id', eventId)
+    .eq('team_id', teamId)
     .order('volgorde', { ascending: false })
     .limit(1)
-    .single()
-  const nextVolgorde = (last?.volgorde ?? -1) + 1
+    .maybeSingle()
+  return (last?.volgorde ?? -1) + 1
+}
 
-  const { error } = await supabase.from('oefeningen').insert({
-    event_id: eventId,
+// Bestaande bibliotheek-oefening aan een training koppelen.
+export async function addOefeningToTraining(eventId: string, oefeningId: string): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await Promise.all([
+    assertOwnEvent(supabase, eventId, user.id),
+    assertOwnOefening(supabase, oefeningId, user.id),
+  ])
+
+  const volgorde = await nextVolgordeForEvent(supabase, eventId, user.id)
+
+  const { error } = await supabase.from('training_oefeningen').insert({
     team_id: user.id,
-    naam,
-    beschrijving: input.beschrijving?.slice(0, 2000) ?? null,
-    categorie: input.categorie,
-    duur_min: input.duur_min ?? null,
-    breedte_m: input.breedte_m ?? null,
-    lengte_m: input.lengte_m ?? null,
-    orientatie: input.orientatie ?? 'vrij',
-    veldzone: input.veldzone ?? null,
-    aantal_teams: Math.max(0, Math.min(20, input.aantal_teams ?? 0)),
-    stap_override: input.stap_override ?? null,
-    genest_in: input.genest_in ?? null,
-    volgorde: nextVolgorde,
+    event_id: eventId,
+    oefening_id: oefeningId,
+    volgorde,
   })
 
-  if (error) throw new Error(error.message)
+  if (error) {
+    // UNIQUE(event_id, oefening_id): oefening zit al in deze training → idempotent negeren.
+    if (error.code === '23505') {
+      revalidatePath(`/events/${eventId}/training-plan`)
+      return
+    }
+    throw new Error(error.message)
+  }
+
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
-export async function updateOefening(id: string, eventId: string, input: OefeningInput) {
+// Nieuwe bibliotheek-oefening maken én meteen aan een training koppelen.
+export async function createAndAddOefening(
+  eventId: string,
+  input: OefeningInput,
+): Promise<{ oefeningId: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  const naam = input.naam.trim().slice(0, 200)
-  if (!naam) throw new Error('Naam verplicht')
-  if (!VALID_CATEGORIES.includes(input.categorie)) throw new Error('Ongeldige categorie')
+  await assertOwnEvent(supabase, eventId, user.id)
+  const v = validateOefening(input)
 
-  const { error } = await supabase
+  const { data: created, error } = await supabase
     .from('oefeningen')
-    .update({
-      naam,
-      beschrijving: input.beschrijving?.slice(0, 2000) ?? null,
-      categorie: input.categorie,
-      duur_min: input.duur_min ?? null,
-      breedte_m: input.breedte_m ?? null,
-      lengte_m: input.lengte_m ?? null,
-      orientatie: input.orientatie ?? 'vrij',
-      veldzone: input.veldzone ?? null,
-      aantal_teams: Math.max(0, Math.min(20, input.aantal_teams ?? 0)),
-      stap_override: input.stap_override ?? null,
-      genest_in: input.genest_in ?? null,
-    })
-    .eq('id', id)
-    .eq('team_id', user.id)
+    .insert(oefeningRow(v, user.id))
+    .select('id')
+    .single()
 
   if (error) throw new Error(error.message)
+  const oefeningId = created.id
+
+  const volgorde = await nextVolgordeForEvent(supabase, eventId, user.id)
+
+  const { error: linkError } = await supabase.from('training_oefeningen').insert({
+    team_id: user.id,
+    event_id: eventId,
+    oefening_id: oefeningId,
+    volgorde,
+  })
+
+  if (linkError) throw new Error(linkError.message)
+
+  revalidatePath('/oefeningen')
   revalidatePath(`/events/${eventId}/training-plan`)
+  return { oefeningId }
 }
 
-export async function deleteOefening(id: string, eventId: string) {
+// Koppeling verwijderen (laat de bibliotheek-oefening zelf staan).
+export async function removeOefeningFromTraining(koppelingId: string, eventId: string): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
   const { error } = await supabase
-    .from('oefeningen')
+    .from('training_oefeningen')
     .delete()
-    .eq('id', id)
+    .eq('id', koppelingId)
     .eq('team_id', user.id)
 
   if (error) throw new Error(error.message)
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Koppeling bijwerken: volgorde / stap_override / genest_in.
+export async function updateKoppeling(
+  koppelingId: string,
+  eventId: string,
+  patch: { volgorde?: number; stap_override?: number | null; genest_in?: string | null },
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  const update: Record<string, number | string | null> = {}
+
+  if (patch.volgorde !== undefined) {
+    update.volgorde = Math.max(0, Math.min(32767, Math.floor(patch.volgorde)))
+  }
+
+  if (patch.stap_override !== undefined) {
+    update.stap_override = patch.stap_override === null
+      ? null
+      : Math.max(1, Math.min(99, Math.floor(patch.stap_override)))
+  }
+
+  if (patch.genest_in !== undefined) {
+    if (patch.genest_in === null) {
+      update.genest_in = null
+    } else {
+      if (patch.genest_in === koppelingId) throw new Error('Kan niet in zichzelf nesten')
+      // De ouder moet een koppeling binnen DEZELFDE training van dit team zijn.
+      const { data: parent } = await supabase
+        .from('training_oefeningen')
+        .select('id')
+        .eq('id', patch.genest_in)
+        .eq('event_id', eventId)
+        .eq('team_id', user.id)
+        .maybeSingle()
+      if (!parent) throw new Error('Ongeldige nesting')
+      update.genest_in = patch.genest_in
+    }
+  }
+
+  if (Object.keys(update).length === 0) return
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update(update)
+    .eq('id', koppelingId)
+    .eq('team_id', user.id)
+
+  if (error) throw new Error(error.message)
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Volledige herordening van de koppelingen binnen een training.
+export async function reorderKoppelingen(eventId: string, orderedIds: string[]): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from('training_oefeningen')
+      .update({ volgorde: i })
+      .eq('id', orderedIds[i])
+      .eq('event_id', eventId)
+      .eq('team_id', user.id)
+    if (error) throw new Error(error.message)
+  }
+
   revalidatePath(`/events/${eventId}/training-plan`)
 }

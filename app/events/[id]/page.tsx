@@ -27,7 +27,7 @@ export default async function EventDetailPage({ params }: Props) {
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', user.id),
     supabase.from('lineups').select('id').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
     supabase.from('metingen').select('*').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
-    supabase.from('oefeningen').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
+    supabase.from('training_oefeningen').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
     supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', user.id),
     supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', user.id),
   ])

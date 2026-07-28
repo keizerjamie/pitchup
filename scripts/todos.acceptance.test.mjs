@@ -511,7 +511,7 @@ test('AC16: open lineup/training-taak zichtbaar in [vandaag, +7], vervalt na de 
 // team_id = user.id.
 test('AC17 (codeniveau): elke Supabase-query voor de To-do-opbouw is geschermd met .eq(\'team_id\', user.id)', () => {
   const pageSrc = readFileSync(path.join(ROOT, 'app/page.tsx'), 'utf8')
-  const relevantTables = ['events', 'lineups', 'match_ratings', 'match_events', 'oefeningen', 'task_overrides']
+  const relevantTables = ['events', 'lineups', 'match_ratings', 'match_events', 'training_oefeningen', 'task_overrides']
   for (const table of relevantTables) {
     const re = new RegExp(`from\\('${table}'\\)[^;]*?\\.eq\\('team_id',\\s*user\\.id\\)`, 's')
     assert.ok(re.test(pageSrc), `query op '${table}' moet .eq('team_id', user.id) bevatten`)

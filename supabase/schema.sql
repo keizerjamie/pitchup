@@ -2,7 +2,8 @@
 -- Run this in the Supabase SQL Editor on a FRESH project.
 -- Reflects the schema the app actually uses (multi-tenant, RLS enabled).
 -- For the RLS policies themselves, see rls.sql.
--- For the trainingsplanner tables (metingen/oefeningen), see training-plan.sql.
+-- For the trainingsplanner tables (metingen/oefeningen/training_oefeningen),
+-- see training-plan.sql (fresh install) and oefening-bibliotheek.sql (migratie).
 
 CREATE TABLE IF NOT EXISTS players (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,

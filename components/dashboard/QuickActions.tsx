@@ -7,6 +7,7 @@ export default function QuickActions({ t }: { t: Dict }) {
     { href: '/events/new', icon: 'add_circle', label: t.home.qaNewEvent },
     { href: '/players/new', icon: 'person_add', label: t.home.qaAddPlayer },
     { href: '/events',      icon: 'calendar_month', label: t.home.qaCalendar },
+    { href: '/oefeningen',  icon: 'sports_soccer', label: t.home.qaOefeningen },
     { href: '/periodisering', icon: 'monitoring', label: t.home.qaPeriodization },
   ]
   return (

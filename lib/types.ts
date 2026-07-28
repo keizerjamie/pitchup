@@ -61,13 +61,38 @@ export type HomeAway = 'home' | 'away'
 export type AttendanceStatus = 'present' | 'absent' | 'unknown'
 
 export type OefeningCategorie =
+  | 'warming_up'
   | 'partijen_groot'
   | 'partijen_midden'
   | 'partijen_klein'
+  | 'positiespel'
+  | 'pass_trap'
   | 'sprints_weinig_rust'
   | 'sprints_veel_rust'
   | 'steigerungs'
   | 'overig'
+
+export type Orientatie = 'breedte' | 'lengte' | 'vrij'
+
+export type Veldzone =
+  | 'links'
+  | 'midden'
+  | 'rechts'
+  | 'strafschopgebied_links'
+  | 'strafschopgebied_rechts'
+
+// Whitelists — gedeeld door de server actions (oefening-library / training-plan)
+// en de client validatie, zodat er één bron van waarheid is.
+export const OEFENING_CATEGORIES: OefeningCategorie[] = [
+  'warming_up',
+  'partijen_groot', 'partijen_midden', 'partijen_klein',
+  'positiespel', 'pass_trap',
+  'sprints_weinig_rust', 'sprints_veel_rust', 'steigerungs', 'overig',
+]
+export const VALID_ORIENTATIES: Orientatie[] = ['breedte', 'lengte', 'vrij']
+export const VALID_VELDZONES: Veldzone[] = [
+  'links', 'midden', 'rechts', 'strafschopgebied_links', 'strafschopgebied_rechts',
+]
 
 export const PERIODIZATION_CATEGORIES: {
   key: OefeningCategorie
@@ -77,9 +102,12 @@ export const PERIODIZATION_CATEGORIES: {
   cycleWeeks: number[]
   hasMeting: boolean
 }[] = [
+  { key: 'warming_up',          label: 'Warming-up',          maxStap: 99, color: 'bg-teal-100 text-teal-800',    cycleWeeks: [],    hasMeting: false },
   { key: 'partijen_groot',      label: 'Partijen Groot',      maxStap: 21, color: 'bg-red-100 text-red-800',      cycleWeeks: [1,2], hasMeting: true  },
   { key: 'partijen_midden',     label: 'Partijen Midden',     maxStap: 15, color: 'bg-orange-100 text-orange-800', cycleWeeks: [3,4], hasMeting: true  },
   { key: 'partijen_klein',      label: 'Partijen Klein',      maxStap: 13, color: 'bg-amber-100 text-amber-800',  cycleWeeks: [5,6], hasMeting: true  },
+  { key: 'positiespel',         label: 'Positiespel',         maxStap: 99, color: 'bg-purple-100 text-purple-800', cycleWeeks: [],    hasMeting: false },
+  { key: 'pass_trap',           label: 'Pass- en trapvorm',   maxStap: 99, color: 'bg-cyan-100 text-cyan-800',    cycleWeeks: [],    hasMeting: false },
   { key: 'sprints_weinig_rust', label: 'Sprints Weinig Rust', maxStap: 14, color: 'bg-blue-100 text-blue-800',    cycleWeeks: [3,4], hasMeting: true  },
   { key: 'sprints_veel_rust',   label: 'Sprints Veel Rust',   maxStap: 13, color: 'bg-indigo-100 text-indigo-800',cycleWeeks: [5,6], hasMeting: true  },
   { key: 'steigerungs',         label: 'Steigerungs',         maxStap: 5,  color: 'bg-emerald-100 text-emerald-800', cycleWeeks: [1,2], hasMeting: false },
@@ -105,23 +133,95 @@ export interface MetingData {
   created_at: string
 }
 
+// Eén team binnen een oefening: aantal spelers + optioneel een gekozen formatie.
+export interface OefeningTeam {
+  grootte: number
+  formatie: string | null
+}
+
+// ────────────────────────────────────────────────
+// Tactiekbord (diagram) — coördinaten
+// ────────────────────────────────────────────────
+// Eigen coördinatenstelsel voor de tekening: x ∈ [0,100], y ∈ [0,140].
+// Een grotere y ligt richting het eigen doel / de eigen helft (onderin).
+// Let op: dit verschilt van FormationDef.positions, waar y een PERCENT (0-100)
+// is; generateDiagram schaalt die percenten naar het 0-140-stelsel.
+
+export type DiagramMarkerRol = 'speler' | 'keeper' | 'neutraal'
+export const DIAGRAM_MARKER_ROLLEN: DiagramMarkerRol[] = ['speler', 'keeper', 'neutraal']
+
+export interface DiagramMarker {
+  x: number
+  y: number
+  teamIndex: number | null
+  rol: DiagramMarkerRol
+  label?: string
+}
+
+export type DiagramMateriaalType = 'pion' | 'bal' | 'doeltje'
+export const DIAGRAM_MATERIAAL_TYPES: DiagramMateriaalType[] = ['pion', 'bal', 'doeltje']
+
+// Varianten van een doeltje (alleen betekenisvol als type === 'doeltje').
+export type DiagramDoelVariant = 'groot' | 'klein' | 'mini'
+export const DIAGRAM_DOEL_VARIANTEN: DiagramDoelVariant[] = ['groot', 'klein', 'mini']
+
+export interface DiagramMateriaal {
+  type: DiagramMateriaalType
+  x: number
+  y: number
+  // Alleen relevant voor type === 'doeltje'; bij 'pion'/'bal' afwezig.
+  variant?: DiagramDoelVariant
+}
+
+export type DiagramLijnStijl = 'pass' | 'loop' | 'dribbel'
+export const DIAGRAM_LIJN_STIJLEN: DiagramLijnStijl[] = ['pass', 'loop', 'dribbel']
+
+export interface DiagramLijn {
+  stijl: DiagramLijnStijl
+  punten: { x: number; y: number }[]
+}
+
+export interface Diagram {
+  markers: DiagramMarker[]
+  materiaal: DiagramMateriaal[]
+  lijnen: DiagramLijn[]
+}
+
+// Bibliotheek-oefening (los van een event). De koppeling aan een training loopt
+// via training_oefeningen (zie TrainingOefening).
 export interface Oefening {
   id: string
-  event_id: string
   team_id: string
   naam: string
   beschrijving: string | null
   categorie: OefeningCategorie
-  stap_override: number | null
+  duur_min: number | null
   breedte_m: number | null
   lengte_m: number | null
-  orientatie: 'breedte' | 'lengte' | 'vrij'
-  veldzone: 'links' | 'midden' | 'rechts' | 'strafschopgebied_links' | 'strafschopgebied_rechts' | null
-  aantal_teams: number
-  genest_in: string | null
-  volgorde: number
-  duur_min: number | null
+  orientatie: Orientatie
+  veldzone: Veldzone | null
+  teams: OefeningTeam[]
+  aantal_neutralen: number
+  diagram: Diagram | null
   created_at: string
+}
+
+// Koppeling van een bibliotheek-oefening aan één training (event).
+export interface TrainingOefening {
+  id: string
+  team_id: string
+  event_id: string
+  oefening_id: string
+  volgorde: number
+  stap_override: number | null
+  genest_in: string | null
+  created_at: string
+}
+
+// Koppeling inclusief de gejoinde bibliotheek-oefening (planner-weergave).
+// Spiegelt de vorm van `.select('*, oefeningen(*)')`.
+export interface TrainingOefeningWithData extends TrainingOefening {
+  oefeningen: Oefening
 }
 
 export interface FootballEvent {
@@ -310,4 +410,168 @@ export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupP
       { x: 65, y: 20, position_label: 'SP', position_number: 9 },
     ],
   },
+}
+
+// ────────────────────────────────────────────────
+// Formaties per teamgrootte (oefening-teams)
+// ────────────────────────────────────────────────
+// Zelfde 0-100-coördinatenstelsel als FORMATIONS: x links→rechts, y eigen doel
+// (y=90) → aanval (kleinere y). K = keeper, V = verdediger, M = middenvelder,
+// A = aanvaller. Dit is een pragmatische standaardset voor Nederlands
+// jeugd/partijspel; de gebruiker kan deze later bijstellen.
+
+export interface FormationDef {
+  key: string
+  label: string
+  positions: Omit<LineupPosition, 'player_id'>[]
+}
+
+// 11-tal hergebruikt de bestaande FORMATIONS-vormen/labels ongewijzigd.
+const FORMATIONS_11: FormationDef[] = Object.entries(FORMATIONS).map(([key, f]) => ({
+  key,
+  label: f.label,
+  positions: f.positions,
+}))
+
+export const FORMATIONS_BY_TEAM_SIZE: Record<number, FormationDef[]> = {
+  3: [
+    { key: '1-1', label: '1-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 50, y: 58, position_label: 'V' },
+      { x: 50, y: 25, position_label: 'A' },
+    ] },
+    { key: '2-0+K', label: '2-0+K', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 32, y: 55, position_label: 'V' },
+      { x: 68, y: 55, position_label: 'V' },
+    ] },
+  ],
+  4: [
+    { key: '2-1', label: '2-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 30, y: 62, position_label: 'V' },
+      { x: 70, y: 62, position_label: 'V' },
+      { x: 50, y: 25, position_label: 'A' },
+    ] },
+    { key: '1-2', label: '1-2', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 50, y: 62, position_label: 'V' },
+      { x: 32, y: 28, position_label: 'A' },
+      { x: 68, y: 28, position_label: 'A' },
+    ] },
+  ],
+  5: [
+    { key: '2-1-1', label: '2-1-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 30, y: 65, position_label: 'V' },
+      { x: 70, y: 65, position_label: 'V' },
+      { x: 50, y: 45, position_label: 'M' },
+      { x: 50, y: 22, position_label: 'A' },
+    ] },
+    { key: '1-2-1', label: '1-2-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 50, y: 68, position_label: 'V' },
+      { x: 30, y: 45, position_label: 'M' },
+      { x: 70, y: 45, position_label: 'M' },
+      { x: 50, y: 22, position_label: 'A' },
+    ] },
+  ],
+  6: [
+    { key: '2-2-1', label: '2-2-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 30, y: 68, position_label: 'V' },
+      { x: 70, y: 68, position_label: 'V' },
+      { x: 30, y: 42, position_label: 'M' },
+      { x: 70, y: 42, position_label: 'M' },
+      { x: 50, y: 20, position_label: 'A' },
+    ] },
+    { key: '3-2', label: '3-2', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 25, y: 66, position_label: 'V' },
+      { x: 50, y: 66, position_label: 'V' },
+      { x: 75, y: 66, position_label: 'V' },
+      { x: 35, y: 28, position_label: 'A' },
+      { x: 65, y: 28, position_label: 'A' },
+    ] },
+  ],
+  7: [
+    { key: '2-3-1', label: '2-3-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 30, y: 70, position_label: 'V' },
+      { x: 70, y: 70, position_label: 'V' },
+      { x: 22, y: 45, position_label: 'M' },
+      { x: 50, y: 45, position_label: 'M' },
+      { x: 78, y: 45, position_label: 'M' },
+      { x: 50, y: 20, position_label: 'A' },
+    ] },
+    { key: '3-2-1', label: '3-2-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 25, y: 70, position_label: 'V' },
+      { x: 50, y: 70, position_label: 'V' },
+      { x: 75, y: 70, position_label: 'V' },
+      { x: 35, y: 45, position_label: 'M' },
+      { x: 65, y: 45, position_label: 'M' },
+      { x: 50, y: 20, position_label: 'A' },
+    ] },
+  ],
+  8: [
+    { key: '3-3-1', label: '3-3-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 22, y: 72, position_label: 'V' },
+      { x: 50, y: 72, position_label: 'V' },
+      { x: 78, y: 72, position_label: 'V' },
+      { x: 22, y: 45, position_label: 'M' },
+      { x: 50, y: 45, position_label: 'M' },
+      { x: 78, y: 45, position_label: 'M' },
+      { x: 50, y: 20, position_label: 'A' },
+    ] },
+    { key: '3-2-2', label: '3-2-2', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 22, y: 72, position_label: 'V' },
+      { x: 50, y: 72, position_label: 'V' },
+      { x: 78, y: 72, position_label: 'V' },
+      { x: 35, y: 47, position_label: 'M' },
+      { x: 65, y: 47, position_label: 'M' },
+      { x: 35, y: 22, position_label: 'A' },
+      { x: 65, y: 22, position_label: 'A' },
+    ] },
+  ],
+  9: [
+    { key: '3-3-2', label: '3-3-2', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 22, y: 73, position_label: 'V' },
+      { x: 50, y: 73, position_label: 'V' },
+      { x: 78, y: 73, position_label: 'V' },
+      { x: 25, y: 48, position_label: 'M' },
+      { x: 50, y: 48, position_label: 'M' },
+      { x: 75, y: 48, position_label: 'M' },
+      { x: 38, y: 22, position_label: 'A' },
+      { x: 62, y: 22, position_label: 'A' },
+    ] },
+    { key: '3-4-1', label: '3-4-1', positions: [
+      { x: 50, y: 90, position_label: 'K' },
+      { x: 22, y: 73, position_label: 'V' },
+      { x: 50, y: 73, position_label: 'V' },
+      { x: 78, y: 73, position_label: 'V' },
+      { x: 18, y: 48, position_label: 'M' },
+      { x: 40, y: 48, position_label: 'M' },
+      { x: 60, y: 48, position_label: 'M' },
+      { x: 82, y: 48, position_label: 'M' },
+      { x: 50, y: 22, position_label: 'A' },
+    ] },
+  ],
+  11: FORMATIONS_11,
+}
+
+// Formaties beschikbaar voor een gegeven teamgrootte.
+export function formationsForSize(n: number): FormationDef[] {
+  return FORMATIONS_BY_TEAM_SIZE[n] ?? []
+}
+
+// Een formatie is geldig als hij null is (geen keuze) of als hij als key/label
+// voorkomt in de lijst van die teamgrootte.
+export function isFormationValidForSize(size: number | null, formatie: string | null): boolean {
+  if (formatie === null) return true
+  if (size === null) return false
+  return formationsForSize(size).some((f) => f.key === formatie || f.label === formatie)
 }

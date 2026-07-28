@@ -120,7 +120,7 @@ export default async function DashboardPage() {
       ? supabase.from('match_events').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     trainingCandidateIds.length > 0
-      ? supabase.from('oefeningen').select('event_id').eq('team_id', user.id).in('event_id', trainingCandidateIds)
+      ? supabase.from('training_oefeningen').select('event_id').eq('team_id', user.id).in('event_id', trainingCandidateIds)
       : Promise.resolve({ data: [] }),
     allCandidateIds.length > 0
       ? supabase.from('task_overrides').select('event_id, task_type').eq('team_id', user.id).in('event_id', allCandidateIds)

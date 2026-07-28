@@ -34,6 +34,7 @@ export default function SidebarNav({
     { href: '/',              label: t.nav.dashboard,     icon: 'space_dashboard' },
     { href: '/players',       label: t.nav.players,       icon: 'groups' },
     { href: '/events',        label: t.nav.calendar,      icon: 'calendar_month' },
+    { href: '/oefeningen',    label: t.nav.oefeningen,    icon: 'sports_soccer' },
     { href: '/periodisering', label: t.nav.periodization, icon: 'monitoring' },
     { href: '/settings',      label: t.nav.settings,      icon: 'settings' },
   ]

@@ -13,3 +13,8 @@ export async function assertOwnPlayer(supabase: SupabaseClient, playerId: string
   const { data } = await supabase.from('players').select('id').eq('id', playerId).eq('team_id', teamId).maybeSingle()
   if (!data) throw new Error('Speler niet gevonden')
 }
+
+export async function assertOwnOefening(supabase: SupabaseClient, oefeningId: string, teamId: string) {
+  const { data } = await supabase.from('oefeningen').select('id').eq('id', oefeningId).eq('team_id', teamId).maybeSingle()
+  if (!data) throw new Error('Oefening niet gevonden')
+}

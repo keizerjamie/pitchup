@@ -3,6 +3,17 @@ import { PERIODIZATION_CATEGORIES, berekenStap, MetingData } from '@/lib/types'
 
 export const CYCLE_LENGTH_WEEKS = 6
 
+// De join `oefeningen(categorie)` levert (afhankelijk van de client-typing) een
+// object óf een array van één rij. Normaliseer naar de categorie-string.
+function joinedCategorie(row: { oefeningen?: unknown }): string | null {
+  const joined = row.oefeningen
+  const rec = Array.isArray(joined) ? joined[0] : joined
+  if (rec && typeof rec === 'object' && 'categorie' in rec) {
+    return (rec as { categorie: string }).categorie
+  }
+  return null
+}
+
 // Week within the 6-week cycle (1-based), counted from the nulmeting date.
 export function cycleWeekFor(nulmetingDate: string, onDate: string): number {
   const ms = new Date(onDate + 'T00:00:00').getTime() - new Date(nulmetingDate + 'T00:00:00').getTime()
@@ -37,8 +48,8 @@ export async function countCategoryOccurrences(
 
   const eventIds = trainingsInRange.map((e) => e.id)
   const { data: exerciseData } = await supabase
-    .from('oefeningen')
-    .select('categorie, event_id')
+    .from('training_oefeningen')
+    .select('event_id, oefeningen(categorie)')
     .in('event_id', eventIds)
     .eq('team_id', teamId)
 
@@ -46,8 +57,10 @@ export async function countCategoryOccurrences(
 
   const catEvents: Record<string, Set<string>> = {}
   for (const ex of exerciseData) {
-    if (!catEvents[ex.categorie]) catEvents[ex.categorie] = new Set()
-    catEvents[ex.categorie].add(ex.event_id)
+    const categorie = joinedCategorie(ex)
+    if (!categorie) continue
+    if (!catEvents[categorie]) catEvents[categorie] = new Set()
+    catEvents[categorie].add(ex.event_id)
   }
   for (const [cat, eventSet] of Object.entries(catEvents)) {
     occurrences[cat] = eventSet.size
@@ -104,15 +117,17 @@ export async function getTrainingLog(
   if (!trainings || trainings.length === 0) return { log, lastByCategory, occurrences }
 
   const { data: exercises } = await supabase
-    .from('oefeningen')
-    .select('event_id, categorie, stap_override')
+    .from('training_oefeningen')
+    .select('event_id, stap_override, oefeningen(categorie)')
     .in('event_id', trainings.map((t) => t.id))
     .eq('team_id', teamId)
 
   const byEvent = new Map<string, { categorie: string; stap_override: number | null }[]>()
   for (const ex of exercises ?? []) {
+    const categorie = joinedCategorie(ex)
+    if (!categorie) continue
     const list = byEvent.get(ex.event_id) ?? []
-    list.push(ex)
+    list.push({ categorie, stap_override: ex.stap_override ?? null })
     byEvent.set(ex.event_id, list)
   }
 

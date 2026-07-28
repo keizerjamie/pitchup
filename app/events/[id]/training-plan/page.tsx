@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Player } from '@/lib/types'
+import { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
 import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
 import BackButton from '@/components/BackButton'
@@ -51,15 +51,22 @@ export default async function TrainingPlanPage({ params }: Props) {
   const latestMetingEvent = metingEvents?.[0] ?? null
 
   // ── Load meting step data (parallel with exercises) ──
-  const [metingResult, oefeningenResult] = await Promise.all([
+  // De bibliotheek-lijst (los van deze training) wordt hier ook geladen — niet
+  // omdat de koppeling-query verandert, maar omdat OefeningPicker een
+  // "kies uit bibliotheek"-lijst nodig heeft die de bestaande koppeling-query
+  // niet levert (die geeft alleen al-gekoppelde oefeningen).
+  const [metingResult, oefeningenResult, libraryResult] = await Promise.all([
     latestMetingEvent
       ? supabase.from('metingen').select('*').eq('event_id', latestMetingEvent.id).eq('team_id', user.id).single()
       : Promise.resolve({ data: null }),
-    supabase.from('oefeningen').select('*').eq('event_id', id).eq('team_id', user.id).order('volgorde'),
+    supabase.from('training_oefeningen').select('*, oefeningen(*)').eq('event_id', id).eq('team_id', user.id).order('volgorde'),
+    supabase.from('oefeningen').select('*').eq('team_id', user.id).order('naam'),
   ])
 
   const latestMeting = metingResult.data
-  const oefeningen = oefeningenResult.data ?? []
+  // Koppelingen aan deze training, elk met de gejoinde bibliotheek-oefening.
+  const oefeningen = (oefeningenResult.data ?? []) as unknown as TrainingOefeningWithData[]
+  const library: Oefening[] = libraryResult.data ?? []
 
   // ── Current steps per category, as of this training's date ──
   const occurrences = latestMetingEvent
@@ -111,6 +118,7 @@ export default async function TrainingPlanPage({ params }: Props) {
             eventId={id}
             initialDoelstelling={event.doelstelling ?? null}
             initialOefeningen={oefeningen}
+            library={library}
             currentSteps={currentSteps}
             hasNulmeting={!!latestMeting}
             suggestion={suggestion}
