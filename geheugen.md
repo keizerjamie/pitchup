@@ -39,12 +39,45 @@ Gebouwd via de feature-factory-keten (researcher → story → PM → backend �
 - UI: `DiagramEditor` (unified Pointer Events + `touch-action:none`, tools select/speler/pion/bal/doeltje/lijn/verwijder, kleur-/variant-keuze via segmented controls, "Opnieuw genereren" met bevestiging), read-only `DiagramView` (kaart + trainingsschema, fallback op per-team `FormationField` als `diagram==null`), gedeeld `PitchBackground` + `DiagramElements`. Coördinatenstelsel = SVG viewBox `0 0 100 140`.
 - **Markers zijn vrij bewerkbaar**: toevoegen (speler-tool met kleurkeuze), verslepen, verwijderen. Teams+formaties zijn alleen het startpunt voor (opnieuw) genereren. Opslaan zonder team is mogelijk.
 
-### Migraties (draaien in Supabase SQL Editor; alle drie zijn door de eigenaar uitgevoerd)
+### Migraties (draaien in Supabase SQL Editor; alle vier zijn door de eigenaar uitgevoerd)
 - `supabase/oefening-bibliotheek.sql` — bibliotheektabel + koppeltabel + backfill.
 - `supabase/oefening-diagram.sql` — `diagram JSONB` kolom.
 - `supabase/oefening-categorieen.sql` — categorie-CHECK verruimd met warming_up/positiespel/pass_trap.
+- `supabase/oefening-spelerindeling.sql` — `spelerindeling JSONB` kolom op `training_oefeningen` (zie feature hieronder).
 
 ### Aandachtspunten / bewust geaccepteerd
 - Server actions gooien nog rauwe DB-foutmeldingen door (`throw new Error(error.message)`) — codebase-breed patroon, niet door deze feature geïntroduceerd; ooit opschonen.
 - De ruimere onzichtbare sleep-hitbox rond de (kleinere) spelers kan materiaal plaatsen vlak náást een speler lastig maken (speler vangt de tik).
 - Demo-oefeningen aangemaakt tijdens testen: "7v7 positiespel opbouw" en "Pass- en trapvorm 4-hoek" (staan in de prod-DB; mogen weg).
+
+## Feature: Teamindeling per trainingsoefening
+Spelers koppelen aan de teams van een oefening, op de trainingsplan-pagina. Gebouwd via de feature-factory-keten (2026-07-29, live).
+
+### Datamodel
+- **`training_oefeningen.spelerindeling JSONB NOT NULL DEFAULT '[]'`** + CHECK `jsonb_typeof = 'array'`. Vorm: **array-van-arrays**; `spelerindeling[i]` = lijst `player_id`'s in team `i`, waarbij `i` = index in `oefeningen.teams`. Een `player_id` in geen enkele sub-array staat "in de pool".
+- Bewust op de **koppeltabel**, niet op de bibliotheek-oefening: dezelfde oefening in twee trainingen heeft dus onafhankelijke indelingen (zelfde regel als `volgorde`/`stap_override`/`genest_in`).
+- Gekozen boven een aparte koppeltabel omdat het `lineups.positions`-precedent al zo werkt (hele indeling in één write). Keerzijde: JSONB kan geen FK op `player_id` afdwingen — daarom valideert de server elke id (zie hieronder).
+
+### Server action + pure lib
+- **`saveSpelerindeling(koppelingId, eventId, spelerindeling)`** in `app/actions/training-plan.ts`. Keten: `Niet ingelogd` → `assertOwnEvent` → koppeling-select gescoped op `id + event_id + team_id` → eigen spelers als `ownPlayerIds` (**géén** `active`-filter, anders vallen inactief-geworden ingedeelde spelers eruit) → `validateSpelerindeling` → update gescoped op `id + team_id` → `revalidatePath`. Raakt nooit `oefeningen`.
+- **`lib/spelerindeling.ts`** (puur, géén `'use server'`): `validateSpelerindeling` (tenant-check per id, teamIndex-grens, geen speler in twee teams) en `autoAssignTeams`.
+- **Let op:** het bestaande `saveLineup` (`app/actions/attendance.ts`) valideert `player_id` NIET tegen de eigen spelers — dat lek is hier bewust niet herhaald, maar staat er nog wel.
+
+### Auto-verdelen (`autoAssignTeams`)
+- Spreidt **per positiegroep** via `POSITION_GROUPS` (`lib/types.ts`): keepers eerst, dan verdedigers/middenvelders/aanvallers; spelers zonder bekende positie vormen een laatste rest-groep.
+- Implementatie: één sortering op `(positiegroep, rating desc, id)` gevolgd door één doorlopende snake-draft. **De snake loopt door over de groepsgrenzen heen** — begint elke groep opnieuw bij team 0, dan krijgt team 0 de beste van élke groep.
+- Vult **alleen open plekken**; bestaande toewijzingen blijven. Overschot gaat naar teams **zonder** grootte (losse plaatsing, onbeperkt); zonder zo'n team blijft het overschot in de pool.
+- Gevolg om te weten: het overschot bestaat nu uit de laatste positiegroepen, niet uit de laagst gerate spelers.
+
+### UI (`components/TeamIndelingEditor.tsx`)
+- Teamkaarten + pool met **alleen aanwezige** spelers (uit `attendance`); afwezigen zijn niet selecteerbaar. Autosave via `startTransition`, met rollback naar `lastConfirmedRef` en een eigen i18n-foutmelding (nooit de rauwe DB-fout).
+- **Drag & drop via unified Pointer Events** (zelfde aanpak als `DiagramEditor`, werkt op touch), met tikken/klikken als alternatief — drempel `DRAG_THRESHOLD_PX = 6`.
+- **Gotcha die live is opgetreden:** de dragstate moet in een **ref** staan, niet in `useState`. Komen `pointerdown` + `pointermove` in dezelfde React-batch binnen (snelle sleep in een echte browser), dan leest de move de state nog uit de oude closure → de sleep werd als klik afgehandeld. Vitest miste dit omdat elke event daar zijn eigen `act()` krijgt; de regressietest dispatcht ze nu in één `act()`.
+- **Nooit stilzwijgend loskoppelen** — waarschuwen bij: afgemelde speler, inactieve/onbekende speler, team boven zijn grootte, en een verwijderd team (die spelers vallen terug in de pool). Een grootte-mismatch blokkeert een drop niet.
+- `TrainingPlanEditor` geeft `initialIndeling={k.spelerindeling ?? EMPTY_INDELING}` door met een **module-constante** als fallback — een inline `[]` maakt elke render een nieuwe referentie en triggert het resync-blok onnodig.
+
+### Bewust geaccepteerd
+- De telling in `teamsRemovedWarning` telt alle id's uit weggevallen teams; niet elk daarvan wordt zichtbaar in de pool (een afwezige niet). Tekst is daarop aangepast i.p.v. de telling — anders zou het signaal verdwijnen als een verwijderd team alleen afwezigen bevatte.
+- Een hard uit `players` verwijderde speler valt bij de eerstvolgende save uit de indeling (zijn id zit niet meer in `ownPlayerIds`). Inactief zetten (`active=false`) blijft wél bewaard.
+- Formaties bevatten **altijd** een keeper (`position_label: 'K'`); er is geen keeperloze variant. Voor een positiespel kies je daarom simpelweg géén formatie. Notatie is inconsistent (`1-1` en `4-3-3` noemen de keeper niet, `2-0+K` wel) — bewust zo gelaten; hernoemen zou een backfill vergen omdat `formatie` als string in `oefeningen.teams` staat.
+- `DiagramEditor` houdt zijn sleepstate ook in `useState` bij en kan dezelfde latente race hebben als hierboven; werkt in de praktijk, niet onderzocht.
