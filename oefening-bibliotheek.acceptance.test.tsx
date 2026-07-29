@@ -37,7 +37,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createOefening, updateOefening, countOefeningKoppelingen } from '@/app/actions/oefening-library'
-import { addOefeningToTraining, updateKoppeling } from '@/app/actions/training-plan'
+import { addOefeningToTraining, updateKoppeling, saveSpelerindeling } from '@/app/actions/training-plan'
 
 // ── Gedeelde Supabase-mock, zelfde patroon als de bestaande action-tests. ──
 type TableResult = { data?: unknown; error?: unknown; count?: number }
@@ -118,6 +118,7 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening
     volgorde: 0,
     stap_override: null,
     genest_in: null,
+    spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
     oefeningen: makeOefening(oefening),
     ...rest,
@@ -242,6 +243,7 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
+          players={[]} presentPlayerIds={[]}
         />
       </DictProvider>,
     )
@@ -336,6 +338,7 @@ describe('AC8/AC17 — volgorde/stap_override/genest_in zijn training-specifiek'
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppelingA, koppelingB]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
+          players={[]} presentPlayerIds={[]}
         />
       </DictProvider>,
     )
@@ -347,6 +350,30 @@ describe('AC8/AC17 — volgorde/stap_override/genest_in zijn training-specifiek'
     await waitFor(() => expect(m.calls.update.some((u) => u.table === 'training_oefeningen')).toBe(true))
     expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'id', val: 'k1' })
     expect(m.calls.eq.some((e) => e.col === 'id' && e.val === 'k2')).toBe(false)
+  })
+})
+
+// ────────────────────────────────────────────────
+// AC8/AC17 (vervolg) — de training-specifieke spelerindeling is ook
+// training-specifiek: saveSpelerindeling schrijft alleen in de koppeltabel
+// `training_oefeningen`, nooit in de bibliotheektabel `oefeningen`.
+// ────────────────────────────────────────────────
+describe('AC8/AC17 — spelerindeling raakt alleen de koppeling, nooit de bibliotheek-oefening', () => {
+  it('saveSpelerindeling schrijft uitsluitend in training_oefeningen', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: {
+          data: { id: 'k1', oefeningen: { teams: [{ grootte: 6, formatie: null }, { grootte: 6, formatie: null }] } },
+          error: null,
+        },
+        players: { data: [{ id: 'p1' }, { id: 'p2' }] },
+      },
+    })
+    use(m)
+    await saveSpelerindeling('k1', 'e1', [['p1'], ['p2']])
+    expect(m.calls.update.every((u) => u.table === 'training_oefeningen')).toBe(true)
+    expect(m.calls.update.some((u) => u.table === 'oefeningen')).toBe(false)
   })
 })
 

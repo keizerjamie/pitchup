@@ -229,6 +229,16 @@ export const es: Dict = {
     allAssigned: 'Todos los jugadores ya asignados', bench: 'Banquillo / reservas',
     save: 'Guardar alineación', saving: 'Guardando...', saved: '✓ Guardado!',
   },
+  teamIndeling: {
+    heading: 'Reparto de equipos', poolLabel: 'Aún por repartir', teamLabel: 'Equipo {n}', autoAssign: 'Generar automáticamente',
+    emptyPool: 'Todos los jugadores presentes están repartidos', remove: 'Quitar del equipo', moveTo: 'Mover a {team}',
+    absentWarning: 'Ausente', unknownPlayer: 'Jugador desconocido', sizeWarning: 'Más jugadores que el tamaño del equipo ({n})',
+    losseTeam: 'Colocación libre', noPresentPlayers: 'No hay jugadores presentes para repartir',
+    teamsRemovedWarning: 'Se eliminó un equipo de este ejercicio: {n} jugador(es) han sido desvinculados.',
+    saveError: 'No se pudo guardar el reparto de equipos. Inténtalo de nuevo.',
+    dragHint: 'Arrastra un jugador a un equipo, o tócalo para seleccionarlo.',
+    teamDropZoneLabel: 'Zona de colocación para {team}', poolDropZoneLabel: 'Zona de colocación para el grupo de jugadores sin repartir',
+  },
   analysis: {
     title: 'Análisis del partido', result: 'Resultado', goalsFor: 'A favor', goalsAgainst: 'Rival',
     ratings: 'Valoraciones', rating: 'Valoración', clearRating: 'Borrar',

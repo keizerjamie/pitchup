@@ -2,12 +2,13 @@
 
 import { useState, useTransition, useRef } from 'react'
 import Link from 'next/link'
-import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, TrainingOefeningWithData, formationsForSize } from '@/lib/types'
+import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, TrainingOefeningWithData, formationsForSize } from '@/lib/types'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningPicker from '@/components/OefeningPicker'
+import TeamIndelingEditor from '@/components/TeamIndelingEditor'
 import { useDict } from '@/lib/i18n-context'
 
 interface Props {
@@ -18,11 +19,22 @@ interface Props {
   currentSteps: Record<string, number | null>
   hasNulmeting: boolean
   suggestion: { week: number; items: { key: string; step: number | null }[] } | null
+  players: Player[]
+  presentPlayerIds: string[]
 }
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
 
-export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion }: Props) {
+// Stabiele fallback-referentie voor een ontbrekende `spelerindeling` (bv. vóór
+// migratie). Een inline `?? []` zou bij elke render van deze parent een
+// nieuwe array-identiteit opleveren, waardoor TeamIndelingEditor's
+// referentie-vergelijking (`prevInitial !== initialIndeling`) onterecht
+// telkens opnieuw synct — en daarmee o.a. een net getoonde foutmelding
+// voortijdig wegvaagt. Door dezelfde module-constante door te geven, blijft
+// de referentie stabiel zolang `spelerindeling` zelf niet verandert.
+const EMPTY_INDELING: Spelerindeling = []
+
+export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
@@ -308,6 +320,16 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             />
                           ))}
                         </div>
+                      )}
+                      {o.teams.length > 0 && (
+                        <TeamIndelingEditor
+                          koppelingId={k.id}
+                          eventId={eventId}
+                          teams={o.teams}
+                          initialIndeling={k.spelerindeling ?? EMPTY_INDELING}
+                          players={players}
+                          presentPlayerIds={presentPlayerIds}
+                        />
                       )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">

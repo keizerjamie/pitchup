@@ -206,6 +206,12 @@ export interface Oefening {
   created_at: string
 }
 
+// Training-specifieke teamindeling per gekoppelde oefening.
+// Array-van-arrays: index = teamIndex binnen oefeningen.teams; elke sub-array is
+// een lijst player_id's in dat team. Een player_id in geen enkele sub-array =
+// in de pool.
+export type Spelerindeling = string[][]
+
 // Koppeling van een bibliotheek-oefening aan één training (event).
 export interface TrainingOefening {
   id: string
@@ -215,6 +221,7 @@ export interface TrainingOefening {
   volgorde: number
   stap_override: number | null
   genest_in: string | null
+  spelerindeling: Spelerindeling
   created_at: string
 }
 

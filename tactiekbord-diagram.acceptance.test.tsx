@@ -114,6 +114,7 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening
     volgorde: 0,
     stap_override: null,
     genest_in: null,
+    spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
     oefeningen: makeOefening(oefening),
     ...rest,
@@ -512,6 +513,7 @@ describe('Criterium 15/16/17 — zelfde tekening, read-only, op bibliotheekkaart
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
+          players={[]} presentPlayerIds={[]}
         />
       </DictProvider>,
     )
@@ -533,6 +535,7 @@ describe('Criterium 15/16/17 — zelfde tekening, read-only, op bibliotheekkaart
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
+          players={[]} presentPlayerIds={[]}
         />
       </DictProvider>,
     )

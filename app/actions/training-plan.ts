@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { assertOwnEvent, assertOwnOefening } from '@/lib/authz'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
+import { validateSpelerindeling } from '@/lib/spelerindeling'
 
 // ────────────────────────────────────────────────
 // Meting
@@ -288,6 +289,61 @@ export async function updateKoppeling(
   const { error } = await supabase
     .from('training_oefeningen')
     .update(update)
+    .eq('id', koppelingId)
+    .eq('team_id', user.id)
+
+  if (error) throw new Error(error.message)
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Training-specifieke teamindeling van één gekoppelde oefening opslaan.
+// spelerindeling = string[][]: index = teamIndex binnen oefeningen.teams, elke
+// sub-array is een lijst player_id's. Raakt UITSLUITEND training_oefeningen,
+// nooit de bibliotheek-oefening `oefeningen`.
+export async function saveSpelerindeling(
+  koppelingId: string,
+  eventId: string,
+  spelerindeling: string[][],
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  // Koppeling ophalen + tenant/event-scopen, inclusief de teamconfig van de
+  // gejoinde bibliotheek-oefening (om teamCount te bepalen).
+  const { data: koppeling } = await supabase
+    .from('training_oefeningen')
+    .select('id, oefeningen(teams)')
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .maybeSingle()
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+
+  // De join levert (afhankelijk van de client-typing) een object óf een array.
+  const joined = (koppeling as { oefeningen?: unknown }).oefeningen
+  const oef = Array.isArray(joined) ? joined[0] : joined
+  const teams = (oef && typeof oef === 'object' && Array.isArray((oef as { teams?: unknown }).teams))
+    ? (oef as { teams: unknown[] }).teams
+    : []
+  const teamCount = teams.length
+
+  // Validatieset: alle eigen spelers (geen active-filter — inactief-ingedeelde
+  // spelers blijven geldig; een hard-verwijderde speler valt vanzelf weg omdat
+  // zijn id niet meer in de set zit).
+  const { data: playerRows } = await supabase
+    .from('players')
+    .select('id')
+    .eq('team_id', user.id)
+  const ownPlayerIds = new Set((playerRows ?? []).map((r) => r.id))
+
+  const clean = validateSpelerindeling(spelerindeling, { teamCount, ownPlayerIds })
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({ spelerindeling: clean })
     .eq('id', koppelingId)
     .eq('team_id', user.id)
 

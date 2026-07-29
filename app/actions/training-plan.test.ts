@@ -10,6 +10,7 @@ import {
   removeOefeningFromTraining,
   updateKoppeling,
   reorderKoppelingen,
+  saveSpelerindeling,
 } from '@/app/actions/training-plan'
 
 type TableResult = { data?: unknown; error?: unknown }
@@ -149,6 +150,99 @@ describe('reorderKoppelingen', () => {
     use(m)
     await expect(reorderKoppelingen('vreemd', ['k1'])).rejects.toThrow('Event niet gevonden')
     // Geen enkele koppeling aangeraakt.
+    expect(m.calls.update).toHaveLength(0)
+  })
+})
+
+describe('saveSpelerindeling', () => {
+  const twoTeams = { teams: [{ grootte: 6, formatie: null }, { grootte: 6, formatie: null }] }
+
+  it('schrijft de genormaliseerde indeling alleen naar training_oefeningen, tenant-gescoped', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: { id: 'k1', oefeningen: twoTeams }, error: null },
+        players: { data: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }] },
+      },
+    })
+    use(m)
+    await saveSpelerindeling('k1', 'e1', [['p1'], ['p2']])
+
+    // Precies één update, uitsluitend op training_oefeningen (nooit oefeningen).
+    expect(m.calls.update).toHaveLength(1)
+    expect(m.calls.update[0].table).toBe('training_oefeningen')
+    expect(m.calls.update[0].payload.spelerindeling).toEqual([['p1'], ['p2']])
+    expect(m.calls.update.some((u) => u.table === 'oefeningen')).toBe(false)
+
+    // Update is gescoped op id + team_id.
+    expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'id', val: 'k1' })
+    expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'team_id', val: 'team-1' })
+  })
+
+  it('scoped de players-validatiequery (voor toegestane player_id\'s) op team_id van de ingelogde user', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: { id: 'k1', oefeningen: twoTeams }, error: null },
+        players: { data: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }] },
+      },
+    })
+    use(m)
+    await saveSpelerindeling('k1', 'e1', [['p1'], ['p2']])
+
+    // Valt deze scoping ooit weg, dan accepteert validateSpelerindeling
+    // player_id's van een ander team — alleen RLS zou dat dan nog afvangen.
+    expect(m.calls.eq).toContainEqual({ table: 'players', col: 'team_id', val: 'team-1' })
+  })
+
+  it('gooit "Niet ingelogd" zonder user', async () => {
+    use(makeSupabase({ user: null }))
+    await expect(saveSpelerindeling('k1', 'e1', [])).rejects.toThrow('Niet ingelogd')
+  })
+
+  it('gooit "Event niet gevonden" bij een event van een ander team', async () => {
+    const m = makeSupabase({ tables: { events: { data: null } } })
+    use(m)
+    await expect(saveSpelerindeling('k1', 'vreemd', [])).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Koppeling niet gevonden" bij een koppeling van een ander team', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: null },
+      },
+    })
+    use(m)
+    await expect(saveSpelerindeling('vreemd', 'e1', [])).rejects.toThrow('Koppeling niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Speler niet gevonden" bij een player_id buiten de tenant', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: { id: 'k1', oefeningen: twoTeams }, error: null },
+        players: { data: [{ id: 'p1' }] },
+      },
+    })
+    use(m)
+    await expect(saveSpelerindeling('k1', 'e1', [['p1', 'vreemd']])).rejects.toThrow('Speler niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Team bestaat niet in deze oefening" bij een teamIndex buiten de teams-lengte', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: { id: 'k1', oefeningen: { teams: [{ grootte: 6, formatie: null }] } }, error: null },
+        players: { data: [{ id: 'p1' }, { id: 'p2' }] },
+      },
+    })
+    use(m)
+    await expect(saveSpelerindeling('k1', 'e1', [['p1'], ['p2']]))
+      .rejects.toThrow('Team bestaat niet in deze oefening')
     expect(m.calls.update).toHaveLength(0)
   })
 })

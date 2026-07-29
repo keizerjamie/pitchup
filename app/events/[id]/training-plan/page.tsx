@@ -122,6 +122,8 @@ export default async function TrainingPlanPage({ params }: Props) {
             currentSteps={currentSteps}
             hasNulmeting={!!latestMeting}
             suggestion={suggestion}
+            players={activePlayers}
+            presentPlayerIds={Array.from(presentIds)}
           />
         </div>
       </div>

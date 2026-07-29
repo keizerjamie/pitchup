@@ -228,6 +228,16 @@ export const de: Dict = {
     allAssigned: 'Alle Spieler bereits eingeteilt', bench: 'Bank / Reserve',
     save: 'Aufstellung speichern', saving: 'Speichern...', saved: '✓ Gespeichert!',
   },
+  teamIndeling: {
+    heading: 'Teameinteilung', poolLabel: 'Noch einzuteilen', teamLabel: 'Team {n}', autoAssign: 'Automatisch generieren',
+    emptyPool: 'Alle anwesenden Spieler sind eingeteilt', remove: 'Aus Team entfernen', moveTo: 'Verschieben nach {team}',
+    absentWarning: 'Abgemeldet', unknownPlayer: 'Unbekannter Spieler', sizeWarning: 'Mehr Spieler als die Teamgröße ({n})',
+    losseTeam: 'Freie Platzierung', noPresentPlayers: 'Keine anwesenden Spieler zum Einteilen',
+    teamsRemovedWarning: 'Ein Team wurde aus dieser Übung entfernt: {n} Spieler wurden abgekoppelt.',
+    saveError: 'Speichern der Teameinteilung ist fehlgeschlagen. Bitte erneut versuchen.',
+    dragHint: 'Ziehe einen Spieler auf ein Team oder tippe zum Auswählen.',
+    teamDropZoneLabel: 'Ablagebereich für {team}', poolDropZoneLabel: 'Ablagebereich für den Pool nicht eingeteilter Spieler',
+  },
   analysis: {
     title: 'Spielanalyse', result: 'Ergebnis', goalsFor: 'Eigene', goalsAgainst: 'Gegner',
     ratings: 'Bewertungen', rating: 'Bewertung', clearRating: 'Löschen',
