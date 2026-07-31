@@ -229,6 +229,7 @@ export const en: Dict = {
     manualSuffix: '(manual)', nestedNoneOption: '— not nested —', stepAuto: 'auto',
     moveUp: 'Move up', moveDown: 'Move down', detailsToggle: 'Edit',
     nestedInBadge: 'Nested in {name}',
+    print: 'Print',
   },
   oefeningen: {
     navLabel: 'Exercises',

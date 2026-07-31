@@ -245,6 +245,7 @@ export const nl = {
     moveDown: 'Naar beneden',
     detailsToggle: 'Bewerken',
     nestedInBadge: 'Genest in {name}',
+    print: 'Afdrukken',
   },
   oefeningen: {
     navLabel: 'Oefeningen',

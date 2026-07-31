@@ -314,3 +314,106 @@ body::after {
 .stagger > *:nth-child(8)  { animation-delay: 350ms; }
 .stagger > *:nth-child(9)  { animation-delay: 400ms; }
 .stagger > *:nth-child(10) { animation-delay: 450ms; }
+
+/* ─────────────────────────────────────────────────
+   Print — trainingsplan afdrukken
+   Dit blok staat bewust ONDERAAN het bestand: het moet ná
+   :root[data-theme='dark'] (regel 57-72 hierboven) staan om bij gelijke
+   selector-specificiteit te winnen wanneer dark mode actief is.
+───────────────────────────────────────────────── */
+@media print {
+  @page { size: A4; margin: 12mm; }
+
+  /* Browsers printen CSS-achtergronden standaard NIET. Het groene veld van
+     PitchBackground.tsx:16 / FormationField.tsx:30 staat in een inline
+     `background: linear-gradient(...)` en zou wit blijven; ook de teal
+     rugnummer-badge (AttendanceSummary.tsx:15) zou onleesbaar worden. */
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Dark mode mag nooit op wit papier belanden. Zelfde waarden als het
+     licht-thema (globals.css:32-53). De selector herhaalt [data-theme='dark']
+     om dezelfde specificiteit te halen; dit blok staat later in het bestand
+     en wint daarmee. VERPLAATSEN BREEKT AC13 STILZWIJGEND. */
+  :root, :root[data-theme='dark'] {
+    --ink: #0a2e2a; --muted: #3f615b; --faint: #8aa39d;
+    --surface: #ffffff; --surface-sunken: #f6faf8; --border-soft: #e0ebe7;
+    --bg: #ffffff; --bg-glow: #ffffff; --track: #eaf2ee;
+    --brand-btn: #0d3d38; --brand-accent: #16a34a;
+    --chip-green-fg: #14655c; --chip-red-fg: #b91c1c; --chip-amber-fg: #b45309;
+  }
+
+  /* Pagina-achtergrond en decoratieve blobs (globals.css:98-103, 151-172)
+     zijn position:fixed — met print-color-adjust:exact zouden ze op ELKE
+     pagina meedrukken. */
+  body { background: #ffffff !important; }
+  body::before, body::after { display: none !important; }
+
+  /* App-chrome is geen inhoud en komt als position:fixed op elke pagina terug:
+     mobiele header (AppShell.tsx:59), bottom-fade (AppShell.tsx:94),
+     bottom-nav (Navigation.tsx:26), FAB (GlobalFab.tsx:187) dragen allemaal
+     `fixed`; de desktop-sidebar gebruikt `md:fixed` en wordt via zijn
+     bestaande anchor-hook geraakt (AppShell.tsx:35). */
+  .anchor-sidebar, .fixed { display: none !important; }
+
+  .app-main { margin-left: 0 !important; }
+  main { padding-top: 0 !important; padding-bottom: 0 !important; min-height: 0 !important; }
+
+  /* Eén kolom forceren, ongeacht papierstand — en dat onafhankelijk van de
+     lg:-breakpoint (min-width:1024px). Bij staand A4 (~703 CSS-px na 12mm
+     marge) matcht `lg:grid` niet en blijft de container `display:block`; bij
+     liggend A4 (~1032 CSS-px) matcht `lg:grid` wél en zou zonder ingrijpen
+     een tweekoloms grid ontstaan. Om in beide gevallen dezelfde richting en
+     volgorde te garanderen, wordt hier niet op de bestaande grid-`order`-
+     classes geleund (die werken alleen als `display:grid` al actief is — bij
+     staand A4 dus niet), maar wordt binnen dit blok expliciet `display: flex`
+     + `flex-direction: column` afgedwongen, met een eigen `order` op de twee
+     children. `.print-single-column` is een gerichte hook-klasse op die ene
+     container (niet een brede `.lg\:grid`-selector, om andere pagina's niet
+     te raken). In de DOM (app/events/[id]/training-plan/page.tsx) staat
+     AttendanceSummary vóór TrainingPlanEditor; `order` hieronder draait dat
+     om zodat het trainingsplan altijd bóven het aanwezigheidsoverzicht print
+     (AC5).
+
+     Twee andere Tailwind-klassen op diezelfde container (page.tsx) matchen
+     bij liggend A4 (≥1024 CSS-px) via de `lg:`-breakpoint alsnog mee en
+     zouden zonder ingrijpen een ander resultaat geven dan bij staand A4:
+     - `lg:items-start` zet `align-items: flex-start`. In een flex-column is
+       dat de dwarsas (breedte): de twee blokken zouden shrink-to-fit worden
+       i.p.v. de volle paginabreedte pakken. `align-items: stretch` hieronder
+       dwingt in beide oriëntaties dezelfde breedte af.
+     - `space-y-6` hangt via Tailwind's `:not(:last-child)`-selector een
+       margin-block-end op aan het DOM-eerste kind (AttendanceSummary) — dat
+       is DOM-volgorde, niet visuele volgorde. Omdat AttendanceSummary door
+       `order: 2` juist onderaan print, komt die 1,5rem marge na het laatste
+       zichtbare blok te staan i.p.v. ertussenin. `gap` op de flex-container
+       volgt wél de visuele (`order`-)volgorde, dus die vervangt hieronder de
+       marge; de margin van `space-y-6` wordt gereset zodat er geen dubbele of
+       verkeerd geplaatste ruimte ontstaat. Deze reset raakt alleen de
+       kinderen van `.print-single-column` en is bewust onafhankelijk van
+       wélk kind DOM-eerste/laatste is, zodat een latere DOM-herschikking
+       'm niet stilzwijgend breekt.
+     Met `flex-direction`, `align-items` én `gap` hieronder expliciet
+     vastgezet is het resultaat qua richting, volgorde, breedte én
+     tussenruimte gelijk in beide papierstanden, ongeacht of
+     `lg:grid`/`lg:items-start`/`lg:gap-8` matchen. */
+  .print-single-column {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 1.5rem !important;
+  }
+  .print-single-column > * {
+    margin-block-start: 0 !important;
+    margin-block-end: 0 !important;
+  }
+  .print-single-column > *:first-child { order: 2 !important; }
+  .print-single-column > *:last-child { order: 1 !important; }
+
+  /* `lg:sticky lg:top-10` (AttendanceSummary, page.tsx) kan bij liggend A4
+     (≥1024 CSS-px) nog matchen; `position: sticky` is zinloos/onvoorspelbaar
+     in paged media zodra de layout één kolom is. Gericht op de Tailwind-klasse
+     zelf i.p.v. een brede `.print-single-column *`-selector, zodat alleen dit
+     ene element wordt geraakt en niet elke nakomeling (bv. dropzones/badges
+     die bewust wél `position: relative` nodig hebben). */
+  .print-single-column .lg\:sticky { position: static !important; }
+}

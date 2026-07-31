@@ -127,7 +127,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     <div className="space-y-6">
 
       {/* Auto-save reassurance — there is no explicit save button */}
-      <p className="flex items-center gap-1.5 text-xs text-faint -mb-2">
+      <p className="print:hidden flex items-center gap-1.5 text-xs text-faint -mb-2">
         <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -135,11 +135,14 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
       </p>
 
       {/* Doelstelling */}
-      <div className="bg-surface rounded-2xl border border-[var(--border-soft)] p-5">
+      <div
+        data-testid="doelstelling-block"
+        className={`bg-surface rounded-2xl border border-[var(--border-soft)] p-5 print:break-inside-avoid ${doelstelling.trim() === '' ? 'print:hidden' : ''}`}
+      >
         <label className="block text-sm font-semibold text-muted mb-2 flex items-center justify-between">
           {t.trainingPlan.objective}
           {doelstellingSaved && (
-            <span className="text-xs text-green-600 font-normal">{t.trainingPlan.saved}</span>
+            <span className="print:hidden text-xs text-green-600 font-normal">{t.trainingPlan.saved}</span>
           )}
         </label>
         <textarea
@@ -147,13 +150,14 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           value={doelstelling}
           onChange={e => handleDoelstellingChange(e.target.value)}
           placeholder={t.trainingPlan.objectivePlaceholder}
-          className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink placeholder:text-faint resize-none text-sm"
+          className="print:hidden w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink placeholder:text-faint resize-none text-sm"
         />
+        <p data-testid="doelstelling-print" className="hidden print:block whitespace-pre-wrap text-sm text-ink">{doelstelling}</p>
       </div>
 
       {/* Cycle-week suggestion */}
       {suggestion && suggestion.items.length > 0 && (
-        <div className="bg-surface rounded-r-2xl border border-orange-200 border-l-[3px] border-l-orange-500 p-4">
+        <div className="print:hidden bg-surface rounded-r-2xl border border-orange-200 border-l-[3px] border-l-orange-500 p-4">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
               {t.periodization.suggestTitle}
@@ -186,7 +190,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
       {/* Periodization status */}
       {hasNulmeting ? (
-        <div className="bg-surface rounded-2xl border border-[var(--border-soft)] p-4">
+        <div className="print:hidden bg-surface rounded-2xl border border-[var(--border-soft)] p-4">
           <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
             {t.periodization.currentSteps} {t.periodization.forTraining}
           </p>
@@ -202,7 +206,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           </div>
         </div>
       ) : (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
+        <div className="print:hidden bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
           <p className="text-sm text-amber-800 flex-1">{t.trainingPlan.nulmetingNeeded}</p>
           <Link
             href="/periodisering"
@@ -214,20 +218,20 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
       )}
 
       {/* Exercises */}
-      <div>
+      <div data-testid="exercises-section" className={koppelingen.length === 0 ? 'print:hidden' : ''}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-muted uppercase tracking-wide">{t.trainingPlan.exercisesHeading}</h2>
           <button
             type="button"
             onClick={openPicker}
-            className="text-sm font-semibold text-orange-600 hover:text-orange-700 active:scale-95 transition-all"
+            className="print:hidden text-sm font-semibold text-orange-600 hover:text-orange-700 active:scale-95 transition-all"
           >
             {t.trainingPlan.addExercise}
           </button>
         </div>
 
         {koppelingen.length === 0 ? (
-          <div className="rounded-2xl border-2 border-dashed border-[var(--border-soft)] p-8 text-center">
+          <div className="print:hidden rounded-2xl border-2 border-dashed border-[var(--border-soft)] p-8 text-center">
             <svg className="w-9 h-9 mx-auto mb-2 text-faint" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
             </svg>
@@ -244,13 +248,13 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               const parent = k.genest_in ? koppelingen.find((other) => other.id === k.genest_in) : null
               const isExpanded = expandedId === k.id
               return (
-                <div key={k.id} className="bg-surface rounded-xl border border-[var(--border-soft)] p-4">
+                <div key={k.id} className="print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4">
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
                       <span className="w-7 h-7 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted">
                         {idx + 1}
                       </span>
-                      <div className="flex flex-col">
+                      <div className="print:hidden flex flex-col">
                         <button
                           type="button"
                           onClick={() => move(idx, -1)}
@@ -274,7 +278,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-ink">{o.naam}</div>
                       {o.beschrijving && (
-                        <p className="text-sm text-muted mt-0.5 line-clamp-2">{o.beschrijving}</p>
+                        <p className="text-sm text-muted mt-0.5 line-clamp-2 print:line-clamp-none">{o.beschrijving}</p>
                       )}
                       <div className="flex flex-wrap items-center gap-1.5 mt-2">
                         {catMeta && (
@@ -307,7 +311,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       </div>
                       {o.diagram ? (
                         <div className="mt-2">
-                          <DiagramView diagram={o.diagram} sizePx={110} />
+                          <DiagramView diagram={o.diagram} sizePx={110} className="print:w-[55mm]!" />
                         </div>
                       ) : o.teams.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-2">
@@ -317,6 +321,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                               positions={tm.formatie ? (formationsForSize(tm.grootte).find((f) => f.key === tm.formatie)?.positions ?? []) : []}
                               label={`${tm.grootte}${tm.formatie ? ` · ${tm.formatie}` : ''}`}
                               sizePx={56}
+                              className="print:w-[35mm]!"
                             />
                           ))}
                         </div>
@@ -332,7 +337,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         />
                       )}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="print:hidden flex items-center gap-2 flex-shrink-0">
                       <button
                         type="button"
                         onClick={() => setExpandedId(isExpanded ? null : k.id)}
@@ -371,7 +376,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   </div>
 
                   {isExpanded && (
-                    <div className="mt-3 pt-3 border-t border-[var(--border-soft)] grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="print:hidden mt-3 pt-3 border-t border-[var(--border-soft)] grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})</label>
                         <input
@@ -406,7 +411,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         <button
           type="button"
           onClick={openPicker}
-          className="mt-3 w-full py-3 rounded-xl border-2 border-dashed border-orange-200 text-orange-500 hover:border-orange-300 hover:bg-orange-50 font-semibold text-sm transition-all active:scale-95"
+          className="print:hidden mt-3 w-full py-3 rounded-xl border-2 border-dashed border-orange-200 text-orange-500 hover:border-orange-300 hover:bg-orange-50 font-semibold text-sm transition-all active:scale-95"
         >
           {t.trainingPlan.addExercise}
         </button>

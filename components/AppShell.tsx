@@ -77,7 +77,7 @@ export default function AppShell({
       </div>
 
       {/* ── Main content ── */}
-      <div className="md:ml-64">
+      <div className="app-main md:ml-64">
         <main className="min-h-screen pb-40 md:pb-8 pt-[calc(env(safe-area-inset-top)_+_3.5rem)] md:pt-0">
           <PageTransition>
             {children}

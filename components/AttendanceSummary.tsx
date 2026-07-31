@@ -27,7 +27,7 @@ function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) 
 // while building a lineup or training plan. Editing lives on the event page.
 export default function AttendanceSummary({ present, absent, eventId, t, className = '' }: Props) {
   return (
-    <div className={`glass-card rounded-2xl overflow-hidden ${className}`}>
+    <div className={`print:break-inside-avoid glass-card rounded-2xl overflow-hidden ${className}`}>
       <div className="px-5 py-4 border-b border-white/50 flex items-center justify-between gap-2">
         <h2 className="font-semibold text-gray-800">{t.event.attendance}</h2>
         <span className="text-sm font-semibold text-teal-700 flex-shrink-0">
@@ -70,7 +70,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
       <Link
         href={`/events/${eventId}`}
         transitionTypes={['nav-back']}
-        className="flex items-center justify-between px-5 py-3 border-t border-gray-100 text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
+        className="print:hidden flex items-center justify-between px-5 py-3 border-t border-gray-100 text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
       >
         {t.event.editAttendance}
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

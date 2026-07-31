@@ -139,6 +139,7 @@ export const es: Dict = {
     manualSuffix: '(manual)', nestedNoneOption: '— sin anidar —', stepAuto: 'auto',
     moveUp: 'Subir', moveDown: 'Bajar', detailsToggle: 'Editar',
     nestedInBadge: 'Anidado en {name}',
+    print: 'Imprimir',
   },
   oefeningen: {
     navLabel: 'Ejercicios',

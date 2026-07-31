@@ -139,6 +139,7 @@ export const fr: Dict = {
     manualSuffix: '(manuel)', nestedNoneOption: '— non imbriqué —', stepAuto: 'auto',
     moveUp: 'Monter', moveDown: 'Descendre', detailsToggle: 'Modifier',
     nestedInBadge: 'Imbriqué dans {name}',
+    print: 'Imprimer',
   },
   oefeningen: {
     navLabel: 'Exercices',

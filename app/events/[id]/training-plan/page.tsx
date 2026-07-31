@@ -6,6 +6,7 @@ import { formatDateLong } from '@/lib/utils'
 import BackButton from '@/components/BackButton'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import AttendanceSummary from '@/components/AttendanceSummary'
+import PrintButton from '@/components/PrintButton'
 import { getDict } from '@/lib/i18n'
 
 interface Props {
@@ -90,19 +91,25 @@ export default async function TrainingPlanPage({ params }: Props) {
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
 
       <div className="flex items-center gap-3">
-        <BackButton fallback={`/events/${id}`} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+        <BackButton fallback={`/events/${id}`} className="print:hidden text-gray-400 hover:text-gray-600 flex-shrink-0">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-bold text-gray-900">{t.event.trainingPlan}</h1>
           <p className="text-sm text-gray-500">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
+        <PrintButton />
       </div>
 
-      {/* Desktop: planner left, attendance overview right (sticky). Mobile: overview on top. */}
-      <div className="lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
+      {/* Desktop: planner left, attendance overview right (sticky). Mobile: overview on top.
+          `print-single-column` forceert op papier altijd één kolom mét het
+          trainingsplan bóven het aanwezigheidsoverzicht (globals.css @media
+          print) — dat werkt onafhankelijk van de lg:-breakpoint, dus zowel bij
+          staand A4 (~703 CSS-px, `lg:grid` matcht niet) als bij liggend A4
+          (~1032 CSS-px, `lg:grid` matcht wél). */}
+      <div className="print-single-column lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
         <div className="lg:order-2">
           <AttendanceSummary
             present={presentPlayers}
