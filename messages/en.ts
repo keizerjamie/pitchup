@@ -333,6 +333,7 @@ export const en: Dict = {
   teamIndeling: {
     heading: 'Team assignment',
     poolLabel: 'Not yet assigned',
+    poolLabelPrint: 'Unassigned',
     teamLabel: 'Team {n}',
     autoAssign: 'Auto-assign',
     emptyPool: 'All present players are assigned',

@@ -230,7 +230,7 @@ export const de: Dict = {
     save: 'Aufstellung speichern', saving: 'Speichern...', saved: '✓ Gespeichert!',
   },
   teamIndeling: {
-    heading: 'Teameinteilung', poolLabel: 'Noch einzuteilen', teamLabel: 'Team {n}', autoAssign: 'Automatisch generieren',
+    heading: 'Teameinteilung', poolLabel: 'Noch einzuteilen', poolLabelPrint: 'Nicht eingeteilt', teamLabel: 'Team {n}', autoAssign: 'Automatisch generieren',
     emptyPool: 'Alle anwesenden Spieler sind eingeteilt', remove: 'Aus Team entfernen', moveTo: 'Verschieben nach {team}',
     absentWarning: 'Abgemeldet', unknownPlayer: 'Unbekannter Spieler', sizeWarning: 'Mehr Spieler als die Teamgröße ({n})',
     losseTeam: 'Freie Platzierung', noPresentPlayers: 'Keine anwesenden Spieler zum Einteilen',

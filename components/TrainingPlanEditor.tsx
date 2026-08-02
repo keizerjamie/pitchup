@@ -134,12 +134,25 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         {t.trainingPlan.autoSaveHint}
       </p>
 
-      {/* Doelstelling */}
+      {/* Doelstelling. Op print bewust compact (FOUT4 print-review): de
+          scherm-typografie (grote letters, ruime p-5-padding) kostte
+          onnodig veel papier. Kopje klein/subtiel, tekst in lijn met de
+          rest van de afdruk ([9px], net als de teamindeling-print-tekst in
+          TeamIndelingEditor.tsx) — de volledige tekst blijft zichtbaar
+          (bestaand AC: niet afgekapt, niet als invoerveld).
+
+          `print:flow-root` (validator-fix, bevestigd gemeten in browser):
+          dit blok is een direct kind van `.print-plan-layout`, maar de
+          `float: left` van `.print-attendance-col` (globals.css) zit één
+          niveau dieper. Alleen boxen die zelf een nieuwe BFC openen wijken
+          uit voor een float; een gewoon blok doet dat niet en zijn
+          border-box loopt dan achter de namenkolom door. `flow-root`
+          opent die BFC zonder verder gedrag te wijzigen. */}
       <div
         data-testid="doelstelling-block"
-        className={`bg-surface rounded-2xl border border-[var(--border-soft)] p-5 print:break-inside-avoid ${doelstelling.trim() === '' ? 'print:hidden' : ''}`}
+        className={`bg-surface rounded-2xl border border-[var(--border-soft)] p-5 print:break-inside-avoid print:p-[2mm] print:rounded-md print:flow-root ${doelstelling.trim() === '' ? 'print:hidden' : ''}`}
       >
-        <label className="block text-sm font-semibold text-muted mb-2 flex items-center justify-between">
+        <label className="block text-sm font-semibold text-muted mb-2 flex items-center justify-between print:text-[7px] print:mb-[0.5mm] print:uppercase print:tracking-wide print:text-faint">
           {t.trainingPlan.objective}
           {doelstellingSaved && (
             <span className="print:hidden text-xs text-green-600 font-normal">{t.trainingPlan.saved}</span>
@@ -152,7 +165,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           placeholder={t.trainingPlan.objectivePlaceholder}
           className="print:hidden w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink placeholder:text-faint resize-none text-sm"
         />
-        <p data-testid="doelstelling-print" className="hidden print:block whitespace-pre-wrap text-sm text-ink">{doelstelling}</p>
+        <p data-testid="doelstelling-print" className="hidden print:block whitespace-pre-wrap print:text-[9px] print:leading-snug text-ink">{doelstelling}</p>
       </div>
 
       {/* Cycle-week suggestion */}
@@ -220,7 +233,10 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
       {/* Exercises */}
       <div data-testid="exercises-section" className={koppelingen.length === 0 ? 'print:hidden' : ''}>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-muted uppercase tracking-wide">{t.trainingPlan.exercisesHeading}</h2>
+          {/* Op print weggelaten: de genummerde oefeningen kondigen zichzelf al
+              aan (badge "1", "2", ...), dus deze sectiekop voegt op papier
+              geen informatie toe en kost alleen ruimte (FOUT4, print-review). */}
+          <h2 className="text-sm font-semibold text-muted uppercase tracking-wide print:hidden">{t.trainingPlan.exercisesHeading}</h2>
           <button
             type="button"
             onClick={openPicker}
@@ -239,7 +255,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
             <p className="text-sm text-faint mt-1">{t.trainingPlan.noExercisesHint}</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 print:space-y-[3mm]">
             {koppelingen.map((k, idx) => {
               const o = k.oefeningen
               const catStep = currentSteps[o.categorie]
@@ -247,11 +263,23 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               const catMeta = ALL_CATS.find(c => c.key === o.categorie)
               const parent = k.genest_in ? koppelingen.find((other) => other.id === k.genest_in) : null
               const isExpanded = expandedId === k.id
+              // Print-only kopregel-tekst: nummer staat al in de badge links,
+              // hier alleen naam + duur + afmetingen + categorie + stap achter
+              // elkaar op één regel — platte tekst i.p.v. pillen (scheelt
+              // padding/hoogte, zie het "kladblok"-doelontwerp).
+              const stepText = effectiveStep !== null && effectiveStep !== undefined
+                ? (k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${effectiveStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${effectiveStep}`))
+                : null
               return (
-                <div key={k.id} className="print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4">
+                // `print:flow-root` (validator-fix, zie de toelichting bij
+                // het doelstellingblok hierboven): alleen de eerste kaart
+                // overlapt de gefloate namenkolom, maar de klasse staat op
+                // alle kaarten — vanaf oefening 2 staan ze toch al onder de
+                // kolom, dus `flow-root` daar is een no-op.
+                <div key={k.id} className="print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root">
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                      <span className="w-7 h-7 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted">
+                      <span className="w-7 h-7 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted print:w-[4mm] print:h-[4mm] print:text-[8px]">
                         {idx + 1}
                       </span>
                       <div className="print:hidden flex flex-col">
@@ -276,11 +304,34 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-ink">{o.naam}</div>
+                      {/* Scherm: naam op eigen regel, badges als pillen eronder.
+                          Print: vervangen door één compacte kopregel hieronder
+                          (samen was dit >20mm van de kaarthoogte). */}
+                      <div className="font-semibold text-ink print:hidden">{o.naam}</div>
+
+                      {/* Print-only kopregel: naam · duur · afmetingen · stap,
+                          achter elkaar op één regel. Staat bewust in de DOM
+                          VÓÓR de beschrijving hieronder — anders leest de
+                          afdruk eerst de kleine grijze beschrijving en pas
+                          daarna de vetgedrukte kopregel (omgekeerde
+                          leesvolgorde, FOUT1 print-review). Categorie is hier
+                          bewust weggelaten: die herhaalt alleen de
+                          oefeningnaam en kost breedte zonder extra informatie
+                          (FOUT2 print-review) — de categorie-badge blijft wel
+                          gewoon op het scherm staan (zie hieronder). De
+                          stap-aanduiding blijft wél staan: die is niet uit de
+                          naam af te leiden. */}
+                      <p className="hidden print:block print:text-[10px] print:font-semibold print:leading-snug">
+                        {o.naam}
+                        {o.duur_min != null && <> · {o.duur_min} min</>}
+                        {o.breedte_m && o.lengte_m && <> · {o.breedte_m}×{o.lengte_m}m</>}
+                        {stepText && <> · {stepText}</>}
+                      </p>
+
                       {o.beschrijving && (
-                        <p className="text-sm text-muted mt-0.5 line-clamp-2 print:line-clamp-none">{o.beschrijving}</p>
+                        <p className="text-sm text-muted mt-0.5 line-clamp-2 print:text-[8px] print:leading-tight print:mt-[0.5mm]">{o.beschrijving}</p>
                       )}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2 print:hidden">
                         {catMeta && (
                           <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${catMeta.color}`}>
                             {catLabel(o.categorie)}
@@ -309,21 +360,34 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           </span>
                         )}
                       </div>
-                      {o.diagram ? (
-                        <div className="mt-2">
-                          <DiagramView diagram={o.diagram} sizePx={110} className="print:w-[55mm]!" />
-                        </div>
-                      ) : o.teams.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {o.teams.map((tm, i) => (
-                            <FormationField
-                              key={i}
-                              positions={tm.formatie ? (formationsForSize(tm.grootte).find((f) => f.key === tm.formatie)?.positions ?? []) : []}
-                              label={`${tm.grootte}${tm.formatie ? ` · ${tm.formatie}` : ''}`}
-                              sizePx={56}
-                              className="print:w-[35mm]!"
-                            />
-                          ))}
+
+                      {/* Diagram/formatieveld naast de teamindeling i.p.v.
+                          erboven (was de belangrijkste hoogtebesparing): het
+                          diagram/formatieveld floatet op print naar links
+                          (42mm breed = 59mm hoog bij de 100/140 veld-aspect-
+                          ratio; FormationField-fallback iets kleiner op 30mm,
+                          FOUT3 print-review — ruim binnen budget bij 1,74 van
+                          de 2 A4), de teamindeling (TeamIndelingEditor's
+                          print-only blok, direct hierna in de DOM) vloeit in
+                          de resterende breedte ernaast. De kaarthoogte wordt
+                          zo max(diagram, teamindeling) i.p.v. de som. */}
+                      {(o.diagram || o.teams.length > 0) && (
+                        <div className="mt-2 print:mt-[1mm] print:float-left print:w-[42mm] print:mr-[3mm]">
+                          {o.diagram ? (
+                            <DiagramView diagram={o.diagram} sizePx={110} className="print:w-[42mm]!" />
+                          ) : (
+                            <div className="flex flex-wrap gap-2 print:flex-col print:gap-[1mm]">
+                              {o.teams.map((tm, i) => (
+                                <FormationField
+                                  key={i}
+                                  positions={tm.formatie ? (formationsForSize(tm.grootte).find((f) => f.key === tm.formatie)?.positions ?? []) : []}
+                                  label={`${tm.grootte}${tm.formatie ? ` · ${tm.formatie}` : ''}`}
+                                  sizePx={56}
+                                  className="print:w-[30mm]!"
+                                />
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                       {o.teams.length > 0 && (

@@ -247,7 +247,15 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
         />
       </DictProvider>,
     )
-    expect(screen.getByText('Positiespel')).toBeInTheDocument()
+    // TrainingPlanEditor rendert de naam twee keer in de DOM (een
+    // scherm-variant en een print-only kopregel, zie TrainingPlanEditor.tsx)
+    // — jsdom past geen `print:`-media toe, dus beide zijn hier tegelijk
+    // aanwezig. Zonder duur/afmetingen/stap (zoals in deze fixture) is de
+    // print-kopregel nu kaal de naam (categorie is er bewust uitgehaald,
+    // print-review FOUT2), dus die twee knopen hebben hier toevallig
+    // identieke tekst. `getAllByText` i.p.v. `getByText` om dat te
+    // verdragen — zelfde patroon als poolLabel/poolLabelPrint elders.
+    expect(screen.getAllByText('Positiespel').length).toBeGreaterThan(0)
     expect(screen.getByText('6 · 3-2')).toBeInTheDocument()
   })
 })

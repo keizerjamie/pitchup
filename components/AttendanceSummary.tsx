@@ -25,58 +25,111 @@ function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) 
 
 // Read-only overview of who is present / absent for an event, for reference
 // while building a lineup or training plan. Editing lives on the event page.
+//
+// Print krijgt een eigen, veel compactere weergave (kladblok-model, op
+// verzoek van de eigenaar): rugnummer + naam onder elkaar in een smalle
+// kolom, i.p.v. de gegroepeerde chips-weergave hieronder — zie het
+// `hidden print:block`-blok verderop. Dezelfde `present`/`absent`-props,
+// alleen anders opgemaakt.
 export default function AttendanceSummary({ present, absent, eventId, t, className = '' }: Props) {
   return (
-    <div className={`print:break-inside-avoid glass-card rounded-2xl overflow-hidden ${className}`}>
-      <div className="px-5 py-4 border-b border-white/50 flex items-center justify-between gap-2">
-        <h2 className="font-semibold text-gray-800">{t.event.attendance}</h2>
-        <span className="text-sm font-semibold text-teal-700 flex-shrink-0">
-          {present.length}/{present.length + absent.length}
-        </span>
+    // `.glass-card` is ongelaagde CSS en wint van elke Tailwind-utility in
+    // `@layer utilities` — `print:bg-transparent`/`print:shadow-none`/
+    // `print:border-0` verloren dat gevecht en waren dode klassen. De
+    // achtergrond/rand/schaduw op print worden nu geregeld door de
+    // `.print-attendance-col`-regel in het `@media print`-blok van
+    // globals.css (staat zelf ook ongelaagd, dus kan `.glass-card` wél
+    // overrulen) — deze component draagt die klasse altijd via `className`
+    // (zie app/events/[id]/training-plan/page.tsx en app/print-preview).
+    <div className={`print:break-inside-avoid glass-card rounded-2xl overflow-hidden print:rounded-none ${className}`}>
+      <div className="print:hidden">
+        <div className="px-5 py-4 border-b border-white/50 flex items-center justify-between gap-2">
+          <h2 className="font-semibold text-gray-800">{t.event.attendance}</h2>
+          <span className="text-sm font-semibold text-teal-700 flex-shrink-0">
+            {present.length}/{present.length + absent.length}
+          </span>
+        </div>
+
+        <div className="px-5 py-4 space-y-3.5">
+          {present.length === 0 ? (
+            <p className="text-sm text-gray-400">{t.event.unknownStat}</p>
+          ) : (
+            POSITION_GROUPS.map((group) => {
+              const gp = present.filter((p) => group.positions.includes(p.position))
+              if (gp.length === 0) return null
+              return (
+                <div key={group.label}>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                    {t.players.groups[group.label] ?? group.label}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {gp.map((p) => <Chip key={p.id} player={p} tone="present" />)}
+                  </div>
+                </div>
+              )
+            })
+          )}
+
+          {absent.length > 0 && (
+            <div className="pt-3 border-t border-gray-100">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                {t.event.absentStat} ({absent.length})
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {absent.map((p) => <Chip key={p.id} player={p} tone="absent" />)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <Link
+          href={`/events/${eventId}`}
+          transitionTypes={['nav-back']}
+          className="flex items-center justify-between px-5 py-3 border-t border-gray-100 text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
+        >
+          {t.event.editAttendance}
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </Link>
       </div>
 
-      <div className="px-5 py-4 space-y-3.5">
-        {present.length === 0 ? (
-          <p className="text-sm text-gray-400">{t.event.unknownStat}</p>
-        ) : (
-          POSITION_GROUPS.map((group) => {
-            const gp = present.filter((p) => group.positions.includes(p.position))
-            if (gp.length === 0) return null
-            return (
-              <div key={group.label}>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                  {t.players.groups[group.label] ?? group.label}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {gp.map((p) => <Chip key={p.id} player={p} tone="present" />)}
-                </div>
-              </div>
-            )
-          })
-        )}
+      {/* Print-only: rugnummer + naam onder elkaar, aanwezig/afwezig onder
+          elkaar met een kopje. Niet gegroepeerd per positie (dat kost extra
+          kopjes/hoogte in een kolom van maar 42mm breed) — op het kladblokje
+          van de eigenaar staan alle namen gewoon onder elkaar.
 
+          Let op: bij `present.length === 0` wordt hier bewust GEEN
+          `{t.event.unknownStat}`-tekst herhaald — dat zou (jsdom past geen
+          CSS/`print:`-media toe, dus dit blok en het scherm-blok hierboven
+          staan tegelijk in de DOM) exact dezelfde losse tekst op twee plekken
+          opleveren en een "Found multiple elements"-fout riskeren in
+          bestaande tests, zoals ook bij poolLabel/poolLabelPrint
+          (TeamIndelingEditor.tsx). */}
+      <div className="hidden print:block print:text-[9px] print:leading-snug">
+        <p className="print:font-bold print:mb-[1mm]">
+          {t.event.attendance} ({present.length}/{present.length + absent.length})
+        </p>
+        {present.length > 0 && (
+          <ul>
+            {present.map((p) => (
+              <li key={p.id}>{p.jersey_number ?? '#'} {p.name}</li>
+            ))}
+          </ul>
+        )}
         {absent.length > 0 && (
-          <div className="pt-3 border-t border-gray-100">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+          <>
+            <p className="print:font-bold print:mt-[2mm] print:mb-[1mm]">
               {t.event.absentStat} ({absent.length})
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {absent.map((p) => <Chip key={p.id} player={p} tone="absent" />)}
-            </div>
-          </div>
+            <ul>
+              {absent.map((p) => (
+                <li key={p.id}>{p.jersey_number ?? '#'} {p.name}</li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
-
-      <Link
-        href={`/events/${eventId}`}
-        transitionTypes={['nav-back']}
-        className="print:hidden flex items-center justify-between px-5 py-3 border-t border-gray-100 text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
-      >
-        {t.event.editAttendance}
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-      </Link>
     </div>
   )
 }

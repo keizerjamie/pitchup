@@ -364,6 +364,13 @@ export const nl = {
   teamIndeling: {
     heading: 'Teamindeling',
     poolLabel: 'Nog in te delen',
+    // Print-only label voor de niet-ingedeelde spelers (kladblok-teamindeling,
+    // TeamIndelingEditor.tsx). Bewust een andere tekst dan `poolLabel`: die
+    // wordt (met jsdom, dat geen CSS/`print:`-media toepast) tegelijk in de
+    // DOM gerenderd, en identieke losse tekst op twee plekken levert een
+    // "Found multiple elements"-fout op in bestaande, niet-print-gerelateerde
+    // tests (teamindeling.acceptance.test.tsx, TeamIndelingEditor.test.tsx).
+    poolLabelPrint: 'Nog niet ingedeeld',
     teamLabel: 'Team {n}',
     autoAssign: 'Genereer automatisch',
     emptyPool: 'Alle aanwezige spelers zijn ingedeeld',

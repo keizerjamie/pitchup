@@ -91,11 +91,13 @@ geprinte data stond al tenant-gescoped in de React-boom, dus geen nieuw isolatie
 ### Aanpak
 - **Print-CSS op de bestaande DOM, geen aparte print-route.** Een `/print`-variant zou een
   tweede, apart te beveiligen data-oppervlak introduceren; bewust afgewezen.
-- **Geen read-only variant van `TeamIndelingEditor`.** De te printen indeling staat alléén in
-  de lokale state van die component (`:81`, `persist()`); een read-only sibling zou de
-  verouderde server-indeling printen zolang een optimistische save nog niet gerevalideerd is.
-  Daarom print-klassen binnen de bestaande component. Let op: **de spelernaam ís de sleepgreep**
-  — alleen de affordance (ring/shadow/selectie/dropzone-rand) print niet, de naam wel.
+- **Geen read-only variant van `TeamIndelingEditor` als apart component.** De te printen
+  indeling staat alléén in de lokale state van die component (`persist()`); een read-only
+  sibling zou de verouderde server-indeling printen zolang een optimistische save nog niet
+  gerevalideerd is. Opgelost met **dual markup binnen dezelfde component**: de interactieve
+  editor is `print:hidden`, ernaast een `hidden print:block`-blok dat **dezelfde lokale
+  `indeling`/`pool`-state** leest. Test D1 bewijst dat (speler verplaatsen → print-blok
+  beweegt mee vóór revalidatie).
 - `components/PrintButton.tsx` gebruikt een **inline SVG**, geen `.ms`-icoonfont: dat font is
   self-hosted en gesubset, dus een ontbrekende glyph zou letterlijk het woord "print" afdrukken.
 
@@ -112,25 +114,64 @@ geprinte data stond al tenant-gescoped in de React-boom, dus geen nieuw isolatie
 - Het blok geldt **app-breed**, niet alleen voor deze pagina. Kan niet anders — zonder deze
   regels print de chrome op elke pagina mee. Verandert niets aan het scherm.
 
-### Gotcha die live bijna misging (bug die 39 groene tests overleefde)
-De uitdraai moet altijd één kolom zijn met het plan bóven het aanwezigheidsoverzicht. De eerste
-implementatie deed dat met `grid-template-columns: 1fr`, maar `display: grid` kwam uitsluitend
-uit `lg:grid` — en **`lg:` matcht niet bij staand A4** (210mm − 24mm marge ≈ 703 CSS-px). Dus:
-container bleef `display: block`, `grid-template-columns` en `lg:order-*` deden niets, en de
-aanwezigheidslijst printte bóven het plan. Alleen bij liggend papier (≈1032 px) klopte het.
-Nu binnen `@media print`: `display: flex` + `flex-direction: column` + expliciete `order`-
-omkering op de twee children, plus `align-items: stretch` en een eigen `gap` (de `space-y-6`-
-marge belandt na de order-omkering aan de verkeerde kant, en `lg:items-start`/`lg:gap-8`
-lekken bij liggend papier alsnog mee).
+### Layout: "kladblok-model" (2026-08-01) — vervangt het eerdere één-kolom-model
+De eerste versie was **4,1 A4-pagina's** en daarmee onwerkbaar. De eigenaar vroeg expliciet om
+zijn oude kladblokje terug: *"aan de linkerkant alle namen onder elkaar en dan daarnaast/
+daaronder de oefeningen."* Gemeten resultaat nu: **476mm = 1,74 pagina** bij 6 oefeningen,
+14 aanwezig, 3 afwezig.
+- **Aanwezigheid = smalle kolom links** via `float: left; width: 42mm` (`.print-attendance-col`)
+  binnen `.print-plan-layout` (`display: block !important`). **Float, geen grid/flex-kolom**:
+  een kolom zou de oefeningen over álle pagina's in een smalle strook opsluiten; met een float
+  lopen ze eronder door zodra de namenlijst op is. Het eerdere `.print-single-column`
+  (flex-column + `order`-omkering) bestaat niet meer.
+- **Waar de besparing zit** (163mm → 71mm per oefening): het diagram staat nu **naast** de
+  teamindeling in plaats van erboven (`print:float-left` op de diagram-wrapper), waardoor de
+  kaarthoogte `max(diagram, tekst)` is in plaats van de som. Diagram 42mm breed (=59mm hoog,
+  viewBox-ratio 1,4), formatieveld-fallback 30mm. Verder: kopregel en badges samengevoegd tot
+  één regel, categorie eraf (herhaalde de oefeningnaam), beschrijving `line-clamp-2` óók op
+  print, kaartpadding `print:p-[2mm]`, en de teamindeling als tekstregels
+  (`Team 1 (5): Jan, Piet, ...`) in plaats van chips.
+
+### Twee CSS-gotcha's die alleen in een echte browser zichtbaar waren
+- **`float` werkt alleen op een BFC-buur.** De float zit één DOM-niveau dieper dan de container,
+  dus alleen boxen die zelf een BFC openen wijken ervoor uit. Zonder `print:flow-root` bleef de
+  border-box van het doelstellingblok en de eerste oefeningkaart op volle breedte staan en liep
+  die **achter de namenkolom door** (gemeten: links 7,4mm/rechts 176,7mm, overlappend met de
+  kolom op 7,4-49,4mm). Mét `print:flow-root`: links 53,4mm, breedte 123,3mm, geen overlap.
+- **Ongelaagde CSS wint van `@layer utilities`.** `@import "tailwindcss"` zet alle utilities in
+  een layer; `.glass-card` staat ongelaagd in `globals.css` en wint dus altijd. Daardoor deden
+  `print:bg-transparent print:shadow-none print:border-0` op het aanwezigheidsblok **niets** en
+  drukte de glass-card-schaduw mee als grijze halo. Reset moet in het (ongelaagde)
+  `@media print`-blok staan. **Zelfde valkuil ligt klaar bij `.ms` en `.surface-card`.**
 
 ### Tests
-- `afdrukken-trainingsplan.acceptance.test.tsx` — 64 tests. jsdom past `@media print` **niet**
+- `afdrukken-trainingsplan.acceptance.test.tsx` — 72 tests. jsdom past `@media print` **niet**
   toe, dus print-zichtbaarheid wordt als **klasse-contract** getest via `hasPrintHiddenAncestor`.
-- **Blok C1 leest `app/globals.css` in met `readFileSync`** en bewaakt dat de reparerende regels
-  er staan (inclusief de blokvolgorde t.o.v. dark mode). Zonder dat blok laat een verwijderde
-  CSS-regel alle tests groen en komt de bug hierboven terug.
+- **Blok C1 leest `app/globals.css` in met `readFileSync`** en bewaakt dat de dragende regels er
+  staan (float, breedte, `display:block`, de styling-reset, en de blokvolgorde t.o.v. dark mode).
+- **Blok E1 bewaakt de klassenkant**: `print:flow-root` en de volledige `print:float-left`-set.
+  Zonder E1.3 zou het weghalen van één klasse de uitdraai terugbrengen naar ~4 pagina's met
+  alle tests groen. Alle E1-tests en C1.11 zijn met een mutatietest bewezen scherp.
+- **Let op bij dual markup**: dezelfde tekst staat twee keer in de DOM (scherm + print), wat
+  `getByText` laat struikelen op "Found multiple elements". Daarom bestaat
+  `teamIndeling.poolLabelPrint` naast `poolLabel`. Gebruik `within(...)` of `getAllByText`.
 - **Niet automatiseerbaar en dus handmatig**: past het op A4, drukt het groene veld écht mee,
-  is dark mode leesbaar op wit papier, blijven meerdere pagina's leesbaar. Deze vier zijn bij
-  het live zetten **niet** geverifieerd — eerste keer dat iemand Cmd-P doet is de echte test.
-  Voor toekomstige automatisering staat `playwright` al in devDependencies
-  (`page.emulateMedia({ media: 'print' })`).
+  is dark mode leesbaar op wit papier, blijven meerdere pagina's leesbaar. Voor toekomstige
+  automatisering staat `playwright` al in devDependencies (`page.emulateMedia({ media: 'print' })`).
+
+### Verificatiemethode die werkte (herbruikbaar)
+Print-layout is niet in jsdom te beoordelen. Wat wél werkte: een **tijdelijke route met nepdata**
+(zonder login, via een dev-only bypass in `proxy.ts`), de viewport op **703 CSS-px** (= 186mm,
+staand A4 minus 12mm marges), en dan in de browserconsole alle `@media print`-regels op `all`
+zetten om ze te activeren. Daarna hoogtes in mm meten (`px * 25.4 / 96`) en delen door 273mm
+(A4 minus marges). Zo zijn beide bovenstaande gotcha's gevonden. **Turbopack pikt wijzigingen in
+`globals.css` vaak niet op — `rm -rf .next` en herstarten, anders meet je oude CSS.**
+
+### Bekend en geaccepteerd
+- **Het budget is 6 oefeningen.** ~50mm vaste overhead + 71mm per oefening, 273mm per pagina en
+  `break-inside-avoid` per kaart → 6 oefeningen = 2 pagina's, 7 = 3 pagina's. "Max 2 A4" is dus
+  geen garantie bij grotere trainingen.
+- Een oefening zonder teams maar mét diagram levert ~59mm papier met veel witruimte ernaast.
+- Bij 4+ teams zonder diagram stapelen de `FormationField`s verticaal in een kaart die niet mag
+  breken; bij 6 teams wordt dat bijna een volle pagina.
+- Beschrijving is op print afgekapt op 2 regels — bewust ingeruild voor hoogte.

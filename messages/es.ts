@@ -231,7 +231,7 @@ export const es: Dict = {
     save: 'Guardar alineación', saving: 'Guardando...', saved: '✓ Guardado!',
   },
   teamIndeling: {
-    heading: 'Reparto de equipos', poolLabel: 'Aún por repartir', teamLabel: 'Equipo {n}', autoAssign: 'Generar automáticamente',
+    heading: 'Reparto de equipos', poolLabel: 'Aún por repartir', poolLabelPrint: 'Sin repartir', teamLabel: 'Equipo {n}', autoAssign: 'Generar automáticamente',
     emptyPool: 'Todos los jugadores presentes están repartidos', remove: 'Quitar del equipo', moveTo: 'Mover a {team}',
     absentWarning: 'Ausente', unknownPlayer: 'Jugador desconocido', sizeWarning: 'Más jugadores que el tamaño del equipo ({n})',
     losseTeam: 'Colocación libre', noPresentPlayers: 'No hay jugadores presentes para repartir',

@@ -358,62 +358,89 @@ body::after {
   .app-main { margin-left: 0 !important; }
   main { padding-top: 0 !important; padding-bottom: 0 !important; min-height: 0 !important; }
 
-  /* Eén kolom forceren, ongeacht papierstand — en dat onafhankelijk van de
-     lg:-breakpoint (min-width:1024px). Bij staand A4 (~703 CSS-px na 12mm
-     marge) matcht `lg:grid` niet en blijft de container `display:block`; bij
-     liggend A4 (~1032 CSS-px) matcht `lg:grid` wél en zou zonder ingrijpen
-     een tweekoloms grid ontstaan. Om in beide gevallen dezelfde richting en
-     volgorde te garanderen, wordt hier niet op de bestaande grid-`order`-
-     classes geleund (die werken alleen als `display:grid` al actief is — bij
-     staand A4 dus niet), maar wordt binnen dit blok expliciet `display: flex`
-     + `flex-direction: column` afgedwongen, met een eigen `order` op de twee
-     children. `.print-single-column` is een gerichte hook-klasse op die ene
-     container (niet een brede `.lg\:grid`-selector, om andere pagina's niet
-     te raken). In de DOM (app/events/[id]/training-plan/page.tsx) staat
-     AttendanceSummary vóór TrainingPlanEditor; `order` hieronder draait dat
-     om zodat het trainingsplan altijd bóven het aanwezigheidsoverzicht print
-     (AC5).
+  /* ── "Kladblok"-layout: aanwezigheid als smalle kolom links, oefeningen
+     ernaast en (zodra de kolom op is) eronder doorlopend naar volgende
+     pagina's. Dit vervangt het vorige "altijd één kolom, plan bovenaan"-
+     besluit (`.print-single-column`, flex-column + order-omkering) — de
+     eigenaar wil expliciet weer zijn oude kladblokje: namen links op een
+     rij, de oefeningen ernaast/eronder.
 
-     Twee andere Tailwind-klassen op diezelfde container (page.tsx) matchen
-     bij liggend A4 (≥1024 CSS-px) via de `lg:`-breakpoint alsnog mee en
-     zouden zonder ingrijpen een ander resultaat geven dan bij staand A4:
-     - `lg:items-start` zet `align-items: flex-start`. In een flex-column is
-       dat de dwarsas (breedte): de twee blokken zouden shrink-to-fit worden
-       i.p.v. de volle paginabreedte pakken. `align-items: stretch` hieronder
-       dwingt in beide oriëntaties dezelfde breedte af.
-     - `space-y-6` hangt via Tailwind's `:not(:last-child)`-selector een
-       margin-block-end op aan het DOM-eerste kind (AttendanceSummary) — dat
-       is DOM-volgorde, niet visuele volgorde. Omdat AttendanceSummary door
-       `order: 2` juist onderaan print, komt die 1,5rem marge na het laatste
-       zichtbare blok te staan i.p.v. ertussenin. `gap` op de flex-container
-       volgt wél de visuele (`order`-)volgorde, dus die vervangt hieronder de
-       marge; de margin van `space-y-6` wordt gereset zodat er geen dubbele of
-       verkeerd geplaatste ruimte ontstaat. Deze reset raakt alleen de
-       kinderen van `.print-single-column` en is bewust onafhankelijk van
-       wélk kind DOM-eerste/laatste is, zodat een latere DOM-herschikking
-       'm niet stilzwijgend breekt.
-     Met `flex-direction`, `align-items` én `gap` hieronder expliciet
-     vastgezet is het resultaat qua richting, volgorde, breedte én
-     tussenruimte gelijk in beide papierstanden, ongeacht of
-     `lg:grid`/`lg:items-start`/`lg:gap-8` matchen. */
-  .print-single-column {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 1.5rem !important;
-  }
-  .print-single-column > * {
-    margin-block-start: 0 !important;
-    margin-block-end: 0 !important;
-  }
-  .print-single-column > *:first-child { order: 2 !important; }
-  .print-single-column > *:last-child { order: 1 !important; }
+     `float: left` is hier bewust het gereedschap i.p.v. grid/flex-kolommen:
+     een grid- of flex-kolom zou de oefeningen opsluiten in een vaste smalle
+     kolom over ALLE pagina's (elke nieuwe pagina herhaalt dan de tweekoloms
+     indeling). Een `float` daarentegen wordt door de browser alleen zo lang
+     "opzij gehouden" als de gefloate box zelf hoog is; loopt de aanwezig-
+     heidslijst leeg (bij ~25 spelers ≈100mm hoog, ruim binnen de 273mm
+     content-hoogte van een staande A4 — pas rond ~80 namen wordt die
+     geraakt; dit is een aanname over de inhoud, de print-attendance-col-
+     regel hieronder legt zelf alleen breedte en marge vast, geen hoogte)
+     dan lopen de oefeningen daarna vanzelf over de volle paginabreedte
+     door — exact het kladblok-effect.
 
-  /* `lg:sticky lg:top-10` (AttendanceSummary, page.tsx) kan bij liggend A4
-     (≥1024 CSS-px) nog matchen; `position: sticky` is zinloos/onvoorspelbaar
-     in paged media zodra de layout één kolom is. Gericht op de Tailwind-klasse
-     zelf i.p.v. een brede `.print-single-column *`-selector, zodat alleen dit
-     ene element wordt geraakt en niet elke nakomeling (bv. dropzones/badges
-     die bewust wél `position: relative` nodig hebben). */
-  .print-single-column .lg\:sticky { position: static !important; }
+     Voorwaarde voor een correcte float: het gefloate element (aanwezigheid)
+     moet in de DOM VÓÓR de content staan die ernaast moet vloeien
+     (oefeningen). In app/events/[id]/training-plan/page.tsx is dat al zo
+     (AttendanceSummary-wrapper is het eerste kind, TrainingPlanEditor-
+     wrapper het tweede) — er is dus geen order-omkering meer nodig. */
+  .print-plan-layout {
+    display: block !important;
+  }
+  /* Bij staand A4 (~703 CSS-px na 12mm marge) matcht `lg:grid` sowieso niet
+     en blijft de container `display:block`; bij liggend A4 (~1032 CSS-px)
+     matcht `lg:grid` wél en zou zonder deze override een CSS-grid ontstaan
+     waarin `float` op een grid-item genegeerd wordt (de kladblok-kolom zou
+     dan niet naast de oefeningen komen te staan). `display:block` hierboven
+     dwingt in beide papierstanden normale block-flow af, wat `float` nodig
+     heeft om te werken. De children resetten hun margin zodat `space-y-6`/
+     `lg:gap-8` (bedoeld voor de grid/flex-weergave op scherm) geen
+     onvoorspelbare extra ruimte tussen de gefloate kolom en de oefeningen
+     introduceert — de kolombreedte/marge hieronder bepaalt de tussenruimte. */
+  .print-plan-layout > * {
+    margin: 0 !important;
+  }
+
+  /* De linkerkolom: rugnummer + naam onder elkaar, klein lettertype (zie
+     AttendanceSummary.tsx voor de compacte print-only opmaak zelf). 42mm
+     breed is ruim genoeg voor "23 Naam Achternaam" zonder te breken, en laat
+     op staand A4 (186mm binnen de marges) nog ruim >140mm over voor de
+     oefeningen ernaast. */
+  .print-attendance-col {
+    float: left !important;
+    width: 42mm !important;
+    margin-right: 4mm !important;
+  }
+
+  /* `.glass-card` (globals.css:181-187) staat ongelaagd CSS, terwijl
+     `@import "tailwindcss"` alle utilities in `@layer utilities` zet —
+     ongelaagde CSS wint altijd van gelaagde CSS, ongeacht bronvolgorde. De
+     `print:bg-transparent print:shadow-none print:border-0`-utilities op
+     AttendanceSummary.tsx (dezelfde node als `.print-attendance-col`)
+     verliezen het daardoor van `.glass-card` en zijn dode klassen. Dit
+     `@media print`-blok staat zelf óók ongelaagd, dus hier kan
+     `.glass-card` wél overruled worden. Gescopeerd op
+     `.print-attendance-col` — niet op `.glass-card` in het algemeen — zodat
+     alleen de aanwezigheidskolom wordt geraakt en geen andere glass-card in
+     de app. Zonder dit blijft met `print-color-adjust: exact` (regel 331
+     hierboven) de kaartrand + schaduw van `.glass-card` zichtbaar als een
+     grijze halo rond de 42mm-kolom.
+
+     Let op dezelfde valkuil bij `.ms` (:126-140) en `.surface-card`
+     (:143-148) — ook ongelaagd, nu nergens door print geraakt, maar bij een
+     toekomstige print:-utility op een element met die klasse verliest die
+     utility net zo. */
+  .print-attendance-col {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* `lg:sticky lg:top-10` staat op hetzelfde element als `.print-attendance-
+     col` (AttendanceSummary, page.tsx) en kan bij liggend A4 (≥1024 CSS-px)
+     nog matchen; `position: sticky` is zinloos in paged media. Gericht op de
+     combinatie van beide klassen op dat ene element (niet een bredere
+     `.print-plan-layout .lg\:sticky`-selector) zodat alleen dít element wordt
+     geraakt en bv. de vergelijkbare `lg:sticky` op de opstelling-pagina
+     (app/events/[id]/lineup/page.tsx, buiten scope van deze wijziging) niet
+     wordt meegeraakt. */
+  .print-attendance-col.lg\:sticky { position: static !important; }
 }

@@ -22,16 +22,16 @@
 //
 // ── Aanvullende dekking na validator-bevindingen (zie onderaan dit bestand) ──
 //   A1.1 → describe('A1.1 — "Afgemeld"-markering ...')            — "Afgemeld" print wél mee
-//   A1.2 → describe('A1.2 — diagram- en formatieveld-breedte ...') — exact print:w-[55mm]!/[35mm]!
+//   A1.2 → describe('A1.2 — diagram- en formatieveld-breedte ...') — exact print:w-[42mm]!/[30mm]!
 //   A1.3 → describe('A1.3 — editor-waarschuwingen ...')            — teamsRemoved/sizeMismatch/saveError print:hidden
 //   A1.4 → AC5-blok, extra test 'de root van het aanwezigheidsblok draagt print:break-inside-avoid'
 //   A2   → gefixt in AC3-blok (eerste test): assertie richt zich nu op het juiste element
 //   A3   → aangevuld in AC8-blok: positieve controle dat de pagina daadwerkelijk inhoud rendert
-//   B1   → describe('B1 — print-single-column ...')  — DOM-volgorde waarop de CSS print:order leunt
+//   B1   → describe('B1 — print-plan-layout / print-attendance-col ...') — DOM-volgorde waarop de CSS-float leunt
 //   B2   → describe('B2 — BackButton is print:hidden ...')
-//   B3   → describe('B3 — lg:sticky zit binnen .print-single-column ...')
-//   B4   → describe('B4 — sectiekop blijft printen bij een gevulde lijst ...')
-//   B5   → describe('B5 — pool-container is print:hidden wanneer leeg ...')
+//   B3   → describe('B3 — print-attendance-col en lg:sticky zitten op dezelfde node ...')
+//   B4   → describe('B4 — sectiekop "Oefeningen" is nu altijd print:hidden ...')
+//   B5   → describe('B5 — de "Nog niet ingedeeld"-regel verschijnt alleen als de pool niet leeg is ...')
 //   C1   → describe('C1 — print-CSS regressiebewaking (app/globals.css, @media print) ...')
 //          — leest globals.css en asserteert dat de regels die de kernbug
 //          (verkeerde papierstand-detectie/orde/kleur/dark-mode-lek) hebben
@@ -39,6 +39,25 @@
 //          alleen de DOM-helft van dat contract (zie B1's eigen comment);
 //          C1 dekt de CSS-helft die B1 niet kon zien. Bewijst NIET dat een
 //          browser deze regels toepast — dat blijft AC11-14, handmatig.
+//   D1   → describe('D1 — print-teamindeling toont de actuele (lokale) indeling ...')
+//          — nieuwe dekking voor het dual-markup-patroon: bewijst dat het
+//          print-only teamblok dezelfde LIVE state leest als de interactieve
+//          editor (niet een bevroren server-/initialIndeling-versie) door
+//          een speler te verplaatsen en te controleren dat het print-blok
+//          meebeweegt vóór enige server-revalidatie.
+//
+// ── LAYOUTWIJZIGING (2026-08-01): "kladblok"-model vervangt "één kolom" ──
+// De eigenaar vond de eerdere uitdraai (4,1 A4) onwerkbaar en vroeg expliciet
+// om zijn oude kladblokje terug: aanwezigheid als smalle kolom LINKS, de
+// oefeningen ernaast/eronder. Dat verving het vorige besluit "op papier altijd
+// één kolom, plan bovenaan" (`.print-single-column`, flex-column +
+// print:order-omkering — bestaat niet meer). Nieuw: `.print-plan-layout`
+// (`display: block !important` op de container) + `.print-attendance-col`
+// (`float: left; width: 42mm` op het aanwezigheidsblok). Gemeten resultaat op
+// A4-breedte met de print-CSS actief: 476mm = 1,74 A4-pagina bij 6 oefeningen
+// (was 4,1). Dit raakte 19 tests die het oude ontwerp bewaakten (AC4×4, AC15,
+// AC5, AC7, AC9, A1.1, A1.2, B1, B3, B4, B5, C1.2-C1.4, C1.10) — allemaal
+// hieronder herschreven naar het nieuwe ontwerp, met dezelfde scherpte.
 //
 // Edge cases (uit de story) zitten inline in het bijbehorende AC-blok:
 //   - training zonder oefeningen                        → AC7
@@ -58,6 +77,11 @@
 // PDF" en controleer op papier/PDF-voorbeeld. Niet in checklist-vorm
 // aanwezig in de repo — aanbevolen om er één toe te voegen bij een volgende
 // wijziging aan de print-CSS (app/globals.css:324 e.v.).
+//
+// Laatst handmatig gemeten (kladblok-model, na de layoutwijziging van
+// 2026-08-01, A4-breedte, print-CSS actief): 476mm = 1,74 A4-pagina bij 6
+// oefeningen (was 4,1 A4 vóór de wijziging). Ruim binnen het budget van
+// maximaal 2 pagina's dat de eigenaar stelde.
 //
 // C1 (verderop in dit bestand) verkleint het risico op een stille regressie
 // hier: die test leest globals.css en asserteert dat de CSS-regels die AC11-14
@@ -450,32 +474,42 @@ describe('AC4 — teamindeling: bediening verborgen, namen zichtbaar', () => {
     expect(hasPrintHiddenAncestor(moveBtn)).toBe(true)
   })
 
-  it('pool-dropzone verliest zijn dropzone-styling op de afdruk (print:border-0 print:p-0)', () => {
+  it('de interactieve pool (dropzone) is print:hidden via de voorouder — de vroegere print:border-0/print:p-0-normalisatie op de dropzone zelf is vervallen omdat de hele interactieve pool nu print:hidden is (TeamIndelingEditor.tsx:300)', () => {
     renderWithTeams()
     const pool = screen.getByTestId('teamindeling-pool')
-    expect(pool.className).toContain('print:border-0')
-    expect(pool.className).toContain('print:p-0')
+    expect(hasPrintHiddenAncestor(pool)).toBe(true)
+    // Regressiebewaking: de oude normalisatieklassen horen niet terug te komen
+    // op een element dat toch al print:hidden is (dode CSS).
+    expect(pool.className).not.toContain('print:border-0')
+    expect(pool.className).not.toContain('print:p-0')
   })
 
-  it('sleep-/selectie-affordance van een chip is genormaliseerd op de afdruk (print:ring-0 print:shadow-none)', () => {
+  it('de interactieve chip (met sleep-/selectie-affordance) is print:hidden via de voorouder — de vroegere print:ring-0/print:shadow-none-normalisatie is vervallen omdat de hele chip-UI nu print:hidden is', () => {
     renderWithTeams()
     const chip = screen.getByRole('button', { name: 'Piet' }).closest('span')
-    expect(chip?.className).toContain('print:ring-0')
-    expect(chip?.className).toContain('print:shadow-none')
+    expect(chip).not.toBeNull()
+    expect(hasPrintHiddenAncestor(chip)).toBe(true)
+    expect(chip?.className).not.toContain('print:ring-0')
+    expect(chip?.className).not.toContain('print:shadow-none')
   })
 
-  it('teamnamen blijven zichtbaar op de afdruk (geen print:hidden)', () => {
+  it('teamnaam blijft leesbaar op de afdruk via het nieuwe print-only teamblok (TeamIndelingEditor.tsx:475-505), terwijl de interactieve teamkaart zelf print:hidden is', () => {
     renderWithTeams()
-    const team0 = screen.getByTestId('teamindeling-team-0')
-    const label = within(team0).getByText(/Team 1/)
-    expect(hasPrintHiddenAncestor(label)).toBe(false)
+    // Contrast: de interactieve teamkaart (scherm-UI) is nu print:hidden.
+    const interactiveTeam0 = screen.getByTestId('teamindeling-team-0')
+    expect(hasPrintHiddenAncestor(interactiveTeam0)).toBe(true)
+
+    // De print-only regel ("Team 1 (1): Piet Peters") leest dezelfde lokale
+    // indeling-state en print wél.
+    const printLine = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === 'Team 1 (1): Piet Peters')
+    expect(hasPrintHiddenAncestor(printLine)).toBe(false)
   })
 
-  it('toegewezen spelernamen blijven zichtbaar op de afdruk (geen print:hidden)', () => {
+  it('toegewezen spelernaam blijft leesbaar op de afdruk, via dezelfde print-only teamregel', () => {
     renderWithTeams()
-    const team0 = screen.getByTestId('teamindeling-team-0')
-    const nameBtn = within(team0).getByRole('button', { name: 'Piet' })
-    expect(hasPrintHiddenAncestor(nameBtn)).toBe(false)
+    const printLine = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === 'Team 2 (1): Jan Jansen')
+    expect(hasPrintHiddenAncestor(printLine)).toBe(false)
+    expect(printLine.textContent).toContain('Jan Jansen')
   })
 
   it('edge case: oefening zonder teams (teams: []) — TeamIndelingEditor rendert niets, geen crash', () => {
@@ -511,10 +545,29 @@ describe('AC5 — aanwezigheidsoverzicht blijft, wijzig-link niet', () => {
     )
   }
 
-  it('het aanwezigheidsblok zelf is niet print:hidden', () => {
+  it('de print-only samenvatting (kop + aantal) is niet print:hidden — vervangt de scherm-<h2>, die nu bewust print:hidden is (dual markup, AttendanceSummary.tsx:37,101)', () => {
     renderSummary()
-    const heading = screen.getByRole('heading', { name: nl.event.attendance })
-    expect(hasPrintHiddenAncestor(heading)).toBe(false)
+    const printHeading = screen.getByText(
+      (_content, el) => el?.tagName === 'P' && el.textContent === `${nl.event.attendance} (1/2)`,
+    )
+    expect(hasPrintHiddenAncestor(printHeading)).toBe(false)
+
+    // Contrast-check: de scherm-<h2> zelf ís nu bewust print:hidden (het
+    // scherm-blok als geheel zit in een print:hidden-wrapper).
+    const screenHeading = screen.getByRole('heading', { name: nl.event.attendance })
+    expect(hasPrintHiddenAncestor(screenHeading)).toBe(true)
+  })
+
+  it('de aanwezige en afwezige spelernamen staan leesbaar in het print-only blok (rugnummer + naam, onder elkaar)', () => {
+    renderSummary()
+    const presentLine = screen.getByText(
+      (_content, el) => el?.tagName === 'LI' && el.textContent === '9 Piet Peters',
+    )
+    const absentLine = screen.getByText(
+      (_content, el) => el?.tagName === 'LI' && el.textContent === '9 Jan Jansen',
+    )
+    expect(hasPrintHiddenAncestor(presentLine)).toBe(false)
+    expect(hasPrintHiddenAncestor(absentLine)).toBe(false)
   })
 
   it('de "wijzig aanwezigheid"-link is print:hidden', () => {
@@ -591,8 +644,12 @@ describe('AC7 — training zonder oefeningen', () => {
     })
     const heading = screen.getByRole('heading', { name: nl.event.trainingPlan })
     expect(hasPrintHiddenAncestor(heading)).toBe(false)
-    const attendanceHeading = screen.getByRole('heading', { name: nl.event.attendance })
-    expect(hasPrintHiddenAncestor(attendanceHeading)).toBe(false)
+    // AttendanceSummary's print-only samenvatting (dual markup, zie AC5) toont
+    // de kop + het aantal; de scherm-<h2> zelf is nu bewust print:hidden.
+    const printAttendanceHeading = screen.getByText(
+      (_content, el) => el?.tagName === 'P' && el.textContent === `${nl.event.attendance} (1/1)`,
+    )
+    expect(hasPrintHiddenAncestor(printAttendanceHeading)).toBe(false)
     expect(screen.getByTestId('exercises-section').className).toContain('print:hidden')
   })
 })
@@ -623,30 +680,46 @@ describe('AC8 — geen tegenstander-veld of -label op de afdruk', () => {
 // AC9 — oefeningdetails zichtbaar op de afdruk, zelfde volgorde als scherm
 // ═══════════════════════════════════════════════════════════════════════
 describe('AC9 — oefeningdetails zichtbaar, zelfde volgorde als scherm', () => {
-  it('naam, beschrijving, duur, afmetingen, categorie-badge en stap-badge zijn niet print:hidden', () => {
+  it('de print-only kopregel toont naam · duur · afmetingen · stap (categorie bewust weggelaten), vóór de beschrijving in de DOM; de scherm-badgerij (incl. categorie) is nu print:hidden (TrainingPlanEditor.tsx:297-319)', () => {
+    // Naam bewust NIET gelijk aan de categorie-tekst ("Positiespel"), zodat de
+    // "categorie ontbreekt in de kopregel"-assertie verderop niet toevallig
+    // slaagt/faalt door de oefeningnaam zelf.
+    const koppeling = makeKoppeling({
+      oefeningen: { ...makeKoppeling().oefeningen, naam: 'Kooivoetbal', categorie: 'positiespel' },
+    })
     renderPlan({
-      initialOefeningen: [makeKoppeling()],
+      initialOefeningen: [koppeling],
       currentSteps: { positiespel: 4 },
     })
-    const naam = screen.getByText('Positiespel 4v4')
+
+    const expectedHeader = `Kooivoetbal · 12 min · 20×30m · ${nl.trainingPlan.stepBadge} 4/99`
+    const printHeader = screen.getByText(
+      (_content, el) => el?.tagName === 'P' && el.textContent === expectedHeader,
+    )
+    expect(hasPrintHiddenAncestor(printHeader)).toBe(false)
+    expect(printHeader.className).toContain('hidden')
+    expect(printHeader.className).toContain('print:block')
+
+    // Categorie zit hier bewust NIET in — pas de assertie aan, laat hem niet
+    // stilzwijgend vervallen (print-review-bevinding, TrainingPlanEditor.tsx:304-306).
+    expect(printHeader.textContent).not.toContain(nl.periodization.categories.positiespel)
+
     const beschrijving = screen.getByText('Balbezit behouden in kleine ruimte')
+    expect(hasPrintHiddenAncestor(beschrijving)).toBe(false)
+
+    // Leesvolgorde op de afdruk: de kopregel staat vóór de beschrijving in de
+    // DOM (voorheen andersom, print-review-bevinding FOUT1).
+    expect(printHeader.compareDocumentPosition(beschrijving) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // Contrast: de losse scherm-naam (eigen <div>) is nu bewust print:hidden
+    // (dual markup — de kopregel hierboven vervangt hem op papier).
+    const screenNaam = screen.getByText('Kooivoetbal', { selector: 'div' })
+    expect(hasPrintHiddenAncestor(screenNaam)).toBe(true)
+
+    // De hele pillenrij (categorie, stap, duur, afmeting, ...) is nu volledig
+    // print:hidden — vervangen door de kopregel hierboven.
     const categorieBadge = screen.getByText(nl.periodization.categories.positiespel)
-    const stapBadge = screen.getByText(`${nl.trainingPlan.stepBadge} 4/99`)
-    const duur = screen.getByText('12 min')
-    const afmeting = screen.getByText('20×30m')
-
-    for (const el of [naam, beschrijving, categorieBadge, stapBadge, duur, afmeting]) {
-      expect(hasPrintHiddenAncestor(el)).toBe(false)
-    }
-
-    // Zelfde DOM-volgorde als op het scherm (jsdom herschikt CSS-order niet —
-    // deze DOM-volgorde IS dus de scherm-volgorde, en aangezien print geen
-    // eigen kopie van deze content rendert (alleen zichtbaarheid toggelt via
-    // print:hidden), is dit ook de afdruk-volgorde).
-    const order = [naam, beschrijving, categorieBadge, stapBadge, duur, afmeting]
-    for (let i = 0; i < order.length - 1; i++) {
-      expect(order[i].compareDocumentPosition(order[i + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    }
+    expect(hasPrintHiddenAncestor(categorieBadge)).toBe(true)
   })
 
   it('edge case: oefening zonder diagram rendert de FormationField-fallback', () => {
@@ -695,27 +768,23 @@ describe('AC10 — geen nieuwe data-ophaling/route, bestaande toegang ongewijzig
 // AC15 — pool ("nog niet ingedeeld") leesbaar op de afdruk, zonder
 // dropzone-/interactiestyling
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC15 — pool ("nog niet ingedeeld") leesbaar zonder dropzone-styling', () => {
-  it('de pool-lijst en het label blijven zichtbaar, met genormaliseerde (niet-interactieve) styling', () => {
+describe('AC15 — pool ("nog niet ingedeeld") leesbaar op de afdruk via de compacte poolLabelPrint-regel (TeamIndelingEditor.tsx:500-504)', () => {
+  it('de "Nog niet ingedeeld"-regel toont het label en alle niet-ingedeelde aanwezige spelers, kommagescheiden, zonder print:hidden-voorouder', () => {
     const koppeling = makeKoppeling({ spelerindeling: [['p1'], []] })
     renderPlan({ initialOefeningen: [koppeling], presentPlayerIds: ['p1', 'p2', 'p3'] })
 
-    const pool = screen.getByTestId('teamindeling-pool')
-    expect(hasPrintHiddenAncestor(pool)).toBe(false)
-    expect(within(pool).getByText(nl.teamIndeling.poolLabel)).toBeInTheDocument()
+    // p2 (Jan Jansen) en p3 (Kees Klaassen) zijn aanwezig maar nog niet
+    // ingedeeld → moeten leesbaar in de print-only pool-regel staan.
+    const expectedLine = `${nl.teamIndeling.poolLabelPrint}: Jan Jansen, Kees Klaassen`
+    const line = screen.getByText(
+      (_content, el) => el?.tagName === 'P' && el.textContent === expectedLine,
+    )
+    expect(hasPrintHiddenAncestor(line)).toBe(false)
 
-    // Nog-niet-ingedeelde spelers (p2, p3) staan leesbaar in de pool.
-    const janChip = within(pool).getByRole('button', { name: /Jan/ })
-    const keesChip = within(pool).getByRole('button', { name: /Kees/ })
-    expect(hasPrintHiddenAncestor(janChip)).toBe(false)
-    expect(hasPrintHiddenAncestor(keesChip)).toBe(false)
-
-    // Dropzone-/interactiestyling genormaliseerd, geen borders/padding-hover-
-    // affordance en geen ring/shadow-selectiestyling op de afdruk.
-    expect(pool.className).toContain('print:border-0')
-    expect(pool.className).toContain('print:p-0')
-    expect(janChip.className).toContain('print:ring-0')
-    expect(janChip.className).toContain('print:shadow-none')
+    // Contrast: de interactieve pool-dropzone (met chips/selectie-styling) is
+    // nu volledig print:hidden — de bovenstaande regel is het enige dat print.
+    const interactivePool = screen.getByTestId('teamindeling-pool')
+    expect(hasPrintHiddenAncestor(interactivePool)).toBe(true)
   })
 })
 
@@ -783,34 +852,48 @@ describe('AC18 — printer-icoon + label "Afdrukken", i18n in alle 5 talen', () 
 // (B1–B5) die hier alsnog gedekt worden.
 
 // ── A1 (gap 1): "Afgemeld"-markering per speler moet WÉL meeprinten ──
-describe('A1.1 — "Afgemeld"-markering per speler print wél mee (TeamIndelingEditor.tsx:402-404)', () => {
-  it('een ingedeelde-maar-afwezige speler toont "Afgemeld" zonder print:hidden-voorouder', () => {
+describe('A1.1 — "Afgemeld"-markering per speler print wél mee, nu inline in de print-only teamregel (TeamIndelingEditor.tsx:486-493)', () => {
+  it('een ingedeelde-maar-afwezige speler toont "(Afgemeld)" inline in de print-teamregel, zonder print:hidden-voorouder', () => {
     // p1 is ingedeeld in team 0, maar staat niet in presentPlayerIds → absent.
     const koppeling = makeKoppeling({ spelerindeling: [['p1'], []] })
     renderPlan({ initialOefeningen: [koppeling], presentPlayerIds: ['p2', 'p3'] })
-    const warning = screen.getByText(nl.teamIndeling.absentWarning)
-    expect(hasPrintHiddenAncestor(warning)).toBe(false)
+
+    const teamLabel = nl.teamIndeling.teamLabel.replace('{n}', '1')
+    const expectedLine = `${teamLabel} (1): Piet Peters (${nl.teamIndeling.absentWarning})`
+    const line = screen.getByText(
+      (_content, el) => el?.tagName === 'P' && el.textContent === expectedLine,
+    )
+    expect(hasPrintHiddenAncestor(line)).toBe(false)
+
+    // Contrast: de interactieve "Afgemeld"-markering op de chip (voorheen op
+    // dié plek getest) is nu print:hidden — de hele interactieve editor is
+    // dat immers.
+    const interactiveWarning = screen.getByText(nl.teamIndeling.absentWarning)
+    expect(hasPrintHiddenAncestor(interactiveWarning)).toBe(true)
   })
 })
 
-// ── A1 (gap 2): diagram 55mm / formatieveld 35mm, exacte klassenstrings ──
-describe('A1.2 — diagram- en formatieveld-breedte op de afdruk (TrainingPlanEditor.tsx:314,324)', () => {
-  it('DiagramView krijgt exact de klasse print:w-[55mm]! mee', () => {
+// ── A1 (gap 2): diagram 42mm / formatieveld 30mm, exacte klassenstrings ──
+// (was 55mm/35mm — kleiner op verzoek van de eigenaar, zie kopcomment
+// "LAYOUTWIJZIGING": diagram/formatieveld staan nu naast de teamindeling
+// i.p.v. erboven, TrainingPlanEditor.tsx:362-379.)
+describe('A1.2 — diagram- en formatieveld-breedte op de afdruk (TrainingPlanEditor.tsx:364,373)', () => {
+  it('DiagramView krijgt exact de klasse print:w-[42mm]! mee', () => {
     const koppeling = makeKoppeling({
       oefeningen: { ...makeKoppeling().oefeningen, diagram: { markers: [], materiaal: [], lijnen: [] } },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const diagram = screen.getByTestId('diagram-view')
-    expect(diagram.parentElement?.className).toContain('print:w-[55mm]!')
+    expect(diagram.parentElement?.className).toContain('print:w-[42mm]!')
   })
 
-  it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[35mm]! mee', () => {
+  it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[30mm]! mee', () => {
     const koppeling = makeKoppeling({
       oefeningen: { ...makeKoppeling().oefeningen, diagram: null, teams: [{ grootte: 4, formatie: null }] },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const field = screen.getByTestId('formation-field')
-    expect(field.parentElement?.className).toContain('print:w-[35mm]!')
+    expect(field.parentElement?.className).toContain('print:w-[30mm]!')
   })
 })
 
@@ -850,36 +933,36 @@ describe('A1.3 — editor-waarschuwingen (teams verwijderd / sizeMismatch / save
   })
 })
 
-// ── B1: printvolgorde/één kolom — DOM-volgorde onderbouwt de CSS print:order-omkering ──
-describe('B1 — print-single-column: DOM-structuur waarop de CSS print:order-omkering leunt (globals.css:361-389)', () => {
-  it('de container draagt print-single-column, en de DOM-volgorde is aanwezigheid vóór trainingsplan', async () => {
+// ── B1: kladblok-layout — DOM-volgorde onderbouwt de CSS-float (vervangt de
+// vervallen .print-single-column flex/order-omkering, zie kopcomment
+// "LAYOUTWIJZIGING") ──
+describe('B1 — print-plan-layout / print-attendance-col: DOM-structuur waarop de CSS-float leunt (globals.css:361-408)', () => {
+  it('de container draagt print-plan-layout, en de aanwezigheidskolom (print-attendance-col) staat als EERSTE kind in de DOM — voorwaarde voor de float (globals.css:377-381)', async () => {
     await renderPage({
       players: [makePlayer({ id: 'p1', name: 'Piet Peters' })],
       attendance: [{ player_id: 'p1', status: 'present' }],
       oefeningenKoppelingen: [makeKoppeling()],
     })
-    const attendanceHeading = screen.getByRole('heading', { name: nl.event.attendance })
     const exercisesHeading = screen.getByText(nl.trainingPlan.exercisesHeading)
 
-    const container = document.querySelector('.print-single-column')
+    const container = document.querySelector('.print-plan-layout')
     expect(container).not.toBeNull()
     expect(container?.children.length).toBe(2)
     const [first, last] = Array.from(container!.children)
 
-    // De CSS (globals.css:399-410) neemt aan dat het EERSTE kind het
-    // aanwezigheidsoverzicht is (order:2 → onderaan op papier) en het LAATSTE
-    // kind het trainingsplan (order:1 → bovenaan op papier). B1 test alleen
-    // de DOM-HELFT van dat contract: klopt de DOM-volgorde hier niet (meer),
-    // dan keert de CSS straks de verkeerde helft om. De CSS-omkering zelf —
-    // het deel dat de bug daadwerkelijk repareerde (display:flex/order i.p.v.
-    // het niet-matchende lg:grid) — wordt bewaakt door C1 verderop in dit
-    // bestand, dat globals.css leest en die regels rechtstreeks asserteert.
-    // Het daadwerkelijke printresultaat (na de CSS-omkering, in een echte
-    // browser) blijft AC11/AC14-terrein en dus handmatig te verifiëren.
-    expect(first.contains(attendanceHeading)).toBe(true)
+    const attendanceCol = document.querySelector('.print-attendance-col')
+    expect(attendanceCol).not.toBeNull()
+
+    // `.print-attendance-col { float: left }` werkt alleen als het gefloate
+    // element in de DOM vóór de content staat die ernaast moet vloeien. B1
+    // test alleen de DOM-HELFT van dat contract; de float-regel zelf wordt
+    // bewaakt door C1 verderop (dat globals.css rechtstreeks leest). Het
+    // daadwerkelijke printresultaat (in een echte browser) blijft
+    // AC11/AC14-terrein en dus handmatig te verifiëren.
+    expect(first.contains(attendanceCol!)).toBe(true)
     expect(first.contains(exercisesHeading)).toBe(false)
     expect(last.contains(exercisesHeading)).toBe(true)
-    expect(last.contains(attendanceHeading)).toBe(false)
+    expect(last.contains(attendanceCol!)).toBe(false)
   })
 })
 
@@ -892,29 +975,39 @@ describe('B2 — BackButton is print:hidden (app/events/[id]/training-plan/page.
   })
 })
 
-// ── B3: lg:sticky wordt binnen print-single-column gereset (structuurcontract) ──
-describe('B3 — lg:sticky zit binnen .print-single-column, zodat de reset-regel kan matchen (globals.css:383-389)', () => {
-  it('het element met lg:sticky lg:top-10 (AttendanceSummary) zit binnen de .print-single-column-container', async () => {
+// ── B3: lg:sticky wordt gereset via een gescopeerde combinatie-selector op
+// DEZELFDE node (structuurcontract) — vervangt de vervallen geneste
+// ".print-single-column .lg\:sticky"-selector ──
+describe('B3 — .print-attendance-col en lg:sticky zitten op dezelfde node, zodat de gescopeerde resetselector .print-attendance-col.lg\\:sticky kan matchen (globals.css:410-418)', () => {
+  it('AttendanceSummary-root draagt zowel print-attendance-col als lg:sticky lg:top-10', async () => {
     // jsdom past geen externe CSS toe — dit bewijst niet dat position:static
-    // daadwerkelijk wordt toegepast, alleen dat de selector
-    // ".print-single-column .lg\\:sticky" een bestaand element in de DOM kan
-    // raken (de klassen-/structuurvoorwaarde voor de regel).
+    // daadwerkelijk wordt toegepast, alleen dat de combinatie-selector
+    // ".print-attendance-col.lg\\:sticky" een bestaand element in de DOM kan
+    // raken (de klassen-/structuurvoorwaarde voor de regel). De selector is
+    // bewust gescopeerd op de COMBINATIE van beide klassen op één node, niet
+    // een bredere ".print-plan-layout .lg\\:sticky"-selector, zodat de
+    // vergelijkbare lg:sticky op de opstelling-pagina niet wordt geraakt.
     await renderPage()
-    const container = document.querySelector('.print-single-column')
-    expect(container).not.toBeNull()
-    const sticky = container!.querySelector('.lg\\:sticky')
-    expect(sticky).not.toBeNull()
-    expect(sticky?.className).toContain('lg:sticky')
-    expect(sticky?.className).toContain('lg:top-10')
+    const attendanceCol = document.querySelector('.print-attendance-col')
+    expect(attendanceCol).not.toBeNull()
+    expect(attendanceCol?.className).toContain('print-attendance-col')
+    expect(attendanceCol?.className).toContain('lg:sticky')
+    expect(attendanceCol?.className).toContain('lg:top-10')
   })
 })
 
-// ── B4: sectiekop "Oefeningen" print:hidden alleen wanneer de hele sectie leeg is ──
-describe('B4 — sectiekop blijft printen bij een gevulde lijst; verdwijnt mee bij een lege lijst (TrainingPlanEditor.tsx:221-230)', () => {
-  it('gevulde lijst: de kop print wél mee, alleen de "+ Oefening toevoegen"-knop naast de kop is print:hidden', () => {
+// ── B4: sectiekop "Oefeningen" is nu ALTIJD print:hidden, ook bij een
+// gevulde lijst (was: alleen print:hidden wanneer de hele sectie leeg was).
+// Bewuste designbeslissing (print-review-bevinding "FOUT4"): de genummerde
+// badges (TrainingPlanEditor.tsx:269-271) kondigen elke oefening al aan, dus
+// de kop voegt op papier niets toe en kost alleen ruimte. Dit draait de
+// vorige B4-test om, die juist eiste dát de kop printte bij een gevulde
+// lijst. ──
+describe('B4 — sectiekop "Oefeningen" is nu altijd print:hidden (TrainingPlanEditor.tsx:231), ook bij een gevulde lijst', () => {
+  it('gevulde lijst: de kop zelf is print:hidden — net als de "+ Oefening toevoegen"-knop ernaast', () => {
     renderPlan({ initialOefeningen: [makeKoppeling()] })
     const heading = screen.getByText(nl.trainingPlan.exercisesHeading)
-    expect(hasPrintHiddenAncestor(heading)).toBe(false)
+    expect(hasPrintHiddenAncestor(heading)).toBe(true)
 
     const headerRow = heading.parentElement
     expect(headerRow).not.toBeNull()
@@ -922,27 +1015,36 @@ describe('B4 — sectiekop blijft printen bij een gevulde lijst; verdwijnt mee b
     expect(hasPrintHiddenAncestor(addButton)).toBe(true)
   })
 
-  it('lege lijst: de hele sectie inclusief de kop is print:hidden (AC7 blijft werken)', () => {
+  it('lege lijst: de hele sectie inclusief de kop blijft print:hidden (AC7 blijft werken)', () => {
     renderPlan({ initialOefeningen: [] })
     const heading = screen.getByText(nl.trainingPlan.exercisesHeading)
     expect(hasPrintHiddenAncestor(heading)).toBe(true)
+    const section = screen.getByTestId('exercises-section')
+    expect(section.className).toContain('print:hidden')
   })
 })
 
-// ── B5: pool-container zelf print:hidden wanneer leeg (TeamIndelingEditor.tsx:426-432) ──
-describe('B5 — pool-container is print:hidden wanneer leeg; blijft zichtbaar wanneer gevuld (AC15 blijft werken)', () => {
-  it('lege pool (alle aanwezige spelers ingedeeld): de pool-container zelf draagt print:hidden', () => {
+// ── B5: de print-only "Nog niet ingedeeld"-regel verschijnt alleen als de
+// pool niet leeg is (TeamIndelingEditor.tsx:500-504). Vervangt de vervallen
+// print:hidden-toggle op de pool-CONTAINER zelf (die container is nu
+// onvoorwaardelijk print:hidden via zijn voorouder, zie AC4/AC15). ──
+describe('B5 — de "Nog niet ingedeeld"-regel verschijnt alleen wanneer de pool niet leeg is; AC15 blijft werken', () => {
+  function findPoolLine() {
+    return screen.queryByText(
+      (_content, el) => el?.tagName === 'P' && !!el.textContent?.startsWith(nl.teamIndeling.poolLabelPrint),
+    )
+  }
+
+  it('lege pool (alle aanwezige spelers ingedeeld): geen poolLabelPrint-regel in de DOM', () => {
     const koppeling = makeKoppeling({ spelerindeling: [['p1', 'p2'], ['p3']] })
     renderPlan({ initialOefeningen: [koppeling], presentPlayerIds: ['p1', 'p2', 'p3'] })
-    const pool = screen.getByTestId('teamindeling-pool')
-    expect(pool.className).toContain('print:hidden')
+    expect(findPoolLine()).not.toBeInTheDocument()
   })
 
-  it('gevulde pool: de pool-container zelf draagt géén print:hidden (contrast-check)', () => {
+  it('gevulde pool: de regel verschijnt wél (contrast-check; zie AC15 voor de inhoudseis)', () => {
     const koppeling = makeKoppeling({ spelerindeling: [['p1'], []] })
     renderPlan({ initialOefeningen: [koppeling], presentPlayerIds: ['p1', 'p2', 'p3'] })
-    const pool = screen.getByTestId('teamindeling-pool')
-    expect(pool.className).not.toContain('print:hidden')
+    expect(findPoolLine()).toBeInTheDocument()
   })
 })
 
@@ -965,8 +1067,9 @@ describe('B5 — pool-container is print:hidden wanneer leeg; blijft zichtbaar w
 // het eigen regelblok van elke selector (accolade-balancering, geen platte
 // regex over het hele bestand), zodat herformattering (extra spaties, een
 // gewijzigd comment, andere regelbreedte) de test niet breekt — maar het
-// weghalen van een regel, het omdraaien van een waarde (bv. order: 1 ↔ 2),
-// of het verwijderen van de bestandsvolgorde-afhankelijkheid wél.
+// weghalen van een regel, het omdraaien van een waarde (bv. float: left ↔
+// right, of de breedte 42mm), of het verwijderen van de
+// bestandsvolgorde-afhankelijkheid (C1.6) wél.
 describe('C1 — print-CSS regressiebewaking (app/globals.css, @media print)', () => {
   const cssSource = readFileSync(GLOBALS_CSS_PATH, 'utf-8')
   const mediaPrintIndex = cssSource.indexOf('@media print')
@@ -980,33 +1083,23 @@ describe('C1 — print-CSS regressiebewaking (app/globals.css, @media print)', (
   // wat correct is: er valt dan sowieso niets zinnigs te bewaken.
   const mediaPrintBlock = extractBalancedBlock(cssSource, mediaPrintIndex)
 
-  it('C1.2 — .print-single-column forceert display:flex + flex-direction:column (de kern van de fix — het oude gedrag leunde op het lg:-grid-breakpoint, dat bij staand A4 ~703px niet matcht)', () => {
-    const block = normalizeWhitespace(findRuleBlock(mediaPrintBlock, /\.print-single-column\s*\{/))
-    expect(block).toMatch(/display:\s*flex\s*!important/)
-    expect(block).toMatch(/flex-direction:\s*column\s*!important/)
+  it('C1.2 — .print-plan-layout forceert display:block (kern van het kladblok-model: float werkt alleen in normale block-flow, niet binnen lg:grid dat bij liggend A4 wél matcht)', () => {
+    const block = normalizeWhitespace(findRuleBlock(mediaPrintBlock, /\.print-plan-layout\s*\{/))
+    expect(block).toMatch(/display:\s*block\s*!important/)
   })
 
-  it('C1.3 — de order-omkering staat er: DOM-eerste kind (aanwezigheid) krijgt order 2, DOM-laatste kind (trainingsplan) krijgt order 1, zodat het trainingsplan boven het aanwezigheidsoverzicht print (AC5)', () => {
-    const firstChildBlock = normalizeWhitespace(
-      findRuleBlock(mediaPrintBlock, /\.print-single-column\s*>\s*\*:first-child\s*\{/)
-    )
-    const lastChildBlock = normalizeWhitespace(
-      findRuleBlock(mediaPrintBlock, /\.print-single-column\s*>\s*\*:last-child\s*\{/)
-    )
-    expect(firstChildBlock).toMatch(/order:\s*2\s*!important/)
-    expect(lastChildBlock).toMatch(/order:\s*1\s*!important/)
+  it('C1.3 — .print-attendance-col float naar links, 42mm breed met 4mm rechtermarge — de kolom die de kladblok-layout draagt (AC5, AC15)', () => {
+    const block = normalizeWhitespace(findRuleBlock(mediaPrintBlock, /\.print-attendance-col\s*\{/))
+    expect(block).toMatch(/float:\s*left\s*!important/)
+    expect(block).toMatch(/width:\s*42mm\s*!important/)
+    expect(block).toMatch(/margin-right:\s*4mm\s*!important/)
   })
 
-  it('C1.4 — align-items:stretch en een expliciete gap voorkomen dat lg:items-start/lg:gap-8 doorlekken; de margin-reset op de children voorkomt dubbele/verkeerd geplaatste ruimte na de order-omkering', () => {
-    const containerBlock = normalizeWhitespace(findRuleBlock(mediaPrintBlock, /\.print-single-column\s*\{/))
-    expect(containerBlock).toMatch(/align-items:\s*stretch\s*!important/)
-    expect(containerBlock).toMatch(/gap:\s*[0-9.]+[a-z%]*\s*!important/)
-
+  it('C1.4 — .print-plan-layout > * reset de margin op de directe kinderen, zodat space-y-6/lg:gap-8 (bedoeld voor de scherm-weergave) geen onvoorspelbare ruimte tussen de gefloate kolom en de oefeningen introduceert', () => {
     const childResetBlock = normalizeWhitespace(
-      findRuleBlock(mediaPrintBlock, /\.print-single-column\s*>\s*\*\s*\{/)
+      findRuleBlock(mediaPrintBlock, /\.print-plan-layout\s*>\s*\*\s*\{/)
     )
-    expect(childResetBlock).toMatch(/margin-block-start:\s*0\s*!important/)
-    expect(childResetBlock).toMatch(/margin-block-end:\s*0\s*!important/)
+    expect(childResetBlock).toMatch(/margin:\s*0\s*!important/)
   })
 
   it('C1.5 — print-color-adjust:exact staat er (zonder deze regel drukt het groene veld/de badge wit af, browsers printen CSS-achtergronden standaard niet)', () => {
@@ -1044,10 +1137,162 @@ describe('C1 — print-CSS regressiebewaking (app/globals.css, @media print)', (
     expect(appMainBlock).toMatch(/margin-left:\s*0\s*!important/)
   })
 
-  it('C1.10 — .lg\\:sticky wordt teruggezet naar position:static, gescopeerd binnen .print-single-column (position:sticky is zinloos in paged media zodra de layout één kolom is)', () => {
+  it("C1.10 — .print-attendance-col.lg\\:sticky wordt teruggezet naar position:static — gescopeerd op de COMBINATIE van beide klassen op dezelfde node (niet een geneste selector), zodat de vergelijkbare lg:sticky op de opstelling-pagina niet wordt geraakt", () => {
     const stickyBlock = normalizeWhitespace(
-      findRuleBlock(mediaPrintBlock, /\.print-single-column\s+\.lg\\:sticky\s*\{/)
+      findRuleBlock(mediaPrintBlock, /\.print-attendance-col\.lg\\:sticky\s*\{/)
     )
     expect(stickyBlock).toMatch(/position:\s*static\s*!important/)
+  })
+
+  // C1.11 (validator-bevinding): `.glass-card` staat ONGELAAGD in globals.css,
+  // terwijl `@import "tailwindcss"` alle utilities in `@layer utilities` zet.
+  // Ongelaagde CSS wint van elke laag, ongeacht bronvolgorde — daarom deden de
+  // eerdere `print:bg-transparent print:shadow-none print:border-0` op
+  // AttendanceSummary NIETS en drukte de glass-card-schaduw mee als grijze halo
+  // rond de 42mm-kolom (zichtbaar doordat print-color-adjust:exact aan staat).
+  // De reset moet dus in dit ongelaagde @media print-blok staan, niet als
+  // utility op het element. Er zijn twee `.print-attendance-col`-blokken (de
+  // float/breedte hierboven en deze styling-reset); we zoeken daarom álle
+  // voorkomens en eisen dat één ervan de drie properties bevat.
+  it('C1.11 — .print-attendance-col krijgt achtergrond, rand en schaduw uitgezet, zodat de glass-card-halo niet meedrukt rond de namenkolom', () => {
+    const blokken: string[] = []
+    const selector = /\.print-attendance-col\s*\{/g
+    let m: RegExpExecArray | null
+    while ((m = selector.exec(mediaPrintBlock)) !== null) {
+      blokken.push(normalizeWhitespace(extractBalancedBlock(mediaPrintBlock, m.index)))
+    }
+    expect(blokken.length).toBeGreaterThan(0)
+    const samen = blokken.join(' ')
+    // Lightning CSS mag `background: transparent` naar `background: none`
+    // optimaliseren; beide zijn functioneel gelijk, dus accepteer allebei.
+    expect(samen).toMatch(/background:\s*(transparent|none)\s*!important/)
+    expect(samen).toMatch(/border:\s*0\s*!important/)
+    expect(samen).toMatch(/box-shadow:\s*none\s*!important/)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// E1 — Klassen die de compacte print-layout dragen (validator-bevindingen)
+// ═══════════════════════════════════════════════════════════════════════
+// Twee gaten die de validator vond nadat de suite al 292× groen was — precies
+// de bugklasse die eerder een layoutfout door 39 groene tests liet glippen:
+//
+//  E1.1/E1.2 `print:flow-root`. De float op de namenkolom zit één DOM-niveau
+//    dieper dan de container, dus alleen boxen die een eigen BFC openen wijken
+//    ervoor uit. Zonder flow-root bleef de border-box van het doelstellingblok
+//    en van de eerste oefeningkaart op volle breedte staan en liep die achter
+//    de 42mm-kolom door (gemeten: links 7,4mm / rechts 176,7mm, overlappend met
+//    de kolom 7,4-49,4mm). Mét flow-root: links 53,4mm, breedte 123,3mm, geen
+//    overlap — en oefening 2+ weer op volle breedte (7,4/169,3mm).
+//
+//  E1.3 `print:float-left` op de diagram-wrapper is DE besparing: hij zet het
+//    diagram naast de teamindeling in plaats van erboven. Zonder deze klasse
+//    stapelen ze weer en gaat de uitdraai van 1,74 terug naar ~4 pagina's,
+//    terwijl elke andere test groen blijft.
+//
+//  E1.4/E1.5 De dual-markup-blokken werden bewezen met alleen
+//    `hasPrintHiddenAncestor(...) === false`. Die helper checkt uitsluitend de
+//    AFWEZIGHEID van `print:hidden`: haal je `print:block` weg van
+//    `hidden print:block`, dan blijft `hidden` staan, print het blok niets, en
+//    blijven al die asserties groen. Hier daarom expliciet béide klassen.
+describe('E1 — klassen die de compacte print-layout dragen', () => {
+  it('E1.1 — het doelstellingblok draagt print:flow-root (BFC, zodat de kaart naast de namenkolom uitwijkt)', () => {
+    renderPlan({ initialDoelstelling: 'Opbouw van achteruit' })
+    expect(screen.getByTestId('doelstelling-block').className).toContain('print:flow-root')
+  })
+
+  it('E1.2 — de oefeningkaart draagt print:flow-root', () => {
+    const koppeling = makeKoppeling({
+      oefeningen: { ...makeKoppeling().oefeningen, diagram: { markers: [], materiaal: [], lijnen: [] } },
+    })
+    renderPlan({ initialOefeningen: [koppeling] })
+    const kaart = screen.getByTestId('diagram-view').closest('.print\\:break-inside-avoid')
+    expect(kaart).not.toBeNull()
+    expect(kaart!.className).toContain('print:flow-root')
+  })
+
+  it('E1.3 — de diagram-wrapper draagt de volledige float-set (float-left + breedte + rechtermarge): zonder float staan diagram en teamindeling weer ónder elkaar', () => {
+    const koppeling = makeKoppeling({
+      oefeningen: { ...makeKoppeling().oefeningen, diagram: { markers: [], materiaal: [], lijnen: [] } },
+    })
+    renderPlan({ initialOefeningen: [koppeling] })
+    // De float staat op de buitenste wrapper (TrainingPlanEditor.tsx:375), niet
+    // op de DiagramView-node zelf — die draagt alleen `print:w-[42mm]!` (A1.2).
+    const floatWrapper = screen.getByTestId('diagram-view').closest('.print\\:float-left')
+    expect(floatWrapper).not.toBeNull()
+    expect(floatWrapper!.className).toContain('print:float-left')
+    expect(floatWrapper!.className).toContain('print:w-[42mm]')
+    expect(floatWrapper!.className).toContain('print:mr-[3mm]')
+  })
+
+  it('E1.4 — het print-only aanwezigheidsblok draagt zowel hidden als print:block (niet alleen "geen print:hidden")', () => {
+    const { container } = render(
+      <AttendanceSummary
+        present={[makePlayer({ id: 'p1', name: 'Piet Peters' })]}
+        absent={[]}
+        eventId="e1"
+        t={nl}
+      />,
+    )
+    const printBlok = container.querySelector('.print\\:block')
+    expect(printBlok).not.toBeNull()
+    expect(printBlok!.className).toContain('hidden')
+    expect(printBlok!.className).toContain('print:block')
+  })
+
+  it('E1.5 — het print-only teamblok draagt zowel hidden als print:block', () => {
+    const koppeling = makeKoppeling({ spelerindeling: [['p1'], []] })
+    const { container } = renderPlan({
+      initialOefeningen: [koppeling],
+      presentPlayerIds: ['p1'],
+    })
+    const teamPrintRegel = screen.getByText(
+      (_c, el) => el?.tagName === 'P' && /^Team 1 \(/.test(el.textContent ?? ''),
+    )
+    const printBlok = teamPrintRegel.closest('.print\\:block')
+    expect(printBlok).not.toBeNull()
+    expect(printBlok!.className).toContain('hidden')
+    expect(printBlok!.className).toContain('print:block')
+    expect(container).toBeTruthy()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// D1 — Dual-markup-correctheid: de print-only teamindeling leest dezelfde
+// lokale `indeling`-state als de interactieve editor, niet een aparte
+// server-/read-only-versie (TeamIndelingEditor.tsx:294-299,481-505)
+// ═══════════════════════════════════════════════════════════════════════
+// Waarom dit een apart correctheidspunt is (los van AC4/A1.1/AC15 hierboven,
+// die alléén tonen DAT de print-only tekst een bepaalde indeling weergeeft):
+// zonder deze test zou een implementatie die het print-blok uit een
+// bevroren `initialIndeling`-prop laat lezen (i.p.v. de live `indeling`-state)
+// alle bovenstaande tests evengoed laten slagen — die renderen immers altijd
+// met een vaste initiële `spelerindeling`-fixture en meten nooit een
+// wijziging ná de eerste render. Deze test bewijst het onderscheid: een
+// speler verplaatsen via de interactieve (scherm-)editor moet DIRECT
+// doorwerken in de print-only regel, vóórdat er een server-revalidatie
+// (nieuwe `initialIndeling`-prop) is geweest.
+describe('D1 — print-teamindeling toont de actuele (lokale) indeling, niet de server-/initiële versie', () => {
+  it('een speler interactief verplaatsen naar een team werkt direct door in de print-only teamregel, vóór enige server-revalidatie', async () => {
+    const koppeling = makeKoppeling({ spelerindeling: [[], []] })
+    renderPlan({ initialOefeningen: [koppeling], presentPlayerIds: ['p1', 'p2', 'p3'] })
+
+    // Vooraf: Piet staat nog niet ingedeeld, dus nog geen print-teamregel met zijn naam.
+    expect(
+      screen.queryByText((_c, el) => el?.tagName === 'P' && el.textContent === 'Team 1 (1): Piet Peters'),
+    ).not.toBeInTheDocument()
+
+    // Selecteer Piet in de pool (zelfde interactie als de bestaande AC4
+    // "Verplaats naar"-test) en verplaats hem naar Team 1.
+    fireEvent.click(screen.getByRole('button', { name: /Piet/ }))
+    fireEvent.click(screen.getByText(nl.teamIndeling.moveTo.replace('{team}', 'Team 1')))
+
+    // De print-only regel toont de nieuwe indeling meteen — dezelfde lokale
+    // `indeling`-state als de interactieve editor, niet `initialIndeling`
+    // (die is in deze test nooit veranderd).
+    const printLine = await screen.findByText(
+      (_c, el) => el?.tagName === 'P' && el.textContent === 'Team 1 (1): Piet Peters',
+    )
+    expect(hasPrintHiddenAncestor(printLine)).toBe(false)
   })
 })

@@ -88,7 +88,7 @@ export default async function TrainingPlanPage({ params }: Props) {
     : null
 
   return (
-    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6">
+    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6 print:py-0 print:space-y-[3mm]">
 
       <div className="flex items-center gap-3">
         <BackButton fallback={`/events/${id}`} className="print:hidden text-gray-400 hover:text-gray-600 flex-shrink-0">
@@ -96,27 +96,32 @@ export default async function TrainingPlanPage({ params }: Props) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-bold text-gray-900">{t.event.trainingPlan}</h1>
-          <p className="text-sm text-gray-500">{formatDateLong(event.date, t.browserLocale)}</p>
+        <div className="min-w-0 flex-1 print:flex print:items-baseline print:gap-2">
+          <h1 className="text-xl font-bold text-gray-900 print:text-sm">{t.event.trainingPlan}</h1>
+          <p className="text-sm text-gray-500 print:text-xs">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
         <PrintButton />
       </div>
 
       {/* Desktop: planner left, attendance overview right (sticky). Mobile: overview on top.
-          `print-single-column` forceert op papier altijd één kolom mét het
-          trainingsplan bóven het aanwezigheidsoverzicht (globals.css @media
-          print) — dat werkt onafhankelijk van de lg:-breakpoint, dus zowel bij
-          staand A4 (~703 CSS-px, `lg:grid` matcht niet) als bij liggend A4
-          (~1032 CSS-px, `lg:grid` matcht wél). */}
-      <div className="print-single-column lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
+          Op papier ("kladblok"-model, op verzoek van de eigenaar): aanwezigheid
+          als smalle kolom LINKS, oefeningen ernaast en — zodra die kolom op is —
+          eronder doorlopend naar volgende pagina's. `print-plan-layout` +
+          `print-attendance-col` (globals.css @media print) regelen dat via
+          `float: left`, niet via grid/flex-kolommen (die zouden de oefeningen
+          over ALLE pagina's in een vaste smalle kolom opsluiten). Werkt
+          onafhankelijk van de lg:-breakpoint: bij staand A4 (~703 CSS-px)
+          matcht `lg:grid` niet, bij liggend A4 (~1032 CSS-px) wél — de
+          `display:block`-override in `.print-plan-layout` dwingt in beide
+          gevallen de normale block-flow af die `float` nodig heeft. */}
+      <div className="print-plan-layout lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
         <div className="lg:order-2">
           <AttendanceSummary
             present={presentPlayers}
             absent={absentPlayers}
             eventId={id}
             t={t}
-            className="lg:sticky lg:top-10"
+            className="lg:sticky lg:top-10 print-attendance-col"
           />
         </div>
 

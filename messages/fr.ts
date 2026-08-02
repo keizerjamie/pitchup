@@ -231,7 +231,7 @@ export const fr: Dict = {
     save: 'Enregistrer la composition', saving: 'Enregistrement...', saved: '✓ Enregistré !',
   },
   teamIndeling: {
-    heading: 'Répartition des équipes', poolLabel: 'Pas encore réparti', teamLabel: 'Équipe {n}', autoAssign: 'Générer automatiquement',
+    heading: 'Répartition des équipes', poolLabel: 'Pas encore réparti', poolLabelPrint: 'Non réparti', teamLabel: 'Équipe {n}', autoAssign: 'Générer automatiquement',
     emptyPool: 'Tous les joueurs présents sont répartis', remove: "Retirer de l'équipe", moveTo: 'Déplacer vers {team}',
     absentWarning: 'Absent', unknownPlayer: 'Joueur inconnu', sizeWarning: "Plus de joueurs que la taille de l'équipe ({n})",
     losseTeam: 'Placement libre', noPresentPlayers: 'Aucun joueur présent à répartir',
