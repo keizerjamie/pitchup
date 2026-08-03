@@ -247,3 +247,73 @@ andere sessie zijn ongecommitte werk gewoon in de working tree behield om later 
 committen. **Nooit blind `git add -A`/`git add .` gebruiken** als er tekenen zijn van vreemde
 bestanden in `git status` — eerst per bestand controleren of de diff uitsluitend eigen wijzigingen
 bevat.
+
+## Feature: Vormstrip (W/G/V) laatste 5 wedstrijden op het dashboard
+In de tegel "Aankomende events" op de hoofdpagina staat nu ook de vorm van de laatste 5
+afgelopen wedstrijden: max. 5 gekleurde letters (W groen / G-D oranje / V-L rood / ?
+grijs bij ontbrekende uitslag), meest recente links. Gebouwd via de feature-factory-keten
+(2026-08-03, live, commit `f2bd2e0`). Dit is de feature die in de sessie hierboven ("Les
+over gelijktijdig werken") als de gelijktijdige, ongerelateerde sessie werd genoemd —
+de scheiding via `git add -p` werkte: onze wijzigingen bleven ongemoeid in de working tree
+en zijn apart gecommit.
+
+### Datamodel
+- **Geen migratie.** Puur lezen van bestaande `events.goals_for`/`goals_against`
+  (nullable `SMALLINT`, `goals_for` = eigen team ongeacht thuis/uit). Geen apart
+  resultaat-veld — uitslag wordt altijd live afgeleid, net als `analyseBestaat()` dat al
+  deed voor "is er een uitslag ingevuld".
+- Bestaande index `idx_events_team_type_date(team_id, type, date)` dekte de nieuwe query
+  al; geen nieuwe index nodig.
+
+### Server (`lib/match-analysis.mjs`, `app/page.tsx`)
+- Nieuwe pure functie **`matchResult({goals_for, goals_against})`** → `'win'|'draw'|'loss'|'unknown'`,
+  naast (niet in plaats van) `analyseBestaat()`. `{0,0}` is expliciet `'draw'`, niet
+  `'unknown'` — 0 is een geldige uitslag.
+- Zesde query in de bestaande `Promise.all` op de dashboardpagina:
+  `.eq('team_id', user.id).eq('type','match').lt('date', today).order('date',{ascending:false}).order('created_at',{ascending:false,nullsFirst:false}).order('id',{ascending:false}).limit(5)`.
+  Tie-break bij gelijke datum is bewust `created_at desc` (invoervolgorde), niet
+  `events.time` (te vaak leeg).
+- `nullsFirst: false` is nodig bij een aflopende sort op een nullable kolom
+  (`created_at`) — Postgres zet NULLs anders vooraan bij `DESC`, precies het soort ding
+  dat stil misgaat.
+- Cutoff is strikt `todayLocal()` (kalenderdag, geen tijdcomponent) — bewust **niet** de
+  ongebruikte `isPast`/`isUpcoming` uit `lib/utils.ts` gebruikt, blijft consistent met de
+  rest van de pagina. Bekende, niet-opgeloste kanttekening: de servertijdzone (vermoedelijk
+  UTC op Vercel) betekent dat "vandaag" tussen 00:00–02:00 NL-tijd nog de vorige
+  kalenderdag is — bestaand app-breed gedrag, hier niet apart gefixt.
+
+### Frontend (`components/dashboard/FormStrip.tsx`)
+- Server component (geen `'use client''`), `t: Dict` als prop zoals `NextMatch.tsx`.
+  Exporteert `FormStripItem` als gedeeld itemtype — `app/page.tsx` importeert dat i.p.v.
+  een eigen inline duplicate te typen (zelfde patroon als `TodoItem`/`AvailabilityItem`).
+- Kleuren **uitsluitend** via bestaande tokens: `--chip-green-fg`/`--chip-amber-fg`/
+  `--chip-red-fg` (tekst) + de rgba-achtergronden letterlijk gekopieerd uit
+  `Availability.tsx`'s `STATUS_STYLE` (er bestaat geen "chip-background"-token — vandaar
+  rgba i.p.v. een var(), bewust zo geaccepteerd). Onbekende uitslag: `--faint` op
+  `--track`.
+- 0 afgelopen wedstrijden → component retourneert `null` (geen lege strip, geen
+  placeholder-tekst); < 5 → toont alleen de beschikbare tekens, geen opvulling.
+- Toegankelijkheid: elke letter heeft `aria-label`/`title` met het volledige woord
+  (betekenis mag niet alleen op kleur steunen), container heeft `role="group"`.
+
+### i18n
+9 nieuwe keys in het `home`-blok van alle 5 talen (`formLabel`, `formLetterWin/Draw/Loss/Unknown`,
+`formWin/Draw/Loss/Unknown`). NL: W/G/V, EN: W/D/L, DE: S/U/N, FR: V/N/D, ES: G/E/P.
+
+### Tests
+- Unit (`scripts/match-analysis.test.mjs`), component (`components/dashboard/FormStrip.test.tsx`,
+  vitest/RTL), en **twee** acceptatielagen: `scripts/match-form.acceptance.test.mjs`
+  (dependency-vrij, `node --test`, repliceert filter/sort/limit + een broncontract-check
+  op `app/page.tsx` die hard faalt als de query-vorm verandert) én
+  `dashboard-vorm.acceptance.test.tsx` (vitest, rendert de échte `DashboardPage` tegen een
+  generieke gemockte Supabase-tabel-engine die de echte `.eq/.lt/.order/.limit`-chain
+  toepast). Bewuste dubbeling, niet samengevoegd: het eerste bestand is snel en isoleert
+  de selectieregels, het tweede bewijst dat de productiequery zich er ook echt aan houdt.
+- `npm test` draait alleen de vitest-tests; de `.mjs`-tests draaien apart met
+  `npm run test:node` (of samen via het nieuwe additieve `npm run test:all` — het
+  bestaande `test`-script is bewust ongewijzigd gelaten).
+
+### Bewust geaccepteerd
+- Achtergrondkleuren van de chips zijn hardcoded rgba (gekopieerd van `Availability.tsx`),
+  niet via een CSS-token — er bestaat geen token voor een translucent chip-vlak en de
+  story verbood nieuwe tokens toe te voegen.
