@@ -175,3 +175,75 @@ zetten om ze te activeren. Daarna hoogtes in mm meten (`px * 25.4 / 96`) en dele
 - Bij 4+ teams zonder diagram stapelen de `FormationField`s verticaal in een kaart die niet mag
   breken; bij 6 teams wordt dat bijna een volle pagina.
 - Beschrijving is op print afgekapt op 2 regels — bewust ingeruild voor hoogte.
+
+## Feature: Stap-inhoud direct op de trainingsplan-kaart
+Coach selecteert per oefening zelf de periodiseringsstap (`stap_override`) en ziet direct de
+bijbehorende trainingsparameters (Arbeid/Herhalingen/Rust HH/Series/Rust series) uit het
+VCT-periodiseringsmodel (6 weken), aangeleverd als PDF. Gebouwd via de feature-factory-keten
+(2026-08-03, live, commit `5f240d1`). **Geen migratie**: de brontabellen zijn statische,
+universele domeinkennis en leven als module-constante — analoog aan `PERIODIZATION_CATEGORIES`.
+
+### Datamodel
+- Nieuw: **`lib/periodization-stappen.ts`** — `PERIODIZATION_STEP_TABLES` (76 datarijen over 5
+  categorieën: partijen_groot 21, partijen_midden 15, partijen_klein 13, sprints_weinig_rust 14,
+  sprints_veel_rust 13), plus `stapInhoud`, `clampStapOverride`, `maxStapVoor`, `heeftStapInhoud`.
+  Eigen bestand naast `lib/types.ts` (al 575+ regels), spiegelt `lib/spelerindeling.ts`
+  (pure lib, geen `'use server'`, gedeeld door client en server).
+- Alle waarden in `StapRij` zijn **letterlijke strings inclusief eenheid en decimaalkomma**
+  (`"4,5 min"`) — nooit parsen/afronden/lokaliseren, in geen enkele taal. `series`/`rustSeries`
+  zijn `undefined` waar de brontabel die kolom niet heeft (`partijen_groot`/`partijen_midden`
+  hebben geen van beide; `sprints_veel_rust` heeft wel `rustSeries` maar geen `series`).
+- `steigerungs` (5 stappen, `hasMeting:false`) heeft **geen** kolomtabel — die 5 beschrijvende
+  teksten (`"6x60m versnellen, 60%, 60 sec rust"`) leven als 5-tuple in
+  `messages/*.ts` → `periodization.steigerungsSteps`, zodat elke taal exact 5 vertalingen moet
+  leveren (typecheck dwingt dit af via de tuple-type-annotatie).
+- `stap_override` wordt nu **per categorie** geclampt (`maxStapVoor`, fallback 99 voor
+  `warming_up`/`positiespel`/`pass_trap`/`overig`) i.p.v. de oude generieke 1-99 — zowel
+  client-side (invoerveld) als server-side (`updateKoppeling`). Bestaande te-hoge waarden in de
+  database worden **stil gecorrigeerd bij het laden** (weergave-only, geen migratiescript); een
+  berekende stap boven het maximum toont de content van de zwaarste beschikbare stap, de badge
+  toont sinds de validatieronde ook de geclampte waarde (was eerst de rauwe DB-waarde — bewust
+  gefixt voor consistentie tussen badge/veld/inhoud).
+
+### Backend (`app/actions/training-plan.ts`, `updateKoppeling`)
+- Haalt bij een `stap_override`-patch eerst de categorie server-side op via een **tenant-gescopede
+  select** (`id + event_id + team_id`, patroon van `saveSpelerindeling`) — een client mag de
+  categorie nooit zelf opgeven. Geen koppeling gevonden → `Koppeling niet gevonden`, geen update.
+- `joinedCategorie` (join-normalisatie) is nu **geëxporteerd** vanuit `lib/periodization.ts` en
+  hergebruikt i.p.v. een derde inline kopie (naast de bestaande in `saveSpelerindeling`).
+- Eind-update is verhard met `.eq('event_id', eventId)`, gelijk aan `reorderKoppelingen`.
+
+### UI (`components/TrainingPlanEditor.tsx`)
+- Stapveld staat nu **direct zichtbaar** op de kaart (niet meer achter "Bewerken") voor de 5
+  tabel-categorieën + `steigerungs`; voor `warming_up`/`positiespel`/`pass_trap`/`overig`
+  ongewijzigd verstopt — bewuste keuze, één plek per veld, nooit twee inputs tegelijk.
+- Print via het bestaande dual-markup-patroon (`hidden print:block`, `data-testid` i.v.m. de
+  dubbele DOM), geplaatst ná de gefloate diagram-wrapper zodat de regel meestal in de bestaande
+  witruimte valt i.p.v. de pagina te verlengen.
+- Save-fout toont een **generieke** i18n-melding (`trainingPlan.stapOpslaanMislukt`) i.p.v. een
+  oorzaak-specifieke tekst — een eerdere versie zei altijd "kon niet gevonden worden", ook bij
+  een netwerkfout; met opzet vaag gehouden.
+
+### Gotcha die de test-verifier ving (bijna live gegaan)
+`parseInt(raw, 10) || null` in `handleStepOverrideChange` behandelde de invoer `"0"` als **leeg**
+(want `0` is falsy in JS), waardoor de override op `null` viel i.p.v. geclampt te worden naar de
+ondergrens **1**. Fix: expliciet op `raw === ''` testen vóór `parseInt`, niet op de falsy-waarde
+van het resultaat. Zelfde valkuil kan overal opduiken waar een numeriek invoerveld met
+`|| fallback` wordt geparsed.
+
+### Bewust geaccepteerd
+- `clampSteps` in `app/actions/training-plan.ts` hardcodeert nog dezelfde categorie-maxima
+  los van `maxStapVoor`/`PERIODIZATION_CATEGORIES` — pre-existing duplicatie, niet door deze
+  feature geïntroduceerd, staat als losse opruim-taak klaar (niet meegenomen in scope).
+- `steigerungsSteps[stap-1]` clamt zelf niet boven index 4, maar is onbereikbaar in de praktijk
+  omdat `steigerungs` `hasMeting:false` heeft en de override al op 5 geclampt is vóór opslag.
+
+### Les over gelijktijdig werken in dezelfde repo (niet featurespecifiek, wel opgedaan tijdens deze sessie)
+Er bleek een **andere sessie gelijktijdig** in dezelfde working tree te werken (een los
+wedstrijdresultaat/"vorm"-dashboard, ongerelateerd). Overlap zat toevallig in alle 5
+`messages/*.ts`-bestanden (beide features voegden sleutels toe in hetzelfde bestand). Opgelost
+met `git add -p` (hunk-voor-hunk), zodat alleen de eigen hunks gestaged en gecommit werden en de
+andere sessie zijn ongecommitte werk gewoon in de working tree behield om later zelf te
+committen. **Nooit blind `git add -A`/`git add .` gebruiken** als er tekenen zijn van vreemde
+bestanden in `git status` — eerst per bestand controleren of de diff uitsluitend eigen wijzigingen
+bevat.
