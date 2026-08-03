@@ -21,21 +21,28 @@ function makeSupabase(opts: {
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
+  type Eq = { col: string; val: unknown }
   const calls = {
+    // `eqs` wijst naar de eq-filters van ÉÉN statement (één from()-keten), zodat
+    // een test kan bewijzen dat juist die select/update tenant-gescoped is —
+    // de vlakke `eq`-lijst mengt alle statements door elkaar.
+    select: [] as { table: string; cols: unknown; eqs: Eq[] }[],
     insert: [] as { table: string; payload: Record<string, unknown> }[],
-    update: [] as { table: string; payload: Record<string, unknown> }[],
+    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
     delete: [] as { table: string }[],
     eq: [] as { table: string; col: string; val: unknown }[],
   }
   function chain(table: string) {
     const result = tables[table] ?? { data: [], error: null }
+    const eqs: Eq[] = []
     const c: Record<string, unknown> = {}
-    for (const m of ['select', 'gt', 'lt', 'gte', 'lte', 'in', 'order', 'limit', 'neq']) {
+    for (const m of ['gt', 'lt', 'gte', 'lte', 'in', 'order', 'limit', 'neq']) {
       c[m] = () => c
     }
-    c.eq = (col: string, val: unknown) => { calls.eq.push({ table, col, val }); return c }
+    c.select = (cols: unknown) => { calls.select.push({ table, cols, eqs }); return c }
+    c.eq = (col: string, val: unknown) => { calls.eq.push({ table, col, val }); eqs.push({ col, val }); return c }
     c.insert = (payload: Record<string, unknown>) => { calls.insert.push({ table, payload }); return c }
-    c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload }); return c }
+    c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload, eqs }); return c }
     c.delete = () => { calls.delete.push({ table }); return c }
     c.single = () => Promise.resolve(result)
     c.maybeSingle = () => Promise.resolve(result)
@@ -99,8 +106,17 @@ describe('addOefeningToTraining', () => {
 })
 
 describe('updateKoppeling', () => {
+  // Koppeling met een gejoinde bibliotheek-oefening in de gegeven categorie.
+  function metCategorie(categorie: string) {
+    return makeSupabase({
+      tables: {
+        training_oefeningen: { data: { id: 'k1', oefeningen: { categorie } }, error: null },
+      },
+    })
+  }
+
   it('raakt alleen de opgegeven koppeling van dit team', async () => {
-    const m = makeSupabase({ tables: { training_oefeningen: { data: { id: 'k1' }, error: null } } })
+    const m = metCategorie('partijen_groot')
     use(m)
     await updateKoppeling('k1', 'e1', { stap_override: 5 })
     expect(m.calls.update).toHaveLength(1)
@@ -108,6 +124,98 @@ describe('updateKoppeling', () => {
     expect(m.calls.update[0].payload.stap_override).toBe(5)
     expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'id', val: 'k1' })
     expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'team_id', val: 'team-1' })
+  })
+
+  it('clamt stap_override op het maximum van de categorie van de koppeling', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: 40 })
+    expect(m.calls.update[0].payload.stap_override).toBe(13)
+  })
+
+  it('clamt steigerungs op 5', async () => {
+    const m = metCategorie('steigerungs')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: 9 })
+    expect(m.calls.update[0].payload.stap_override).toBe(5)
+  })
+
+  it('clamt een categorie zonder brondata op 99', async () => {
+    const m = metCategorie('overig')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: 150 })
+    expect(m.calls.update[0].payload.stap_override).toBe(99)
+  })
+
+  it('haalt de categorie server-side op, gescoped op id + event_id + team_id', async () => {
+    // Koppeling van een ander team/andere training → select vindt niets.
+    // Precies daarom staan de assertions op DIT pad: de eq-filters die de mock
+    // registreert komen dan uitsluitend van de categorie-select.
+    const m = makeSupabase({ tables: { training_oefeningen: { data: null } } })
+    use(m)
+    await expect(updateKoppeling('vreemd', 'e1', { stap_override: 5 }))
+      .rejects.toThrow('Koppeling niet gevonden')
+
+    const select = m.calls.select.find((s) => s.table === 'training_oefeningen')!
+    expect(select.eqs).toEqual([
+      { col: 'id', val: 'vreemd' },
+      { col: 'event_id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+    // Niets weggeschreven zonder gevonden koppeling.
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('wist de override zonder extra select (er valt niets te clampen)', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: null })
+    expect(m.calls.select.filter((s) => s.table === 'training_oefeningen')).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(1)
+    expect(m.calls.update[0].payload.stap_override).toBeNull()
+  })
+
+  it('scoped de eind-update op id + event_id + team_id', async () => {
+    // Patch zonder categorie-select, zodat alle eq-filters van de update komen.
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: null })
+    expect(m.calls.update[0].eqs).toEqual([
+      { col: 'id', val: 'k1' },
+      { col: 'event_id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('laat het volgorde-pad ongemoeid (geen categorie-select, eigen clamp)', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { volgorde: 99_999 })
+    expect(m.calls.select.filter((s) => s.table === 'training_oefeningen')).toHaveLength(0)
+    expect(m.calls.update[0].payload.volgorde).toBe(32767)
+  })
+
+  it('weigert nesting in zichzelf', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await expect(updateKoppeling('k1', 'e1', { genest_in: 'k1' }))
+      .rejects.toThrow('Kan niet in zichzelf nesten')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('weigert een ouder buiten deze training/dit team', async () => {
+    const m = makeSupabase({ tables: { training_oefeningen: { data: null } } })
+    use(m)
+    await expect(updateKoppeling('k1', 'e1', { genest_in: 'vreemd' }))
+      .rejects.toThrow('Ongeldige nesting')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Niet ingelogd" zonder user', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+    await expect(updateKoppeling('k1', 'e1', { stap_override: 5 })).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.update).toHaveLength(0)
   })
 })
 

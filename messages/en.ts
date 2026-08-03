@@ -230,6 +230,7 @@ export const en: Dict = {
     moveUp: 'Move up', moveDown: 'Move down', detailsToggle: 'Edit',
     nestedInBadge: 'Nested in {name}',
     print: 'Print',
+    stapOpslaanMislukt: 'Saving the step failed. Please try again.',
   },
   oefeningen: {
     navLabel: 'Exercises',
@@ -313,6 +314,18 @@ export const en: Dict = {
     currentSteps: 'Current periodisation status',
     forTraining: 'for this session', step: 'step', of: 'of',
     categories: { warming_up: 'Warm-up', partijen_groot: 'Large Games', partijen_midden: 'Medium Games', partijen_klein: 'Small Games', positiespel: 'Positional play', pass_trap: 'Passing & receiving', sprints_weinig_rust: 'Sprints Little Rest', sprints_veel_rust: 'Sprints Much Rest', steigerungs: 'Steigerungs', overig: 'Other' } as Record<string, string>,
+    stepWork: 'Work',
+    stepReps: 'Reps',
+    stepRestReps: 'Rest between reps',
+    stepSeries: 'Sets',
+    stepRestSeries: 'Rest between sets',
+    steigerungsSteps: [
+      '6x60m acceleration runs, 60%, 60 sec rest',
+      '7x50m acceleration runs, 70%, 50 sec rest',
+      '8x40m acceleration runs, 80%, 40 sec rest',
+      '9x30m acceleration runs, 90%, 30 sec rest',
+      '10x20m acceleration runs, 100%, 20 sec rest',
+    ] as [string, string, string, string, string],
   },
   lineup: {
     title: 'Lineup',

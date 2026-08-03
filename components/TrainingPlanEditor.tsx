@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useState, useTransition, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, TrainingOefeningWithData, formationsForSize } from '@/lib/types'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
+import { clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningPicker from '@/components/OefeningPicker'
@@ -55,6 +56,24 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   const [unlinkConfirm, setUnlinkConfirm] = useState<string | null>(null)
   const doelstellingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Foutmeldingen per koppeling voor een mislukte stap_override-save (nooit
+  // de rauwe serverfout tonen — zelfde principe als TeamIndelingEditor's
+  // saveError).
+  const [stapOverrideErrors, setStapOverrideErrors] = useState<Record<string, string>>({})
+
+  // Laatst bevestigde stap_override per koppeling (server-waarde óf een
+  // succesvol opgeslagen waarde) — bron voor de rollback bij een mislukte
+  // save. Ref i.p.v. state: mag niet tijdens render gemuteerd worden (React
+  // verbiedt dit), vandaar de useEffect hieronder die 'm bijhoudt zodra de
+  // server een frisse `initialOefeningen` levert (zelfde patroon als
+  // TeamIndelingEditor's lastConfirmedRef).
+  const lastConfirmedStapOverrideRef = useRef<Record<string, number | null>>(
+    Object.fromEntries(initialOefeningen.map((k) => [k.id, k.stap_override])),
+  )
+  useEffect(() => {
+    lastConfirmedStapOverrideRef.current = Object.fromEntries(initialOefeningen.map((k) => [k.id, k.stap_override]))
+  }, [initialOefeningen])
+
   function handleDoelstellingChange(val: string) {
     setDoelstelling(val)
     setDoelstellingSaved(false)
@@ -98,11 +117,30 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     })
   }
 
-  function handleStepOverrideChange(koppelingId: string, raw: string) {
-    const value = raw === '' ? null : Math.max(1, Math.min(99, parseInt(raw, 10) || 1))
+  function handleStepOverrideChange(koppelingId: string, raw: string, categorie: string) {
+    const value = raw === '' ? null : clampStapOverride(parseInt(raw, 10), categorie)
     setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, stap_override: value } : k)))
+    setStapOverrideErrors((prev) => {
+      if (!(koppelingId in prev)) return prev
+      const rest = { ...prev }
+      delete rest[koppelingId]
+      return rest
+    })
     startTransition(async () => {
-      await updateKoppeling(koppelingId, eventId, { stap_override: value })
+      try {
+        await updateKoppeling(koppelingId, eventId, { stap_override: value })
+        // Geslaagd: dit is nu de laatst bevestigde stap_override.
+        lastConfirmedStapOverrideRef.current[koppelingId] = value
+      } catch {
+        // Opslaan mislukt (om welke reden dan ook — niet per se omdat de
+        // koppeling zelf niet gevonden werd): rollback naar de laatst
+        // bevestigde waarde, generieke i18n-foutmelding — nooit de rauwe
+        // (server-)fout tonen (zelfde patroon als TeamIndelingEditor's
+        // saveError).
+        const fallback = lastConfirmedStapOverrideRef.current[koppelingId] ?? null
+        setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, stap_override: fallback } : k)))
+        setStapOverrideErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.stapOpslaanMislukt }))
+      }
     })
   }
 
@@ -259,16 +297,37 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
             {koppelingen.map((k, idx) => {
               const o = k.oefeningen
               const catStep = currentSteps[o.categorie]
-              const effectiveStep = k.stap_override !== null ? k.stap_override : catStep
               const catMeta = ALL_CATS.find(c => c.key === o.categorie)
               const parent = k.genest_in ? koppelingen.find((other) => other.id === k.genest_in) : null
               const isExpanded = expandedId === k.id
+
+              // Stap-inhoud (Arbeid/Herhalingen/Rust HH/Series/Rust series),
+              // alleen voor de 5 tabel-categorieën + steigerungs
+              // (heeftStapInhoud). `overrideClamped` is meteen de "stille
+              // correctie bij laden" van een te hoge bestaande DB-waarde (bv.
+              // stap_override: 40 bij een categorie met max 13) — het
+              // invoerveld hieronder toont deze geclampte waarde, niet de
+              // rauwe DB-waarde. `contentStep` (de geclampte override, anders
+              // de gemeten stap) is óók de bron voor het badge/pil-nummer en
+              // de print-kopregel hieronder: badge, veld én content tonen
+              // voor dezelfde koppeling altijd hetzelfde stapnummer
+              // (validator-fix — voorheen las de badge de rauwe, ongeclampte
+              // `stap_override`, waardoor een oude DB-waarde boven het
+              // categorie-maximum in de badge uit de pas liep met het veld).
+              const maxStap = maxStapVoor(o.categorie)
+              const overrideClamped = clampStapOverride(k.stap_override, o.categorie)
+              const contentStep = overrideClamped ?? catStep ?? null
+              const inhoud = stapInhoud(o.categorie, contentStep)
+              const steigerungsTekst = o.categorie === 'steigerungs' && contentStep
+                ? t.periodization.steigerungsSteps[contentStep - 1] ?? null
+                : null
+              const showsStepContent = heeftStapInhoud(o.categorie)
               // Print-only kopregel-tekst: nummer staat al in de badge links,
               // hier alleen naam + duur + afmetingen + categorie + stap achter
               // elkaar op één regel — platte tekst i.p.v. pillen (scheelt
               // padding/hoogte, zie het "kladblok"-doelontwerp).
-              const stepText = effectiveStep !== null && effectiveStep !== undefined
-                ? (k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${effectiveStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${effectiveStep}`))
+              const stepText = contentStep !== null && contentStep !== undefined
+                ? (k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${contentStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${contentStep}`))
                 : null
               return (
                 // `print:flow-root` (validator-fix, zie de toelichting bij
@@ -337,9 +396,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             {catLabel(o.categorie)}
                           </span>
                         )}
-                        {effectiveStep !== null && effectiveStep !== undefined && (
+                        {contentStep !== null && contentStep !== undefined && (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
-                            {k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${effectiveStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${effectiveStep}`)}
+                            {k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${contentStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${contentStep}`)}
                             {k.stap_override !== null && <span className="ml-1 opacity-60">{t.trainingPlan.manualSuffix}</span>}
                           </span>
                         )}
@@ -360,6 +419,59 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           </span>
                         )}
                       </div>
+
+                      {/* Stapveld + trainingsparameters direct op de kaart
+                          voor de 5 tabel-categorieën + steigerungs
+                          (heeftStapInhoud) — niet meer verstopt achter
+                          "Bewerken" (zie ook het "Bewerken"-paneel verderop,
+                          waar dit veld voor déze categorieën is verwijderd).
+                          `print:hidden`: de afdruk krijgt hieronder, ná de
+                          gefloate diagram-wrapper, een eigen compacte
+                          print-only regel. */}
+                      {showsStepContent && (
+                        <div
+                          data-testid={`stap-inhoud-${k.id}`}
+                          className="print:hidden mt-2 p-2.5 rounded-lg bg-surface-sunken border border-[var(--border-soft)] space-y-1.5"
+                        >
+                          <div className="flex items-center gap-2">
+                            <label htmlFor={`stap-override-${k.id}`} className="text-xs font-semibold text-muted">
+                              {t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})
+                            </label>
+                            <input
+                              id={`stap-override-${k.id}`}
+                              type="number"
+                              min={1}
+                              max={maxStap}
+                              value={overrideClamped ?? ''}
+                              placeholder={t.trainingPlan.stepAuto}
+                              onChange={(e) => handleStepOverrideChange(k.id, e.target.value, o.categorie)}
+                              className="w-20 px-2 py-1 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink"
+                            />
+                          </div>
+                          {stapOverrideErrors[k.id] && (
+                            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+                              {stapOverrideErrors[k.id]}
+                            </p>
+                          )}
+                          {o.categorie === 'steigerungs' ? (
+                            steigerungsTekst && <p className="text-xs text-ink">{steigerungsTekst}</p>
+                          ) : (
+                            inhoud && (
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                                <span><span className="text-faint">{t.periodization.stepWork}:</span> <span className="text-ink font-medium">{inhoud.arbeid}</span></span>
+                                <span><span className="text-faint">{t.periodization.stepReps}:</span> <span className="text-ink font-medium">{inhoud.herhalingen}</span></span>
+                                <span><span className="text-faint">{t.periodization.stepRestReps}:</span> <span className="text-ink font-medium">{inhoud.rustHH}</span></span>
+                                {inhoud.series !== undefined && (
+                                  <span><span className="text-faint">{t.periodization.stepSeries}:</span> <span className="text-ink font-medium">{inhoud.series}</span></span>
+                                )}
+                                {inhoud.rustSeries !== undefined && (
+                                  <span><span className="text-faint">{t.periodization.stepRestSeries}:</span> <span className="text-ink font-medium">{inhoud.rustSeries}</span></span>
+                                )}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
 
                       {/* Diagram/formatieveld naast de teamindeling i.p.v.
                           erboven (was de belangrijkste hoogtebesparing): het
@@ -390,6 +502,35 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           )}
                         </div>
                       )}
+
+                      {/* Print-only stap-inhoud: dezelfde content als het
+                          scherm-blok hierboven, maar in het `·`-gescheiden
+                          platte-tekst-patroon van de print-kopregel
+                          (TrainingPlanEditor.tsx:379-384 hierboven). Staat
+                          bewust NA de gefloate diagram-wrapper zodat hij op
+                          papier meestal in de witruimte naast het diagram
+                          valt i.p.v. de kaart te verlengen. Eigen
+                          data-testid omdat dezelfde tekst ook (verborgen)
+                          in het scherm-blok staat — jsdom past @media print
+                          niet toe, dus tests moeten het print-element apart
+                          kunnen vinden. */}
+                      {showsStepContent && (inhoud || steigerungsTekst) && (
+                        <p
+                          data-testid={`stap-inhoud-print-${k.id}`}
+                          className="hidden print:block print:text-[8px] print:leading-tight print:text-ink"
+                        >
+                          {o.categorie === 'steigerungs'
+                            ? steigerungsTekst
+                            : inhoud && [
+                                `${t.periodization.stepWork}: ${inhoud.arbeid}`,
+                                `${t.periodization.stepReps}: ${inhoud.herhalingen}`,
+                                `${t.periodization.stepRestReps}: ${inhoud.rustHH}`,
+                                inhoud.series !== undefined ? `${t.periodization.stepSeries}: ${inhoud.series}` : null,
+                                inhoud.rustSeries !== undefined ? `${t.periodization.stepRestSeries}: ${inhoud.rustSeries}` : null,
+                              ].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+
                       {o.teams.length > 0 && (
                         <TeamIndelingEditor
                           koppelingId={k.id}
@@ -441,16 +582,22 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
                   {isExpanded && (
                     <div className="print:hidden mt-3 pt-3 border-t border-[var(--border-soft)] grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})</label>
-                        <input
-                          type="number" min={1} max={99}
-                          value={k.stap_override ?? ''}
-                          placeholder={t.trainingPlan.stepAuto}
-                          onChange={(e) => handleStepOverrideChange(k.id, e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink"
-                        />
-                      </div>
+                      {/* Voor categorieën met stap-inhoud (heeftStapInhoud)
+                          staat dit veld nu direct op de kaart hierboven —
+                          niet meer hier, om nooit twee inputs voor hetzelfde
+                          veld tegelijk te tonen. */}
+                      {!showsStepContent && (
+                        <div>
+                          <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})</label>
+                          <input
+                            type="number" min={1} max={99}
+                            value={k.stap_override ?? ''}
+                            placeholder={t.trainingPlan.stepAuto}
+                            onChange={(e) => handleStepOverrideChange(k.id, e.target.value, o.categorie)}
+                            className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink"
+                          />
+                        </div>
+                      )}
                       <div>
                         <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.nestedLabel}</label>
                         <select

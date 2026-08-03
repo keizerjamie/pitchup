@@ -139,6 +139,7 @@ export const de: Dict = {
     moveUp: 'Nach oben', moveDown: 'Nach unten', detailsToggle: 'Bearbeiten',
     nestedInBadge: 'Eingebettet in {name}',
     print: 'Drucken',
+    stapOpslaanMislukt: 'Speichern des Schritts ist fehlgeschlagen. Bitte erneut versuchen.',
   },
   oefeningen: {
     navLabel: 'Übungen',
@@ -221,6 +222,18 @@ export const de: Dict = {
     save: 'Nulltest speichern', saving: 'Speichern...', saved: '✓ Nulltest gespeichert',
     currentSteps: 'Aktuelle Periodisierungsphase', forTraining: 'für dieses Training', step: 'Schritt', of: 'von',
     categories: { warming_up: 'Aufwärmen', partijen_groot: 'Großes Spiel', partijen_midden: 'Mittleres Spiel', partijen_klein: 'Kleines Spiel', positiespel: 'Positionsspiel', pass_trap: 'Pass- und Annahmeform', sprints_weinig_rust: 'Sprints Wenig Pause', sprints_veel_rust: 'Sprints Viel Pause', steigerungs: 'Steigerungs', overig: 'Sonstiges' } as Record<string, string>,
+    stepWork: 'Belastung',
+    stepReps: 'Wiederholungen',
+    stepRestReps: 'Pause zw. WH',
+    stepSeries: 'Serien',
+    stepRestSeries: 'Pause zw. Serien',
+    steigerungsSteps: [
+      '6x60m Beschleunigungsläufe, 60%, 60 sec Pause',
+      '7x50m Beschleunigungsläufe, 70%, 50 sec Pause',
+      '8x40m Beschleunigungsläufe, 80%, 40 sec Pause',
+      '9x30m Beschleunigungsläufe, 90%, 30 sec Pause',
+      '10x20m Beschleunigungsläufe, 100%, 20 sec Pause',
+    ] as [string, string, string, string, string],
   },
   lineup: {
     title: 'Aufstellung', vsLabel: 'vs', presentCount: 'anwesend', presentSection: 'Anwesend',

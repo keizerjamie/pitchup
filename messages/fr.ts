@@ -140,6 +140,7 @@ export const fr: Dict = {
     moveUp: 'Monter', moveDown: 'Descendre', detailsToggle: 'Modifier',
     nestedInBadge: 'Imbriqué dans {name}',
     print: 'Imprimer',
+    stapOpslaanMislukt: "L'enregistrement de l'étape a échoué. Veuillez réessayer.",
   },
   oefeningen: {
     navLabel: 'Exercices',
@@ -222,6 +223,18 @@ export const fr: Dict = {
     save: 'Enregistrer le test de base', saving: 'Enregistrement...', saved: '✓ Test de base enregistré',
     currentSteps: 'Statut périodisation actuel', forTraining: 'pour cette séance', step: 'étape', of: 'de',
     categories: { warming_up: 'Échauffement', partijen_groot: 'Grands matchs', partijen_midden: 'Matchs moyens', partijen_klein: 'Petits matchs', positiespel: 'Jeu de position', pass_trap: 'Passe et contrôle', sprints_weinig_rust: 'Sprints peu de repos', sprints_veel_rust: 'Sprints beaucoup de repos', steigerungs: 'Steigerungs', overig: 'Autre' } as Record<string, string>,
+    stepWork: 'Travail',
+    stepReps: 'Répétitions',
+    stepRestReps: 'Repos entre rép.',
+    stepSeries: 'Séries',
+    stepRestSeries: 'Repos entre séries',
+    steigerungsSteps: [
+      "6x60m courses d'accélération, 60%, 60 sec repos",
+      "7x50m courses d'accélération, 70%, 50 sec repos",
+      "8x40m courses d'accélération, 80%, 40 sec repos",
+      "9x30m courses d'accélération, 90%, 30 sec repos",
+      "10x20m courses d'accélération, 100%, 20 sec repos",
+    ] as [string, string, string, string, string],
   },
   lineup: {
     title: 'Composition', vsLabel: 'vs', presentCount: 'présents', presentSection: 'Présents',

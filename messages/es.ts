@@ -140,6 +140,7 @@ export const es: Dict = {
     moveUp: 'Subir', moveDown: 'Bajar', detailsToggle: 'Editar',
     nestedInBadge: 'Anidado en {name}',
     print: 'Imprimir',
+    stapOpslaanMislukt: 'No se pudo guardar el paso. Inténtalo de nuevo.',
   },
   oefeningen: {
     navLabel: 'Ejercicios',
@@ -222,6 +223,18 @@ export const es: Dict = {
     save: 'Guardar prueba base', saving: 'Guardando...', saved: '✓ Prueba base guardada',
     currentSteps: 'Estado actual de periodización', forTraining: 'para este entrenamiento', step: 'paso', of: 'de',
     categories: { warming_up: 'Calentamiento', partijen_groot: 'Partidos grandes', partijen_midden: 'Partidos medianos', partijen_klein: 'Partidos pequeños', positiespel: 'Juego de posición', pass_trap: 'Pase y control', sprints_weinig_rust: 'Sprints poco descanso', sprints_veel_rust: 'Sprints mucho descanso', steigerungs: 'Steigerungs', overig: 'Otro' } as Record<string, string>,
+    stepWork: 'Trabajo',
+    stepReps: 'Repeticiones',
+    stepRestReps: 'Descanso entre rep.',
+    stepSeries: 'Series',
+    stepRestSeries: 'Descanso entre series',
+    steigerungsSteps: [
+      '6x60m carreras de aceleración, 60%, 60 sec descanso',
+      '7x50m carreras de aceleración, 70%, 50 sec descanso',
+      '8x40m carreras de aceleración, 80%, 40 sec descanso',
+      '9x30m carreras de aceleración, 90%, 30 sec descanso',
+      '10x20m carreras de aceleración, 100%, 20 sec descanso',
+    ] as [string, string, string, string, string],
   },
   lineup: {
     title: 'Alineación', vsLabel: 'vs', presentCount: 'presentes', presentSection: 'Presentes',

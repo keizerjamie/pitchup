@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { assertOwnEvent, assertOwnOefening } from '@/lib/authz'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 import { validateSpelerindeling } from '@/lib/spelerindeling'
+import { joinedCategorie } from '@/lib/periodization'
+import { clampStapOverride } from '@/lib/periodization-stappen'
 
 // ────────────────────────────────────────────────
 // Meting
@@ -261,9 +263,25 @@ export async function updateKoppeling(
   }
 
   if (patch.stap_override !== undefined) {
-    update.stap_override = patch.stap_override === null
-      ? null
-      : Math.max(1, Math.min(99, Math.floor(patch.stap_override)))
+    if (patch.stap_override === null) {
+      update.stap_override = null
+    } else {
+      // De bovengrens is categorie-specifiek (PERIODIZATION_CATEGORIES.maxStap),
+      // dus eerst de categorie server-side ophalen — nooit uit de client
+      // aannemen. Gescoped op id + event_id + team_id, zoals saveSpelerindeling.
+      const { data: koppeling } = await supabase
+        .from('training_oefeningen')
+        .select('id, oefeningen(categorie)')
+        .eq('id', koppelingId)
+        .eq('event_id', eventId)
+        .eq('team_id', user.id)
+        .maybeSingle()
+      if (!koppeling) throw new Error('Koppeling niet gevonden')
+
+      // Onbekende/ontbrekende categorie → '' → clamp op de ruime grens 99.
+      const categorie = joinedCategorie(koppeling) ?? ''
+      update.stap_override = clampStapOverride(patch.stap_override, categorie)
+    }
   }
 
   if (patch.genest_in !== undefined) {
@@ -290,6 +308,7 @@ export async function updateKoppeling(
     .from('training_oefeningen')
     .update(update)
     .eq('id', koppelingId)
+    .eq('event_id', eventId)
     .eq('team_id', user.id)
 
   if (error) throw new Error(error.message)

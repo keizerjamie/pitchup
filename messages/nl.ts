@@ -246,6 +246,7 @@ export const nl = {
     detailsToggle: 'Bewerken',
     nestedInBadge: 'Genest in {name}',
     print: 'Afdrukken',
+    stapOpslaanMislukt: 'Opslaan van de stap is mislukt. Probeer het opnieuw.',
   },
   oefeningen: {
     navLabel: 'Oefeningen',
@@ -344,6 +345,19 @@ export const nl = {
       steigerungs: 'Steigerungs',
       overig: 'Overig',
     } as Record<string, string>,
+    stepWork: 'Arbeid',
+    stepReps: 'Herhalingen',
+    stepRestReps: 'Rust HH',
+    stepSeries: 'Series',
+    stepRestSeries: 'Rust series',
+    // Tuple (niet string[]): dwingt af dat elke taal exact 5 teksten levert.
+    steigerungsSteps: [
+      '6x60m versnellen, 60%, 60 sec rust',
+      '7x50m versnellen, 70%, 50 sec rust',
+      '8x40m versnellen, 80%, 40 sec rust',
+      '9x30m versnellen, 90%, 30 sec rust',
+      '10x20m versnellen, 100%, 20 sec rust',
+    ] as [string, string, string, string, string],
   },
   lineup: {
     title: 'Opstelling',

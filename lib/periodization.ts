@@ -5,7 +5,7 @@ export const CYCLE_LENGTH_WEEKS = 6
 
 // De join `oefeningen(categorie)` levert (afhankelijk van de client-typing) een
 // object óf een array van één rij. Normaliseer naar de categorie-string.
-function joinedCategorie(row: { oefeningen?: unknown }): string | null {
+export function joinedCategorie(row: { oefeningen?: unknown }): string | null {
   const joined = row.oefeningen
   const rec = Array.isArray(joined) ? joined[0] : joined
   if (rec && typeof rec === 'object' && 'categorie' in rec) {

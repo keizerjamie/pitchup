@@ -18,7 +18,7 @@
 // contract), niet losse interne functies.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
@@ -350,9 +350,12 @@ describe('AC8/AC17 — volgorde/stap_override/genest_in zijn training-specifiek'
         />
       </DictProvider>,
     )
-    const toggles = screen.getAllByLabelText(nl.trainingPlan.detailsToggle)
-    fireEvent.click(toggles[0])
-    const stepInput = screen.getByPlaceholderText(nl.trainingPlan.stepAuto)
+    // partijen_klein heeft stap-inhoud (heeftStapInhoud), dus het stapveld
+    // staat al direct op de kaart — geen "Bewerken"-klik meer nodig. Beide
+    // koppelingen tonen zo'n veld (zelfde placeholder "auto"), dus scopen op
+    // de kaart van k1 via zijn eigen data-testid om ondubbelzinnig het juiste
+    // veld te raken (anders "Found multiple elements").
+    const stepInput = within(screen.getByTestId('stap-inhoud-k1')).getByPlaceholderText(nl.trainingPlan.stepAuto)
     fireEvent.change(stepInput, { target: { value: '9' } })
 
     await waitFor(() => expect(m.calls.update.some((u) => u.table === 'training_oefeningen')).toBe(true))
