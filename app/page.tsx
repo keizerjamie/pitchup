@@ -10,8 +10,9 @@ import NextMatch from '@/components/dashboard/NextMatch'
 import TodoList, { TaskType, TodoItem } from '@/components/dashboard/TodoList'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
 import QuickActions from '@/components/dashboard/QuickActions'
+import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
-import { analyseBestaat } from '@/lib/match-analysis.mjs'
+import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 // AANNAME A1 (goedgekeurd): backward-fetchhorizon voor To-do kandidaat-events —
@@ -40,6 +41,7 @@ export default async function DashboardPage() {
     { data: teamNameRow },
     { data: todoCandidateEvents },
     { data: trainingDateRows },
+    { data: recentMatchRows },
   ] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
     supabase.from('players').select('id, name, position, jersey_number, injured').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
@@ -50,6 +52,17 @@ export default async function DashboardPage() {
     // Trainingsdatums voor de live analyse-deadline — bewust ONbegrensd naar
     // voren (geen lte windowEnd): never-miss, zie lib/todos.mjs isTaskVisible.
     supabase.from('events').select('date').eq('team_id', user.id).eq('type', 'training').gte('date', fetchStart).order('date', { ascending: true }),
+    // Recente vorm (W/G/V) van de laatste 5 afgeronde wedstrijden — alle
+    // match_type's tellen mee, oefenwedstrijden inclusief.
+    supabase.from('events')
+      .select('id, date, goals_for, goals_against')
+      .eq('team_id', user.id)
+      .eq('type', 'match')
+      .lt('date', today)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+      .limit(5),
   ])
 
   const teamName = teamNameRow?.value?.trim() || null
@@ -60,6 +73,8 @@ export default async function DashboardPage() {
   const injuredCount = players.filter((p) => p.injured).length
   const fitCount = totalActive - injuredCount
   const injuredPct = totalActive > 0 ? Math.round((injuredCount / totalActive) * 100) : 0
+  const recentForm: FormStripItem[] =
+    (recentMatchRows ?? []).map((m) => ({ id: m.id, result: matchResult(m) }))
 
   const allEventIds = upcoming.map((e) => e.id)
   const { data: attendanceRows } = allEventIds.length > 0
@@ -303,7 +318,9 @@ export default async function DashboardPage() {
             </span>
           </div>
         </StatCard>
-        <StatCard label={t.home.statUpcoming} icon="event" value={upcoming.length} />
+        <StatCard label={t.home.statUpcoming} icon="event" value={upcoming.length}>
+          <FormStrip items={recentForm} t={t} />
+        </StatCard>
         <NextMatch match={nextMatch} t={t} />
       </div>
 

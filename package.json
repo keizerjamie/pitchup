@@ -10,7 +10,9 @@
     "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:node": "node --test scripts/*.test.mjs",
+    "test:all": "npm test && npm run test:node"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

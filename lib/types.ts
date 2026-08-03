@@ -59,6 +59,10 @@ export type EventType = 'training' | 'match' | 'meting'
 export type MatchType = 'friendly' | 'league' | 'cup'
 export type HomeAway = 'home' | 'away'
 export type AttendanceStatus = 'present' | 'absent' | 'unknown'
+// Uitkomst van één wedstrijd vanuit het eigen team gezien; 'unknown' = geen
+// (volledige) uitslag ingevuld. Afgeleid door matchResult() in
+// lib/match-analysis.mjs — één bron van waarheid voor de W/G/V-vorm.
+export type MatchResult = 'win' | 'draw' | 'loss' | 'unknown'
 
 export type OefeningCategorie =
   | 'warming_up'

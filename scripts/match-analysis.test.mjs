@@ -11,6 +11,7 @@ import {
   isValidMinute,
   goalsSum,
   analyseBestaat,
+  matchResult,
   MATCH_EVENT_KINDS,
 } from '../lib/match-analysis.mjs'
 
@@ -186,5 +187,64 @@ test('criterium 8 (done-status): ontbrekende tellers gedragen zich als 0', () =>
     analyseBestaat({ goals_for: null, goals_against: null, ratingCount: 1 }),
     true,
     'één rating zonder eventCount-veld → wel analyse',
+  )
+})
+
+// ── matchResult: W/G/V-vorm van de laatste wedstrijden ──────────────────────
+// Zelfde "beide doelpuntvelden nodig"-regel als analyseBestaat; de sleutels
+// win/draw/loss/unknown spiegelen MatchResult in lib/types.ts.
+// Dit blok dekt uitsluitend de UNIT (één rij → één uitkomst). Welke rijen in
+// de vorm-strip belanden en in welke volgorde staat in
+// scripts/match-form.acceptance.test.mjs; dat de echte query + render dat in
+// productie ook doen, staat in dashboard-vorm.acceptance.test.tsx.
+
+test('matchResult: meer doelpunten voor dan tegen → win', () => {
+  assert.equal(matchResult({ goals_for: 3, goals_against: 1 }), 'win')
+  assert.equal(matchResult({ goals_for: 1, goals_against: 0 }), 'win', 'nipte 1-0 is ook winst')
+  assert.equal(matchResult({ goals_for: 10, goals_against: 9 }), 'win')
+})
+
+test('matchResult: minder doelpunten voor dan tegen → loss', () => {
+  assert.equal(matchResult({ goals_for: 1, goals_against: 3 }), 'loss')
+  assert.equal(matchResult({ goals_for: 0, goals_against: 1 }), 'loss', 'nipte 0-1 is verlies')
+})
+
+test('matchResult: gelijk aantal doelpunten → draw (ook 0-0)', () => {
+  assert.equal(matchResult({ goals_for: 2, goals_against: 2 }), 'draw')
+  assert.equal(
+    matchResult({ goals_for: 0, goals_against: 0 }),
+    'draw',
+    '0 is een geldige uitslag, geen ontbrekende waarde',
+  )
+})
+
+test('matchResult: ontbrekende uitslag → unknown (beide velden nodig)', () => {
+  assert.equal(matchResult({ goals_for: null, goals_against: null }), 'unknown')
+  assert.equal(matchResult({ goals_for: 2, goals_against: null }), 'unknown', 'alleen voor ingevuld')
+  assert.equal(matchResult({ goals_for: null, goals_against: 1 }), 'unknown', 'alleen tegen ingevuld')
+})
+
+test('matchResult: undefined gedraagt zich exact als null', () => {
+  assert.equal(matchResult({ goals_for: undefined, goals_against: undefined }), 'unknown')
+  assert.equal(matchResult({ goals_for: 2, goals_against: undefined }), 'unknown')
+  assert.equal(matchResult({ goals_for: undefined, goals_against: 1 }), 'unknown')
+  // Zelfde uitkomst als de null-variant → de twee "leeg"-vormen zijn inwisselbaar.
+  assert.equal(
+    matchResult({ goals_for: undefined, goals_against: 1 }),
+    matchResult({ goals_for: null, goals_against: 1 }),
+  )
+})
+
+test('matchResult: leeg of ontbrekend argument → unknown (geen crash)', () => {
+  assert.equal(matchResult({}), 'unknown', 'leeg object → geen uitslag')
+  assert.equal(matchResult(), 'unknown', 'zonder argument → geen uitslag')
+})
+
+test('matchResult: negeert extra velden op de rij (id/date/match_type)', () => {
+  // De rij komt straks rechtstreeks uit Supabase (id, date, goals_for,
+  // goals_against); alleen de twee doelpuntvelden mogen meetellen.
+  assert.equal(
+    matchResult({ id: 'e1', date: '2026-07-20', match_type: 'friendly', goals_for: 2, goals_against: 1 }),
+    'win',
   )
 })
