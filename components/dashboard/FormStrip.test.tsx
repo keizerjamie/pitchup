@@ -83,6 +83,24 @@ describe('FormStrip', () => {
     expect(container.innerHTML).not.toMatch(/bg-white/)
   })
 
+  it('regressie: chips gebruiken responsieve sizing-classes, niet de oude vaste 18px-afmeting', () => {
+    const { container } = render(<FormStrip items={FIVE_ITEMS} t={nl} />)
+    const chip = container.querySelector('span[aria-label]') as HTMLElement
+    const classes = chip.className.split(/\s+/)
+    expect(classes).toContain('flex-1')
+    expect(classes).toContain('min-w-0')
+    expect(classes).toContain('max-w-[28px]')
+    expect(classes).toContain('aspect-square')
+    expect(classes).not.toContain('w-[18px]')
+    expect(classes).not.toContain('h-[18px]')
+  })
+
+  it('regressie: de group-container is volledig breed (w-full), zodat de chips over de tegel kunnen schalen', () => {
+    const { container } = render(<FormStrip items={FIVE_ITEMS} t={nl} />)
+    const group = container.querySelector('[role="group"]') as HTMLElement
+    expect(group.className).toMatch(/\bw-full\b/)
+  })
+
   it('duplicate result-waarden met verschillende ids renderen zonder React key-warning', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const duplicateResults = [

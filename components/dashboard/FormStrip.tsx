@@ -37,13 +37,13 @@ export default function FormStrip({ items, t }: { items: FormStripItem[]; t: Dic
   }
 
   return (
-    <div className="flex items-center gap-1" role="group" aria-label={t.home.formLabel}>
+    <div className="flex items-center gap-1 w-full" role="group" aria-label={t.home.formLabel}>
       {items.map((m) => (
         <span
           key={m.id}
           title={label[m.result]}
           aria-label={label[m.result]}
-          className="w-[18px] h-[18px] rounded-md flex items-center justify-center text-[11px] font-extrabold font-display"
+          className="flex-1 min-w-0 max-w-[28px] aspect-square rounded-md flex items-center justify-center text-[13px] sm:text-[15px] font-extrabold font-display"
           style={{ background: FORM_STYLE[m.result].bg, color: FORM_STYLE[m.result].fg }}
         >
           {letter[m.result]}

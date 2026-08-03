@@ -318,9 +318,11 @@ export default async function DashboardPage() {
             </span>
           </div>
         </StatCard>
-        <StatCard label={t.home.statUpcoming} icon="event" value={upcoming.length}>
-          <FormStrip items={recentForm} t={t} />
-        </StatCard>
+        <StatCard label={t.home.statForm} icon="insights" value={
+          recentForm.length > 0
+            ? <FormStrip items={recentForm} t={t} />
+            : <span className="text-[13px] font-semibold text-faint">{t.home.formEmpty}</span>
+        } />
         <NextMatch match={nextMatch} t={t} />
       </div>
 

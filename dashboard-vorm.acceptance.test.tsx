@@ -1,10 +1,16 @@
-// Acceptatietests — Recente vorm (W/G/V) in de "Aankomende events"-tegel op
-// de hoofdpagina (user story: als coach in één oogopslag de vorm van de
+// Acceptatietests — Recente vorm (W/G/V) in de "Vorm"-tegel op de
+// hoofdpagina (user story: als coach in één oogopslag de vorm van de
 // laatste 5 afgelopen wedstrijden zien in app/page.tsx, zonder naar de
 // kalender/wedstrijdanalyses te hoeven).
 //
+// Sinds de opvolgende ronde is de dashboardtegel omgezet van "Aankomende
+// events" (label + getal) naar "Vorm" (label + de vorm-strip zelf als
+// hoofdelement, of een hint-tekst bij lege staat) — zie app/page.tsx:321-325.
+// De i18n-key `statUpcoming` bestaat niet meer; de nieuwe keys zijn
+// `statForm` ("Vorm") en `formEmpty` ("Nog geen wedstrijden gespeeld").
+//
 // ── AC → test-mapping (nummering exact zoals in de goedgekeurde story) ──
-//   AC1  → describe('AC1 — vorm-strip in de "Aankomende events"-tegel')
+//   AC1  → describe('AC1 — vorm-strip in de "Vorm"-tegel')
 //   AC2  → describe('AC2 — W bij meer doelpunten voor, kleur --chip-green-fg')
 //   AC3  → describe('AC3 — G bij gelijkspel, kleur --chip-amber-fg')
 //   AC4  → describe('AC4 — V bij meer doelpunten tegen, kleur --chip-red-fg')
@@ -19,7 +25,7 @@
 //   AC13 → describe('AC13 — alle match_types tellen mee, inclusief friendly')
 //   AC14 → describe('AC14 — nooit meer dan 5 tekens, nooit vandaag/later')
 //   AC15 → describe('AC15 — minder dan 5 afgelopen wedstrijden: alleen wat er is')
-//   AC16 → describe('AC16 — 0 afgelopen wedstrijden: geen strip, geen placeholder')
+//   AC16 → describe('AC16 — 0 afgelopen wedstrijden: geen strip, wel hint-tekst')
 //   AC17 → describe('AC17 — tie-break bij gelijke datum: created_at desc, dan id desc')
 //
 // ── Testmethode ──
@@ -273,18 +279,18 @@ async function renderDashboard(opts: {
   return render(<DictProvider dict={nl}>{el}</DictProvider>)
 }
 
-// Vindt de vorm-strip (role="group") binnen de "Aankomende events"-tegel —
-// role="group" komt in de hele component-boom uitsluitend van FormStrip voor
-// (geverifieerd: geen enkel ander component gebruikt role="group").
-function upcomingCard(): HTMLElement {
-  const label = screen.getByText(nl.home.statUpcoming)
+// Vindt de "Vorm"-tegel (StatCard met label t.home.statForm) — role="group"
+// komt in de hele component-boom uitsluitend van FormStrip voor (geverifieerd:
+// geen enkel ander component gebruikt role="group").
+function vormCard(): HTMLElement {
+  const label = screen.getByText(nl.home.statForm)
   const card = label.closest('.surface-card')
-  if (!card) throw new Error('StatCard "Aankomende events" niet gevonden')
+  if (!card) throw new Error('StatCard "Vorm" niet gevonden')
   return card as HTMLElement
 }
 
 function formGroup(): HTMLElement | null {
-  return within(upcomingCard()).queryByRole('group')
+  return within(vormCard()).queryByRole('group')
 }
 
 function chipLetters(group: HTMLElement): string[] {
@@ -292,9 +298,9 @@ function chipLetters(group: HTMLElement): string[] {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC1 — vorm-strip in de "Aankomende events"-tegel
+// AC1 — vorm-strip in de "Vorm"-tegel
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC1 — vorm-strip in de "Aankomende events"-tegel', () => {
+describe('AC1 — vorm-strip in de "Vorm"-tegel', () => {
   it('toont een reeks tekens voor de laatste afgelopen wedstrijden, binnen de echte StatCard-tegel', async () => {
     await renderDashboard({
       events: [
@@ -612,18 +618,25 @@ describe('AC15 — minder dan 5 afgelopen wedstrijden: alleen wat er is', () => 
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC16 — 0 afgelopen wedstrijden → vorm-strip helemaal niet tonen, geen
-// placeholder
+// AC16 — 0 afgelopen wedstrijden → geen vorm-strip, wél een hint-tekst in de
+// "Vorm"-tegel (FormStrip retourneert nog steeds null bij 0 items; dat
+// contract blijft ongewijzigd — de tegel zelf toont in dat geval de hint
+// t.home.formEmpty in plaats van de strip, zie app/page.tsx:321-325)
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC16 — 0 afgelopen wedstrijden: geen strip, geen placeholder', () => {
-  it('geen enkele afgelopen wedstrijd → de vorm-strip (role="group") bestaat niet in de tegel, geen lege/placeholder-chip', async () => {
+describe('AC16 — 0 afgelopen wedstrijden: geen strip, wel hint-tekst', () => {
+  it('geen enkele afgelopen wedstrijd → de vorm-strip (role="group") bestaat niet, maar de hint-tekst en het "Vorm"-label staan wel in de tegel', async () => {
     await renderDashboard({ events: [] })
     expect(formGroup()).toBeNull()
     // Extra: ook geen losse chip-achtige elementen in de tegel zelf.
-    expect(within(upcomingCard()).queryByRole('group')).toBeNull()
+    expect(within(vormCard()).queryByRole('group')).toBeNull()
+    // Wel de hint-tekst zichtbaar in de tegel (lege staat, geen stille tegel).
+    expect(within(vormCard()).getByText(nl.home.formEmpty)).toBeInTheDocument()
+    // Het "Vorm"-label blijft zichtbaar (vormCard() vindt de tegel er al op,
+    // maar we bevestigen het hier expliciet als onderdeel van dit AC).
+    expect(within(vormCard()).getByText(nl.home.statForm)).toBeInTheDocument()
   })
 
-  it('wel events, maar geen enkele afgelopen wedstrijd (training + toekomstige match) → nog steeds geen strip', async () => {
+  it('wel events, maar geen enkele afgelopen wedstrijd (training + toekomstige match) → nog steeds geen strip, wel hint-tekst', async () => {
     await renderDashboard({
       events: [
         matchRow({ id: 'training', type: 'training', date: addDaysFixed(TODAY, -1) }),
@@ -631,15 +644,18 @@ describe('AC16 — 0 afgelopen wedstrijden: geen strip, geen placeholder', () =>
       ],
     })
     expect(formGroup()).toBeNull()
+    expect(within(vormCard()).getByText(nl.home.formEmpty)).toBeInTheDocument()
+    expect(within(vormCard()).getByText(nl.home.statForm)).toBeInTheDocument()
   })
 
   // Bevinding 3 (opschoonronde): de vorm-query zelf faalt op DB-niveau
   // ({ data: null, error }) — app/page.tsx vangt dit af met `?? []`
   // (regel 76-77) zodat de strip stilletjes verdwijnt, net als bij 0
   // afgelopen wedstrijden. Dit test bewijst dat faalpad van buitenaf: de
-  // pagina rendert zonder te crashen (geen ongevangen rejection/throw) en
-  // toont nergens de rauwe DB-foutmelding.
-  it('vorm-query geeft { data: null, error } terug (DB-fout) → pagina crasht niet, geen rauwe DB-foutmelding, geen strip (zelfde eindresultaat als AC16)', async () => {
+  // pagina rendert zonder te crashen (geen ongevangen rejection/throw),
+  // toont nergens de rauwe DB-foutmelding, en valt netjes terug op dezelfde
+  // hint-tekst als de andere lege-staat-gevallen in dit AC.
+  it('vorm-query geeft { data: null, error } terug (DB-fout) → pagina crasht niet, geen rauwe DB-foutmelding, geen strip maar wel de hint-tekst (zelfde eindresultaat als AC16)', async () => {
     await renderDashboard({
       events: [
         matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 2, goals_against: 0 }),
@@ -651,6 +667,9 @@ describe('AC16 — 0 afgelopen wedstrijden: geen strip, geen placeholder', () =>
     expect(formGroup()).toBeNull()
     // Geen rauwe DB-foutmelding zichtbaar op de pagina.
     expect(document.body.textContent).not.toMatch(/db error \(simulated\)/i)
+    // Wel de hint-tekst en het label, net als bij de andere lege-staat-cases.
+    expect(within(vormCard()).getByText(nl.home.formEmpty)).toBeInTheDocument()
+    expect(within(vormCard()).getByText(nl.home.statForm)).toBeInTheDocument()
   })
 })
 
@@ -689,5 +708,123 @@ describe('AC17 — tie-break bij gelijke datum: created_at desc, dan id desc', (
     const group = formGroup()!
     // id desc: idHigh (...333) > idMid (...222) > idLow (...111) → V, G, W
     expect(chipLetters(group)).toEqual([nl.home.formLetterLoss, nl.home.formLetterDraw, nl.home.formLetterWin])
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Vorm-tegel — structuur en presentatie (dekking voor de tegel-restyle in
+// deze ronde: van "Aankomende events" (label + getal) naar "Vorm" (label +
+// vorm-strip als hoofdelement, of hint-tekst bij lege staat) — zie
+// app/page.tsx:321-325. Geen van de bovenstaande, genummerde ACs dekte deze
+// nieuwe presentatie-eisen expliciet, dus die krijgen hier eigen tests.
+// ═══════════════════════════════════════════════════════════════════════
+describe('Vorm-tegel toont het label "Vorm"', () => {
+  it('de tegel toont t.home.statForm ("Vorm") als label', async () => {
+    await renderDashboard({
+      events: [matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 1, goals_against: 0 })],
+    })
+    expect(within(vormCard()).getByText(nl.home.statForm)).toBeInTheDocument()
+  })
+})
+
+describe('Vorm-strip staat in de hoofdelement-slot (value), niet in een onderschrift', () => {
+  it('de FormStrip-container (role="group") is genest binnen de value-wrapper van StatCard (className bevat text-[32px]) — dit bewijst dat de strip het hoofdelement is, niet een bijschrift', async () => {
+    await renderDashboard({
+      events: [
+        matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 2, goals_against: 0 }),
+        matchRow({ id: 'b', date: addDaysFixed(TODAY, -2), goals_for: 1, goals_against: 1 }),
+      ],
+    })
+    const group = formGroup()!
+    // StatCard.tsx:26 rendert de `value`-prop in een div met className
+    // "font-display text-[32px] font-bold text-ink leading-none" — dat is
+    // het hoofdelement-slot van de tegel (waar voorheen het grote getal
+    // stond). Een voorouder met die exacte class vinden bewijst dat de
+    // vorm-strip daadwerkelijk het hoofdelement is geworden, en niet ergens
+    // anders in de tegel (bv. als children/onderschrift) is geplakt. We
+    // lopen handmatig de ouderketen af (in plaats van closest() met een CSS-
+    // selector) om escaping-problemen met de vierkante haken in de
+    // Tailwind-arbitrary-value-class te vermijden.
+    let ancestor: HTMLElement | null = group.parentElement
+    let found = false
+    while (ancestor) {
+      if (ancestor.classList.contains('text-[32px]')) {
+        found = true
+        break
+      }
+      ancestor = ancestor.parentElement
+    }
+    expect(found).toBe(true)
+  })
+})
+
+describe('Vorm-tegel gebruikt het "insights"-icoon', () => {
+  it('binnen de tegel staat een element met class "ms" en tekstinhoud "insights"', async () => {
+    await renderDashboard({
+      events: [matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 1, goals_against: 0 })],
+    })
+    const iconEl = Array.from(vormCard().querySelectorAll('.ms')).find((el) => el.textContent === 'insights')
+    expect(iconEl).toBeTruthy()
+  })
+})
+
+describe('Vorm-tegel toont geen cijfer meer (het getal is vervangen door de strip)', () => {
+  it('happy-path met wedstrijden → de tegel-inhoud bevat geen enkel cijfer (alleen "Vorm", het icoon-ligatuur "insights" en W/G/V-letters)', async () => {
+    await renderDashboard({
+      events: [
+        matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 2, goals_against: 0 }),
+        matchRow({ id: 'b', date: addDaysFixed(TODAY, -2), goals_for: 1, goals_against: 1 }),
+        matchRow({ id: 'c', date: addDaysFixed(TODAY, -3), goals_for: 0, goals_against: 3 }),
+      ],
+    })
+    expect(vormCard().textContent).not.toMatch(/\d/)
+  })
+})
+
+describe('"Aankomende events" komt nergens meer voor op de pagina', () => {
+  it('het oude tegel-label is volledig verdwenen, ook elders op de pagina', async () => {
+    await renderDashboard({
+      events: [matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 1, goals_against: 0 })],
+    })
+    expect(screen.queryByText('Aankomende events')).toBeNull()
+  })
+})
+
+describe('i18n-dekking — statForm en formEmpty in alle 5 dictionaries', () => {
+  const dicts = [
+    ['nl', nl],
+    ['en', en],
+    ['de', de],
+    ['fr', fr],
+    ['es', es],
+  ] as const
+
+  it('statForm bestaat en is niet leeg, in alle 5 talen', () => {
+    for (const [locale, dict] of dicts) {
+      expect(dict.home.statForm, `statForm ontbreekt of is leeg voor locale "${locale}"`).toBeTruthy()
+      expect(dict.home.statForm.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it('formEmpty bestaat en is niet leeg, in alle 5 talen', () => {
+    for (const [locale, dict] of dicts) {
+      expect(dict.home.formEmpty, `formEmpty ontbreekt of is leeg voor locale "${locale}"`).toBeTruthy()
+      expect(dict.home.formEmpty.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it('statForm verschilt zinvol per taal (niet alle 5 identiek; EN en DE mogen toevallig allebei "Form" zijn)', () => {
+    const values = dicts.map(([, dict]) => dict.home.statForm)
+    expect(new Set(values).size).toBeGreaterThan(1)
+    expect(nl.home.statForm).toBe('Vorm')
+    expect(en.home.statForm).toBe('Form')
+    expect(de.home.statForm).toBe('Form')
+    expect(fr.home.statForm).toBe('Forme')
+    expect(es.home.statForm).toBe('Forma')
+  })
+
+  it('formEmpty verschilt zinvol per taal (alle 5 talen hebben een eigen volledige zin)', () => {
+    const values = dicts.map(([, dict]) => dict.home.formEmpty)
+    expect(new Set(values).size).toBe(5)
   })
 })
