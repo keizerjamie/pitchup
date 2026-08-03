@@ -249,13 +249,32 @@ bestanden in `git status` — eerst per bestand controleren of de diff uitsluite
 bevat.
 
 ## Feature: Vormstrip (W/G/V) laatste 5 wedstrijden op het dashboard
-In de tegel "Aankomende events" op de hoofdpagina staat nu ook de vorm van de laatste 5
-afgelopen wedstrijden: max. 5 gekleurde letters (W groen / G-D oranje / V-L rood / ?
-grijs bij ontbrekende uitslag), meest recente links. Gebouwd via de feature-factory-keten
-(2026-08-03, live, commit `f2bd2e0`). Dit is de feature die in de sessie hierboven ("Les
-over gelijktijdig werken") als de gelijktijdige, ongerelateerde sessie werd genoemd —
-de scheiding via `git add -p` werkte: onze wijzigingen bleven ongemoeid in de working tree
-en zijn apart gecommit.
+Op de hoofdpagina staat een eigen tegel **"Vorm"** met de vorm van de laatste 5 afgelopen
+wedstrijden: max. 5 gekleurde letters (W groen / G-D oranje / V-L rood / ? grijs bij
+ontbrekende uitslag), meest recente links, als **hoofdelement van de tegel** (niet als
+onderschrift). Gebouwd via de feature-factory-keten (2026-08-03, live, commit `f2bd2e0`
++ vervolgcommit voor de "Vorm"-restyle). Dit is de feature die in de sessie hierboven
+("Les over gelijktijdig werken") als de gelijktijdige, ongerelateerde sessie werd
+genoemd — de scheiding via `git add -p` werkte: onze wijzigingen bleven ongemoeid in de
+working tree en zijn apart gecommit.
+
+**Restyle (zelfde dag, live-feedback):** de tegel heette eerst "Aankomende events" (met
+het aantal aankomende events als groot getal, de vorm-strip als klein onderschrift
+eronder) — bij het bekijken op productie bleek dat onbruikbaar zolang er nog geen
+afgelopen wedstrijd met uitslag was (de strip was dan leeg, alleen het cijfer zichtbaar).
+Omgezet naar een eigen "Vorm"-tegel: label `t.home.statForm`, icoon `insights`, de
+`FormStrip` staat nu in de `value`-slot van `StatCard` (het hoofdelement, `text-[32px]`)
+i.p.v. in `children`. Bij 0 afgelopen wedstrijden toont de tegel nu bewust wél een
+hint-tekst `t.home.formEmpty` ("Nog geen wedstrijden gespeeld") op die plek — **dit is
+het tegenovergestelde van de eerdere aanname "0 → geen placeholder"**, die gold voor de
+oude combi-tegel en is hiermee achterhaald. De i18n-key `statUpcoming` is overal
+verwijderd (was na de restyle dood); het aantal aankomende events wordt nergens meer op
+het dashboard los getoond, maar de onderliggende `upcoming`-query/variabele in
+`app/page.tsx` bleef ongewijzigd nodig voor `heroEvent`/`nextMatch`/attendance.
+Chip-grootte ging van vaste 18×18px naar responsief `flex-1 min-w-0 max-w-[28px]
+aspect-square` (nooit vaste 28px: op mobiel, 2-koloms grid ~375px, passen 5 vaste
+28px-chips niet in de tegel — doorgerekend, niet giswerk), verankerd met een
+regressietest in `FormStrip.test.tsx` op exact deze classnamen.
 
 ### Datamodel
 - **Geen migratie.** Puur lezen van bestaande `events.goals_for`/`goals_against`
