@@ -402,8 +402,49 @@ meecommitten zonder de bron te verifiëren.
 Tijdens deze sessie stond er (net als bij de "Vorm"-feature eerder) een **andere,
 niet-gerelateerde sessie** met ongecommit werk in de tree: een `formatie`→`formaties`-
 hernoeming (`lib/types.ts` en een reeks componenten/tests eromheen, plus nieuwe
-`lib/oefening-filter.ts`/`lib/use-reduced-motion.ts`). Veroorzaakte 84 typecheck-fouten en
-3 falende tests op het moment van deze audit — **niet door de security-fixes**. Bewust
-buiten de commit gelaten (`git add <expliciete bestandslijst>`, geen `git add -A`), zoals
-ook de eerdere sessie al als les vastlegde. Die migratie staat dus nog open in de working
-tree voor wie hem afmaakt.
+`lib/oefening-filter.ts`). Veroorzaakte 84 typecheck-fouten en 3 falende tests op het
+moment van deze audit — **niet door de security-fixes**. Bewust buiten de commit gelaten
+(`git add <expliciete bestandslijst>`, geen `git add -A`), zoals ook de eerdere sessie al
+als les vastlegde. Die migratie staat dus nog open in de working tree voor wie hem afmaakt.
+
+*Correctie (zie hieronder): `lib/use-reduced-motion.ts` hoorde hier niet bij — dat was op
+dat moment ongecommit werk van een **derde**, ook onafhankelijke sessie (animatie-review),
+die toevallig tegelijk in dezelfde tree stond. Bevestigt de patroon-les: meerdere sessies
+delen deze working tree gelijktijdig, dus check bij twijfel altijd `git log -- <bestand>`
+voor je aanneemt dat iets bij "de andere workstream" hoort.*
+
+## Animatie-review & -fixes (2026-08-04, commit `f15d92b`)
+Via de `review-animations`-skill: bottom-nav, FAB-menu en spelers-bottomsheet gereviewed
+tegen Emil Kowalski's craft-bar, daarna de bevindingen gefixt (alleen deze 4 bestanden
+gecommit, de rest van de toen aanwezige tree-troep bewust ongemoeid gelaten — zie boven).
+
+### Nieuwe gedeelde helper
+- **`lib/use-reduced-motion.ts`** (`useReducedMotion()`): hydration-safe
+  `useSyncExternalStore`-hook op `prefers-reduced-motion`. Gebruik dit voortaan voor elke
+  nieuwe JS-gedreven transform/animatie i.p.v. losse `matchMedia`-calls — de globale CSS
+  in `app/globals.css` dekt alléén `::view-transition-*`, niet losse inline-style-transforms.
+
+### Patronen om te herhalen
+- **Animeer `transform`, nooit `left`/`width`/`top`.** De bottom-nav-pil deed dat wel
+  (`components/Navigation.tsx`) — layout-thrash op elke tab-wissel, de meest frequente
+  interactie in de app. Nu `transform: translateX()` met vaste breedte, gemeten via
+  `ResizeObserver` op de tab-track (nodig omdat de pilbreedte niet met een vaste CSS-%
+  uit te drukken viel zonder layout-property).
+- **Exit-timing moet matchen met de unmount-`setTimeout`.** Twee plekken
+  (`GlobalFab.tsx`, `PlayerList.tsx`) hadden een langere CSS-transition dan de
+  `setTimeout` die de node daarna unmountte — het laatste element werd zichtbaar
+  midden-animatie weggehaald. Los dit patroon-breed op: leg de duur vast in één
+  `const`/module-constante en gebruik die zowel in de transition-string als in de
+  `setTimeout`, met een kleine buffer (+20ms) erboven.
+- **Asymmetrische timing bij overlays**: entrance mag springy/staggered zijn (delight),
+  exit moet snel en zonder stagger (anders loopt de laatste van een gestaggerde reeks
+  items de unmount-timer voorbij — precies de vorige bullet).
+
+### Bewust geaccepteerd restrisico
+- Geen visuele end-to-end-verificatie van de bottom-nav-klik-flow kon los van de app
+  zelf; is nu wél bevestigd (ingelogde sessie, screenshot na navigatie + FAB open/dicht).
+- Systemische kanttekeningen uit de review **niet** meegenomen in deze fixronde (bewust
+  klein gehouden, alleen de 5 geverifieerde bevindingen): `transition-all` wordt bijna
+  overal gebruikt i.p.v. specifieke properties, en Tailwind's `hover:`-utility mist overal
+  `@media (hover: hover) and (pointer: fine)`-gating (sticky-hover-risico op touch). Beide
+  zijn codebase-brede patronen, geen losse bugs — pak ze apart op als het ooit relevant wordt.
