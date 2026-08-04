@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Player, POSITION_GROUPS } from '@/lib/types'
 import { markInjured, markRecovered } from '@/app/actions/players'
 import { useDict } from '@/lib/i18n-context'
+import { useReducedMotion } from '@/lib/use-reduced-motion'
 
 type SheetAction = {
   label: string
@@ -16,6 +17,9 @@ type SheetAction = {
 }
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
+
+// Must stay in sync with the sheet's transform transition duration below.
+const SHEET_EXIT_MS = 320
 
 function initialsOf(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean)
@@ -40,6 +44,7 @@ export default function PlayerList({ active, inactive }: Props) {
   const [sheetVisible, setSheetVisible] = useState(false)
   const [query, setQuery] = useState('')
   const [isPending, startTransition] = useTransition()
+  const reduceMotion = useReducedMotion()
 
   const q = query.trim().toLowerCase()
   const filteredActive = useMemo(
@@ -57,7 +62,8 @@ export default function PlayerList({ active, inactive }: Props) {
   }
   function closeSheet() {
     setSheetVisible(false)
-    setTimeout(() => setSelected(null), 300)
+    // Small buffer above SHEET_EXIT_MS so the exit transition finishes before unmount.
+    setTimeout(() => setSelected(null), SHEET_EXIT_MS + 20)
   }
   function navigate(href: string) {
     closeSheet()
@@ -246,8 +252,11 @@ export default function PlayerList({ active, inactive }: Props) {
             className="fixed left-0 right-0 z-[300] px-4 max-w-md mx-auto"
             style={{
               bottom: 'max(env(safe-area-inset-bottom), 16px)',
-              transform: sheetVisible ? 'translateY(0)' : 'translateY(110%)',
-              transition: 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
+              transform: reduceMotion ? 'none' : sheetVisible ? 'translateY(0)' : 'translateY(110%)',
+              opacity: reduceMotion ? (sheetVisible ? 1 : 0) : 1,
+              transition: reduceMotion
+                ? `opacity ${SHEET_EXIT_MS}ms ease`
+                : `transform ${SHEET_EXIT_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
             }}
           >
             <div className="surface-card rounded-2xl overflow-hidden mb-3">

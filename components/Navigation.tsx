@@ -1,12 +1,28 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useDict } from '@/lib/i18n-context'
+import { useReducedMotion } from '@/lib/use-reduced-motion'
+
+const TAB_COUNT = 4
+const PILL_INSET = 6 // px gap on each side of the pill within its tab slot
 
 export default function Navigation() {
   const pathname = usePathname()
   const t = useDict()
+  const reduceMotion = useReducedMotion()
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [tabWidth, setTabWidth] = useState(0)
+
+  useEffect(() => {
+    const el = trackRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => setTabWidth(entry.contentRect.width / TAB_COUNT))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   if (pathname === '/login' || pathname === '/register') return null
 
@@ -33,20 +49,20 @@ export default function Navigation() {
           border: '1px solid var(--border-soft)',
         }}
       >
-        {/* Sliding active pill */}
-        {activeIndex >= 0 && (
+        {/* Sliding active pill — GPU-composited transform, not left/width */}
+        {activeIndex >= 0 && tabWidth > 0 && (
           <div
-            className="absolute top-1.5 bottom-1.5 rounded-xl"
+            className="absolute top-1.5 bottom-1.5 left-0 rounded-xl"
             style={{
               background: 'color-mix(in srgb, var(--primary) 12%, transparent)',
-              width: `calc(${100 / tabs.length}% - 12px)`,
-              left: `calc(${activeIndex * (100 / tabs.length)}% + 6px)`,
-              transition: 'left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              width: tabWidth - PILL_INSET * 2,
+              transform: `translateX(${activeIndex * tabWidth + PILL_INSET}px)`,
+              transition: reduceMotion ? 'none' : 'transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
             }}
           />
         )}
 
-        <div className="flex h-[62px]">
+        <div ref={trackRef} className="flex h-[62px]">
           {tabs.map((tab, i) => {
             const active = i === activeIndex
             return (

@@ -4,6 +4,10 @@ import { useState, useEffect, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useDict } from '@/lib/i18n-context'
+import { useReducedMotion } from '@/lib/use-reduced-motion'
+
+// Exit is snappier than the springy entrance — asymmetric timing.
+const CLOSE_MS = 200
 
 const PlusIcon = () => (
   <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth={2.25} viewBox="0 0 24 24">
@@ -41,6 +45,7 @@ export default function GlobalFab() {
   const t = useDict()
   const [open, setOpen] = useState(false)
   const [visible, setVisible] = useState(false)
+  const reduceMotion = useReducedMotion()
   // true after hydration on the client, false during SSR — portal-safe
   const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false)
 
@@ -51,7 +56,8 @@ export default function GlobalFab() {
 
   function closeMenu() {
     setVisible(false)
-    setTimeout(() => setOpen(false), 300)
+    // Small buffer above CLOSE_MS so the exit transition finishes before unmount.
+    setTimeout(() => setOpen(false), CLOSE_MS + 20)
   }
 
   useEffect(() => {
@@ -96,7 +102,9 @@ export default function GlobalFab() {
           backdropFilter: visible ? 'blur(16px)' : 'blur(0px)',
           WebkitBackdropFilter: visible ? 'blur(16px)' : 'blur(0px)',
           opacity: visible ? 1 : 0,
-          transition: 'opacity 0.25s ease, backdrop-filter 0.25s ease, -webkit-backdrop-filter 0.25s ease',
+          transition: visible
+            ? 'opacity 0.25s ease-out, backdrop-filter 0.25s ease-out, -webkit-backdrop-filter 0.25s ease-out'
+            : `opacity ${CLOSE_MS}ms ease-out, backdrop-filter ${CLOSE_MS}ms ease-out, -webkit-backdrop-filter ${CLOSE_MS}ms ease-out`,
         }}
       />
 
@@ -115,9 +123,11 @@ export default function GlobalFab() {
           borderRadius: 20,
           boxShadow: '0 8px 40px rgba(0,0,0,0.20), 0 2px 0 rgba(255,255,255,0.95) inset',
           transformOrigin: 'bottom right',
-          transform: visible ? 'scale(1) translateY(0)' : 'scale(0.80) translateY(12px)',
+          transform: reduceMotion ? 'none' : visible ? 'scale(1) translateY(0)' : 'scale(0.92) translateY(12px)',
           opacity: visible ? 1 : 0,
-          transition: 'transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.22s ease',
+          transition: visible
+            ? 'transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.22s ease-out'
+            : `transform ${CLOSE_MS}ms cubic-bezier(0.23, 1, 0.32, 1), opacity ${CLOSE_MS}ms ease-out`,
           overflow: 'hidden',
         }}
       >
@@ -151,8 +161,12 @@ export default function GlobalFab() {
               zIndex: 1,
               textDecoration: 'none',
               opacity: visible ? 1 : 0,
-              transform: visible ? 'translateX(0)' : 'translateX(16px)',
-              transition: `opacity 0.28s ease ${80 + i * 55}ms, transform 0.34s cubic-bezier(0.34,1.56,0.64,1) ${80 + i * 55}ms`,
+              transform: reduceMotion ? 'none' : visible ? 'translateX(0)' : 'translateX(16px)',
+              // Stagger only on entrance; exit animates all items together, fast, so the
+              // menu never gets unmounted mid-transition on a later item.
+              transition: visible
+                ? `opacity 0.28s ease-out ${80 + i * 55}ms, transform 0.34s cubic-bezier(0.34,1.56,0.64,1) ${80 + i * 55}ms`
+                : `opacity ${CLOSE_MS}ms ease-out, transform ${CLOSE_MS}ms ease-out`,
             }}
           >
             <div style={{
