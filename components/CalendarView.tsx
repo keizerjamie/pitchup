@@ -49,10 +49,12 @@ export default function CalendarView({ events, attendanceMap }: Props) {
   const monthLabel = new Date(ym.year, ym.month - 1, 1).toLocaleDateString(locale, { month: 'long', year: 'numeric' })
   const weekdayLabels = weeks[0].map((d) => new Date(d + 'T00:00:00').toLocaleDateString(locale, { weekday: 'short' }))
 
-  const agendaDays = useMemo(
-    () => weeks.flat().filter((d) => sameMonth(d, ym.year, ym.month) && eventsByDate[d]?.length),
-    [weeks, ym, eventsByDate],
-  )
+  const agendaDays = useMemo(() => {
+    const days = weeks.flat().filter((d) => sameMonth(d, ym.year, ym.month) && eventsByDate[d]?.length)
+    const future = days.filter((d) => d >= today)
+    const past = days.filter((d) => d < today).reverse()
+    return [...future, ...past]
+  }, [weeks, ym, eventsByDate, today])
 
   function shiftMonth(delta: number) {
     setYm(({ year, month }) => {
