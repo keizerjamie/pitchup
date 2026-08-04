@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { OefeningInput } from '@/lib/oefening'
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { createClient } from '@/lib/supabase/server'
+import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import {
   createOefening,
   updateOefening,
@@ -78,16 +79,77 @@ describe('createOefening', () => {
     use(m)
     await createOefening(baseInput({
       teams: [
-        { grootte: 4, formatie: '2-1' },
-        { grootte: 6, formatie: '3-2' },
-        { grootte: 8, formatie: null },
+        { grootte: 4, formaties: ['2-1'] },
+        { grootte: 6, formaties: ['3-2'] },
+        { grootte: 8, formaties: [] },
       ],
     }))
     expect(m.calls.insert[0].payload.teams).toEqual([
-      { grootte: 4, formatie: '2-1' },
-      { grootte: 6, formatie: '3-2' },
-      { grootte: 8, formatie: null },
+      { grootte: 4, formaties: ['2-1'] },
+      { grootte: 6, formaties: ['3-2'] },
+      { grootte: 8, formaties: [] },
     ])
+  })
+
+  it('slaat meerdere formaties per team op, alfabetisch op label', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    // Bewust in omgekeerde volgorde ingevoerd.
+    await createOefening(baseInput({ teams: [{ grootte: 4, formaties: ['2-1', '1-2'] }] }))
+    expect(m.calls.insert[0].payload.teams).toEqual([{ grootte: 4, formaties: ['1-2', '2-1'] }])
+  })
+
+  it('canonieke volgorde is onafhankelijk van de invoervolgorde', async () => {
+    const a = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(a)
+    await createOefening(baseInput({ teams: [{ grootte: 11, formaties: ['5-3-2', '3-4-3', '4-4-2'] }] }))
+
+    const b = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(b)
+    await createOefening(baseInput({ teams: [{ grootte: 11, formaties: ['4-4-2', '5-3-2', '3-4-3'] }] }))
+
+    expect(a.calls.insert[0].payload.teams).toEqual(b.calls.insert[0].payload.teams)
+    expect(a.calls.insert[0].payload.teams).toEqual([
+      { grootte: 11, formaties: ['3-4-3', '4-4-2', '5-3-2'] },
+    ])
+  })
+
+  it('ontdubbelt herhaalde formaties', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    await createOefening(baseInput({ teams: [{ grootte: 6, formaties: ['3-2', '3-2', '2-2-1'] }] }))
+    expect(m.calls.insert[0].payload.teams).toEqual([{ grootte: 6, formaties: ['2-2-1', '3-2'] }])
+  })
+
+  it('een lege selectie blijft een lege array (= geen formatie)', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    await createOefening(baseInput({ teams: [{ grootte: 6, formaties: [] }] }))
+    expect(m.calls.insert[0].payload.teams).toEqual([{ grootte: 6, formaties: [] }])
+  })
+
+  it('dual-read: legacy invoer {grootte, formatie} wordt als nieuwe vorm weggeschreven', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    await createOefening(baseInput({
+      teams: [
+        { grootte: 4, formatie: '2-1' },
+        { grootte: 6, formatie: null },
+      ] as unknown as OefeningInput['teams'],
+    }))
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 4, formaties: ['2-1'] },
+      { grootte: 6, formaties: [] },
+    ])
+  })
+
+  it('dual-read: een legacy formatie die niet bij de grootte past faalt nog steeds', async () => {
+    use(makeSupabase())
+    await expect(
+      createOefening(baseInput({
+        teams: [{ grootte: 6, formatie: '4-3-3' }] as unknown as OefeningInput['teams'],
+      })),
+    ).rejects.toThrow('Formatie past niet bij teamgrootte')
   })
 
   it('slaagt met aantal_neutralen > 0', async () => {
@@ -99,13 +161,25 @@ describe('createOefening', () => {
 
   it('faalt wanneer de formatie niet bij de teamgrootte past', async () => {
     use(makeSupabase())
-    await expect(createOefening(baseInput({ teams: [{ grootte: 6, formatie: '4-3-3' }] })))
+    await expect(createOefening(baseInput({ teams: [{ grootte: 6, formaties: ['4-3-3'] }] })))
       .rejects.toThrow('Formatie past niet bij teamgrootte')
+  })
+
+  it('faalt zodra ÉÉN van meerdere formaties niet bij de grootte past, ongeacht positie', async () => {
+    for (const formaties of [
+      ['3-2', '4-3-3'],       // fout achteraan
+      ['4-3-3', '3-2'],       // fout vooraan
+      ['3-2', '4-3-3', '2-2-1'], // fout in het midden
+    ]) {
+      use(makeSupabase())
+      await expect(createOefening(baseInput({ teams: [{ grootte: 6, formaties }] })))
+        .rejects.toThrow('Formatie past niet bij teamgrootte')
+    }
   })
 
   it('faalt bij een ongeldige teamgrootte', async () => {
     use(makeSupabase())
-    await expect(createOefening(baseInput({ teams: [{ grootte: 10, formatie: null }] })))
+    await expect(createOefening(baseInput({ teams: [{ grootte: 10, formaties: [] }] })))
       .rejects.toThrow('Ongeldige teamgrootte')
   })
 
@@ -134,7 +208,7 @@ describe('createOefening', () => {
     const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
     use(m)
     await createOefening(baseInput({
-      teams: Array.from({ length: 8 }, () => ({ grootte: 3, formatie: null })),
+      teams: Array.from({ length: 8 }, () => ({ grootte: 3, formaties: [] })),
     }))
     expect((m.calls.insert[0].payload.teams as unknown[]).length).toBe(6)
   })
@@ -175,10 +249,10 @@ describe('createOefening', () => {
     const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
     use(m)
     await createOefening(baseInput({
-      teams: [{ grootte: 6, formatie: null, foo: 'bar' } as unknown as OefeningInput['teams'][number]],
+      teams: [{ grootte: 6, formaties: [], foo: 'bar' } as unknown as OefeningInput['teams'][number]],
     }))
     const team = (m.calls.insert[0].payload.teams as Record<string, unknown>[])[0]
-    expect(team).toEqual({ grootte: 6, formatie: null })
+    expect(team).toEqual({ grootte: 6, formaties: [] })
     expect('foo' in team).toBe(false)
   })
 })
@@ -192,5 +266,55 @@ describe('updateOefening / deleteOefening (tenant-isolatie)', () => {
   it('delete op een oefening van een ander team → niet gevonden', async () => {
     use(makeSupabase({ tables: { oefeningen: { data: null } } }))
     await expect(deleteOefening('other')).rejects.toThrow('Oefening niet gevonden')
+  })
+})
+
+describe('generieke foutafhandeling (geen ruwe databasemelding)', () => {
+  let consoleError: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    consoleError.mockRestore()
+  })
+
+  function logged() {
+    return consoleError.mock.calls.map((args: unknown[]) => args.join(' ')).join('\n')
+  }
+
+  // data blijft gevuld zodat assertOwnOefening slaagt; de mutatie zelf faalt.
+  const dbFout = {
+    data: { id: 'o1' },
+    error: { code: '23505', message: 'Key (naam)=(Rondo) already exists' },
+  }
+
+  it('createOefening: generieke melding, context in de log, geen ruwe tekst', async () => {
+    use(makeSupabase({ tables: { oefeningen: dbFout } }))
+
+    await expect(createOefening(baseInput())).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('oefeningLibrary.createOefening')
+    expect(logged()).toContain('23505')
+    expect(logged()).not.toContain('Rondo')
+  })
+
+  it('updateOefening: generieke melding met eigen context', async () => {
+    use(makeSupabase({ tables: { oefeningen: dbFout } }))
+
+    await expect(updateOefening('o1', baseInput())).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('oefeningLibrary.updateOefening')
+    expect(logged()).not.toContain('already exists')
+  })
+
+  it('deleteOefening: generieke melding met eigen context', async () => {
+    use(makeSupabase({ tables: { oefeningen: dbFout } }))
+
+    await expect(deleteOefening('o1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('oefeningLibrary.deleteOefening')
+    expect(logged()).not.toContain('already exists')
   })
 })

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { assertOwnOefening } from '@/lib/authz'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
+import { genericError } from '@/lib/errors'
 
 // ────────────────────────────────────────────────
 // Bibliotheek-CRUD (los van een training)
@@ -22,7 +23,7 @@ export async function createOefening(input: OefeningInput): Promise<{ id: string
     .select('id')
     .single()
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('oefeningLibrary.createOefening', error)
   revalidatePath('/oefeningen')
   return { id: data.id }
 }
@@ -41,7 +42,7 @@ export async function updateOefening(id: string, input: OefeningInput): Promise<
     .eq('id', id)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('oefeningLibrary.updateOefening', error)
 
   revalidatePath('/oefeningen')
 
@@ -77,7 +78,7 @@ export async function deleteOefening(id: string): Promise<void> {
     .eq('id', id)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('oefeningLibrary.deleteOefening', error)
 
   revalidatePath('/oefeningen')
   for (const k of koppelingen ?? []) {

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { assertOwnEvent } from '@/lib/authz'
 import { isValidTaskType } from '@/lib/todos.mjs'
+import { genericError } from '@/lib/errors'
 
 type TaskType = 'lineup' | 'analysis' | 'training_plan'
 
@@ -25,7 +26,7 @@ export async function markTaskDone(eventId: string, taskType: TaskType): Promise
       { onConflict: 'team_id,event_id,task_type' },
     )
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('todos.markTaskDone', error)
   revalidatePath('/')
 }
 
@@ -46,6 +47,6 @@ export async function reopenTask(eventId: string, taskType: TaskType): Promise<v
     .eq('event_id', eventId)
     .eq('task_type', taskType)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('todos.reopenTask', error)
   revalidatePath('/')
 }

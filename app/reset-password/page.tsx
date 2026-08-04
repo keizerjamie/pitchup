@@ -1,38 +1,28 @@
 'use client'
 
-import { useState } from 'react'
+import { useActionState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { createClient } from '@/lib/supabase/client'
+import { updatePassword } from '@/app/actions/auth'
 import { useDict } from '@/lib/i18n-context'
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
 
 // Reached via the recovery link in the reset e-mail: Supabase has then
 // already established a (recovery) session, so updateUser is allowed.
 export default function ResetPasswordPage() {
   const t = useDict()
   const router = useRouter()
-  const [password, setPassword] = useState('')
-  const [pending, setPending] = useState(false)
-  const [done, setDone] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [state, action, pending] = useActionState(updatePassword, null)
+  const done = state !== null && state.error === null
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setPending(true)
-    setError(null)
-
-    const supabase = createClient()
-    const { error: updateError } = await supabase.auth.updateUser({ password })
-
-    if (updateError) {
-      setError(updateError.message)
-      setPending(false)
-      return
-    }
-
-    setDone(true)
-    setTimeout(() => router.replace('/'), 1500)
-  }
+  // Alleen navigeren (geen state meer bijwerken): het geslaagd-scherm volgt
+  // rechtstreeks uit `state`, dus dit effect is puur een side effect naar
+  // een extern systeem (de router).
+  useEffect(() => {
+    if (!done) return
+    const timeout = setTimeout(() => router.replace('/'), 1500)
+    return () => clearTimeout(timeout)
+  }, [done, router])
 
   return (
     <div className="fixed inset-0 overflow-auto flex items-center justify-center px-4" style={{ background: 'linear-gradient(160deg, #0d3d38 0%, #0a2e2a 100%)' }}>
@@ -47,23 +37,22 @@ export default function ResetPasswordPage() {
             {t.auth.passwordUpdated}
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
+          <form action={action} className="space-y-4">
+            {state?.error && (
               <div className="bg-red-500/20 border border-red-400/30 text-red-200 text-sm px-4 py-3 rounded-xl">
-                {error}
+                {state.error}
               </div>
             )}
 
             <div>
               <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.newPassword}</label>
               <input
+                name="password"
                 type="password"
                 required
-                minLength={6}
+                minLength={MIN_PASSWORD_LENGTH}
                 autoComplete="new-password"
                 autoFocus
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
                 placeholder={t.auth.passwordMinLength}
               />

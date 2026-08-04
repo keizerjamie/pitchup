@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { assertOwnEvent, assertOwnPlayer } from '@/lib/authz'
 import type { MatchEventKind } from '@/lib/types'
 import { clampGoals, isValidRating, isValidKind, isValidMinute } from '@/lib/match-analysis.mjs'
+import { genericError } from '@/lib/errors'
 
 // Revalidate both the analysis sub-page and the event page (which shows the
 // analysis ActionCard + done-state) after every mutation.
@@ -31,7 +32,7 @@ export async function saveMatchResult(
     .eq('team_id', user.id)
     .eq('type', 'match')
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('matchAnalysis.saveMatchResult', error)
   revalidateEvent(eventId)
 }
 
@@ -56,7 +57,7 @@ export async function saveMatchRating(
       .eq('event_id', eventId)
       .eq('player_id', playerId)
       .eq('team_id', user.id)
-    if (error) throw new Error(error.message)
+    if (error) throw genericError('matchAnalysis.saveMatchRating.delete', error)
     return
   }
 
@@ -69,7 +70,7 @@ export async function saveMatchRating(
       { onConflict: 'event_id,player_id' },
     )
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('matchAnalysis.saveMatchRating', error)
   // Bewust géén revalidatePath hier: ratings worden in hoge frequentie met +/-
   // aangepast en de client toont de waarde al optimistisch. Zou dit de huidige
   // analyse-route revalideren, dan herrendert de hele pagina bij elke klik. De
@@ -99,7 +100,7 @@ export async function addMatchEvent(
     .from('match_events')
     .insert({ event_id: eventId, player_id: playerId, kind, minute, team_id: user.id })
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('matchAnalysis.addMatchEvent', error)
   revalidateEvent(eventId)
 }
 
@@ -114,6 +115,6 @@ export async function deleteMatchEvent(id: string, eventId: string): Promise<voi
     .eq('id', id)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('matchAnalysis.deleteMatchEvent', error)
   revalidateEvent(eventId)
 }

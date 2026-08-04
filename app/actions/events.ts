@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { EventType, MatchType, HomeAway } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
+import { genericError } from '@/lib/errors'
 
 // 'meting' events worden alleen nog via saveNulmeting (periodisering) aangemaakt
 const VALID_EVENT_TYPES: EventType[] = ['training', 'match']
@@ -49,7 +50,7 @@ export async function createEvent(formData: FormData) {
     .select('id')
     .single()
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('events.createEvent', error)
 
   // Meting events have no attendance records
   if (type !== 'meting') {
@@ -86,7 +87,7 @@ export async function deleteEvent(id: string) {
     .eq('id', id)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('events.deleteEvent', error)
   revalidatePath('/events')
   revalidatePath('/')
 }

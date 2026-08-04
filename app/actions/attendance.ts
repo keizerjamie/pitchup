@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { AttendanceStatus } from '@/lib/types'
-import { assertOwnEvent, assertOwnPlayer } from '@/lib/authz'
+import { assertKnownPlayerId, assertOwnEvent, assertOwnPlayer, getOwnPlayerIds } from '@/lib/authz'
+import { genericError } from '@/lib/errors'
 
 export async function updateAttendance(
   eventId: string,
@@ -29,7 +30,7 @@ export async function updateAttendance(
       { onConflict: 'event_id,player_id' }
     )
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('attendance.updateAttendance', error)
   revalidatePath(`/events/${eventId}`)
 }
 
@@ -69,7 +70,7 @@ export async function markAbsentForPeriod(
     .from('attendance')
     .upsert(records, { onConflict: 'event_id,player_id' })
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('attendance.markAbsentForPeriod', error)
   revalidatePath(`/players/${playerId}/absence`)
   return events.length
 }
@@ -85,7 +86,7 @@ export async function markAllPresent(eventId: string) {
     .eq('event_id', eventId)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('attendance.markAllPresent', error)
   revalidatePath(`/events/${eventId}`)
 }
 
@@ -103,12 +104,20 @@ export async function saveLineup(
   if (typeof formation !== 'string' || formation.length > 20) throw new Error('Ongeldige formatie')
   if (!Array.isArray(positions) || positions.length > 30) throw new Error('Ongeldige opstelling')
 
+  // Elk player_id moet een eigen speler zijn: RLS beschermt de players-tabel,
+  // maar de opstelling gaat als JSONB de lineups-rij in en zou anders een
+  // vreemd (of willekeurig lang) id kunnen bevatten. Zelfde patroon als
+  // saveSpelerindeling in app/actions/training-plan.ts.
+  const ownPlayerIds = await getOwnPlayerIds(supabase, user.id)
+
   const cleanPositions = positions.map((p) => ({
-    player_id: typeof p.player_id === 'string' ? p.player_id : null,
+    player_id: p.player_id === null || p.player_id === undefined
+      ? null
+      : assertKnownPlayerId(p.player_id, ownPlayerIds),
     x: Math.max(0, Math.min(100, Number(p.x) || 0)),
     y: Math.max(0, Math.min(100, Number(p.y) || 0)),
     position_label: String(p.position_label ?? '').slice(0, 10),
-    position_number: typeof p.position_number === 'number' ? p.position_number : undefined,
+    position_number: Number.isInteger(p.position_number) ? p.position_number : undefined,
   }))
 
   const { error } = await supabase
@@ -118,6 +127,6 @@ export async function saveLineup(
       { onConflict: 'event_id' }
     )
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('attendance.saveLineup', error)
   revalidatePath(`/events/${eventId}/lineup`)
 }

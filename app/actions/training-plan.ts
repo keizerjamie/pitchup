@@ -7,6 +7,7 @@ import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefenin
 import { validateSpelerindeling } from '@/lib/spelerindeling'
 import { joinedCategorie } from '@/lib/periodization'
 import { clampStapOverride } from '@/lib/periodization-stappen'
+import { genericError } from '@/lib/errors'
 
 // ────────────────────────────────────────────────
 // Meting
@@ -47,7 +48,7 @@ export async function saveMeting(eventId: string, steps: MetingSteps, notes: str
     notes: notes?.slice(0, 1000) ?? null,
   }, { onConflict: 'event_id' })
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.saveMeting', error)
   revalidatePath(`/events/${eventId}`)
   revalidatePath('/periodisering')
 }
@@ -83,14 +84,14 @@ export async function saveNulmeting(input: {
       .update({ date: input.date })
       .eq('id', eventId)
       .eq('team_id', user.id)
-    if (error) throw new Error(error.message)
+    if (error) throw genericError('trainingPlan.saveNulmeting.event', error)
   } else {
     const { data: created, error } = await supabase
       .from('events')
       .insert({ type: 'meting', date: input.date, team_id: user.id })
       .select('id')
       .single()
-    if (error) throw new Error(error.message)
+    if (error) throw genericError('trainingPlan.saveNulmeting.createEvent', error)
     eventId = created.id
   }
 
@@ -101,7 +102,7 @@ export async function saveNulmeting(input: {
     notes: input.notes?.slice(0, 1000) ?? null,
   }, { onConflict: 'event_id' })
 
-  if (metingError) throw new Error(metingError.message)
+  if (metingError) throw genericError('trainingPlan.saveNulmeting.meting', metingError)
   revalidatePath('/periodisering')
 }
 
@@ -117,7 +118,7 @@ export async function deleteNulmeting(eventId: string) {
     .eq('team_id', user.id)
     .eq('type', 'meting')
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.deleteNulmeting', error)
   revalidatePath('/periodisering')
 }
 
@@ -136,7 +137,7 @@ export async function saveDoelstelling(eventId: string, doelstelling: string) {
     .eq('id', eventId)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.saveDoelstelling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
@@ -187,7 +188,7 @@ export async function addOefeningToTraining(eventId: string, oefeningId: string)
       revalidatePath(`/events/${eventId}/training-plan`)
       return
     }
-    throw new Error(error.message)
+    throw genericError('trainingPlan.addOefeningToTraining', error)
   }
 
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -211,7 +212,7 @@ export async function createAndAddOefening(
     .select('id')
     .single()
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.createAndAddOefening', error)
   const oefeningId = created.id
 
   const volgorde = await nextVolgordeForEvent(supabase, eventId, user.id)
@@ -223,7 +224,7 @@ export async function createAndAddOefening(
     volgorde,
   })
 
-  if (linkError) throw new Error(linkError.message)
+  if (linkError) throw genericError('trainingPlan.createAndAddOefening.link', linkError)
 
   revalidatePath('/oefeningen')
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -242,7 +243,7 @@ export async function removeOefeningFromTraining(koppelingId: string, eventId: s
     .eq('id', koppelingId)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.removeOefeningFromTraining', error)
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
@@ -311,7 +312,7 @@ export async function updateKoppeling(
     .eq('event_id', eventId)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.updateKoppeling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
@@ -366,7 +367,7 @@ export async function saveSpelerindeling(
     .eq('id', koppelingId)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('trainingPlan.saveSpelerindeling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
@@ -385,7 +386,7 @@ export async function reorderKoppelingen(eventId: string, orderedIds: string[]):
       .eq('id', orderedIds[i])
       .eq('event_id', eventId)
       .eq('team_id', user.id)
-    if (error) throw new Error(error.message)
+    if (error) throw genericError('trainingPlan.reorderKoppelingen', error)
   }
 
   revalidatePath(`/events/${eventId}/training-plan`)

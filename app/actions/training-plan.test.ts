@@ -4,6 +4,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { createClient } from '@/lib/supabase/server'
+import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import {
   addOefeningToTraining,
   createAndAddOefening,
@@ -263,7 +264,7 @@ describe('reorderKoppelingen', () => {
 })
 
 describe('saveSpelerindeling', () => {
-  const twoTeams = { teams: [{ grootte: 6, formatie: null }, { grootte: 6, formatie: null }] }
+  const twoTeams = { teams: [{ grootte: 6, formaties: [] }, { grootte: 6, formaties: [] }] }
 
   it('schrijft de genormaliseerde indeling alleen naar training_oefeningen, tenant-gescoped', async () => {
     const m = makeSupabase({
@@ -344,7 +345,7 @@ describe('saveSpelerindeling', () => {
     const m = makeSupabase({
       tables: {
         events: { data: { id: 'e1' } },
-        training_oefeningen: { data: { id: 'k1', oefeningen: { teams: [{ grootte: 6, formatie: null }] } }, error: null },
+        training_oefeningen: { data: { id: 'k1', oefeningen: { teams: [{ grootte: 6, formaties: [] }] } }, error: null },
         players: { data: [{ id: 'p1' }, { id: 'p2' }] },
       },
     })
@@ -373,7 +374,20 @@ describe('createAndAddOefening', () => {
       },
     })
     use(m)
-    await expect(createAndAddOefening('e1', input)).rejects.toThrow('link kapot')
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    // De fout propageert, maar met een generieke melding: de ruwe
+    // database-melding mag de client niet bereiken (zie lib/errors.ts).
+    let err: Error | null = null
+    try {
+      await createAndAddOefening('e1', input)
+    } catch (e) {
+      err = e as Error
+    }
+    expect(err?.message).toBe(GENERIC_ERROR_MESSAGE)
+    expect(err?.message).not.toContain('link kapot')
+    expect(consoleError.mock.calls.flat().join(' ')).not.toContain('link kapot')
+    consoleError.mockRestore()
     // De bibliotheek-oefening is wel aangemaakt; de koppeling-insert is geprobeerd.
     expect(m.calls.insert.some((i) => i.table === 'oefeningen')).toBe(true)
     expect(m.calls.insert.some((i) => i.table === 'training_oefeningen')).toBe(true)

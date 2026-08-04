@@ -5,6 +5,7 @@ import { signUp } from '@/app/actions/auth'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useDict } from '@/lib/i18n-context'
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
 
 export default function RegisterPage() {
   const [state, action, pending] = useActionState(signUp, null)
@@ -42,7 +43,7 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-white/70 text-sm font-medium mb-1.5">{t.auth.password}</label>
-            <input name="password" type="password" required autoComplete="new-password" minLength={6}
+            <input name="password" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH}
               className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.passwordMinLength} />
           </div>

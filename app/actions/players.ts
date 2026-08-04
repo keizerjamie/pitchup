@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Position, POSITIONS, AttendanceStatus } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { todayLocal } from '@/lib/utils'
+import { genericError } from '@/lib/errors'
 
 function validatePlayerInput(formData: FormData) {
   const name = (formData.get('name') as string | null)?.trim() ?? ''
@@ -47,7 +48,7 @@ export async function createPlayer(formData: FormData) {
     secondary_positions,
   })
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('players.createPlayer', error)
   revalidatePath('/players')
 }
 
@@ -65,7 +66,7 @@ export async function updatePlayer(id: string, formData: FormData) {
     .eq('id', id)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('players.updatePlayer', error)
   revalidatePath('/players')
   revalidatePath(`/players/${id}/edit`)
 }
@@ -81,7 +82,7 @@ export async function deletePlayer(id: string) {
     .eq('id', id)
     .eq('team_id', user.id)
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('players.deletePlayer', error)
   revalidatePath('/players')
 }
 
@@ -116,7 +117,7 @@ export async function markInjured(playerId: string): Promise<void> {
     .eq('team_id', user.id)
     .neq('type', 'meting')
     .gte('date', today)
-  if (eventsError) throw new Error(eventsError.message)
+  if (eventsError) throw genericError('players.markInjured.events', eventsError)
 
   if (events && events.length > 0) {
     const eventIds = events.map((e) => e.id)
@@ -128,7 +129,7 @@ export async function markInjured(playerId: string): Promise<void> {
       .eq('team_id', user.id)
       .eq('player_id', playerId)
       .in('event_id', eventIds)
-    if (existingError) throw new Error(existingError.message)
+    if (existingError) throw genericError('players.markInjured.attendance', existingError)
 
     const statusByEvent = new Map<string, AttendanceStatus>()
     for (const row of existing ?? []) statusByEvent.set(row.event_id, row.status as AttendanceStatus)
@@ -148,7 +149,7 @@ export async function markInjured(playerId: string): Promise<void> {
       const { error } = await supabase
         .from('attendance')
         .upsert(records, { onConflict: 'event_id,player_id' })
-      if (error) throw new Error(error.message)
+      if (error) throw genericError('players.markInjured.upsert', error)
     }
   }
 
@@ -157,7 +158,7 @@ export async function markInjured(playerId: string): Promise<void> {
     .update({ injured: true })
     .eq('id', playerId)
     .eq('team_id', user.id)
-  if (playerError) throw new Error(playerError.message)
+  if (playerError) throw genericError('players.markInjured.player', playerError)
 
   revalidatePath('/players')
   revalidatePath('/')
@@ -178,7 +179,7 @@ export async function markRecovered(playerId: string): Promise<void> {
     .eq('team_id', user.id)
     .neq('type', 'meting')
     .gte('date', today)
-  if (eventsError) throw new Error(eventsError.message)
+  if (eventsError) throw genericError('players.markRecovered.events', eventsError)
 
   if (events && events.length > 0) {
     const futureEventIds = events.map((e) => e.id)
@@ -195,7 +196,7 @@ export async function markRecovered(playerId: string): Promise<void> {
       .eq('injury_set', true)
       .eq('status', 'absent')
       .in('event_id', futureEventIds)
-    if (restoreError) throw new Error(restoreError.message)
+    if (restoreError) throw genericError('players.markRecovered.restore', restoreError)
   }
 
   // b. ALLE resterende injury_set-markeringen van de speler opschonen zonder de
@@ -207,14 +208,14 @@ export async function markRecovered(playerId: string): Promise<void> {
     .eq('team_id', user.id)
     .eq('player_id', playerId)
     .eq('injury_set', true)
-  if (clearError) throw new Error(clearError.message)
+  if (clearError) throw genericError('players.markRecovered.clear', clearError)
 
   const { error: playerError } = await supabase
     .from('players')
     .update({ injured: false })
     .eq('id', playerId)
     .eq('team_id', user.id)
-  if (playerError) throw new Error(playerError.message)
+  if (playerError) throw genericError('players.markRecovered.player', playerError)
 
   revalidatePath('/players')
   revalidatePath('/')

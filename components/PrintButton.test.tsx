@@ -5,10 +5,12 @@ import { nl } from '@/messages/nl'
 import PrintButton from '@/components/PrintButton'
 
 describe('PrintButton', () => {
-  let printSpy: ReturnType<typeof vi.fn>
+  // Expliciete signatuur: vitest 4 typeert een generieke vi.fn() als
+  // Procedure | Constructable, wat niet op window.print past.
+  let printSpy: ReturnType<typeof vi.fn<() => void>>
 
   beforeEach(() => {
-    printSpy = vi.fn()
+    printSpy = vi.fn<() => void>()
     window.print = printSpy
   })
 

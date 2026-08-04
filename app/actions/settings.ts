@@ -2,6 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { genericError } from '@/lib/errors'
+import { MAX_SEASON_DAYS, isDateString, seasonTrainingDates } from '@/lib/season-dates'
 
 export async function getDefaultAttendance(): Promise<'present' | 'unknown'> {
   const supabase = await createClient()
@@ -36,9 +38,10 @@ export async function saveSettings(formData: FormData) {
   const defaultAttendance = formData.get('default_attendance') as string
   if (!['present', 'unknown'].includes(defaultAttendance)) throw new Error('Ongeldige waarde')
 
-  await supabase
+  const { error } = await supabase
     .from('settings')
     .upsert({ team_id: user.id, key: 'default_attendance', value: defaultAttendance }, { onConflict: 'team_id,key' })
+  if (error) throw genericError('settings.saveSettings', error)
 
   revalidatePath('/settings')
 }
@@ -48,10 +51,11 @@ export async function saveScheduleSettings(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+  // isDateString weigert naast een verkeerd formaat ook niet-bestaande datums
+  // (2026-02-30), die `Date` stilzwijgend zou doorrollen.
   const seasonStart = formData.get('season_start') as string
   const seasonEnd = formData.get('season_end') as string
-  if (!DATE_RE.test(seasonStart) || !DATE_RE.test(seasonEnd)) throw new Error('Ongeldige datum')
+  if (!isDateString(seasonStart) || !isDateString(seasonEnd)) throw new Error('Ongeldige datum')
 
   const entries = [
     { team_id: user.id, key: 'season_start', value: seasonStart },
@@ -61,7 +65,9 @@ export async function saveScheduleSettings(formData: FormData) {
     { team_id: user.id, key: 'training_location', value: (formData.get('training_location') as string) || '' },
   ]
 
-  await supabase.from('settings').upsert(entries, { onConflict: 'team_id,key' })
+  const { error } = await supabase.from('settings').upsert(entries, { onConflict: 'team_id,key' })
+  if (error) throw genericError('settings.saveScheduleSettings', error)
+
   revalidatePath('/settings')
 }
 
@@ -85,7 +91,7 @@ export async function deleteSeasonTrainings(): Promise<{ deleted: number }> {
     .lte('date', seasonEnd)
     .select('id')
 
-  if (error) throw new Error(error.message)
+  if (error) throw genericError('settings.deleteSeasonTrainings', error)
   revalidatePath('/events')
   revalidatePath('/')
   return { deleted: data?.length ?? 0 }
@@ -100,7 +106,14 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
 
   const seasonStart = settings['season_start']
   const seasonEnd = settings['season_end']
-  const trainingDays = (settings['training_days'] || '').split(',').map(Number).filter((n) => !isNaN(n))
+  // Lege segmenten er eerst uit: `''.split(',')` levert [''] op en `Number('')`
+  // is 0, waardoor een leeg `training_days` anders als "elke zondag" zou tellen.
+  const trainingDays = (settings['training_days'] || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
   const trainingTime = settings['training_time'] || null
   const trainingLocation = settings['training_location'] || null
 
@@ -115,24 +128,27 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
     .eq('type', 'training')
   const existingDates = new Set((existing ?? []).map((e) => e.date))
 
-  const start = new Date(seasonStart + 'T00:00:00')
-  const end = new Date(seasonEnd + 'T00:00:00')
-  const toCreate: { type: string; date: string; time: string | null; location: string | null; team_id: string }[] = []
-
-  const cursor = new Date(start)
-  while (cursor <= end) {
-    const dayOfWeek = cursor.getDay()
-    if (trainingDays.includes(dayOfWeek)) {
-      const y = cursor.getFullYear()
-      const m = String(cursor.getMonth() + 1).padStart(2, '0')
-      const d = String(cursor.getDate()).padStart(2, '0')
-      const dateStr = `${y}-${m}-${d}`
-      if (!existingDates.has(dateStr)) {
-        toCreate.push({ type: 'training', date: dateStr, time: trainingTime, location: trainingLocation, team_id: user.id })
-      }
+  // Datums worden in UTC uitgerekend (lib/season-dates.ts). Lokale
+  // Date-parsing zou hier de tijdzone van de server laten meebeslissen: op een
+  // UTC-lambda kan een training dan een dag verschuiven ten opzichte van wat de
+  // gebruiker in Europe/Amsterdam instelde.
+  const season = seasonTrainingDates(seasonStart, seasonEnd, trainingDays)
+  if (!season.ok) {
+    if (season.reason === 'season-too-long') {
+      throw new Error(`Het seizoen mag maximaal ${MAX_SEASON_DAYS} dagen beslaan`)
     }
-    cursor.setDate(cursor.getDate() + 1)
+    throw new Error('Controleer de seizoensdatums: de einddatum moet na de startdatum liggen')
   }
+
+  const toCreate = season.dates
+    .filter((date) => !existingDates.has(date))
+    .map((date) => ({
+      type: 'training',
+      date,
+      time: trainingTime,
+      location: trainingLocation,
+      team_id: user.id,
+    }))
 
   if (toCreate.length === 0) {
     return { created: 0, skipped: 0 }
@@ -145,7 +161,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
       .from('events')
       .insert(batch)
       .select('id')
-    if (error) throw new Error(error.message)
+    if (error) throw genericError('settings.generateSeasonTrainings', error)
 
     const { data: players } = await supabase.from('players').select('id').eq('active', true).eq('team_id', user.id)
     const defaultStatus = settings['default_attendance'] ?? 'present'
@@ -154,7 +170,8 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
       const attendanceRecords = inserted.flatMap((ev) =>
         players.map((p) => ({ event_id: ev.id, player_id: p.id, status: defaultStatus, team_id: user.id }))
       )
-      await supabase.from('attendance').insert(attendanceRecords)
+      const { error: attendanceError } = await supabase.from('attendance').insert(attendanceRecords)
+      if (attendanceError) throw genericError('settings.generateSeasonTrainings.attendance', attendanceError)
     }
 
     created += batch.length
