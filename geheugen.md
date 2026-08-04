@@ -407,6 +407,17 @@ moment van deze audit — **niet door de security-fixes**. Bewust buiten de comm
 (`git add <expliciete bestandslijst>`, geen `git add -A`), zoals ook de eerdere sessie al
 als les vastlegde. Die migratie staat dus nog open in de working tree voor wie hem afmaakt.
 
+*Update 2026-08-04 (commit `fecf788`): de `formatie`→`formaties`-hernoeming hierboven is
+afgerond via de volledige feature-factory-keten (zie "Feature: Meerdere formaties per
+oefening-team" hieronder) — gebouwd vanaf de laatste `main`, niet door de halfklare stand
+uit de tree over te nemen. `lib/oefening-filter.ts`, `components/OefeningPicker.tsx` (de
+uitbreiding), `components/OefeningPicker.test.tsx` en
+`oefening-picker-filters.acceptance.test.tsx` bleken bij nader inzien een **aparte,
+eigen feature** te zijn (filterrij in de oefening-toevoegen-sheet: categorie, veldzone,
+aantal, duur — 18 acceptatiecriteria, eigen state), losstaand van de formaties-hernoeming
+maar toevallig in dezelfde tree ontstaan. Die staat na dit commit nog steeds open/
+ongecommit — niet verward met de nu afgeronde formaties-feature.
+
 *Correctie (zie hieronder): `lib/use-reduced-motion.ts` hoorde hier niet bij — dat was op
 dat moment ongecommit werk van een **derde**, ook onafhankelijke sessie (animatie-review),
 die toevallig tegelijk in dezelfde tree stond. Bevestigt de patroon-les: meerdere sessies
@@ -448,3 +459,58 @@ gecommit, de rest van de toen aanwezige tree-troep bewust ongemoeid gelaten — 
   overal gebruikt i.p.v. specifieke properties, en Tailwind's `hover:`-utility mist overal
   `@media (hover: hover) and (pointer: fine)`-gating (sticky-hover-risico op touch). Beide
   zijn codebase-brede patronen, geen losse bugs — pak ze apart op als het ooit relevant wordt.
+
+## Feature: Meerdere formaties per oefening-team (2026-08-04, commit `fecf788`)
+Gebouwd via de volledige feature-factory-keten (researcher → story-writer → project-manager
+→ backend-engineer → frontend-engineer → test-verifier → validator), met goedkeuringspauzes
+na de story en na de brief. Trainer kan per team in een oefening nu **meerdere**
+vereenvoudigde formaties selecteren i.p.v. precies één, zodat één oefening tegen elke
+gangbare formatie voor die teamgrootte bruikbaar is.
+
+### Datamodel
+- **`OefeningTeam.formatie: string | null` → `formaties: string[]`** (`lib/types.ts`). Lege
+  array = functioneel identiek aan het oude "geen formatie" (team los/zonder labels
+  getekend). Geen apart maximum aantal formaties per team.
+- **Geen DB-migratie nodig**: `oefeningen.teams` is JSONB zonder elementschema (alleen
+  `jsonb_array_length(teams) <= 6`), dus de vormwijziging zit puur in de applicatielaag.
+- **Dual-read i.p.v. migratiescript**: `normalizeOefeningTeam(s)` (`lib/types.ts`) leest
+  zowel de nieuwe vorm (`{grootte, formaties: [...]}`) als de legacy vorm
+  (`{grootte, formatie: string|null}`, `null`→`[]`, `"2-1"`→`["2-1"]`). Toegepast in de
+  leeslaag (`app/oefeningen/page.tsx`, `app/events/[id]/training-plan/page.tsx`) én als
+  vangnet in `validateOefening`/`generateDiagram` (voor een oude browser-tab die tijdens
+  deploy nog de legacy vorm post). Een oefening migreert vanzelf naar de nieuwe vorm zodra
+  hij opnieuw wordt opgeslagen — **bestaande productiedata is dus nooit expliciet
+  gemigreerd**, dat gebeurt lazy per rij.
+- **`formationsForSize(n)`** sorteert nu alfabetisch op label, als gesorteerde **kopie**
+  bij module-init (`FORMATIONS_SORTED_BY_TEAM_SIZE`). `FORMATIONS`/`FORMATIONS_BY_TEAM_SIZE`
+  zelf blijven bewust ongemuteerd — die worden ook los gebruikt door
+  `components/LineupBuilder.tsx` (de ongerelateerde wedstrijdopstelling-feature), die niet
+  van formatie-volgorde mag veranderen.
+- **`basisFormatieDef(grootte, formaties)`**: nieuwe centrale helper, geeft de alfabetisch
+  eerste (op label) van een selectie terug (of `null` bij lege selectie). Enige plek waar
+  "welke formatie is de basis" wordt bepaald — gebruikt door zowel de diagram-autogeneratie
+  (`lib/diagram.ts`) als alle weergaveplekken.
+- **`isFormationValidForSize`** ongewijzigd; wordt nu per waarde in een lus aangeroepen in
+  `validateOefening` (elke geselecteerde formatie wordt individueel gevalideerd, niet
+  alleen de eerste).
+
+### UI
+- `components/OefeningEditor.tsx`: single-`<select>` vervangen door alfabetisch gesorteerde
+  aan/uit-toggleknoppen (`aria-pressed`, stijl hergebruikt van de bestaande veldzone-
+  toggles) + een "Alles selecteren"-knop (disabled bij geen teamgrootte, of als alles al
+  aan staat). **Bewust geen "alles wissen"-knop** — wissen gaat per toggle. Teamgrootte
+  wijzigen filtert niet-passende formaties automatisch uit de selectie.
+- Weergave (`OefeningLibrary.tsx`, `TrainingPlanEditor.tsx`, `TeamIndelingEditor.tsx`, en de
+  editor-preview zelf) toont **overal alleen de basisformatie** (alfabetisch eerste), nooit
+  alle geselecteerde formaties en geen "+n"-teller — bewuste keuze om het bestaande, strak
+  afgestelde print-hoogtebudget in `TrainingPlanEditor.tsx` niet te laten verschuiven.
+- Nieuwe i18n-keys `oefeningen.formations`/`oefeningen.selectAllFormations` in alle 5
+  `messages/*.ts`. De oude `formation`/`noFormation`-keys zijn bewust laten staan
+  (ongebruikt maar aanwezig in alle talen) — geen opruimscope toegevoegd aan deze feature.
+
+### Randobservatie
+`components/TeamIndelingEditor.tsx` gebruikte `team.formatie` ook (regel ~333) maar stond
+niet in de eerste researcher-briefing — pas de backend-engineer signaleerde het (anders was
+de typecheck stukgegaan). Les: bij een datamodel-hernoeming die door meerdere lagen loopt,
+blijft een brede grep op het oude veld nodig tot vlak vóór het bouwen, niet alleen tijdens
+het onderzoek.
