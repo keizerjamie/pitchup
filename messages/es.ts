@@ -212,7 +212,7 @@ export const es: Dict = {
     filterCountLabel: 'Número de jugadores',
     filterDurationLabel: 'Duración (min)',
     filterMinPlaceholder: 'min',
-    filterMaxPlaceholder: 'max',
+    filterMaxPlaceholder: 'máx',
   },
   periodization: {
     lastDone: 'Última vez',

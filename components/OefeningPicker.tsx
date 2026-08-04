@@ -1,8 +1,9 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Oefening, OefeningCategorie } from '@/lib/types'
+import { Oefening, OefeningCategorie, Veldzone, OEFENING_CATEGORIES, VALID_VELDZONES } from '@/lib/types'
 import type { OefeningInput } from '@/lib/oefening'
+import { filterOefeningen, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
 import { addOefeningToTraining, createAndAddOefening } from '@/app/actions/training-plan'
 import OefeningEditor from '@/components/OefeningEditor'
 import { useDict } from '@/lib/i18n-context'
@@ -22,15 +23,11 @@ interface Props {
 export default function OefeningPicker({ eventId, library, onClose, presetCategorie }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
-  const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<OefeningFilters>(EMPTY_OEFENING_FILTERS)
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(!!presetCategorie)
 
-  const q = query.trim().toLowerCase()
-  const filtered = useMemo(
-    () => (q ? library.filter((o) => o.naam.toLowerCase().includes(q)) : library),
-    [library, q],
-  )
+  const filtered = useMemo(() => filterOefeningen(library, filters), [library, filters])
 
   function handlePick(oefeningId: string) {
     setError(null)
@@ -81,11 +78,128 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
           )}
 
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={filters.query}
+            onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
             placeholder={t.oefeningen.pickerSearchPlaceholder}
             className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink placeholder:text-faint"
           />
+
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="oefening-filter-categorie" className="block text-xs font-semibold text-muted mb-1">
+                  {t.oefeningen.filterCategoryLabel}
+                </label>
+                <select
+                  id="oefening-filter-categorie"
+                  value={filters.categorie ?? ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, categorie: e.target.value ? (e.target.value as OefeningCategorie) : null }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface"
+                >
+                  <option value="">{t.oefeningen.filterAll}</option>
+                  {OEFENING_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>{t.periodization.categories[cat] ?? cat}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="oefening-filter-veldzone" className="block text-xs font-semibold text-muted mb-1">
+                  {t.oefeningen.filterZoneLabel}
+                </label>
+                <select
+                  id="oefening-filter-veldzone"
+                  value={filters.veldzone ?? ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, veldzone: e.target.value ? (e.target.value as Veldzone) : null }))
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface"
+                >
+                  <option value="">{t.oefeningen.filterAll}</option>
+                  {VALID_VELDZONES.map((zone) => (
+                    <option key={zone} value={zone}>{t.trainingPlan.fieldZones[zone]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted mb-1">{t.oefeningen.filterCountLabel}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="oefening-filter-aantal-min" className="sr-only">
+                    {`${t.oefeningen.filterCountLabel} ${t.oefeningen.filterMinPlaceholder}`}
+                  </label>
+                  <input
+                    id="oefening-filter-aantal-min"
+                    type="number"
+                    min={0}
+                    value={filters.aantalMin ?? ''}
+                    onChange={(e) =>
+                      setFilters((f) => ({ ...f, aantalMin: e.target.value === '' ? null : Number(e.target.value) }))
+                    }
+                    placeholder={t.oefeningen.filterMinPlaceholder}
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="oefening-filter-aantal-max" className="sr-only">
+                    {`${t.oefeningen.filterCountLabel} ${t.oefeningen.filterMaxPlaceholder}`}
+                  </label>
+                  <input
+                    id="oefening-filter-aantal-max"
+                    type="number"
+                    min={0}
+                    value={filters.aantalMax ?? ''}
+                    onChange={(e) =>
+                      setFilters((f) => ({ ...f, aantalMax: e.target.value === '' ? null : Number(e.target.value) }))
+                    }
+                    placeholder={t.oefeningen.filterMaxPlaceholder}
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted mb-1">{t.oefeningen.filterDurationLabel}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="oefening-filter-duur-min" className="sr-only">
+                    {`${t.oefeningen.filterDurationLabel} ${t.oefeningen.filterMinPlaceholder}`}
+                  </label>
+                  <input
+                    id="oefening-filter-duur-min"
+                    type="number"
+                    min={0}
+                    value={filters.duurMin ?? ''}
+                    onChange={(e) =>
+                      setFilters((f) => ({ ...f, duurMin: e.target.value === '' ? null : Number(e.target.value) }))
+                    }
+                    placeholder={t.oefeningen.filterMinPlaceholder}
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="oefening-filter-duur-max" className="sr-only">
+                    {`${t.oefeningen.filterDurationLabel} ${t.oefeningen.filterMaxPlaceholder}`}
+                  </label>
+                  <input
+                    id="oefening-filter-duur-max"
+                    type="number"
+                    min={0}
+                    value={filters.duurMax ?? ''}
+                    onChange={(e) =>
+                      setFilters((f) => ({ ...f, duurMax: e.target.value === '' ? null : Number(e.target.value) }))
+                    }
+                    placeholder={t.oefeningen.filterMaxPlaceholder}
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
 
           <button
             type="button"
