@@ -514,3 +514,57 @@ niet in de eerste researcher-briefing — pas de backend-engineer signaleerde he
 de typecheck stukgegaan). Les: bij een datamodel-hernoeming die door meerdere lagen loopt,
 blijft een brede grep op het oude veld nodig tot vlak vóór het bouwen, niet alleen tijdens
 het onderzoek.
+
+## Feature: Filter op oefeningen bij toevoegen aan training (2026-08-04, commit `8402537`)
+Gebouwd via de volledige feature-factory-keten, met goedkeuringspauzes na de story en na de
+brief. Trainer kan in `OefeningPicker` (bottom-sheet bij "oefening toevoegen aan training")
+filteren op categorie, veldzone, en bereiken (min/max) voor aantal betrokken spelers en
+duur — gecombineerd met AND, ook met de bestaande naam-zoekbalk.
+
+### Datamodel & aanpak
+- **Geen datamodel- of API-wijziging.** Alle filters draaien op bestaande kolommen
+  (`categorie`, `veldzone`, `teams`, `aantal_neutralen`, `duur_min`); puur client-side
+  filteren op de al team-gescoped, al-geladen bibliotheek (`.eq('team_id', user.id)` in
+  `app/events/[id]/training-plan/page.tsx`).
+- **Nieuw, bewust apart bestand `lib/oefening-filter.ts`** (niet toegevoegd aan
+  `lib/oefening.ts`) — dat laatste bevat server-side validatiecode
+  (`validateDiagram`/`FORMATIONS_BY_TEAM_SIZE`) die je niet in de clientbundel wilt trekken.
+  Pure exports: `OefeningFilters`, `EMPTY_OEFENING_FILTERS`, `totaalAantalSpelers`,
+  `matchesRange`, `matchesOefeningFilters`, `filterOefeningen`.
+- **Som voor het aantallen-filter = `SOM(teams[].grootte) + aantal_neutralen`**, geen ander
+  veld telt mee. Lege `teams`-array (bv. warming-up) telt als `0 + aantal_neutralen`.
+- **Falsy-zero-valkuil bewust vermeden**: `aantalMin: 0` / `duurMin: 0` zijn geldige actieve
+  filters. Overal `!== null`-checks, nooit `if (min)`. Leeg getalveld → `null`
+  (`e.target.value === '' ? null : Number(e.target.value)`), nooit `0`.
+- **`veldzone: null` of `duur_min: null` matcht nooit een actief filter** op dat veld
+  (bewuste keuze: uitsluiten, niet meenemen). `min > max` levert stil nul matches op, geen
+  foutmelding.
+- **`OefeningPicker`-filterstate**: één `useState<OefeningFilters>(EMPTY_OEFENING_FILTERS)`
+  i.p.v. losse `useState`-regels per veld — voorkomt drift bij een toekomstig extra
+  filterveld. Reset bij sluiten gebeurt gratis via de bestaande conditionele
+  unmount/remount in `TrainingPlanEditor.tsx`, geen aparte resetlogica nodig.
+- **UI-labels bewust "Categorie" (niet "Type")** voor consistentie met de rest van de app.
+  Filters altijd zichtbaar (niet inklapbaar); geen "filters wissen"-knop (elk veld apart
+  terug te zetten); elk filterveld single-value (geen multi-select).
+- Nieuwe i18n-keys (`filterAll`, `filterCategoryLabel`, `filterZoneLabel`,
+  `filterCountLabel`, `filterDurationLabel`, `filterMinPlaceholder`, `filterMaxPlaceholder`)
+  in de `oefeningen`-sectie van alle 5 `messages/*.ts`.
+- Alleen `OefeningPicker` (de add-to-training-flow) heeft de filters; de losstaande
+  bibliotheekpagina (`OefeningLibrary.tsx`) bewust niet meegenomen — apart op te pakken als
+  dat ooit gewenst is.
+
+### Gotcha: twee sessies tegelijk in dezelfde working directory
+Tijdens deze build liep **gelijktijdig een andere sessie** de "Meerdere formaties per
+oefening-team"-feature (zie hierboven, commit `fecf788`) in dezelfde checkout. Gevolg: onze
+nog niet -goedgekeurde, uncommitte wijzigingen aan `messages/nl.ts`/`en.ts`/`de.ts`/`fr.ts`
+werden meegezogen in hún commit (andere sessie deed kennelijk een brede `git add` vlak
+voordat wij die bestanden hadden gecommit). Geen dataverlies — inhoud klopte, tests bleven
+groen — maar wel een commit die iets bevat wat zijn eigen message niet dekt. Ook verklaart
+dit waarom de backend-engineer halverwege 24 typecheck-fouten zag (die andere sessie was nog
+midden in de formatie→formaties-refactor) en de frontend-engineer kort daarna 0 fouten (die
+sessie was toen al klaar en had gecommit). **Les: bij twee Claude Code-sessies tegelijk op
+dezelfde repo-checkout kunnen commits elkaars nog-niet-beoordeelde wijzigingen aan
+gedeelde bestanden (vooral `messages/*.ts`, dat elke i18n-feature raakt) absorberen.**
+Gebruik bij gelijktijdig werk aan dezelfde repo bij voorkeur losse worktrees/branches, of
+wees je ervan bewust dat `git log`/`git blame` even nagelopen moet worden vóór je commit als
+er buiten je eigen sessie om ook is gewerkt.
