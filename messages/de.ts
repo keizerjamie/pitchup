@@ -205,6 +205,13 @@ export const de: Dict = {
     spelerLicht: 'Hell',
     spelerOranje: 'Orange',
     spelerNeutraal: 'Neutral',
+    filterAll: '— alle —',
+    filterCategoryLabel: 'Kategorie',
+    filterZoneLabel: 'Feldzone',
+    filterCountLabel: 'Anzahl Spieler',
+    filterDurationLabel: 'Dauer (Min.)',
+    filterMinPlaceholder: 'min',
+    filterMaxPlaceholder: 'max',
   },
   periodization: {
     lastDone: 'Zuletzt gemacht',

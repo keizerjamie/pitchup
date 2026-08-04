@@ -30,39 +30,92 @@ describe('OefeningEditor — teams (dynamische lijst)', () => {
     expect(screen.getByText(nl.oefeningen.noTeamsHint)).toBeInTheDocument()
   })
 
-  it('grootte 7 kiezen → alleen 7v7-formaties selecteerbaar, niet-passende afwezig', () => {
+  it('grootte 7 kiezen → alleen 7v7-formaties zijn als toggle-knop aanwezig, alfabetisch gesorteerd', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
 
     const sizeSelect = screen.getAllByLabelText(nl.oefeningen.teamSize)[0]
     fireEvent.change(sizeSelect, { target: { value: '7' } })
 
-    const formatieSelect = screen.getAllByLabelText(nl.oefeningen.formation)[0] as HTMLSelectElement
-    expect(formatieSelect.disabled).toBe(false)
-
-    const optionLabels = within(formatieSelect).getAllByRole('option').map((o) => (o as HTMLOptionElement).value)
-    // 7v7-formaties (uit FORMATIONS_BY_TEAM_SIZE[7]) moeten aanwezig zijn...
-    expect(optionLabels).toContain('2-3-1')
-    expect(optionLabels).toContain('3-2-1')
+    const group = screen.getByRole('group', { name: nl.oefeningen.formations })
+    const buttonLabels = within(group).getAllByRole('button').map((b) => b.textContent)
+    // 7v7-formaties (uit FORMATIONS_BY_TEAM_SIZE[7]) moeten aanwezig zijn, alfabetisch...
+    expect(buttonLabels).toEqual(['2-3-1', '3-2-1'])
     // ...maar een 11-tal formatie die niet bij grootte 7 past, niet.
-    expect(optionLabels).not.toContain('4-3-3')
-    expect(optionLabels).not.toContain('4-4-2')
+    expect(buttonLabels).not.toContain('4-3-3')
+    expect(buttonLabels).not.toContain('4-4-2')
   })
 
-  it('reset de formatie wanneer de teamgrootte wijzigt naar een niet-passende maat', () => {
+  it('meerdere toggles aanklikken selecteert beide en levert beide keys op in de submit-payload', async () => {
+    const { onSubmit } = renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Positiespel' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '2-3-1' }))
+    fireEvent.click(screen.getByRole('button', { name: '3-2-1' }))
+
+    expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 7, formaties: ['2-3-1', '3-2-1'] }])
+  })
+
+  it('"Alles selecteren" selecteert alle formaties van die grootte, submit bevat alle keys, en de knop wordt daarna disabled', async () => {
+    const { onSubmit } = renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Positiespel' } })
+
+    const selectAllButton = screen.getByText(nl.oefeningen.selectAllFormations)
+    expect(selectAllButton).not.toBeDisabled()
+    fireEvent.click(selectAllButton)
+
+    expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(nl.oefeningen.selectAllFormations)).toBeDisabled()
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 7, formaties: ['2-3-1', '3-2-1'] }])
+  })
+
+  it('teamgrootte wijzigen naar een niet-passende maat laat niet-passende formaties automatisch vervallen', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
 
     const sizeSelect = screen.getAllByLabelText(nl.oefeningen.teamSize)[0]
     fireEvent.change(sizeSelect, { target: { value: '7' } })
-    const formatieSelect = screen.getAllByLabelText(nl.oefeningen.formation)[0] as HTMLSelectElement
-    fireEvent.change(formatieSelect, { target: { value: '2-3-1' } })
-    expect(formatieSelect.value).toBe('2-3-1')
+    fireEvent.click(screen.getByRole('button', { name: '2-3-1' }))
+    expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
 
-    // Wissel naar grootte 6 — '2-3-1' bestaat niet voor 6, dus moet resetten naar leeg.
+    // Wissel naar grootte 6 — '2-3-1' bestaat niet voor 6, dus moet vervallen.
     fireEvent.change(sizeSelect, { target: { value: '6' } })
-    const formatieSelectAfter = screen.getAllByLabelText(nl.oefeningen.formation)[0] as HTMLSelectElement
-    expect(formatieSelectAfter.value).toBe('')
+    const group = screen.getByRole('group', { name: nl.oefeningen.formations })
+    within(group).getAllByRole('button').forEach((b) => {
+      expect(b).toHaveAttribute('aria-pressed', 'false')
+    })
+  })
+
+  it('geen teamgrootte gekozen → geen toggle-knoppen zichtbaar, "Alles selecteren" disabled', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+
+    expect(screen.queryByRole('group', { name: nl.oefeningen.formations })).not.toBeInTheDocument()
+    expect(screen.getByText(nl.oefeningen.selectAllFormations)).toBeDisabled()
+  })
+
+  it('nieuw team start met een lege formaties-selectie (niets auto-geselecteerd)', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
+
+    const group = screen.getByRole('group', { name: nl.oefeningen.formations })
+    within(group).getAllByRole('button').forEach((b) => {
+      expect(b).toHaveAttribute('aria-pressed', 'false')
+    })
   })
 
   it('ondersteunt meerdere teams met verschillende groottes tegelijk (asymmetrie)', () => {
@@ -78,9 +131,9 @@ describe('OefeningEditor — teams (dynamische lijst)', () => {
     fireEvent.change(sizeSelects[1], { target: { value: '6' } })
     fireEvent.change(sizeSelects[2], { target: { value: '8' } })
 
-    const formatieSelects = screen.getAllByLabelText(nl.oefeningen.formation) as HTMLSelectElement[]
-    fireEvent.change(formatieSelects[0], { target: { value: '2-1' } })
-    fireEvent.change(formatieSelects[1], { target: { value: '3-2' } })
+    const groups = screen.getAllByRole('group', { name: nl.oefeningen.formations })
+    fireEvent.click(within(groups[0]).getByRole('button', { name: '2-1' }))
+    fireEvent.click(within(groups[1]).getByRole('button', { name: '3-2' }))
     // Team 3 blijft zonder formatie (mag leeg).
 
     expect((screen.getAllByLabelText(nl.oefeningen.teamSize)[0] as HTMLSelectElement).value).toBe('4')
@@ -135,7 +188,7 @@ describe('OefeningEditor — overige velden', () => {
 
     fireEvent.click(screen.getByText(nl.trainingPlan.save))
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
-    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 5, formatie: null }])
+    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 5, formaties: [] }])
   })
 
   it('toont een foutmelding wanneer onSubmit faalt, zonder de sheet te sluiten', async () => {

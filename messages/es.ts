@@ -206,6 +206,13 @@ export const es: Dict = {
     spelerLicht: 'Claro',
     spelerOranje: 'Naranja',
     spelerNeutraal: 'Neutral',
+    filterAll: '— todas —',
+    filterCategoryLabel: 'Categoría',
+    filterZoneLabel: 'Zona del campo',
+    filterCountLabel: 'Número de jugadores',
+    filterDurationLabel: 'Duración (min)',
+    filterMinPlaceholder: 'min',
+    filterMaxPlaceholder: 'max',
   },
   periodization: {
     lastDone: 'Última vez',

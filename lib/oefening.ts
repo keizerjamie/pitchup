@@ -9,6 +9,8 @@ import {
   VALID_VELDZONES,
   FORMATIONS_BY_TEAM_SIZE,
   isFormationValidForSize,
+  formationsForSize,
+  normalizeOefeningTeam,
 } from '@/lib/types'
 import { validateDiagram } from '@/lib/diagram'
 
@@ -56,12 +58,19 @@ export function validateOefening(input: OefeningInput): ValidatedOefening {
 
   const rawTeams = Array.isArray(input.teams) ? input.teams.slice(0, 6) : []
   const teams: OefeningTeam[] = rawTeams.map((tm) => {
-    const grootte = Number(tm?.grootte)
+    // Dual-read + strip onbekende velden: behoud alleen {grootte, formaties}.
+    const { grootte, formaties } = normalizeOefeningTeam(tm)
     if (!VALID_SIZES.includes(grootte)) throw new Error('Ongeldige teamgrootte')
-    const formatie = tm?.formatie ?? null
-    if (!isFormationValidForSize(grootte, formatie)) throw new Error('Formatie past niet bij teamgrootte')
-    // Strip onbekende velden: behoud alleen {grootte, formatie}.
-    return { grootte, formatie }
+    // Élke waarde valideren, niet alleen de eerste.
+    for (const key of formaties) {
+      if (!isFormationValidForSize(grootte, key)) throw new Error('Formatie past niet bij teamgrootte')
+    }
+    // Canonieke opslagvolgorde: alfabetisch op label, altijd als key opgeslagen
+    // (een binnengekomen label wordt zo naar zijn key genormaliseerd).
+    const canoniek = formationsForSize(grootte)
+      .filter((f) => formaties.includes(f.key) || formaties.includes(f.label))
+      .map((f) => f.key)
+    return { grootte, formaties: canoniek }
   })
 
   const aantal_neutralen = Math.max(0, Math.min(30, Math.floor(Number(input.aantal_neutralen) || 0)))

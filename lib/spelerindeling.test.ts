@@ -77,8 +77,8 @@ describe('validateSpelerindeling', () => {
 // ────────────────────────────────────────────────
 describe('autoAssignTeams', () => {
   const teams2x2: OefeningTeam[] = [
-    { grootte: 2, formatie: null },
-    { grootte: 2, formatie: null },
+    { grootte: 2, formaties: [] },
+    { grootte: 2, formaties: [] },
   ]
 
   it('verdeelt aanwezigen gebalanceerd over teams-met-grootte (snake op rating)', () => {
@@ -128,8 +128,8 @@ describe('autoAssignTeams', () => {
 
   it('legt het overschot in een team zonder grootte (losse plaatsing, onbeperkt)', () => {
     const teams: OefeningTeam[] = [
-      { grootte: 2, formatie: null },
-      { grootte: 0, formatie: null }, // losse plaatsing
+      { grootte: 2, formaties: [] },
+      { grootte: 0, formaties: [] }, // losse plaatsing
     ]
     const present = [
       makePlayer({ id: 'a', rating: 9 }),
@@ -160,8 +160,8 @@ describe('autoAssignTeams', () => {
 
   it('verdeelt het overschot gebalanceerd over meerdere losse teams', () => {
     const teams: OefeningTeam[] = [
-      { grootte: 0, formatie: null },
-      { grootte: 0, formatie: null },
+      { grootte: 0, formaties: [] },
+      { grootte: 0, formaties: [] },
     ]
     const present = [
       makePlayer({ id: 'a', rating: 9 }),
@@ -185,8 +185,8 @@ describe('autoAssignTeams', () => {
 // één DOORLOPENDE snake-draft over alle open plekken.
 describe('autoAssignTeams — spreiding per positiegroep', () => {
   const teams2x3: OefeningTeam[] = [
-    { grootte: 3, formatie: null },
-    { grootte: 3, formatie: null },
+    { grootte: 3, formaties: [] },
+    { grootte: 3, formaties: [] },
   ]
 
   it('zet twee keepers in verschillende teams (kerngeval)', () => {
@@ -215,8 +215,8 @@ describe('autoAssignTeams — spreiding per positiegroep', () => {
 
   it('spreidt elke positiegroep: 4 verdedigers en 4 aanvallers over 2 teams → 2+2 per team', () => {
     const teams2x4: OefeningTeam[] = [
-      { grootte: 4, formatie: null },
-      { grootte: 4, formatie: null },
+      { grootte: 4, formaties: [] },
+      { grootte: 4, formaties: [] },
     ]
     const present = [
       makePlayer({ id: 'v9', position: 'Centrale verdediger', rating: 9 }),
@@ -279,8 +279,8 @@ describe('autoAssignTeams — spreiding per positiegroep', () => {
 
   it('verdeelt ook spelers zonder (bekende) positie — de rest-groep gaat als laatste', () => {
     const teams2x2: OefeningTeam[] = [
-      { grootte: 2, formatie: null },
-      { grootte: 2, formatie: null },
+      { grootte: 2, formaties: [] },
+      { grootte: 2, formaties: [] },
     ]
     const present = [
       makePlayer({ id: 'k1', position: 'Keeper', rating: 8 }),
@@ -319,9 +319,9 @@ describe('autoAssignTeams — spreiding per positiegroep', () => {
 
   it('legt het overschot in het losse team en houdt de keepers gesplitst', () => {
     const teams: OefeningTeam[] = [
-      { grootte: 2, formatie: null },
-      { grootte: 2, formatie: null },
-      { grootte: 0, formatie: null }, // losse plaatsing
+      { grootte: 2, formaties: [] },
+      { grootte: 2, formaties: [] },
+      { grootte: 0, formaties: [] }, // losse plaatsing
     ]
     const present = [
       makePlayer({ id: 'k1', position: 'Keeper', rating: 8 }),
@@ -342,8 +342,8 @@ describe('autoAssignTeams — spreiding per positiegroep', () => {
 
   it('laat het overschot in de pool als er geen los team is (met positiegroepen)', () => {
     const teams2x2: OefeningTeam[] = [
-      { grootte: 2, formatie: null },
-      { grootte: 2, formatie: null },
+      { grootte: 2, formaties: [] },
+      { grootte: 2, formaties: [] },
     ]
     const present = [
       makePlayer({ id: 'k1', position: 'Keeper', rating: 8 }),

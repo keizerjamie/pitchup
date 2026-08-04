@@ -176,7 +176,7 @@ function renderDiagramEditor(
 // ────────────────────────────────────────────────────────────────────────────
 describe('Criterium 1 — auto-opzet bij openen zonder opgeslagen tekening', () => {
   it('DiagramEditor genereert bij mount (value=null) automatisch uit teams + neutralen + veldzone samen', () => {
-    const teams: OefeningTeam[] = [{ grootte: 4, formatie: '2-1' }]
+    const teams: OefeningTeam[] = [{ grootte: 4, formaties: ['2-1'] }]
     const onChange = vi.fn()
     renderDiagramEditor(null, onChange, { teams, aantalNeutralen: 3, veldzone: 'rechts' })
 
@@ -190,7 +190,7 @@ describe('Criterium 1 — auto-opzet bij openen zonder opgeslagen tekening', () 
   })
 
   it('generateDiagram: veldzone beïnvloedt daadwerkelijk de x-posities (links vs. rechts leveren andere coördinaten)', () => {
-    const teams: OefeningTeam[] = [{ grootte: 4, formatie: null }]
+    const teams: OefeningTeam[] = [{ grootte: 4, formaties: [] }]
     const links = generateDiagram(teams, 0, 'links')
     const rechts = generateDiagram(teams, 0, 'rechts')
     expect(links.markers.every((m) => m.x <= 55)).toBe(true)
@@ -230,7 +230,7 @@ describe('Criterium 4/13 — bestaande tekening bij openen tonen, niet regenerer
       lijnen: [],
     }
     const onChange = vi.fn()
-    renderDiagramEditor(saved, onChange, { teams: [{ grootte: 4, formatie: null }], aantalNeutralen: 2, veldzone: 'links' })
+    renderDiagramEditor(saved, onChange, { teams: [{ grootte: 4, formaties: [] }], aantalNeutralen: 2, veldzone: 'links' })
 
     expect(onChange).not.toHaveBeenCalled()
     const marker = screen.getByTestId('diagram-marker-0').querySelector('circle')!
@@ -307,7 +307,7 @@ describe('Criterium 7 — materiaalwijziging blijft behouden na opslaan en herop
   it('een verplaatst materiaal-item komt terecht in de opgeslagen input én verschijnt op de nieuwe positie bij heropenen', async () => {
     const initial = makeOefening({
       id: 'o1',
-      teams: [{ grootte: 4, formatie: null }],
+      teams: [{ grootte: 4, formaties: [] }],
       diagram: { markers: [], materiaal: [{ type: 'pion', x: 5, y: 5 }], lijnen: [] },
     })
     const onSubmit = vi.fn().mockResolvedValue(undefined)
@@ -497,7 +497,7 @@ describe('Criterium 15/16/17 — zelfde tekening, read-only, op bibliotheekkaart
   }
 
   it('Criterium 16 — bibliotheekkaart toont een read-only DiagramView (geen FormationField-fallback) wanneer er een tekening is', () => {
-    const oefening: OefeningWithUsage = { ...makeOefening({ diagram, teams: [{ grootte: 4, formatie: '2-1' }] }), koppelingCount: 0 }
+    const oefening: OefeningWithUsage = { ...makeOefening({ diagram, teams: [{ grootte: 4, formaties: ['2-1'] }] }), koppelingCount: 0 }
     render(<DictProvider dict={nl}><OefeningLibrary oefeningen={[oefening]} /></DictProvider>)
 
     const view = screen.getByTestId('diagram-view')

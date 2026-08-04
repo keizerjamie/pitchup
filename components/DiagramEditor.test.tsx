@@ -54,7 +54,7 @@ function renderEditor(value: Diagram | null, onChange = vi.fn(), overrides: { te
 
 describe('DiagramEditor — auto-genereren bij mount', () => {
   it('genereert automatisch een diagram wanneer value null is, en niet opnieuw bij een volgende render met nog steeds null', () => {
-    const teams: OefeningTeam[] = [{ grootte: 4, formatie: null }]
+    const teams: OefeningTeam[] = [{ grootte: 4, formaties: [] }]
     const onChange = vi.fn()
     const { rerender } = renderEditor(null, onChange, { teams })
 
@@ -352,7 +352,7 @@ describe('DiagramEditor — opnieuw genereren', () => {
   })
 
   it('bevestigen roept onChange aan met een vers gegenereerd diagram (via generateDiagram)', () => {
-    const teams: OefeningTeam[] = [{ grootte: 4, formatie: '2-1' }]
+    const teams: OefeningTeam[] = [{ grootte: 4, formaties: ['2-1'] }]
     const value: Diagram = { markers: [], materiaal: [{ type: 'pion', x: 1, y: 1 }], lijnen: [] }
     const { onChange } = renderEditor(value, vi.fn(), { teams, aantalNeutralen: 2, veldzone: 'links' })
 

@@ -1,5 +1,7 @@
 import {
   formationsForSize,
+  basisFormatieDef,
+  normalizeOefeningTeam,
   DIAGRAM_MARKER_ROLLEN,
   DIAGRAM_MATERIAAL_TYPES,
   DIAGRAM_DOEL_VARIANTEN,
@@ -89,14 +91,16 @@ export function generateDiagram(
   void breedteM // bewust ongebruikt (no-op, zie hierboven)
   void lengteM
   // Behoud elk team met een bekende grootte (formationsForSize niet-leeg). Teams
-  // MET een geldige formatie krijgen die formatie-vorm; teams zonder (formatie
-  // null of onbekende key) krijgen een losse rij/grid van `grootte` spelers.
+  // MET minstens één geldige formatie krijgen de vorm van hun BASISformatie (de
+  // alfabetisch eerste van de selectie); teams zonder (lege selectie of alleen
+  // onbekende keys) krijgen een losse rij/grid van `grootte` spelers.
+  // normalizeOefeningTeam is hier het dual-read-vangnet: er kan nog legacy
+  // {grootte, formatie} uit de database of van een oudere client binnenkomen.
   const usable = (Array.isArray(teams) ? teams : [])
     .map((t) => {
-      const grootte = Number(t?.grootte)
-      const list = formationsForSize(grootte)
-      if (list.length === 0) return null // onbekende grootte → overslaan
-      const def: FormationDef | null = (t?.formatie ? list.find((f) => f.key === t.formatie) : undefined) ?? null
+      const { grootte, formaties } = normalizeOefeningTeam(t)
+      if (formationsForSize(grootte).length === 0) return null // onbekende grootte → overslaan
+      const def: FormationDef | null = basisFormatieDef(grootte, formaties)
       return { grootte, def }
     })
     .filter((u): u is { grootte: number; def: FormationDef | null } => u !== null)

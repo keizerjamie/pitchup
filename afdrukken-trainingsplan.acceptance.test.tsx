@@ -255,7 +255,7 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): Train
       lengte_m: 30,
       orientatie: 'vrij',
       veldzone: null,
-      teams: [{ grootte: 2, formatie: null }, { grootte: 2, formatie: null }],
+      teams: [{ grootte: 2, formaties: [] }, { grootte: 2, formaties: [] }],
       aantal_neutralen: 0,
       diagram: null,
       created_at: '2024-01-01T00:00:00Z',
@@ -727,7 +727,7 @@ describe('AC9 — oefeningdetails zichtbaar, zelfde volgorde als scherm', () => 
       oefeningen: {
         ...makeKoppeling().oefeningen,
         diagram: null,
-        teams: [{ grootte: 4, formatie: null }],
+        teams: [{ grootte: 4, formaties: [] }],
       },
     })
     renderPlan({ initialOefeningen: [koppeling] })
@@ -889,7 +889,7 @@ describe('A1.2 — diagram- en formatieveld-breedte op de afdruk (TrainingPlanEd
 
   it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[30mm]! mee', () => {
     const koppeling = makeKoppeling({
-      oefeningen: { ...makeKoppeling().oefeningen, diagram: null, teams: [{ grootte: 4, formatie: null }] },
+      oefeningen: { ...makeKoppeling().oefeningen, diagram: null, teams: [{ grootte: 4, formaties: [] }] },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const field = screen.getByTestId('formation-field')

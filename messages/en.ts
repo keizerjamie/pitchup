@@ -296,6 +296,13 @@ export const en: Dict = {
     spelerLicht: 'Light',
     spelerOranje: 'Orange',
     spelerNeutraal: 'Neutral',
+    filterAll: '— all —',
+    filterCategoryLabel: 'Category',
+    filterZoneLabel: 'Field zone',
+    filterCountLabel: 'Number of players',
+    filterDurationLabel: 'Duration (min)',
+    filterMinPlaceholder: 'min',
+    filterMaxPlaceholder: 'max',
   },
   periodization: {
     lastDone: 'Last done',

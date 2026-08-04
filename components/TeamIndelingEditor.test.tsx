@@ -69,8 +69,8 @@ const players: Player[] = [
 ]
 
 const twoTeams: OefeningTeam[] = [
-  { grootte: 2, formatie: null },
-  { grootte: 2, formatie: null },
+  { grootte: 2, formaties: [] },
+  { grootte: 2, formaties: [] },
 ]
 
 function renderEditor(overrides: {
@@ -390,7 +390,7 @@ describe('TeamIndelingEditor — teams verkleind: spelers uit weggevallen teams 
     // Slechts 1 team over; het weggevallen 2e team bevatte een id die niet in
     // `players` voorkomt (dus nooit in de pool zichtbaar wordt).
     renderEditor({
-      teams: [{ grootte: 2, formatie: null }],
+      teams: [{ grootte: 2, formaties: [] }],
       initialIndeling: [['p1'], ['ghost-not-present']],
     })
 

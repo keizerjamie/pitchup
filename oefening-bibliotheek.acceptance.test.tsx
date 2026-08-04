@@ -148,10 +148,10 @@ describe('AC1 — oefening opslaan zonder verplichte training-koppeling', () => 
 // bestaande oefening (bewerk-modus van OefeningEditor).
 // ────────────────────────────────────────────────
 describe('AC2 — team-/formatiekeuzes worden getoond bij het heropenen van een oefening', () => {
-  it('OefeningEditor toont bij bewerken de opgeslagen teamgrootte, formatie en aantal neutralen', () => {
+  it('OefeningEditor toont bij bewerken de opgeslagen teamgrootte, meerdere formaties (toggles aan) en aantal neutralen', () => {
     const existing = makeOefening({
       naam: 'Positiespel',
-      teams: [{ grootte: 7, formatie: '2-3-1' }],
+      teams: [{ grootte: 7, formaties: ['2-3-1', '3-2-1'] }],
       aantal_neutralen: 2,
     })
     render(
@@ -161,7 +161,8 @@ describe('AC2 — team-/formatiekeuzes worden getoond bij het heropenen van een 
     )
     expect((screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`) as HTMLInputElement).value).toBe('Positiespel')
     expect((screen.getAllByLabelText(nl.oefeningen.teamSize)[0] as HTMLSelectElement).value).toBe('7')
-    expect((screen.getAllByLabelText(nl.oefeningen.formation)[0] as HTMLSelectElement).value).toBe('2-3-1')
+    expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'true')
     expect((screen.getByLabelText(nl.oefeningen.neutralsLabel) as HTMLInputElement).value).toBe('2')
   })
 })
@@ -236,7 +237,7 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
 
   it('(UI) trainingsschema toont de opgeslagen team-/formatiekeuzes van de gekoppelde oefening', () => {
     const koppeling = makeKoppeling({
-      oefening: { naam: 'Positiespel', teams: [{ grootte: 6, formatie: '3-2' }] },
+      oefening: { naam: 'Positiespel', teams: [{ grootte: 6, formaties: ['3-2'] }] },
     })
     render(
       <DictProvider dict={nl}>
@@ -375,7 +376,7 @@ describe('AC8/AC17 — spelerindeling raakt alleen de koppeling, nooit de biblio
       tables: {
         events: { data: { id: 'e1' } },
         training_oefeningen: {
-          data: { id: 'k1', oefeningen: { teams: [{ grootte: 6, formatie: null }, { grootte: 6, formatie: null }] } },
+          data: { id: 'k1', oefeningen: { teams: [{ grootte: 6, formaties: [] }, { grootte: 6, formaties: [] }] } },
           error: null,
         },
         players: { data: [{ id: 'p1' }, { id: 'p2' }] },
@@ -429,7 +430,7 @@ describe('AC16 — periodiseringstelling telt de koppeling, niet naam/beschrijvi
       tables: {
         events: { data: [{ id: 't1' }] },
         training_oefeningen: {
-          data: [{ event_id: 't1', oefeningen: { categorie: 'partijen_groot', naam: 'Rondo', beschrijving: 'v1', teams: [{ grootte: 6, formatie: '3-2' }] } }],
+          data: [{ event_id: 't1', oefeningen: { categorie: 'partijen_groot', naam: 'Rondo', beschrijving: 'v1', teams: [{ grootte: 6, formaties: ['3-2'] }] } }],
         },
       },
     })
@@ -439,7 +440,7 @@ describe('AC16 — periodiseringstelling telt de koppeling, niet naam/beschrijvi
       tables: {
         events: { data: [{ id: 't1' }] },
         training_oefeningen: {
-          data: [{ event_id: 't1', oefeningen: { categorie: 'partijen_groot', naam: 'Andere naam', beschrijving: 'v2', teams: [{ grootte: 4, formatie: '2-1' }] } }],
+          data: [{ event_id: 't1', oefeningen: { categorie: 'partijen_groot', naam: 'Andere naam', beschrijving: 'v2', teams: [{ grootte: 4, formaties: ['2-1'] }] } }],
         },
       },
     })

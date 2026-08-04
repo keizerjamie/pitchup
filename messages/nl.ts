@@ -312,6 +312,13 @@ export const nl = {
     spelerLicht: 'Licht',
     spelerOranje: 'Oranje',
     spelerNeutraal: 'Neutraal',
+    filterAll: '— alle —',
+    filterCategoryLabel: 'Categorie',
+    filterZoneLabel: 'Veldzone',
+    filterCountLabel: 'Aantal spelers',
+    filterDurationLabel: 'Duur (min)',
+    filterMinPlaceholder: 'min',
+    filterMaxPlaceholder: 'max',
   },
   periodization: {
     lastDone: 'Laatst gedaan',

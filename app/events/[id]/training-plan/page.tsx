@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
+import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams } from '@/lib/types'
 import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
 import BackButton from '@/components/BackButton'
@@ -66,8 +66,17 @@ export default async function TrainingPlanPage({ params }: Props) {
 
   const latestMeting = metingResult.data
   // Koppelingen aan deze training, elk met de gejoinde bibliotheek-oefening.
-  const oefeningen = (oefeningenResult.data ?? []) as unknown as TrainingOefeningWithData[]
-  const library: Oefening[] = libraryResult.data ?? []
+  // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie};
+  // normaliseer naar {grootte, formaties} vóórdat de UI de data ziet — zowel op
+  // de gejoinde koppelingen als op de losse bibliotheeklijst.
+  const oefeningen = ((oefeningenResult.data ?? []) as unknown as TrainingOefeningWithData[]).map((k) => ({
+    ...k,
+    oefeningen: { ...k.oefeningen, teams: normalizeOefeningTeams(k.oefeningen?.teams) },
+  }))
+  const library: Oefening[] = (libraryResult.data ?? []).map((o) => ({
+    ...o,
+    teams: normalizeOefeningTeams(o.teams),
+  }))
 
   // ── Current steps per category, as of this training's date ──
   const occurrences = latestMetingEvent

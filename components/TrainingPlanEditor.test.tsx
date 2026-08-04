@@ -60,7 +60,7 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): Train
       lengte_m: null,
       orientatie: 'vrij',
       veldzone: null,
-      teams: [{ grootte: 1, formatie: null }],
+      teams: [{ grootte: 1, formaties: [] }],
       aantal_neutralen: 0,
       diagram: null,
       created_at: '2024-01-01T00:00:00Z',

@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Oefening, PERIODIZATION_CATEGORIES, formationsForSize } from '@/lib/types'
+import { Oefening, PERIODIZATION_CATEGORIES, basisFormatieDef } from '@/lib/types'
 import type { OefeningInput } from '@/lib/oefening'
 import { createOefening, updateOefening, deleteOefening } from '@/app/actions/oefening-library'
 import FormationField from '@/components/FormationField'
@@ -161,14 +161,17 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                 </div>
               ) : o.teams.length > 0 && (
                 <div className="flex flex-wrap gap-3 mt-3 min-w-0">
-                  {o.teams.map((tm, i) => (
-                    <FormationField
-                      key={i}
-                      positions={tm.formatie ? (formationsForSize(tm.grootte).find((f) => f.key === tm.formatie)?.positions ?? []) : []}
-                      label={`${tm.grootte}${tm.formatie ? ` · ${tm.formatie}` : ''}`}
-                      sizePx={72}
-                    />
-                  ))}
+                  {o.teams.map((tm, i) => {
+                    const basis = basisFormatieDef(tm.grootte, tm.formaties)
+                    return (
+                      <FormationField
+                        key={i}
+                        positions={basis?.positions ?? []}
+                        label={`${tm.grootte}${basis ? ` · ${basis.label}` : ''}`}
+                        sizePx={72}
+                      />
+                    )
+                  })}
                 </div>
               )}
 

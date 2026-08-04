@@ -137,10 +137,13 @@ export interface MetingData {
   created_at: string
 }
 
-// Eén team binnen een oefening: aantal spelers + optioneel een gekozen formatie.
+// Eén team binnen een oefening: aantal spelers + 0..n gekozen formaties.
+// Canonieke opslagvolgorde van `formaties` = alfabetisch op label (zie
+// validateOefening in lib/oefening.ts); de eerste is de "basisformatie" die het
+// diagram en de weergave voeden (zie basisFormatieDef).
 export interface OefeningTeam {
   grootte: number
-  formatie: string | null
+  formaties: string[] // lege array = "geen formatie" (los getekend, geen labels)
 }
 
 // ────────────────────────────────────────────────
@@ -574,9 +577,56 @@ export const FORMATIONS_BY_TEAM_SIZE: Record<number, FormationDef[]> = {
   11: FORMATIONS_11,
 }
 
-// Formaties beschikbaar voor een gegeven teamgrootte.
+// Alfabetisch op label; bij gelijk label op key als tiebreak (stabiel).
+const byLabel = (a: FormationDef, b: FormationDef) =>
+  a.label.localeCompare(b.label, 'nl') || a.key.localeCompare(b.key, 'nl')
+
+// Eén keer bij module-init gesorteerde KOPIEËN. FORMATIONS en
+// FORMATIONS_BY_TEAM_SIZE zelf blijven ongemuteerd: die worden ook los gebruikt
+// (o.a. door components/LineupBuilder.tsx voor de wedstrijdopstelling), waar de
+// oorspronkelijke volgorde betekenis heeft.
+const FORMATIONS_SORTED_BY_TEAM_SIZE: Record<number, FormationDef[]> = Object.fromEntries(
+  Object.entries(FORMATIONS_BY_TEAM_SIZE).map(([n, list]) => [Number(n), [...list].sort(byLabel)]),
+)
+const NO_FORMATIONS: FormationDef[] = []
+
+// Formaties beschikbaar voor een gegeven teamgrootte, alfabetisch op label.
 export function formationsForSize(n: number): FormationDef[] {
-  return FORMATIONS_BY_TEAM_SIZE[n] ?? []
+  return FORMATIONS_SORTED_BY_TEAM_SIZE[n] ?? NO_FORMATIONS
+}
+
+// De alfabetisch eerste (op label) geselecteerde formatie van dit team; die is
+// de basis voor het diagram en voor de weergave in bibliotheek/print/indeling.
+// Tolerant: null/undefined/lege selectie → null (= "geen formatie").
+export function basisFormatieDef(
+  grootte: number,
+  formaties: string[] | null | undefined,
+): FormationDef | null {
+  const sel = formaties ?? []
+  if (sel.length === 0) return null
+  return formationsForSize(grootte).find((f) => sel.includes(f.key) || sel.includes(f.label)) ?? null
+}
+
+// Dual-read: accepteert zowel de nieuwe vorm {grootte, formaties: string[]} als
+// de legacy vorm {grootte, formatie: string|null} uit bestaande JSONB-rijen.
+// Strippt al het andere. Er is bewust GEEN datamigratie: bij de volgende save
+// wordt de nieuwe vorm weggeschreven.
+export function normalizeOefeningTeam(raw: unknown): OefeningTeam {
+  const r = (raw ?? {}) as { grootte?: unknown; formaties?: unknown; formatie?: unknown }
+  const grootte = Number(r.grootte)
+  let keys: string[]
+  if (Array.isArray(r.formaties)) {
+    keys = r.formaties.filter((v): v is string => typeof v === 'string' && v !== '')
+  } else if (typeof r.formatie === 'string' && r.formatie !== '') {
+    keys = [r.formatie]
+  } else {
+    keys = []
+  }
+  return { grootte, formaties: [...new Set(keys)] }
+}
+
+export function normalizeOefeningTeams(raw: unknown): OefeningTeam[] {
+  return Array.isArray(raw) ? raw.slice(0, 6).map(normalizeOefeningTeam) : []
 }
 
 // Een formatie is geldig als hij null is (geen keuze) of als hij als key/label

@@ -10,6 +10,7 @@ import {
   PERIODIZATION_CATEGORIES,
   FORMATIONS_BY_TEAM_SIZE,
   formationsForSize,
+  basisFormatieDef,
   isFormationValidForSize,
 } from '@/lib/types'
 import type { OefeningInput } from '@/lib/oefening'
@@ -26,7 +27,7 @@ const MAX_TEAMS = 6
 // gekozen grootte worden meegenomen in de uiteindelijke OefeningInput.
 interface TeamRow {
   grootte: number | null
-  formatie: string | null
+  formaties: string[]
 }
 
 interface Props {
@@ -41,7 +42,7 @@ interface Props {
 }
 
 function teamsToRows(teams: OefeningTeam[]): TeamRow[] {
-  return teams.map((t) => ({ grootte: t.grootte, formatie: t.formatie }))
+  return teams.map((t) => ({ grootte: t.grootte, formaties: t.formaties ?? [] }))
 }
 
 export default function OefeningEditor({ initial, onCancel, onSubmit, presetCategorie, presetNaam }: Props) {
@@ -67,13 +68,13 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   // Teams zoals ze meegaan naar het diagram: alleen rijen met een gekozen
   // grootte (zelfde filter als handleSubmit hieronder).
   const diagramTeams: OefeningTeam[] = teams
-    .filter((tm): tm is { grootte: number; formatie: string | null } => tm.grootte !== null)
-    .map((tm) => ({ grootte: tm.grootte, formatie: tm.formatie }))
+    .filter((tm): tm is { grootte: number; formaties: string[] } => tm.grootte !== null)
+    .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties }))
 
   const catLabel = (key: string) => t.periodization.categories[key] ?? key
 
   function addTeam() {
-    setTeams((prev) => (prev.length >= MAX_TEAMS ? prev : [...prev, { grootte: null, formatie: null }]))
+    setTeams((prev) => (prev.length >= MAX_TEAMS ? prev : [...prev, { grootte: null, formaties: [] }]))
   }
 
   function removeTeam(index: number) {
@@ -83,13 +84,26 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   function handleTeamSizeChange(index: number, newSize: number | null) {
     setTeams((prev) => prev.map((tm, i) => {
       if (i !== index) return tm
-      const stillValid = isFormationValidForSize(newSize, tm.formatie)
-      return { grootte: newSize, formatie: stillValid ? tm.formatie : null }
+      const stillValid = tm.formaties.filter((key) => isFormationValidForSize(newSize, key))
+      return { grootte: newSize, formaties: stillValid }
     }))
   }
 
-  function handleTeamFormatieChange(index: number, formatie: string | null) {
-    setTeams((prev) => prev.map((tm, i) => (i === index ? { ...tm, formatie } : tm)))
+  function toggleTeamFormatie(index: number, key: string) {
+    setTeams((prev) => prev.map((tm, i) => {
+      if (i !== index) return tm
+      const formaties = tm.formaties.includes(key)
+        ? tm.formaties.filter((f) => f !== key)
+        : [...tm.formaties, key]
+      return { ...tm, formaties }
+    }))
+  }
+
+  function selectAllFormaties(index: number) {
+    setTeams((prev) => prev.map((tm, i) => {
+      if (i !== index || tm.grootte === null) return tm
+      return { ...tm, formaties: formationsForSize(tm.grootte).map((f) => f.key) }
+    }))
   }
 
   function handleSubmit() {
@@ -104,8 +118,8 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
       orientatie,
       veldzone,
       teams: teams
-        .filter((tm): tm is { grootte: number; formatie: string | null } => tm.grootte !== null)
-        .map((tm) => ({ grootte: tm.grootte, formatie: tm.formatie })),
+        .filter((tm): tm is { grootte: number; formaties: string[] } => tm.grootte !== null)
+        .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties })),
       aantal_neutralen: aantalNeutralen,
       diagram,
     }
@@ -288,9 +302,8 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
             <div className="space-y-3">
               {teams.map((team, i) => {
                 const formationOptions = team.grootte !== null ? formationsForSize(team.grootte) : []
-                const previewPositions = team.grootte !== null && team.formatie
-                  ? formationOptions.find((f) => f.key === team.formatie)?.positions ?? null
-                  : null
+                const allSelected = formationOptions.length > 0 && formationOptions.every((f) => team.formaties.includes(f.key))
+                const basis = team.grootte !== null ? basisFormatieDef(team.grootte, team.formaties) : null
                 return (
                   <div key={i} className="rounded-xl border border-[var(--border-soft)] p-3 space-y-2">
                     <div className="flex items-end gap-2">
@@ -308,21 +321,6 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                           ))}
                         </select>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <label htmlFor={`team-formatie-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.formation}</label>
-                        <select
-                          id={`team-formatie-${i}`}
-                          value={team.formatie ?? ''}
-                          onChange={(e) => handleTeamFormatieChange(i, e.target.value || null)}
-                          disabled={team.grootte === null}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface disabled:bg-surface-sunken disabled:text-faint"
-                        >
-                          <option value="">{t.oefeningen.noFormation}</option>
-                          {formationOptions.map((f) => (
-                            <option key={f.key} value={f.key}>{f.label}</option>
-                          ))}
-                        </select>
-                      </div>
                       <button
                         type="button"
                         onClick={() => removeTeam(i)}
@@ -334,8 +332,45 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                         </svg>
                       </button>
                     </div>
-                    {previewPositions && (
-                      <FormationField positions={previewPositions} label={`${team.grootte} · ${team.formatie}`} sizePx={110} />
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-semibold text-muted">{t.oefeningen.formations}</label>
+                        <button
+                          type="button"
+                          onClick={() => selectAllFormaties(i)}
+                          disabled={team.grootte === null || allSelected}
+                          className="text-[11px] font-semibold text-orange-600 hover:text-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {t.oefeningen.selectAllFormations}
+                        </button>
+                      </div>
+                      {team.grootte !== null && (
+                        <div role="group" aria-label={t.oefeningen.formations} className="flex flex-wrap gap-2">
+                          {formationOptions.map((f) => {
+                            const selected = team.formaties.includes(f.key)
+                            return (
+                              <button
+                                key={f.key}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => toggleTeamFormatie(i, f.key)}
+                                className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                                  selected
+                                    ? 'bg-orange-500 text-white border-orange-500'
+                                    : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                                }`}
+                              >
+                                {f.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {basis && (
+                      <FormationField positions={basis.positions} label={`${team.grootte} · ${basis.label}`} sizePx={110} />
                     )}
                   </div>
                 )

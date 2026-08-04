@@ -19,8 +19,8 @@ function within(m: { x: number; y: number }) {
 describe('generateDiagram', () => {
   it('plaatst één marker per speler + per neutrale (bij gevulde formaties)', () => {
     const teams: OefeningTeam[] = [
-      { grootte: 5, formatie: null },
-      { grootte: 7, formatie: null },
+      { grootte: 5, formaties: [] },
+      { grootte: 7, formaties: [] },
     ]
     const d = generateDiagram(teams, 3, null)
     expect(d.markers.length).toBe(5 + 7 + 3)
@@ -29,7 +29,7 @@ describe('generateDiagram', () => {
   })
 
   it('team zonder formatie: precies grootte losse spelers, geen keeper/label', () => {
-    const d = generateDiagram([{ grootte: 5, formatie: null }], 0, null)
+    const d = generateDiagram([{ grootte: 5, formaties: [] }], 0, null)
     const teamMarkers = d.markers.filter((m) => m.teamIndex === 0)
     expect(teamMarkers.length).toBe(5)
     expect(teamMarkers.every((m) => m.rol === 'speler')).toBe(true)
@@ -41,18 +41,49 @@ describe('generateDiagram', () => {
 
   it('team MET formatie: gebruikt de formatie-posities inclusief keeper en labels', () => {
     const def = formationsForSize(5)[0]
-    const d = generateDiagram([{ grootte: 5, formatie: def.key }], 0, null)
+    const d = generateDiagram([{ grootte: 5, formaties: [def.key] }], 0, null)
     const teamMarkers = d.markers.filter((m) => m.teamIndex === 0)
     expect(teamMarkers.length).toBe(def.positions.length)
     expect(teamMarkers.some((m) => m.rol === 'keeper')).toBe(true)
     expect(teamMarkers.some((m) => (m.label ?? '') !== '')).toBe(true)
   })
 
+  it('team met MEERDERE formaties: het diagram volgt de alfabetisch eerste (basis)', () => {
+    const alle = formationsForSize(4)
+    const basis = alle[0]
+    const tweede = alle[1]
+    // Beide selectievolgordes geven exact hetzelfde diagram: de basis wint.
+    const a = generateDiagram([{ grootte: 4, formaties: [tweede.key, basis.key] }], 0, null)
+    const b = generateDiagram([{ grootte: 4, formaties: [basis.key, tweede.key] }], 0, null)
+    const alleenBasis = generateDiagram([{ grootte: 4, formaties: [basis.key] }], 0, null)
+    expect(a).toEqual(alleenBasis)
+    expect(b).toEqual(alleenBasis)
+    // ...en niet dat van de tweede formatie.
+    expect(a).not.toEqual(generateDiagram([{ grootte: 4, formaties: [tweede.key] }], 0, null))
+  })
+
+  it('lege of onbekende selectie → losse-rij-tak, zonder te gooien', () => {
+    for (const formaties of [[], ['onzin'], ['4-3-3']]) {
+      const d = generateDiagram([{ grootte: 4, formaties }], 0, null)
+      const teamMarkers = d.markers.filter((m) => m.teamIndex === 0)
+      expect(teamMarkers.length).toBe(4)
+      expect(teamMarkers.every((m) => m.rol === 'speler')).toBe(true)
+      expect(teamMarkers.every((m) => m.label === undefined || m.label === '')).toBe(true)
+    }
+  })
+
+  it('dual-read: een legacy team {grootte, formatie} levert hetzelfde diagram als {formaties}', () => {
+    const legacy = [{ grootte: 4, formatie: '2-1' }] as unknown as OefeningTeam[]
+    expect(generateDiagram(legacy, 0, null)).toEqual(
+      generateDiagram([{ grootte: 4, formaties: ['2-1'] }], 0, null),
+    )
+  })
+
   it('slaat teams met onbekende grootte over', () => {
     const d = generateDiagram(
       [
-        { grootte: 5, formatie: null },
-        { grootte: 99, formatie: null },
+        { grootte: 5, formaties: [] },
+        { grootte: 99, formaties: [] },
       ],
       0,
       null,
@@ -66,8 +97,8 @@ describe('generateDiagram', () => {
     const size = 6
     const def = formationsForSize(size)[0]
     const teams: OefeningTeam[] = [
-      { grootte: size, formatie: def.key },
-      { grootte: size, formatie: def.key },
+      { grootte: size, formaties: [def.key] },
+      { grootte: size, formaties: [def.key] },
     ]
     const d = generateDiagram(teams, 0, null)
     const t0 = d.markers.filter((m) => m.teamIndex === 0)
@@ -94,15 +125,15 @@ describe('generateDiagram', () => {
   })
 
   it('1 team: alle markers liggen op de eigen (onder)helft (y>=70)', () => {
-    const d = generateDiagram([{ grootte: 7, formatie: null }], 0, null)
+    const d = generateDiagram([{ grootte: 7, formaties: [] }], 0, null)
     expect(d.markers.every((m) => m.y >= 70)).toBe(true)
   })
 
   it('3+ teams: markers vallen in disjuncte y-banden per team', () => {
     const teams: OefeningTeam[] = [
-      { grootte: 4, formatie: null },
-      { grootte: 4, formatie: null },
-      { grootte: 4, formatie: null },
+      { grootte: 4, formaties: [] },
+      { grootte: 4, formaties: [] },
+      { grootte: 4, formaties: [] },
     ]
     const d = generateDiagram(teams, 0, null)
     const bandH = 140 / 3
@@ -116,8 +147,8 @@ describe('generateDiagram', () => {
   it('gemengd: team 0 met formatie, team 1 zonder → team 1 losjes in de bovenhelft', () => {
     const def = formationsForSize(6)[0]
     const teams: OefeningTeam[] = [
-      { grootte: 6, formatie: def.key },
-      { grootte: 6, formatie: null },
+      { grootte: 6, formaties: [def.key] },
+      { grootte: 6, formaties: [] },
     ]
     const d = generateDiagram(teams, 0, null)
     const t0 = d.markers.filter((m) => m.teamIndex === 0)
@@ -143,9 +174,9 @@ describe('generateDiagram', () => {
 
   it('losse teams in 3+ opstelling vallen in disjuncte y-banden per team', () => {
     const teams: OefeningTeam[] = [
-      { grootte: 5, formatie: null },
-      { grootte: 5, formatie: null },
-      { grootte: 5, formatie: null },
+      { grootte: 5, formaties: [] },
+      { grootte: 5, formaties: [] },
+      { grootte: 5, formaties: [] },
     ]
     const d = generateDiagram(teams, 0, null)
     const bandH = 140 / 3
@@ -158,7 +189,7 @@ describe('generateDiagram', () => {
   })
 
   it('neutralen: rol neutraal, teamIndex null, rond y≈70 en binnen grenzen', () => {
-    const d = generateDiagram([{ grootte: 4, formatie: null }], 5, null)
+    const d = generateDiagram([{ grootte: 4, formaties: [] }], 5, null)
     const neutralen = d.markers.filter((m) => m.rol === 'neutraal')
     expect(neutralen.length).toBe(5)
     expect(neutralen.every((m) => m.teamIndex === null)).toBe(true)
@@ -167,7 +198,7 @@ describe('generateDiagram', () => {
   })
 
   it('veel neutralen (>10) worden over twee rijen verdeeld, allemaal binnen grenzen', () => {
-    const d = generateDiagram([{ grootte: 4, formatie: null }], 14, null)
+    const d = generateDiagram([{ grootte: 4, formaties: [] }], 14, null)
     const neutralen = d.markers.filter((m) => m.rol === 'neutraal')
     expect(neutralen.length).toBe(14)
     expect(neutralen.every(within)).toBe(true)
@@ -177,7 +208,7 @@ describe('generateDiagram', () => {
 
   it('alle coördinaten blijven binnen grenzen ongeacht veldzone', () => {
     for (const z of ['links', 'rechts', 'midden', 'strafschopgebied_links', 'strafschopgebied_rechts', null] as const) {
-      const d = generateDiagram([{ grootte: 8, formatie: null }, { grootte: 8, formatie: null }], 6, z)
+      const d = generateDiagram([{ grootte: 8, formaties: [] }, { grootte: 8, formaties: [] }], 6, z)
       expect(d.markers.every(within)).toBe(true)
     }
   })
@@ -311,7 +342,7 @@ describe('validateOefening — diagram integratie', () => {
   const base: OefeningInput = {
     naam: 'Test',
     categorie: 'overig',
-    teams: [{ grootte: 5, formatie: null }],
+    teams: [{ grootte: 5, formaties: [] }],
     aantal_neutralen: 0,
   }
 

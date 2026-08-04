@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Oefening } from '@/lib/types'
+import { Oefening, normalizeOefeningTeams } from '@/lib/types'
 import OefeningLibrary, { OefeningWithUsage } from '@/components/OefeningLibrary'
 
 export default async function OefeningenPage() {
@@ -13,7 +13,12 @@ export default async function OefeningenPage() {
     supabase.from('training_oefeningen').select('oefening_id').eq('team_id', user.id),
   ])
 
-  const oefeningen: Oefening[] = oefeningenData ?? []
+  // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie}.
+  // Normaliseer naar {grootte, formaties} vóórdat de UI de data ziet.
+  const oefeningen: Oefening[] = (oefeningenData ?? []).map((o) => ({
+    ...o,
+    teams: normalizeOefeningTeams(o.teams),
+  }))
 
   const usageCounts = new Map<string, number>()
   for (const row of koppelingenData ?? []) {

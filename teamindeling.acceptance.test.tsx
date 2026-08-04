@@ -102,8 +102,8 @@ const players4: Player[] = [
 ]
 
 const twoTeams: OefeningTeam[] = [
-  { grootte: 2, formatie: null },
-  { grootte: 2, formatie: null },
+  { grootte: 2, formaties: [] },
+  { grootte: 2, formaties: [] },
 ]
 
 function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
@@ -316,7 +316,7 @@ describe('AC6 — twee koppelingen van dezelfde bibliotheek-oefening zijn onafha
       kB: { id: 'kB', team_id: 'team-1', event_id: 'eB', spelerindeling: [] },
     }
     const events: Record<string, { id: string }> = { eA: { id: 'eA' }, eB: { id: 'eB' } }
-    const teams: OefeningTeam[] = [{ grootte: 6, formatie: null }, { grootte: 6, formatie: null }]
+    const teams: OefeningTeam[] = [{ grootte: 6, formaties: [] }, { grootte: 6, formaties: [] }]
     const calls = { update: [] as { id: string | null; teamIdEq: string | null; payload: Record<string, unknown> }[] }
 
     function eventsChain() {
@@ -453,7 +453,7 @@ describe('AC6 — twee koppelingen van dezelfde bibliotheek-oefening zijn onafha
 // ────────────────────────────────────────────────────────────────────────────
 describe('AC12 — alleen aanwezige spelers zijn input voor "genereer automatisch"', () => {
   it('"genereer automatisch" plaatst een niet-aanwezige speler nooit in een team', async () => {
-    const teams: OefeningTeam[] = [{ grootte: 3, formatie: null }]
+    const teams: OefeningTeam[] = [{ grootte: 3, formaties: [] }]
     const m = makeSupabase({ tables: tablesFor('k1', teams, [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }]) })
     use(m)
     const koppeling = makeKoppeling({ id: 'k1', oefening: { teams } })
@@ -522,7 +522,7 @@ describe('AC12 — alleen aanwezige spelers zijn input voor "genereer automatisc
 // ────────────────────────────────────────────────────────────────────────────
 describe('AC18 — team zonder vaste grootte ontvangt onbeperkt het overschot van automatisch indelen', () => {
   it('"genereer automatisch" plaatst het overschot in het losse team, zonder groottewaarschuwing', async () => {
-    const teams: OefeningTeam[] = [{ grootte: 1, formatie: null }, { grootte: 0, formatie: null }]
+    const teams: OefeningTeam[] = [{ grootte: 1, formaties: [] }, { grootte: 0, formaties: [] }]
     const m = makeSupabase({ tables: tablesFor('k1', teams) })
     use(m)
     const koppeling = makeKoppeling({ id: 'k1', oefening: { teams } })
