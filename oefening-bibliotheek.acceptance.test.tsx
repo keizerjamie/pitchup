@@ -148,7 +148,7 @@ describe('AC1 — oefening opslaan zonder verplichte training-koppeling', () => 
 // bestaande oefening (bewerk-modus van OefeningEditor).
 // ────────────────────────────────────────────────
 describe('AC2 — team-/formatiekeuzes worden getoond bij het heropenen van een oefening', () => {
-  it('OefeningEditor toont bij bewerken de opgeslagen teamgrootte, meerdere formaties (toggles aan) en aantal neutralen', () => {
+  it('OefeningEditor toont bij bewerken de opgeslagen teamgrootte, formatie (single-select) en aantal neutralen', () => {
     const existing = makeOefening({
       naam: 'Positiespel',
       teams: [{ grootte: 7, formaties: ['2-3-1', '3-2-1'] }],
@@ -161,8 +161,12 @@ describe('AC2 — team-/formatiekeuzes worden getoond bij het heropenen van een 
     )
     expect((screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`) as HTMLInputElement).value).toBe('Positiespel')
     expect((screen.getAllByLabelText(nl.oefeningen.teamSize)[0] as HTMLSelectElement).value).toBe('7')
+    // Legacy multi-select-data (2 items) wordt bij het inladen genormaliseerd
+    // naar single-select: alleen het alfabetisch-eerste item ('2-3-1') blijft
+    // geselecteerd, conform het single-select-gedrag dat de rest van de
+    // editor overal afdwingt.
     expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'false')
     expect((screen.getByLabelText(nl.oefeningen.neutralsLabel) as HTMLInputElement).value).toBe('2')
   })
 })

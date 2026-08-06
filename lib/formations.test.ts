@@ -1,13 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   formationsForSize,
-  isFormationValidForSize,
-  basisFormatieDef,
   normalizeOefeningTeam,
   normalizeOefeningTeams,
   FORMATIONS,
   FORMATIONS_BY_TEAM_SIZE,
 } from '@/lib/types'
+
+// basisFormatieDef en isFormatieGeldigVoorTeam (voorheen isFormationValidForSize)
+// zijn verhuisd naar lib/formaties.ts; hun tests staan in lib/formaties.test.ts.
 
 const SIZES = [3, 4, 5, 6, 7, 8, 9, 11]
 
@@ -66,50 +67,33 @@ describe('formationsForSize', () => {
   })
 })
 
-describe('basisFormatieDef', () => {
-  it('lege/null/undefined selectie → null (= geen formatie)', () => {
-    expect(basisFormatieDef(4, [])).toBeNull()
-    expect(basisFormatieDef(4, null)).toBeNull()
-    expect(basisFormatieDef(4, undefined)).toBeNull()
-  })
-
-  it('één selectie → die formatie', () => {
-    expect(basisFormatieDef(4, ['2-1'])?.key).toBe('2-1')
-  })
-
-  it('meerdere selecties → de alfabetisch eerste, ongeacht invoervolgorde', () => {
-    expect(basisFormatieDef(4, ['2-1', '1-2'])?.key).toBe('1-2')
-    expect(basisFormatieDef(4, ['1-2', '2-1'])?.key).toBe('1-2')
-    expect(basisFormatieDef(11, ['5-3-2', '4-4-2', '3-4-3'])?.key).toBe('3-4-3')
-  })
-
-  it('accepteert ook labels in plaats van keys', () => {
-    expect(basisFormatieDef(6, ['3-2'])?.key).toBe('3-2')
-  })
-
-  it('onbekende keys of onbekende grootte → null', () => {
-    expect(basisFormatieDef(4, ['4-3-3'])).toBeNull()
-    expect(basisFormatieDef(99, ['2-1'])).toBeNull()
-  })
-})
-
 describe('normalizeOefeningTeam (dual-read)', () => {
   it('legacy formatie-string → array van één', () => {
     expect(normalizeOefeningTeam({ grootte: 4, formatie: '2-1' })).toEqual({
       grootte: 4,
       formaties: ['2-1'],
+      keeperInGrootte: true,
     })
   })
 
   it('legacy formatie null/lege string → lege array', () => {
-    expect(normalizeOefeningTeam({ grootte: 4, formatie: null })).toEqual({ grootte: 4, formaties: [] })
-    expect(normalizeOefeningTeam({ grootte: 4, formatie: '' })).toEqual({ grootte: 4, formaties: [] })
+    expect(normalizeOefeningTeam({ grootte: 4, formatie: null })).toEqual({
+      grootte: 4,
+      formaties: [],
+      keeperInGrootte: true,
+    })
+    expect(normalizeOefeningTeam({ grootte: 4, formatie: '' })).toEqual({
+      grootte: 4,
+      formaties: [],
+      keeperInGrootte: true,
+    })
   })
 
   it('nieuwe vorm blijft behouden', () => {
     expect(normalizeOefeningTeam({ grootte: 4, formaties: ['2-1', '1-2'] })).toEqual({
       grootte: 4,
       formaties: ['2-1', '1-2'],
+      keeperInGrootte: true,
     })
   })
 
@@ -117,18 +101,19 @@ describe('normalizeOefeningTeam (dual-read)', () => {
     expect(normalizeOefeningTeam({ grootte: 4, formaties: ['1-2'], formatie: '2-1' })).toEqual({
       grootte: 4,
       formaties: ['1-2'],
+      keeperInGrootte: true,
     })
   })
 
   it('ontdubbelt en gooit niet-strings/lege strings weg', () => {
     expect(
       normalizeOefeningTeam({ grootte: 4, formaties: ['2-1', '2-1', '', 7, null, '1-2'] }),
-    ).toEqual({ grootte: 4, formaties: ['2-1', '1-2'] })
+    ).toEqual({ grootte: 4, formaties: ['2-1', '1-2'], keeperInGrootte: true })
   })
 
   it('stript onbekende velden', () => {
     const t = normalizeOefeningTeam({ grootte: 6, formaties: ['3-2'], foo: 'bar' })
-    expect(Object.keys(t).sort()).toEqual(['formaties', 'grootte'])
+    expect(Object.keys(t).sort()).toEqual(['formaties', 'grootte', 'keeperInGrootte'])
   })
 
   it('tolerant voor null/undefined/rommel', () => {
@@ -138,18 +123,38 @@ describe('normalizeOefeningTeam (dual-read)', () => {
   })
 })
 
+describe('normalizeOefeningTeam (keeperInGrootte)', () => {
+  it('ontbrekend veld → true (bestaande rijen tellen de keeper mee)', () => {
+    expect(normalizeOefeningTeam({ grootte: 6, formaties: [] }).keeperInGrootte).toBe(true)
+  })
+
+  it('expliciet false blijft false', () => {
+    expect(normalizeOefeningTeam({ grootte: 6, keeperInGrootte: false }).keeperInGrootte).toBe(false)
+  })
+
+  it('niet-booleaanse rommel valt terug op de default true', () => {
+    for (const raw of ['false', 0, null, [], {}]) {
+      expect(normalizeOefeningTeam({ grootte: 6, keeperInGrootte: raw }).keeperInGrootte).toBe(true)
+    }
+  })
+
+  it('grootte 11 forceert true, ongeacht de invoer', () => {
+    expect(normalizeOefeningTeam({ grootte: 11, keeperInGrootte: false }).keeperInGrootte).toBe(true)
+  })
+})
+
 describe('normalizeOefeningTeams', () => {
   it('normaliseert een gemengde legacy/nieuwe lijst', () => {
     expect(
       normalizeOefeningTeams([
         { grootte: 4, formatie: '2-1' },
-        { grootte: 6, formaties: ['3-2', '2-2-1'] },
+        { grootte: 6, formaties: ['3-2', '2-2-1'], keeperInGrootte: false },
         { grootte: 8, formatie: null },
       ]),
     ).toEqual([
-      { grootte: 4, formaties: ['2-1'] },
-      { grootte: 6, formaties: ['3-2', '2-2-1'] },
-      { grootte: 8, formaties: [] },
+      { grootte: 4, formaties: ['2-1'], keeperInGrootte: true },
+      { grootte: 6, formaties: ['3-2', '2-2-1'], keeperInGrootte: false },
+      { grootte: 8, formaties: [], keeperInGrootte: true },
     ])
   })
 
@@ -157,27 +162,5 @@ describe('normalizeOefeningTeams', () => {
     expect(normalizeOefeningTeams(null)).toEqual([])
     expect(normalizeOefeningTeams('x')).toEqual([])
     expect(normalizeOefeningTeams(Array.from({ length: 9 }, () => ({ grootte: 3 })))).toHaveLength(6)
-  })
-})
-
-describe('isFormationValidForSize', () => {
-  it('null formatie is altijd geldig', () => {
-    expect(isFormationValidForSize(7, null)).toBe(true)
-    expect(isFormationValidForSize(null, null)).toBe(true)
-  })
-
-  it('een passende formatie (key) is geldig', () => {
-    expect(isFormationValidForSize(7, '2-3-1')).toBe(true)
-    expect(isFormationValidForSize(6, '2-2-1')).toBe(true)
-    expect(isFormationValidForSize(11, '4-3-3')).toBe(true)
-  })
-
-  it('een niet-passende formatie is ongeldig', () => {
-    expect(isFormationValidForSize(7, '4-3-3')).toBe(false)
-    expect(isFormationValidForSize(3, '2-3-1')).toBe(false)
-  })
-
-  it('een formatie zonder grootte is ongeldig', () => {
-    expect(isFormationValidForSize(null, '4-3-3')).toBe(false)
   })
 })

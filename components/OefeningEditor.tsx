@@ -8,26 +8,27 @@ import {
   OefeningTeam,
   Veldzone,
   PERIODIZATION_CATEGORIES,
-  FORMATIONS_BY_TEAM_SIZE,
-  formationsForSize,
-  basisFormatieDef,
-  isFormationValidForSize,
 } from '@/lib/types'
+import { VALID_TEAM_SIZES, formatiesVoorTeam, basisFormatieDef, isFormatieGeldigVoorTeam } from '@/lib/formaties'
 import type { OefeningInput } from '@/lib/oefening'
 import FormationField from '@/components/FormationField'
 import DiagramEditor from '@/components/DiagramEditor'
 import { useDict } from '@/lib/i18n-context'
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
-const TEAM_SIZES = Object.keys(FORMATIONS_BY_TEAM_SIZE).map(Number).sort((a, b) => a - b)
+const TEAM_SIZES = VALID_TEAM_SIZES
 const MAX_TEAMS = 6
 
 // Team-rij tijdens het bewerken: grootte mag tijdelijk leeg (null) zijn
 // zolang de gebruiker nog geen keuze heeft gemaakt. Alleen rijen met een
 // gekozen grootte worden meegenomen in de uiteindelijke OefeningInput.
+// keeperInGrootte is (in tegenstelling tot OefeningTeam) NIET optioneel in de
+// lokale state — er is altijd een expliciete waarde (default true), zodat elke
+// afgeleide berekening (catalogus, filtering) een ondubbelzinnige teamvorm heeft.
 interface TeamRow {
   grootte: number | null
   formaties: string[]
+  keeperInGrootte: boolean
 }
 
 interface Props {
@@ -41,8 +42,24 @@ interface Props {
   presetNaam?: string
 }
 
-function teamsToRows(teams: OefeningTeam[]): TeamRow[] {
-  return teams.map((t) => ({ grootte: t.grootte, formaties: t.formaties ?? [] }))
+// Filtert meegekomen `formaties` alvast op geldigheid tegen de huidige
+// categorie: voorkomt dat een inmiddels ongeldige, opgeslagen selectie in de
+// state komt — anders geeft een ongerelateerde wijziging bij opslaan een
+// serverfout. Reduceert de selectie daarna ook tot maximaal 1 item: legacy
+// rijen uit de teruggedraaide multi-select-feature kunnen nog meerdere
+// geldige keys bevatten, terwijl de UI overal single-select afdwingt. Bij
+// meerdere waarden wint dezelfde alfabetisch-eerste die basisFormatieDef ook
+// als "de" basisformatie aanwijst.
+function teamsToRows(teams: OefeningTeam[], categorie: OefeningCategorie): TeamRow[] {
+  return teams.map((t) => {
+    const keeperInGrootte = t.keeperInGrootte ?? true
+    const geldig = (t.formaties ?? []).filter((key) =>
+      isFormatieGeldigVoorTeam(key, { grootte: t.grootte, keeperInGrootte }, categorie),
+    )
+    const basis = basisFormatieDef({ grootte: t.grootte, formaties: geldig, keeperInGrootte })
+    const formaties = basis ? [basis.key] : []
+    return { grootte: t.grootte, formaties, keeperInGrootte }
+  })
 }
 
 export default function OefeningEditor({ initial, onCancel, onSubmit, presetCategorie, presetNaam }: Props) {
@@ -52,12 +69,13 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
 
   const [naam, setNaam] = useState(initial?.naam ?? presetNaam ?? '')
   const [beschrijving, setBeschrijving] = useState(initial?.beschrijving ?? '')
-  const [categorie, setCategorie] = useState<OefeningCategorie>(initial?.categorie ?? presetCategorie ?? 'partijen_groot')
+  const initialCategorie = initial?.categorie ?? presetCategorie ?? 'partijen_groot'
+  const [categorie, setCategorie] = useState<OefeningCategorie>(initialCategorie)
   const [duurMin, setDuurMin] = useState<number | null>(initial?.duur_min ?? null)
   const [breedteM, setBreedteM] = useState<number | null>(initial?.breedte_m ?? null)
   const [lengteM, setLengteM] = useState<number | null>(initial?.lengte_m ?? null)
   const [veldzone, setVeldzone] = useState<Veldzone | null>(initial?.veldzone ?? null)
-  const [teams, setTeams] = useState<TeamRow[]>(teamsToRows(initial?.teams ?? []))
+  const [teams, setTeams] = useState<TeamRow[]>(teamsToRows(initial?.teams ?? [], initialCategorie))
   const [aantalNeutralen, setAantalNeutralen] = useState<number>(initial?.aantal_neutralen ?? 0)
   const [diagram, setDiagram] = useState<Diagram | null>(initial?.diagram ?? null)
   const [showDiagramEditor, setShowDiagramEditor] = useState(false)
@@ -68,13 +86,15 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   // Teams zoals ze meegaan naar het diagram: alleen rijen met een gekozen
   // grootte (zelfde filter als handleSubmit hieronder).
   const diagramTeams: OefeningTeam[] = teams
-    .filter((tm): tm is { grootte: number; formaties: string[] } => tm.grootte !== null)
-    .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties }))
+    .filter((tm): tm is { grootte: number; formaties: string[]; keeperInGrootte: boolean } => tm.grootte !== null)
+    .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties, keeperInGrootte: tm.keeperInGrootte }))
 
   const catLabel = (key: string) => t.periodization.categories[key] ?? key
 
   function addTeam() {
-    setTeams((prev) => (prev.length >= MAX_TEAMS ? prev : [...prev, { grootte: null, formaties: [] }]))
+    setTeams((prev) =>
+      prev.length >= MAX_TEAMS ? prev : [...prev, { grootte: null, formaties: [], keeperInGrootte: true }],
+    )
   }
 
   function removeTeam(index: number) {
@@ -84,25 +104,46 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   function handleTeamSizeChange(index: number, newSize: number | null) {
     setTeams((prev) => prev.map((tm, i) => {
       if (i !== index) return tm
-      const stillValid = tm.formaties.filter((key) => isFormationValidForSize(newSize, key))
-      return { grootte: newSize, formaties: stillValid }
+      // 11-tal forceert altijd een keeper — geen keuze te tonen/te bewaren.
+      const keeperInGrootte = newSize === 11 ? true : tm.keeperInGrootte
+      const formaties =
+        newSize === null
+          ? []
+          : tm.formaties.filter((key) => isFormatieGeldigVoorTeam(key, { grootte: newSize, keeperInGrootte }, categorie))
+      return { grootte: newSize, formaties, keeperInGrootte }
     }))
   }
 
-  function toggleTeamFormatie(index: number, key: string) {
+  // Single-select: dezelfde chip nogmaals aanklikken maakt de selectie leeg
+  // ("geen formatie"); een andere chip aanklikken vervangt de vorige keuze.
+  function selectTeamFormatie(index: number, key: string) {
     setTeams((prev) => prev.map((tm, i) => {
       if (i !== index) return tm
-      const formaties = tm.formaties.includes(key)
-        ? tm.formaties.filter((f) => f !== key)
-        : [...tm.formaties, key]
+      const formaties = tm.formaties.includes(key) ? [] : [key]
       return { ...tm, formaties }
     }))
   }
 
-  function selectAllFormaties(index: number) {
+  // Keeper-schakelaar is per team: wijzigen van team A raakt team B niet.
+  function setTeamKeeper(index: number, keeperInGrootte: boolean) {
     setTeams((prev) => prev.map((tm, i) => {
       if (i !== index || tm.grootte === null) return tm
-      return { ...tm, formaties: formationsForSize(tm.grootte).map((f) => f.key) }
+      const formaties = tm.formaties.filter((key) =>
+        isFormatieGeldigVoorTeam(key, { grootte: tm.grootte as number, keeperInGrootte }, categorie),
+      )
+      return { ...tm, keeperInGrootte, formaties }
+    }))
+  }
+
+  // Categorie is oefening-breed: raakt de selectie van ALLE teamrijen tegelijk.
+  function handleCategorieChange(newCategorie: OefeningCategorie) {
+    setCategorie(newCategorie)
+    setTeams((prev) => prev.map((tm) => {
+      if (tm.grootte === null) return tm
+      const formaties = tm.formaties.filter((key) =>
+        isFormatieGeldigVoorTeam(key, { grootte: tm.grootte as number, keeperInGrootte: tm.keeperInGrootte }, newCategorie),
+      )
+      return { ...tm, formaties }
     }))
   }
 
@@ -118,8 +159,8 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
       orientatie,
       veldzone,
       teams: teams
-        .filter((tm): tm is { grootte: number; formaties: string[] } => tm.grootte !== null)
-        .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties })),
+        .filter((tm): tm is { grootte: number; formaties: string[]; keeperInGrootte: boolean } => tm.grootte !== null)
+        .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties, keeperInGrootte: tm.keeperInGrootte })),
       aantal_neutralen: aantalNeutralen,
       diagram,
     }
@@ -171,10 +212,11 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
 
           {/* Categorie */}
           <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.category}</label>
+            <label htmlFor="oefening-categorie" className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.category}</label>
             <select
+              id="oefening-categorie"
               value={categorie}
-              onChange={(e) => setCategorie(e.target.value as OefeningCategorie)}
+              onChange={(e) => handleCategorieChange(e.target.value as OefeningCategorie)}
               className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink bg-surface"
             >
               {ALL_CATS.map((cat) => (
@@ -301,9 +343,14 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
 
             <div className="space-y-3">
               {teams.map((team, i) => {
-                const formationOptions = team.grootte !== null ? formationsForSize(team.grootte) : []
-                const allSelected = formationOptions.length > 0 && formationOptions.every((f) => team.formaties.includes(f.key))
-                const basis = team.grootte !== null ? basisFormatieDef(team.grootte, team.formaties) : null
+                const formationOptions =
+                  team.grootte !== null
+                    ? formatiesVoorTeam({ grootte: team.grootte, keeperInGrootte: team.keeperInGrootte }, categorie)
+                    : []
+                const basis =
+                  team.grootte !== null
+                    ? basisFormatieDef({ grootte: team.grootte, formaties: team.formaties, keeperInGrootte: team.keeperInGrootte })
+                    : null
                 return (
                   <div key={i} className="rounded-xl border border-[var(--border-soft)] p-3 space-y-2">
                     <div className="flex items-end gap-2">
@@ -333,39 +380,75 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                       </button>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="block text-xs font-semibold text-muted">{t.oefeningen.formations}</label>
-                        <button
-                          type="button"
-                          onClick={() => selectAllFormaties(i)}
-                          disabled={team.grootte === null || allSelected}
-                          className="text-[11px] font-semibold text-orange-600 hover:text-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {t.oefeningen.selectAllFormations}
-                        </button>
-                      </div>
-                      {team.grootte !== null && (
-                        <div role="group" aria-label={t.oefeningen.formations} className="flex flex-wrap gap-2">
-                          {formationOptions.map((f) => {
-                            const selected = team.formaties.includes(f.key)
-                            return (
-                              <button
-                                key={f.key}
-                                type="button"
-                                aria-pressed={selected}
-                                onClick={() => toggleTeamFormatie(i, f.key)}
-                                className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
-                                  selected
-                                    ? 'bg-orange-500 text-white border-orange-500'
-                                    : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
-                                }`}
-                              >
-                                {f.label}
-                              </button>
-                            )
-                          })}
+                    {/* Keeper-schakelaar per team — verborgen bij een 11-tal
+                        (die forceert de keeper altijd, geen keuze nodig). */}
+                    {team.grootte !== null && team.grootte !== 11 && (
+                      <div>
+                        <label className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.keeperLabel}</label>
+                        <div role="group" aria-label={t.oefeningen.keeperLabel} className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            aria-pressed={team.keeperInGrootte}
+                            onClick={() => setTeamKeeper(i, true)}
+                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                              team.keeperInGrootte
+                                ? 'bg-orange-500 text-white border-orange-500'
+                                : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                            }`}
+                          >
+                            {t.oefeningen.keeperIncluded}
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={!team.keeperInGrootte}
+                            onClick={() => setTeamKeeper(i, false)}
+                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                              !team.keeperInGrootte
+                                ? 'bg-orange-500 text-white border-orange-500'
+                                : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                            }`}
+                          >
+                            {t.oefeningen.keeperExcluded}
+                          </button>
                         </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.formation}</label>
+                      {team.grootte !== null && (
+                        formationOptions.length > 0 ? (
+                          <div role="group" aria-label={t.oefeningen.formation} className="flex flex-wrap gap-2">
+                            {formationOptions.map((f) => {
+                              const selected = team.formaties.includes(f.key)
+                              return (
+                                <button
+                                  key={f.key}
+                                  type="button"
+                                  aria-pressed={selected}
+                                  onClick={() => selectTeamFormatie(i, f.key)}
+                                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                                    selected
+                                      ? 'bg-orange-500 text-white border-orange-500'
+                                      : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                                  }`}
+                                >
+                                  {f.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          // AC18 — lege catalogus (bv. grootte 3 + inclusief keeper +
+                          // partijen_groot): geen opties om uit te kiezen, disabled-staat.
+                          <span
+                            data-testid={`geen-formaties-${i}`}
+                            aria-disabled="true"
+                            className="inline-block py-1.5 px-3 rounded-lg text-xs font-semibold border-2 border-[var(--border-soft)] text-faint opacity-60 cursor-not-allowed"
+                          >
+                            {t.oefeningen.noFormationsAvailable}
+                          </span>
+                        )
                       )}
                     </div>
 

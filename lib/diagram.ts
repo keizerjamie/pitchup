@@ -1,6 +1,4 @@
 import {
-  formationsForSize,
-  basisFormatieDef,
   normalizeOefeningTeam,
   DIAGRAM_MARKER_ROLLEN,
   DIAGRAM_MATERIAAL_TYPES,
@@ -18,6 +16,7 @@ import {
   type DiagramLijnStijl,
   type FormationDef,
 } from '@/lib/types'
+import { VALID_TEAM_SIZES, basisFormatieDef } from '@/lib/formaties'
 
 // Framework-agnostische, pure logica voor het tactiekbord (diagram) van een
 // bibliotheek-oefening. Bewust géén 'use server' en geen React: zowel de server
@@ -90,18 +89,21 @@ export function generateDiagram(
 ): Diagram {
   void breedteM // bewust ongebruikt (no-op, zie hierboven)
   void lengteM
-  // Behoud elk team met een bekende grootte (formationsForSize niet-leeg). Teams
-  // MET minstens één geldige formatie krijgen de vorm van hun BASISformatie (de
-  // alfabetisch eerste van de selectie); teams zonder (lege selectie of alleen
-  // onbekende keys) krijgen een losse rij/grid van `grootte` spelers.
+  // Behoud elk team met een geldige grootte (VALID_TEAM_SIZES — inclusief 10, dat
+  // in de gecureerde lijst ontbreekt maar door de generator wel gedekt wordt).
+  // Teams MET een geldige formatie krijgen de vorm van hun BASISformatie; teams
+  // zonder (lege selectie of een onbekende key) krijgen een losse rij/grid van
+  // `grootte` spelers. basisFormatieDef resolvet categorie-onafhankelijk, dus het
+  // diagram hoeft de categorie van de oefening niet te kennen.
   // normalizeOefeningTeam is hier het dual-read-vangnet: er kan nog legacy
-  // {grootte, formatie} uit de database of van een oudere client binnenkomen.
+  // {grootte, formatie} uit de database of van een oudere client binnenkomen, en
+  // het vult keeperInGrootte met de default (true) aan.
   const usable = (Array.isArray(teams) ? teams : [])
     .map((t) => {
-      const { grootte, formaties } = normalizeOefeningTeam(t)
-      if (formationsForSize(grootte).length === 0) return null // onbekende grootte → overslaan
-      const def: FormationDef | null = basisFormatieDef(grootte, formaties)
-      return { grootte, def }
+      const team = normalizeOefeningTeam(t)
+      if (!VALID_TEAM_SIZES.includes(team.grootte)) return null // onbekende grootte → overslaan
+      const def: FormationDef | null = basisFormatieDef(team)
+      return { grootte: team.grootte, def }
     })
     .filter((u): u is { grootte: number; def: FormationDef | null } => u !== null)
 

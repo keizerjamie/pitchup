@@ -137,13 +137,17 @@ export interface MetingData {
   created_at: string
 }
 
-// Eén team binnen een oefening: aantal spelers + 0..n gekozen formaties.
-// Canonieke opslagvolgorde van `formaties` = alfabetisch op label (zie
-// validateOefening in lib/oefening.ts); de eerste is de "basisformatie" die het
-// diagram en de weergave voeden (zie basisFormatieDef).
+// Eén team binnen een oefening: aantal spelers + hooguit één gekozen formatie.
+// `formaties` blijft een array (bestaande JSONB-vorm), maar validateOefening in
+// lib/oefening.ts accepteert er nog maximaal één; die ene is de "basisformatie"
+// die het diagram en de weergave voeden (zie basisFormatieDef in lib/formaties.ts).
 export interface OefeningTeam {
   grootte: number
   formaties: string[] // lege array = "geen formatie" (los getekend, geen labels)
+  // Telt de keeper mee in `grootte`? Ontbreekt het veld (oude rijen), dan true.
+  // Bij grootte 11 altijd true. false = het team speelt zonder keeper, dus
+  // `grootte` veldspelers en geen K-marker op de tekening.
+  keeperInGrootte?: boolean
 }
 
 // ────────────────────────────────────────────────
@@ -591,20 +595,12 @@ const FORMATIONS_SORTED_BY_TEAM_SIZE: Record<number, FormationDef[]> = Object.fr
 const NO_FORMATIONS: FormationDef[] = []
 
 // Formaties beschikbaar voor een gegeven teamgrootte, alfabetisch op label.
+// LET OP: deze gecureerde lijst is voor oefening-teams alleen nog in gebruik voor
+// (a) het 11-tal en (b) als resolutie-vangnet voor oude keys als '2-0+K'. De
+// keuzelijst van alle overige groottes komt uit de generator in lib/formaties.ts.
+// Grootte 10 blijft hier bewust leeg (legacy-gedrag); de generator ondersteunt 10 wél.
 export function formationsForSize(n: number): FormationDef[] {
   return FORMATIONS_SORTED_BY_TEAM_SIZE[n] ?? NO_FORMATIONS
-}
-
-// De alfabetisch eerste (op label) geselecteerde formatie van dit team; die is
-// de basis voor het diagram en voor de weergave in bibliotheek/print/indeling.
-// Tolerant: null/undefined/lege selectie → null (= "geen formatie").
-export function basisFormatieDef(
-  grootte: number,
-  formaties: string[] | null | undefined,
-): FormationDef | null {
-  const sel = formaties ?? []
-  if (sel.length === 0) return null
-  return formationsForSize(grootte).find((f) => sel.includes(f.key) || sel.includes(f.label)) ?? null
 }
 
 // Dual-read: accepteert zowel de nieuwe vorm {grootte, formaties: string[]} als
@@ -612,7 +608,12 @@ export function basisFormatieDef(
 // Strippt al het andere. Er is bewust GEEN datamigratie: bij de volgende save
 // wordt de nieuwe vorm weggeschreven.
 export function normalizeOefeningTeam(raw: unknown): OefeningTeam {
-  const r = (raw ?? {}) as { grootte?: unknown; formaties?: unknown; formatie?: unknown }
+  const r = (raw ?? {}) as {
+    grootte?: unknown
+    formaties?: unknown
+    formatie?: unknown
+    keeperInGrootte?: unknown
+  }
   const grootte = Number(r.grootte)
   let keys: string[]
   if (Array.isArray(r.formaties)) {
@@ -622,17 +623,13 @@ export function normalizeOefeningTeam(raw: unknown): OefeningTeam {
   } else {
     keys = []
   }
-  return { grootte, formaties: [...new Set(keys)] }
+  // Ontbrekend/niet-booleaans veld → true (bestaande rijen tellen de keeper mee).
+  // Een 11-tal telt de keeper altijd mee (gecureerde FORMATIONS-lijst).
+  const keeperInGrootte =
+    grootte === 11 ? true : typeof r.keeperInGrootte === 'boolean' ? r.keeperInGrootte : true
+  return { grootte, formaties: [...new Set(keys)], keeperInGrootte }
 }
 
 export function normalizeOefeningTeams(raw: unknown): OefeningTeam[] {
   return Array.isArray(raw) ? raw.slice(0, 6).map(normalizeOefeningTeam) : []
-}
-
-// Een formatie is geldig als hij null is (geen keuze) of als hij als key/label
-// voorkomt in de lijst van die teamgrootte.
-export function isFormationValidForSize(size: number | null, formatie: string | null): boolean {
-  if (formatie === null) return true
-  if (size === null) return false
-  return formationsForSize(size).some((f) => f.key === formatie || f.label === formatie)
 }

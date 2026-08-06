@@ -9,7 +9,15 @@ import {
   DIAGRAM_MAX_TEAM_INDEX,
 } from '@/lib/diagram'
 import { formationsForSize, type OefeningTeam } from '@/lib/types'
+import { formatiesVoorTeam } from '@/lib/formaties'
 import { validateOefening, type OefeningInput } from '@/lib/oefening'
+
+// De formatie-opties van een team zoals de generator ze oplevert; de categorie is
+// voor de tekening niet relevant (basisFormatieDef resolvet categorie-onafhankelijk),
+// dus we gebruiken hier de ruimste catalogus.
+function opties(grootte: number, keeperInGrootte = true) {
+  return formatiesVoorTeam({ grootte, keeperInGrootte }, 'partijen_klein')
+}
 
 // Helper: elke coördinaat binnen de grenzen van het 0-100 / 0-140-stelsel.
 function within(m: { x: number; y: number }) {
@@ -39,20 +47,48 @@ describe('generateDiagram', () => {
     expect(teamMarkers.every(within)).toBe(true)
   })
 
-  it('team MET formatie: gebruikt de formatie-posities inclusief keeper en labels', () => {
-    const def = formationsForSize(5)[0]
+  it('team MET formatie: gebruikt de formatie-posities inclusief keeper, alleen K gelabeld', () => {
+    const def = opties(5)[0]
     const d = generateDiagram([{ grootte: 5, formaties: [def.key] }], 0, null)
     const teamMarkers = d.markers.filter((m) => m.teamIndex === 0)
-    expect(teamMarkers.length).toBe(def.positions.length)
-    expect(teamMarkers.some((m) => m.rol === 'keeper')).toBe(true)
-    expect(teamMarkers.some((m) => (m.label ?? '') !== '')).toBe(true)
+    // Inclusief keeper: exact `grootte` markers (K + 4 veldspelers).
+    expect(teamMarkers.length).toBe(5)
+    expect(teamMarkers.filter((m) => m.rol === 'keeper')).toHaveLength(1)
+    // Gegenereerde formaties labelen alleen de keeper; V/M/A blijven leeg.
+    expect(teamMarkers.filter((m) => (m.label ?? '') !== '')).toHaveLength(1)
+    expect(teamMarkers.find((m) => m.rol === 'keeper')!.label).toBe('K')
   })
 
-  it('team met MEERDERE formaties: het diagram volgt de alfabetisch eerste (basis)', () => {
-    const alle = formationsForSize(4)
+  it('team ZONDER keeper in de grootte: `grootte` veldspelers en GEEN keeper-marker', () => {
+    const def = opties(5, false)[0]
+    const d = generateDiagram(
+      [{ grootte: 5, formaties: [def.key], keeperInGrootte: false }],
+      0,
+      null,
+    )
+    const teamMarkers = d.markers.filter((m) => m.teamIndex === 0)
+    expect(teamMarkers.length).toBe(5)
+    expect(teamMarkers.every((m) => m.rol === 'speler')).toBe(true)
+    expect(teamMarkers.every((m) => (m.label ?? '') === '')).toBe(true)
+  })
+
+  it('grootte 10 wordt nu wél getekend (via de gegenereerde catalogus)', () => {
+    // De gecureerde lijst kent geen 10-tal, de generator wel.
+    expect(formationsForSize(10)).toEqual([])
+    const def = opties(10).find((f) => f.key === '4-4-1')!
+    const d = generateDiagram([{ grootte: 10, formaties: [def.key] }], 0, null)
+    expect(d.markers.filter((m) => m.teamIndex === 0)).toHaveLength(10)
+
+    // Ook zonder gekozen formatie: losse rij van 10.
+    const los = generateDiagram([{ grootte: 10, formaties: [] }], 0, null)
+    expect(los.markers.filter((m) => m.teamIndex === 0)).toHaveLength(10)
+  })
+
+  it('legacy multi-select-data: het diagram volgt de alfabetisch eerste (basis)', () => {
+    // Productiedata van vóór de single-select kan nog meerdere waarden bevatten.
+    const alle = opties(4)
     const basis = alle[0]
     const tweede = alle[1]
-    // Beide selectievolgordes geven exact hetzelfde diagram: de basis wint.
     const a = generateDiagram([{ grootte: 4, formaties: [tweede.key, basis.key] }], 0, null)
     const b = generateDiagram([{ grootte: 4, formaties: [basis.key, tweede.key] }], 0, null)
     const alleenBasis = generateDiagram([{ grootte: 4, formaties: [basis.key] }], 0, null)
@@ -95,7 +131,7 @@ describe('generateDiagram', () => {
 
   it('2 teams met formatie: team 1 is exact gespiegeld t.o.v. de basispositie van team 0', () => {
     const size = 6
-    const def = formationsForSize(size)[0]
+    const def = opties(size)[0]
     const teams: OefeningTeam[] = [
       { grootte: size, formaties: [def.key] },
       { grootte: size, formaties: [def.key] },
@@ -145,7 +181,7 @@ describe('generateDiagram', () => {
   })
 
   it('gemengd: team 0 met formatie, team 1 zonder → team 1 losjes in de bovenhelft', () => {
-    const def = formationsForSize(6)[0]
+    const def = opties(6)[0]
     const teams: OefeningTeam[] = [
       { grootte: 6, formaties: [def.key] },
       { grootte: 6, formaties: [] },

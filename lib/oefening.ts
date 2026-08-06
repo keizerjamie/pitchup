@@ -7,11 +7,9 @@ import {
   OEFENING_CATEGORIES,
   VALID_ORIENTATIES,
   VALID_VELDZONES,
-  FORMATIONS_BY_TEAM_SIZE,
-  isFormationValidForSize,
-  formationsForSize,
   normalizeOefeningTeam,
 } from '@/lib/types'
+import { VALID_TEAM_SIZES, formatiesVoorTeam } from '@/lib/formaties'
 import { validateDiagram } from '@/lib/diagram'
 
 // Gedeelde, framework-agnostische validatie/normalisatie voor bibliotheek-
@@ -47,8 +45,6 @@ export interface ValidatedOefening {
   diagram: Diagram | null
 }
 
-const VALID_SIZES = Object.keys(FORMATIONS_BY_TEAM_SIZE).map(Number)
-
 export function validateOefening(input: OefeningInput): ValidatedOefening {
   const naam = (input.naam ?? '').trim().slice(0, 200)
   if (!naam) throw new Error('Naam verplicht')
@@ -58,19 +54,23 @@ export function validateOefening(input: OefeningInput): ValidatedOefening {
 
   const rawTeams = Array.isArray(input.teams) ? input.teams.slice(0, 6) : []
   const teams: OefeningTeam[] = rawTeams.map((tm) => {
-    // Dual-read + strip onbekende velden: behoud alleen {grootte, formaties}.
-    const { grootte, formaties } = normalizeOefeningTeam(tm)
-    if (!VALID_SIZES.includes(grootte)) throw new Error('Ongeldige teamgrootte')
-    // Élke waarde valideren, niet alleen de eerste.
-    for (const key of formaties) {
-      if (!isFormationValidForSize(grootte, key)) throw new Error('Formatie past niet bij teamgrootte')
-    }
-    // Canonieke opslagvolgorde: alfabetisch op label, altijd als key opgeslagen
-    // (een binnengekomen label wordt zo naar zijn key genormaliseerd).
-    const canoniek = formationsForSize(grootte)
-      .filter((f) => formaties.includes(f.key) || formaties.includes(f.label))
-      .map((f) => f.key)
-    return { grootte, formaties: canoniek }
+    // Dual-read + strip onbekende velden: behoud alleen {grootte, formaties,
+    // keeperInGrootte}. normalizeOefeningTeam forceert keeperInGrootte bij een
+    // 11-tal al naar true.
+    const { grootte, formaties, keeperInGrootte } = normalizeOefeningTeam(tm)
+    if (!VALID_TEAM_SIZES.includes(grootte)) throw new Error('Ongeldige teamgrootte')
+    // Single-select: hooguit één formatie per team, geen stille afkap.
+    if (formaties.length > 1) throw new Error('Maximaal één formatie per team')
+    // De keuzelijst hangt af van grootte, keeper-stand ÉN categorie (input.categorie
+    // is hierboven al gevalideerd).
+    const opties = formatiesVoorTeam({ grootte, keeperInGrootte }, input.categorie)
+    // Canonieke opslag: altijd de KEY (een binnengekomen label wordt genormaliseerd).
+    const canoniek = formaties.map((waarde) => {
+      const def = opties.find((f) => f.key === waarde || f.label === waarde)
+      if (!def) throw new Error('Formatie past niet bij teamgrootte')
+      return def.key
+    })
+    return { grootte, formaties: canoniek, keeperInGrootte }
   })
 
   const aantal_neutralen = Math.max(0, Math.min(30, Math.floor(Number(input.aantal_neutralen) || 0)))

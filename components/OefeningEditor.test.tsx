@@ -4,6 +4,7 @@ import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import OefeningEditor from '@/components/OefeningEditor'
 import type { OefeningInput } from '@/lib/oefening'
+import { formatiesVoorTeam } from '@/lib/formaties'
 
 function renderEditor(overrides: Partial<Parameters<typeof OefeningEditor>[0]> = {}) {
   const onSubmit = vi.fn<(input: OefeningInput) => Promise<void>>().mockResolvedValue(undefined)
@@ -30,59 +31,61 @@ describe('OefeningEditor — teams (dynamische lijst)', () => {
     expect(screen.getByText(nl.oefeningen.noTeamsHint)).toBeInTheDocument()
   })
 
-  it('grootte 7 kiezen → alleen 7v7-formaties zijn als toggle-knop aanwezig, alfabetisch gesorteerd', () => {
+  it('grootte 7 kiezen (standaardcategorie partijen_groot, inclusief keeper) toont exact de door de generator geleverde formaties, alfabetisch gesorteerd', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
 
     const sizeSelect = screen.getAllByLabelText(nl.oefeningen.teamSize)[0]
     fireEvent.change(sizeSelect, { target: { value: '7' } })
 
-    const group = screen.getByRole('group', { name: nl.oefeningen.formations })
+    const expected = formatiesVoorTeam({ grootte: 7, keeperInGrootte: true }, 'partijen_groot').map((f) => f.label)
+    expect(expected.length).toBeGreaterThan(0)
+
+    const group = screen.getByRole('group', { name: nl.oefeningen.formation })
     const buttonLabels = within(group).getAllByRole('button').map((b) => b.textContent)
-    // 7v7-formaties (uit FORMATIONS_BY_TEAM_SIZE[7]) moeten aanwezig zijn, alfabetisch...
-    expect(buttonLabels).toEqual(['2-3-1', '3-2-1'])
-    // ...maar een 11-tal formatie die niet bij grootte 7 past, niet.
-    expect(buttonLabels).not.toContain('4-3-3')
-    expect(buttonLabels).not.toContain('4-4-2')
+    expect(buttonLabels).toEqual(expected)
+    expect([...buttonLabels].sort((a, b) => (a ?? '').localeCompare(b ?? '', 'nl'))).toEqual(buttonLabels)
   })
 
-  it('meerdere toggles aanklikken selecteert beide en levert beide keys op in de submit-payload', async () => {
+  it('single-select: een chip aanklikken selecteert die, een andere chip aanklikken vervangt de selectie', async () => {
     const { onSubmit } = renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
     fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
     fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Positiespel' } })
 
     fireEvent.click(screen.getByRole('button', { name: '2-3-1' }))
-    fireEvent.click(screen.getByRole('button', { name: '3-2-1' }))
-
     expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Andere chip aanklikken vervangt de selectie (geen multi-select meer).
+    fireEvent.click(screen.getByRole('button', { name: '3-2-1' }))
+    expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.click(screen.getByText(nl.trainingPlan.save))
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
-    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 7, formaties: ['2-3-1', '3-2-1'] }])
+    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 7, formaties: ['3-2-1'], keeperInGrootte: true }])
   })
 
-  it('"Alles selecteren" selecteert alle formaties van die grootte, submit bevat alle keys, en de knop wordt daarna disabled', async () => {
-    const { onSubmit } = renderEditor()
+  it('dezelfde chip nogmaals aanklikken maakt de selectie leeg ("geen formatie")', () => {
+    renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
     fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
-    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Positiespel' } })
 
-    const selectAllButton = screen.getByText(nl.oefeningen.selectAllFormations)
-    expect(selectAllButton).not.toBeDisabled()
-    fireEvent.click(selectAllButton)
-
+    fireEvent.click(screen.getByRole('button', { name: '2-3-1' }))
     expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '3-2-1' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText(nl.oefeningen.selectAllFormations)).toBeDisabled()
 
-    fireEvent.click(screen.getByText(nl.trainingPlan.save))
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
-    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 7, formaties: ['2-3-1', '3-2-1'] }])
+    fireEvent.click(screen.getByRole('button', { name: '2-3-1' }))
+    expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('teamgrootte wijzigen naar een niet-passende maat laat niet-passende formaties automatisch vervallen', () => {
+  it('de "Alles selecteren"-knop bestaat niet meer', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
+    expect(screen.queryByText('Alles selecteren')).not.toBeInTheDocument()
+  })
+
+  it('teamgrootte wijzigen naar een niet-passende maat laat een niet-passende formatie automatisch vervallen', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
 
@@ -91,31 +94,146 @@ describe('OefeningEditor — teams (dynamische lijst)', () => {
     fireEvent.click(screen.getByRole('button', { name: '2-3-1' }))
     expect(screen.getByRole('button', { name: '2-3-1' })).toHaveAttribute('aria-pressed', 'true')
 
-    // Wissel naar grootte 6 — '2-3-1' bestaat niet voor 6, dus moet vervallen.
+    // Wissel naar grootte 6 — '2-3-1' bestaat niet in die catalogus, dus moet vervallen.
     fireEvent.change(sizeSelect, { target: { value: '6' } })
-    const group = screen.getByRole('group', { name: nl.oefeningen.formations })
+    const expected6 = formatiesVoorTeam({ grootte: 6, keeperInGrootte: true }, 'partijen_groot').map((f) => f.label)
+    expect(expected6).not.toContain('2-3-1')
+    const group = screen.getByRole('group', { name: nl.oefeningen.formation })
     within(group).getAllByRole('button').forEach((b) => {
       expect(b).toHaveAttribute('aria-pressed', 'false')
     })
   })
 
-  it('geen teamgrootte gekozen → geen toggle-knoppen zichtbaar, "Alles selecteren" disabled', () => {
+  it('categoriewissel (oefening-breed) filtert de selectie van ALLE teamrijen tegelijk', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    const sizeSelects = screen.getAllByLabelText(nl.oefeningen.teamSize)
+    fireEvent.change(sizeSelects[0], { target: { value: '7' } })
+    fireEvent.change(sizeSelects[1], { target: { value: '7' } })
 
-    expect(screen.queryByRole('group', { name: nl.oefeningen.formations })).not.toBeInTheDocument()
-    expect(screen.getByText(nl.oefeningen.selectAllFormations)).toBeDisabled()
+    const groups = screen.getAllByRole('group', { name: nl.oefeningen.formation })
+    // '1-5' bestaat alleen bij categorie 'overig' (lege linie toegestaan), niet bij 'partijen_groot'.
+    fireEvent.change(screen.getByLabelText(nl.trainingPlan.category), { target: { value: 'overig' } })
+    fireEvent.click(within(groups[0]).getByRole('button', { name: '1-5' }))
+    fireEvent.click(within(groups[1]).getByRole('button', { name: '1-5' }))
+    expect(within(groups[0]).getByRole('button', { name: '1-5' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(groups[1]).getByRole('button', { name: '1-5' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Terug naar 'partijen_groot': '1-5' bestaat daar niet (2 gevulde linies), dus beide rijen vervallen stilzwijgend.
+    fireEvent.change(screen.getByLabelText(nl.trainingPlan.category), { target: { value: 'partijen_groot' } })
+    within(groups[0]).getAllByRole('button').forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'false'))
+    within(groups[1]).getAllByRole('button').forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'false'))
   })
 
-  it('nieuw team start met een lege formaties-selectie (niets auto-geselecteerd)', () => {
+  it('categorie "partijen_groot" toont alleen formaties met 3 gevulde linies; categorie "overig" toont ook formaties met een lege linie', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
     fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
 
-    const group = screen.getByRole('group', { name: nl.oefeningen.formations })
+    let group = screen.getByRole('group', { name: nl.oefeningen.formation })
+    let labels = within(group).getAllByRole('button').map((b) => b.textContent)
+    expect(labels.every((l) => (l ?? '').split('-').length === 3)).toBe(true)
+
+    fireEvent.change(screen.getByLabelText(nl.trainingPlan.category), { target: { value: 'overig' } })
+    group = screen.getByRole('group', { name: nl.oefeningen.formation })
+    labels = within(group).getAllByRole('button').map((b) => b.textContent)
+    expect(labels.some((l) => (l ?? '').split('-').length === 2)).toBe(true)
+  })
+
+  it('keeper-schakelaar per team: wijzigen van team A raakt team B niet, en is verborgen bij een 11-tal', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    const sizeSelects = screen.getAllByLabelText(nl.oefeningen.teamSize)
+    fireEvent.change(sizeSelects[0], { target: { value: '4' } })
+    fireEvent.change(sizeSelects[1], { target: { value: '4' } })
+
+    const keeperGroups = screen.getAllByRole('group', { name: nl.oefeningen.keeperLabel })
+    expect(keeperGroups).toHaveLength(2)
+    // Default: inclusief keeper.
+    expect(within(keeperGroups[0]).getByRole('button', { name: nl.oefeningen.keeperIncluded })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(keeperGroups[1]).getByRole('button', { name: nl.oefeningen.keeperIncluded })).toHaveAttribute('aria-pressed', 'true')
+
+    // Selecteer een formatie op team 1 (grootte 4, inclusief keeper, partijen_groot → precies 1 optie: '1-1-1').
+    const formationGroups = screen.getAllByRole('group', { name: nl.oefeningen.formation })
+    fireEvent.click(within(formationGroups[0]).getByRole('button', { name: '1-1-1' }))
+    expect(within(formationGroups[0]).getByRole('button', { name: '1-1-1' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Team 2 wisselen naar exclusief keeper raakt team 1 niet.
+    fireEvent.click(within(keeperGroups[1]).getByRole('button', { name: nl.oefeningen.keeperExcluded }))
+    expect(within(keeperGroups[1]).getByRole('button', { name: nl.oefeningen.keeperExcluded })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(keeperGroups[0]).getByRole('button', { name: nl.oefeningen.keeperIncluded })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(formationGroups[0]).getByRole('button', { name: '1-1-1' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Bij een 11-tal wordt de keeper-schakelaar niet getoond.
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[2], { target: { value: '11' } })
+    expect(screen.getAllByRole('group', { name: nl.oefeningen.keeperLabel })).toHaveLength(2)
+  })
+
+  it('keeper-schakelaar wisselen filtert de bestaande selectie van díe rij (isFormatieGeldigVoorTeam)', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '4' } })
+
+    const formationGroup = screen.getByRole('group', { name: nl.oefeningen.formation })
+    fireEvent.click(within(formationGroup).getByRole('button', { name: '1-1-1' }))
+    expect(within(formationGroup).getByRole('button', { name: '1-1-1' })).toHaveAttribute('aria-pressed', 'true')
+
+    const keeperGroup = screen.getByRole('group', { name: nl.oefeningen.keeperLabel })
+    fireEvent.click(within(keeperGroup).getByRole('button', { name: nl.oefeningen.keeperExcluded }))
+
+    // '1-1-1' bestaat niet in de exclusief-keeper-catalogus van grootte 4 (dat is '1-1-2'/'1-2-1'/'2-1-1').
+    const expectedExcl = formatiesVoorTeam({ grootte: 4, keeperInGrootte: false }, 'partijen_groot').map((f) => f.label)
+    expect(expectedExcl).not.toContain('1-1-1')
+    const groupAfter = screen.getByRole('group', { name: nl.oefeningen.formation })
+    within(groupAfter).getAllByRole('button').forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'false'))
+  })
+
+  it('teamgrootte 3 + partijen_groot + inclusief keeper (lege catalogus, AC18): geen formatie-opties, disabled-staat i.p.v. een lege chip-groep', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '3' } })
+
+    expect(formatiesVoorTeam({ grootte: 3, keeperInGrootte: true }, 'partijen_groot')).toHaveLength(0)
+    expect(screen.queryByRole('group', { name: nl.oefeningen.formation })).not.toBeInTheDocument()
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+
+    // Exclusief keeper geeft wél opties (bv. '1-1-1').
+    const keeperGroup = screen.getByRole('group', { name: nl.oefeningen.keeperLabel })
+    fireEvent.click(within(keeperGroup).getByRole('button', { name: nl.oefeningen.keeperExcluded }))
+    expect(screen.getByRole('group', { name: nl.oefeningen.formation })).toBeInTheDocument()
+  })
+
+  it('teamgrootte 10 is nu gewoon bruikbaar (toont formatie-opties)', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '10' } })
+
+    const group = screen.getByRole('group', { name: nl.oefeningen.formation })
+    expect(within(group).getAllByRole('button').length).toBeGreaterThan(0)
+  })
+
+  it('geen teamgrootte gekozen → geen formatie-chips en geen keeper-schakelaar zichtbaar', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+
+    expect(screen.queryByRole('group', { name: nl.oefeningen.formation })).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: nl.oefeningen.keeperLabel })).not.toBeInTheDocument()
+  })
+
+  it('nieuw team start met een lege formaties-selectie (niets auto-geselecteerd) en inclusief keeper', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '7' } })
+
+    const group = screen.getByRole('group', { name: nl.oefeningen.formation })
     within(group).getAllByRole('button').forEach((b) => {
       expect(b).toHaveAttribute('aria-pressed', 'false')
     })
+    const keeperGroup = screen.getByRole('group', { name: nl.oefeningen.keeperLabel })
+    expect(within(keeperGroup).getByRole('button', { name: nl.oefeningen.keeperIncluded })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('ondersteunt meerdere teams met verschillende groottes tegelijk (asymmetrie)', () => {
@@ -131,9 +249,9 @@ describe('OefeningEditor — teams (dynamische lijst)', () => {
     fireEvent.change(sizeSelects[1], { target: { value: '6' } })
     fireEvent.change(sizeSelects[2], { target: { value: '8' } })
 
-    const groups = screen.getAllByRole('group', { name: nl.oefeningen.formations })
-    fireEvent.click(within(groups[0]).getByRole('button', { name: '2-1' }))
-    fireEvent.click(within(groups[1]).getByRole('button', { name: '3-2' }))
+    const groups = screen.getAllByRole('group', { name: nl.oefeningen.formation })
+    fireEvent.click(within(groups[0]).getByRole('button', { name: '1-1-1' }))
+    fireEvent.click(within(groups[1]).getByRole('button', { name: '1-1-3' }))
     // Team 3 blijft zonder formatie (mag leeg).
 
     expect((screen.getAllByLabelText(nl.oefeningen.teamSize)[0] as HTMLSelectElement).value).toBe('4')
@@ -188,7 +306,7 @@ describe('OefeningEditor — overige velden', () => {
 
     fireEvent.click(screen.getByText(nl.trainingPlan.save))
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
-    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 5, formaties: [] }])
+    expect(onSubmit.mock.calls[0][0].teams).toEqual([{ grootte: 5, formaties: [], keeperInGrootte: true }])
   })
 
   it('toont een foutmelding wanneer onSubmit faalt, zonder de sheet te sluiten', async () => {

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { OefeningTeam, Player, Spelerindeling, basisFormatieDef } from '@/lib/types'
+import { OefeningTeam, Player, Spelerindeling } from '@/lib/types'
+import { basisFormatieDef } from '@/lib/formaties'
 import { saveSpelerindeling } from '@/app/actions/training-plan'
 import { autoAssignTeams } from '@/lib/spelerindeling'
 import { useDict } from '@/lib/i18n-context'
@@ -329,7 +330,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
         {teams.map((team, i) => {
           const ids = indeling[i] ?? []
           const teamLabel = t.teamIndeling.teamLabel.replace('{n}', String(i + 1))
-          const basis = hasSize(team) ? basisFormatieDef(team.grootte, team.formaties) : null
+          const basis = hasSize(team) ? basisFormatieDef(team) : null
           const detail = hasSize(team)
             ? `${team.grootte}${basis ? ` · ${basis.label}` : ''}`
             : t.teamIndeling.losseTeam

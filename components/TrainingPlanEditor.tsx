@@ -2,7 +2,8 @@
 
 import { useState, useTransition, useRef, useEffect } from 'react'
 import Link from 'next/link'
-import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, TrainingOefeningWithData, basisFormatieDef } from '@/lib/types'
+import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, TrainingOefeningWithData } from '@/lib/types'
+import { basisFormatieDef } from '@/lib/formaties'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
 import { clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
@@ -490,7 +491,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           ) : (
                             <div className="flex flex-wrap gap-2 print:flex-col print:gap-[1mm]">
                               {o.teams.map((tm, i) => {
-                                const basis = basisFormatieDef(tm.grootte, tm.formaties)
+                                const basis = basisFormatieDef(tm)
                                 return (
                                   <FormationField
                                     key={i}

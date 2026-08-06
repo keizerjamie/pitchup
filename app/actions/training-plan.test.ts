@@ -364,6 +364,37 @@ describe('createAndAddOefening', () => {
     aantal_neutralen: 0,
   }
 
+  it('schrijft de teams canoniek weg: key + keeperInGrootte', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o-new' }, error: null },
+        training_oefeningen: { data: { id: 'k1' }, error: null },
+      },
+    })
+    use(m)
+    await createAndAddOefening('e1', {
+      ...input,
+      teams: [
+        { grootte: 6, formaties: ['3-2'] },                            // label → key
+        { grootte: 6, formaties: ['3-2-1'], keeperInGrootte: false },  // zonder keeper
+      ],
+    })
+    const oefening = m.calls.insert.find((i) => i.table === 'oefeningen')!
+    expect(oefening.payload.teams).toEqual([
+      { grootte: 6, formaties: ['3-0-2'], keeperInGrootte: true },
+      { grootte: 6, formaties: ['3-2-1'], keeperInGrootte: false },
+    ])
+    expect(oefening.payload.team_id).toBe('team-1')
+  })
+
+  it('weigert meer dan één formatie per team', async () => {
+    use(makeSupabase({ tables: { events: { data: { id: 'e1' } } } }))
+    await expect(
+      createAndAddOefening('e1', { ...input, teams: [{ grootte: 6, formaties: ['3-0-2', '2-2-1'] }] }),
+    ).rejects.toThrow('Maximaal één formatie per team')
+  })
+
   it('propageert een fout bij het koppelen (geen halve staat)', async () => {
     // Oefening-insert slaagt (geeft id terug), maar de koppel-insert faalt.
     const m = makeSupabase({

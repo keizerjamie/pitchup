@@ -79,53 +79,57 @@ describe('createOefening', () => {
     use(m)
     await createOefening(baseInput({
       teams: [
-        { grootte: 4, formaties: ['2-1'] },
-        { grootte: 6, formaties: ['3-2'] },
+        { grootte: 4, formaties: ['2-0-1'] },
+        { grootte: 6, formaties: ['3-0-2'] },
         { grootte: 8, formaties: [] },
       ],
     }))
     expect(m.calls.insert[0].payload.teams).toEqual([
-      { grootte: 4, formaties: ['2-1'] },
-      { grootte: 6, formaties: ['3-2'] },
-      { grootte: 8, formaties: [] },
+      { grootte: 4, formaties: ['2-0-1'], keeperInGrootte: true },
+      { grootte: 6, formaties: ['3-0-2'], keeperInGrootte: true },
+      { grootte: 8, formaties: [], keeperInGrootte: true },
     ])
   })
 
-  it('slaat meerdere formaties per team op, alfabetisch op label', async () => {
+  it('slaat een binnengekomen label canoniek op als key', async () => {
     const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
     use(m)
-    // Bewust in omgekeerde volgorde ingevoerd.
-    await createOefening(baseInput({ teams: [{ grootte: 4, formaties: ['2-1', '1-2'] }] }))
-    expect(m.calls.insert[0].payload.teams).toEqual([{ grootte: 4, formaties: ['1-2', '2-1'] }])
-  })
-
-  it('canonieke volgorde is onafhankelijk van de invoervolgorde', async () => {
-    const a = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
-    use(a)
-    await createOefening(baseInput({ teams: [{ grootte: 11, formaties: ['5-3-2', '3-4-3', '4-4-2'] }] }))
-
-    const b = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
-    use(b)
-    await createOefening(baseInput({ teams: [{ grootte: 11, formaties: ['4-4-2', '5-3-2', '3-4-3'] }] }))
-
-    expect(a.calls.insert[0].payload.teams).toEqual(b.calls.insert[0].payload.teams)
-    expect(a.calls.insert[0].payload.teams).toEqual([
-      { grootte: 11, formaties: ['3-4-3', '4-4-2', '5-3-2'] },
+    // '3-2' is het LABEL van compositie 3V-0M-2A.
+    await createOefening(baseInput({ teams: [{ grootte: 6, formaties: ['3-2'] }] }))
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 6, formaties: ['3-0-2'], keeperInGrootte: true },
     ])
   })
 
-  it('ontdubbelt herhaalde formaties', async () => {
+  it('weigert meer dan één formatie per team', async () => {
+    use(makeSupabase())
+    await expect(createOefening(baseInput({ teams: [{ grootte: 4, formaties: ['2-0-1', '1-0-2'] }] })))
+      .rejects.toThrow('Maximaal één formatie per team')
+  })
+
+  it('weigert meer dan één formatie ook bij een 11-tal', async () => {
+    use(makeSupabase())
+    await expect(
+      createOefening(baseInput({ teams: [{ grootte: 11, formaties: ['5-3-2', '3-4-3'] }] })),
+    ).rejects.toThrow('Maximaal één formatie per team')
+  })
+
+  it('ontdubbelt herhaalde formaties (blijft daarmee binnen het maximum van 1)', async () => {
     const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
     use(m)
-    await createOefening(baseInput({ teams: [{ grootte: 6, formaties: ['3-2', '3-2', '2-2-1'] }] }))
-    expect(m.calls.insert[0].payload.teams).toEqual([{ grootte: 6, formaties: ['2-2-1', '3-2'] }])
+    await createOefening(baseInput({ teams: [{ grootte: 6, formaties: ['3-0-2', '3-0-2'] }] }))
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 6, formaties: ['3-0-2'], keeperInGrootte: true },
+    ])
   })
 
   it('een lege selectie blijft een lege array (= geen formatie)', async () => {
     const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
     use(m)
     await createOefening(baseInput({ teams: [{ grootte: 6, formaties: [] }] }))
-    expect(m.calls.insert[0].payload.teams).toEqual([{ grootte: 6, formaties: [] }])
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 6, formaties: [], keeperInGrootte: true },
+    ])
   })
 
   it('dual-read: legacy invoer {grootte, formatie} wordt als nieuwe vorm weggeschreven', async () => {
@@ -138,9 +142,70 @@ describe('createOefening', () => {
       ] as unknown as OefeningInput['teams'],
     }))
     expect(m.calls.insert[0].payload.teams).toEqual([
-      { grootte: 4, formaties: ['2-1'] },
-      { grootte: 6, formaties: [] },
+      { grootte: 4, formaties: ['2-0-1'], keeperInGrootte: true },
+      { grootte: 6, formaties: [], keeperInGrootte: true },
     ])
+  })
+
+  it('slaat keeperInGrootte false op: het team speelt zonder keeper', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    // Zonder keeper zijn er 6 veldspelers, dus '3-2-1' past (met keeper zou dat niet).
+    await createOefening(baseInput({
+      teams: [{ grootte: 6, formaties: ['3-2-1'], keeperInGrootte: false }],
+    }))
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 6, formaties: ['3-2-1'], keeperInGrootte: false },
+    ])
+  })
+
+  it('een formatie die alleen zonder keeper past, faalt met keeper', async () => {
+    use(makeSupabase())
+    await expect(
+      createOefening(baseInput({ teams: [{ grootte: 6, formaties: ['3-2-1'] }] })),
+    ).rejects.toThrow('Formatie past niet bij teamgrootte')
+  })
+
+  it('grootte 11 forceert keeperInGrootte true, ongeacht de invoer', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    await createOefening(baseInput({
+      teams: [{ grootte: 11, formaties: ['4-3-3'], keeperInGrootte: false }],
+    }))
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 11, formaties: ['4-3-3'], keeperInGrootte: true },
+    ])
+  })
+
+  it('accepteert grootte 10 (nieuw: gedekt door de gegenereerde catalogus)', async () => {
+    const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(m)
+    await createOefening(baseInput({ teams: [{ grootte: 10, formaties: ['4-4-1'] }] }))
+    expect(m.calls.insert[0].payload.teams).toEqual([
+      { grootte: 10, formaties: ['4-4-1'], keeperInGrootte: true },
+    ])
+  })
+
+  it('valideert categorie-afhankelijk: partijen_groot eist alle drie de linies', async () => {
+    // '3-0-2' (geen middenvelder) mag wél bij partijen_klein...
+    const ok = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+    use(ok)
+    await createOefening(baseInput({
+      categorie: 'partijen_klein',
+      teams: [{ grootte: 6, formaties: ['3-0-2'] }],
+    }))
+    expect(ok.calls.insert[0].payload.teams).toEqual([
+      { grootte: 6, formaties: ['3-0-2'], keeperInGrootte: true },
+    ])
+
+    // ...maar niet bij partijen_groot.
+    use(makeSupabase())
+    await expect(
+      createOefening(baseInput({
+        categorie: 'partijen_groot',
+        teams: [{ grootte: 6, formaties: ['3-0-2'] }],
+      })),
+    ).rejects.toThrow('Formatie past niet bij teamgrootte')
   })
 
   it('dual-read: een legacy formatie die niet bij de grootte past faalt nog steeds', async () => {
@@ -165,22 +230,24 @@ describe('createOefening', () => {
       .rejects.toThrow('Formatie past niet bij teamgrootte')
   })
 
-  it('faalt zodra ÉÉN van meerdere formaties niet bij de grootte past, ongeacht positie', async () => {
+  it('de max-1-check gaat vóór de per-waarde-validatie (geen stille afkap)', async () => {
     for (const formaties of [
-      ['3-2', '4-3-3'],       // fout achteraan
-      ['4-3-3', '3-2'],       // fout vooraan
-      ['3-2', '4-3-3', '2-2-1'], // fout in het midden
+      ['3-0-2', '4-3-3'],            // fout achteraan
+      ['4-3-3', '3-0-2'],            // fout vooraan
+      ['3-0-2', '4-3-3', '2-2-1'],   // fout in het midden
     ]) {
       use(makeSupabase())
       await expect(createOefening(baseInput({ teams: [{ grootte: 6, formaties }] })))
-        .rejects.toThrow('Formatie past niet bij teamgrootte')
+        .rejects.toThrow('Maximaal één formatie per team')
     }
   })
 
   it('faalt bij een ongeldige teamgrootte', async () => {
-    use(makeSupabase())
-    await expect(createOefening(baseInput({ teams: [{ grootte: 10, formaties: [] }] })))
-      .rejects.toThrow('Ongeldige teamgrootte')
+    for (const grootte of [2, 12, 0]) {
+      use(makeSupabase())
+      await expect(createOefening(baseInput({ teams: [{ grootte, formaties: [] }] })))
+        .rejects.toThrow('Ongeldige teamgrootte')
+    }
   })
 
   it('faalt wanneer niet ingelogd', async () => {
@@ -252,7 +319,7 @@ describe('createOefening', () => {
       teams: [{ grootte: 6, formaties: [], foo: 'bar' } as unknown as OefeningInput['teams'][number]],
     }))
     const team = (m.calls.insert[0].payload.teams as Record<string, unknown>[])[0]
-    expect(team).toEqual({ grootte: 6, formaties: [] })
+    expect(team).toEqual({ grootte: 6, formaties: [], keeperInGrootte: true })
     expect('foo' in team).toBe(false)
   })
 })
