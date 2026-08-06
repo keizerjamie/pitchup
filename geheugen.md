@@ -460,7 +460,19 @@ gecommit, de rest van de toen aanwezige tree-troep bewust ongemoeid gelaten — 
   `@media (hover: hover) and (pointer: fine)`-gating (sticky-hover-risico op touch). Beide
   zijn codebase-brede patronen, geen losse bugs — pak ze apart op als het ooit relevant wordt.
 
-## Feature: Meerdere formaties per oefening-team (2026-08-04, commit `fecf788`)
+## Feature: Meerdere formaties per oefening-team (2026-08-04, commit `fecf788`) — **VERVANGEN, zie hieronder**
+**Deze feature is op 2026-08-04 (commit `52361c5`) alweer teruggedraaid/vervangen** — bleek
+een misinterpretatie van de featurevraag (de gebruiker bedoelde niet "meerdere formaties per
+team", maar "een veel grotere lijst met kiesbare, automatisch gegenereerde formaties, nog
+steeds één per team"). Zie de nieuwe sectie "Feature: Automatisch gegenereerde
+formatie-catalogus" verderop in dit bestand voor de huidige, correcte staat. De onderstaande
+beschrijving is **historisch** (nuttig om te snappen wat er tussen `fecf788` en `52361c5` in
+productie stond, en welke bestanden/patronen daarna zijn overgenomen of vervangen) — niet
+meer de huidige werkelijkheid. **Belangrijke, blijvende les hierover**: bij een ambigue
+featurebeschrijving ("alle X kunnen selecteren") eerst de kernmechaniek in gewone taal laten
+bevestigen door de gebruiker vóórdat er dieper op UI-/technische details wordt doorgevraagd —
+zie het memory-bestand `feature-factory-confirm-core-mechanic` (globaal, niet in deze repo).
+
 Gebouwd via de volledige feature-factory-keten (researcher → story-writer → project-manager
 → backend-engineer → frontend-engineer → test-verifier → validator), met goedkeuringspauzes
 na de story en na de brief. Trainer kan per team in een oefening nu **meerdere**
@@ -568,3 +580,85 @@ gedeelde bestanden (vooral `messages/*.ts`, dat elke i18n-feature raakt) absorbe
 Gebruik bij gelijktijdig werk aan dezelfde repo bij voorkeur losse worktrees/branches, of
 wees je ervan bewust dat `git log`/`git blame` even nagelopen moet worden vóór je commit als
 er buiten je eigen sessie om ook is gewerkt.
+
+## Feature: Automatisch gegenereerde formatie-catalogus, single-select (2026-08-04, commit `52361c5`)
+**Corrigeert** de hierboven beschreven "meerdere formaties"-feature (`fecf788`/`7710a3c`) —
+die bleek een misinterpretatie. Gebouwd via de volledige feature-factory-keten met twee
+goedkeuringsrondes (story + brief) en een extra tussentijdse gebruikersvraag toen de
+test-verifier een structureel AC-conflict blootlegde (zie onder). Trainer kiest per
+oefening-team weer **één** formatie, maar nu uit een **automatisch gegenereerde** lijst i.p.v.
+1-2 handmatig gecureerde opties.
+
+### Datamodel
+- **`OefeningTeam`**: `formaties: string[]` blijft de veldnaam (nu afgedwongen tot max 1
+  item — save met 2 items → `'Maximaal één formatie per team'`), plus nieuw
+  `keeperInGrootte?: boolean` (ontbreekt → `true`; bij grootte 11 altijd geforceerd `true`).
+  Bestaande productierijen met 2 items (legacy van `fecf788`) blijven werken: bij lezen
+  wint het alfabetisch-eerste item (`basisFormatieDef`), en `OefeningEditor.tsx`'s
+  `teamsToRows` trimt zo'n selectie bij het openen zelf ook terug tot 1 item (anders bleven
+  er 2 chips actief en blokkeerde opslaan — een bug die pas de validator ving, zie
+  "Les" onderaan).
+- **Nieuw bestand `lib/formaties.ts`** (bewust apart van `lib/types.ts`/`lib/oefening.ts`,
+  zelfde importcyclus-reden als eerder bij `normalizeOefeningTeam`): de generator
+  (`genereerFormaties`), positie-layout (`layoutPosities`), en de team-brede resolvers
+  (`formatiesVoorTeam`, `basisFormatieDef`, `isFormatieGeldigVoorTeam`,
+  `aantalVeldspelers`, `VALID_TEAM_SIZES = [3..11]`). `basisFormatieDef` en
+  `isFormationValidForSize` zijn hierheen VERHUISD uit `lib/types.ts` (niet meer daar
+  exporteren).
+- **`FORMATIONS`/`FORMATIONS_BY_TEAM_SIZE`/`formationsForSize` blijven inhoudelijk
+  ongewijzigd** — rol nu beperkt tot (a) grootte 11 (nog steeds de curated 4-3-3/4-4-2/
+  4-2-3-1/3-4-3/5-3-2-lijst, gedeeld met `components/LineupBuilder.tsx`, dat feature
+  ongemoeid), en (b) een legacy-vangnet om oude opgeslagen keys als `'2-0+K'` nog te kunnen
+  tekenen. **`formationsForSize(10)` blijft bewust `[]`** (was al zo, bewust niet
+  "gecorrigeerd") — grootte 10 loopt overal via de nieuwe `VALID_TEAM_SIZES`/generator, niet
+  via deze legacy-functie.
+- **Generator-regels**: verdediging ≤5, middenveld ≤5, aanval ≤3, som = N (veldspelers).
+  N = `grootte − 1` bij `keeperInGrootte: true`, anders `grootte`. Welke linie 0 mag zijn
+  hangt af van `oefening.categorie`: bij `partijen_groot` moeten alle 3 linies ≥1 zijn,
+  bij elke andere categorie mag een linie 0 zijn. Label = niet-lege linies aan elkaar
+  (`"2-3"`, nooit `"0-2-3"`); key = altijd 3 segmenten (`"0-2-3"`), voor ondubbelzinnige
+  opslag/resolutie ook al kan het label dubbelzinnig lijken.
+- **Tie-break bij botsende labels** (bv. "2-3" kan zowel 0V+2M+3A als 2V+3M+0A betekenen):
+  wint de compositie met de meeste verdedigers, bij gelijkspel de meeste aanvallers
+  (`lib/formaties.ts`, functie `beterDan`). **Bewust, getest en door de gebruiker
+  bevestigd emergent gevolg**: hierdoor is een formatie met **0 verdedigers structureel
+  onmogelijk** in de hele catalogus (voor géén enkele grootte/categorie/keeper-combinatie) —
+  0 middenvelders en 0 aanvallers komen wel voor. Dit week af van de letterlijke story-tekst
+  ("elke linie mag 0 zijn") en is met terugwerkende kracht als bewust gedrag vastgelegd na
+  bevestiging door de gebruiker, niet als bug gefixt. Kom je dit weer tegen: dit is
+  **verwacht**, geen regressie.
+- **Keeper-marker in het diagram**: bij `keeperInGrootte: true` (en altijd bij grootte 11)
+  wordt een aparte K-marker getekend; bij `false` géén keeper-marker. Beide gevallen leveren
+  exact `grootte` markers totaal op. Dit is de **tegenovergestelde** keuze van het
+  oorspronkelijke technisch-brief-voorstel van de project-manager ("keeper altijd tekenen")
+  — de gebruiker koos expliciet voor "geen marker bij exclusief keeper" toen ernaar gevraagd.
+- Tactiekdiagram van gegenereerde formaties toont geen V/M/A-tekstlabel meer op de posities
+  (rol is af te lezen uit de positie op het veld); de K-labeling blijft staan.
+
+### UI
+- `components/OefeningEditor.tsx`: single-select chips (verving de multi-toggle + "Alles
+  selecteren" volledig), keeper-schakelaar per team (verborgen/geforceerd `true` bij
+  grootte 11), teamgrootte-/categorie-/keeper-wissel filtert de bestaande selectie
+  stilzwijgend via `isFormatieGeldigVoorTeam` (geen melding, bevestigd door de gebruiker).
+  Lege-catalogus-geval (enige in het hele bereik: grootte 3 + `partijen_groot` + inclusief
+  keeper) toont een disabled-status met de nieuwe key `oefeningen.noFormationsAvailable`
+  (bewust apart van het bestaande `noFormation`, dat een andere betekenis heeft: "geen
+  keuze gemaakt" vs. "geen keuze mogelijk").
+- i18n: `formations`/`selectAllFormations` (van de teruggedraaide feature) verwijderd uit
+  alle 5 `messages/*.ts`; nieuw `keeperLabel`/`keeperIncluded`/`keeperExcluded`/
+  `noFormationsAvailable` toegevoegd. `formation`/`noFormation` (nog ouder, van vóór
+  `fecf788`) blijven bewust ongebruikt staan.
+
+### Les — waarom deze correctie nodig was
+De oorspronkelijke featurevraag ("ik wil alle vereenvoudigde formaties kunnen selecteren")
+werd zonder de kernmechaniek expliciet te parafraseren/bevestigen doorgezet naar de volledige
+keten, en verkeerd geïnterpreteerd als "multi-select per team" i.p.v. "een grotere,
+automatisch gegenereerde single-select-lijst". Zie het globale memory-bestand
+`feature-factory-confirm-core-mechanic` voor de blijvende werkwijze-les. Concreet in deze
+sessie ook geleerd: **de validator vond na afronding nog een echte bug** (legacy 2-item-data
+liet 2 chips actief staan en blokkeerde opslaan) — een teken dat "bestaande multi-item-data
+blijft werken via het eerste/alfabetisch-eerste item" als regel in de brief stond, maar niet
+consistent was doorgevoerd naar ALLE lezplekken (wel in de preview/weergave via
+`basisFormatieDef`, niet in de editor-`teamsToRows`-initialisatie). Bij een vergelijkbare
+"blijft werken met oude data"-eis in een volgende feature: expliciet navragen of/hoe dat
+getest wordt op **elke** plek waar die data wordt ingelezen, niet alleen de weergave.
