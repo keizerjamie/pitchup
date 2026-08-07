@@ -97,6 +97,8 @@ export const fr: Dict = {
     trainingPlan: 'Planificateur', trainingPlanHint: 'Planifier les exercices et la structure de la séance', trainingPlanCta: 'Prépare ta séance !',
     trainingPlanView: 'Voir le plan',
     trainingPlanViewHint: "Le plan d'entraînement est prêt",
+    squad: 'Composer la sélection', squadHint: 'Choisir les joueurs convoqués pour le match', squadCta: 'Compose ta sélection !',
+    squadView: 'Voir la sélection', squadViewHint: 'La sélection a déjà été composée',
     lineup: 'Créer la composition', lineupHint: 'Définir la formation et la composition', lineupCta: 'Crée ta composition !',
     lineupView: 'Voir la composition', lineupViewHint: 'La composition a déjà été créée',
     analysis: 'Analyse du match', analysisHint: 'Résultat, évaluations et événements', analysisCta: "Remplir l'analyse !",
@@ -263,6 +265,14 @@ export const fr: Dict = {
     choosePlayer: 'Choisir un joueur pour', removePlayer: 'Retirer le joueur',
     allAssigned: 'Tous les joueurs sont déjà placés', bench: 'Banc / réserve',
     save: 'Enregistrer la composition', saving: 'Enregistrement...', saved: '✓ Enregistré !',
+  },
+  matchSquad: {
+    title: 'Sélection',
+    selectedCount: '{n} sélectionné(s)',
+    emptyTeam: "Ajoutez d'abord des joueurs pour composer une sélection.",
+    emptyExportHint: "Sélectionnez d'abord des joueurs pour pouvoir exporter.",
+    toggleLabel: 'Sélectionner',
+    saveError: "L'enregistrement de la sélection a échoué. Veuillez réessayer.",
   },
   teamIndeling: {
     heading: 'Répartition des équipes', poolLabel: 'Pas encore réparti', poolLabelPrint: 'Non réparti', teamLabel: 'Équipe {n}', autoAssign: 'Générer automatiquement',

@@ -97,6 +97,8 @@ export const es: Dict = {
     trainingPlan: 'Planificador', trainingPlanHint: 'Planifica ejercicios y estructura para este entrenamiento', trainingPlanCta: '¡Crea tu entrenamiento!',
     trainingPlanView: 'Ver plan de entrenamiento',
     trainingPlanViewHint: 'El plan ya está listo',
+    squad: 'Convocar jugadores', squadHint: 'Elige quién es convocado para el partido', squadCta: '¡Haz tu convocatoria!',
+    squadView: 'Ver convocatoria', squadViewHint: 'La convocatoria ya está hecha',
     lineup: 'Crear alineación', lineupHint: 'Establecer formación y alineación', lineupCta: '¡Crea tu alineación!',
     lineupView: 'Ver alineación', lineupViewHint: 'La alineación ya ha sido creada',
     analysis: 'Análisis del partido', analysisHint: 'Resultado, valoraciones y eventos', analysisCta: '¡Rellenar análisis!',
@@ -263,6 +265,14 @@ export const es: Dict = {
     choosePlayer: 'Elegir jugador para', removePlayer: 'Quitar jugador',
     allAssigned: 'Todos los jugadores ya asignados', bench: 'Banquillo / reservas',
     save: 'Guardar alineación', saving: 'Guardando...', saved: '✓ Guardado!',
+  },
+  matchSquad: {
+    title: 'Convocatoria',
+    selectedCount: '{n} seleccionados',
+    emptyTeam: 'Añade primero jugadores para poder hacer una convocatoria.',
+    emptyExportHint: 'Selecciona primero jugadores para poder exportar.',
+    toggleLabel: 'Seleccionar',
+    saveError: 'No se pudo guardar la convocatoria. Inténtalo de nuevo.',
   },
   teamIndeling: {
     heading: 'Reparto de equipos', poolLabel: 'Aún por repartir', poolLabelPrint: 'Sin repartir', teamLabel: 'Equipo {n}', autoAssign: 'Generar automáticamente',

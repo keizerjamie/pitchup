@@ -49,4 +49,22 @@ describe('PrintButton', () => {
     const button = screen.getByRole('button', { name: nl.trainingPlan.print })
     expect(button.className).toContain('print:hidden')
   })
+
+  it('zonder disabled-prop: ongewijzigd gedrag — knop is niet disabled', () => {
+    renderButton()
+    const button = screen.getByRole('button', { name: nl.trainingPlan.print })
+    expect(button).not.toBeDisabled()
+  })
+
+  it('disabled={true}: de knop heeft het disabled-attribuut en een klik roept window.print() niet aan', () => {
+    render(
+      <DictProvider dict={nl}>
+        <PrintButton disabled />
+      </DictProvider>,
+    )
+    const button = screen.getByRole('button', { name: nl.trainingPlan.print })
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(printSpy).not.toHaveBeenCalled()
+  })
 })

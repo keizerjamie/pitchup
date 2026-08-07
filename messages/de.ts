@@ -96,6 +96,8 @@ export const de: Dict = {
     trainingPlan: 'Trainingsplaner', trainingPlanHint: 'Übungen und Struktur für dieses Training planen', trainingPlanCta: 'Erstelle dein Training!',
     trainingPlanView: 'Trainingsplan ansehen',
     trainingPlanViewHint: 'Trainingsplan ist fertig',
+    squad: 'Kader nominieren', squadHint: 'Wähle, wer für das Spiel nominiert wird', squadCta: 'Nominiere deinen Kader!',
+    squadView: 'Kader ansehen', squadViewHint: 'Kader wurde bereits nominiert',
     lineup: 'Aufstellung erstellen', lineupHint: 'Formation und Aufstellung festlegen', lineupCta: 'Erstelle deine Aufstellung!',
     lineupView: 'Aufstellung ansehen', lineupViewHint: 'Aufstellung wurde bereits erstellt',
     analysis: 'Spielanalyse', analysisHint: 'Ergebnis, Bewertungen und Ereignisse', analysisCta: 'Analyse ausfüllen!',
@@ -262,6 +264,14 @@ export const de: Dict = {
     choosePlayer: 'Spieler wählen für', removePlayer: 'Spieler entfernen',
     allAssigned: 'Alle Spieler bereits eingeteilt', bench: 'Bank / Reserve',
     save: 'Aufstellung speichern', saving: 'Speichern...', saved: '✓ Gespeichert!',
+  },
+  matchSquad: {
+    title: 'Kader',
+    selectedCount: '{n} ausgewählt',
+    emptyTeam: 'Füge zuerst Spieler hinzu, um einen Kader zu nominieren.',
+    emptyExportHint: 'Wähle zuerst Spieler aus, um exportieren zu können.',
+    toggleLabel: 'Auswählen',
+    saveError: 'Speichern des Kaders ist fehlgeschlagen. Bitte erneut versuchen.',
   },
   teamIndeling: {
     heading: 'Teameinteilung', poolLabel: 'Noch einzuteilen', poolLabelPrint: 'Nicht eingeteilt', teamLabel: 'Team {n}', autoAssign: 'Automatisch generieren',

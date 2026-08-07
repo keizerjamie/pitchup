@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS match_events (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Opgeroepen spelers per wedstrijd (wedstrijdselectie) — zie match-squad.sql.
+-- Een rij = deze speler is voor dit event geselecteerd.
+CREATE TABLE IF NOT EXISTS match_squad (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL,
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (event_id, player_id)
+);
+
 -- Handmatig afgevinkte taken per event (To-do) — zie task-overrides.sql.
 CREATE TABLE IF NOT EXISTS task_overrides (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -105,6 +116,8 @@ CREATE INDEX IF NOT EXISTS idx_match_ratings_event ON match_ratings(event_id);
 CREATE INDEX IF NOT EXISTS idx_match_ratings_team  ON match_ratings(team_id);
 CREATE INDEX IF NOT EXISTS idx_match_events_event  ON match_events(event_id);
 CREATE INDEX IF NOT EXISTS idx_match_events_team   ON match_events(team_id);
+CREATE INDEX IF NOT EXISTS idx_match_squad_event ON match_squad(event_id);
+CREATE INDEX IF NOT EXISTS idx_match_squad_team  ON match_squad(team_id);
 CREATE INDEX IF NOT EXISTS idx_task_overrides_event ON task_overrides(event_id);
 CREATE INDEX IF NOT EXISTS idx_task_overrides_team  ON task_overrides(team_id);
 
@@ -115,4 +128,5 @@ ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lineups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_ratings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE match_squad ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_overrides ENABLE ROW LEVEL SECURITY;

@@ -21,7 +21,7 @@ export default async function EventDetailPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }] = await Promise.all([
+  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
     supabase.from('players').select('*').eq('team_id', user.id).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', user.id),
@@ -30,6 +30,7 @@ export default async function EventDetailPage({ params }: Props) {
     supabase.from('training_oefeningen').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
     supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', user.id),
     supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', user.id),
+    supabase.from('match_squad').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
   ])
 
   if (!event) notFound()
@@ -119,7 +120,12 @@ export default async function EventDetailPage({ params }: Props) {
         )}
       </div>
 
-      {/* Lineup / training-plan action */}
+      {/* Squad / lineup / training-plan action */}
+      {isMatch && (
+        <ActionCard href={`/events/${id}/squad`} done={(squadCheck?.length ?? 0) > 0} icon="groups"
+          title={t.event.squad} hint={t.event.squadHint}
+          viewLabel={t.event.squadView} viewHint={t.event.squadViewHint} cta={t.event.squadCta} />
+      )}
       {isMatch && (
         <ActionCard href={`/events/${id}/lineup`} done={!!lineup} icon="dashboard"
           title={t.event.lineup} hint={t.event.lineupHint}

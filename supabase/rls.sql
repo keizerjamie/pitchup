@@ -60,6 +60,14 @@ create policy "task_overrides: own team only"
   using (team_id = auth.uid())
   with check (team_id = auth.uid());
 
+-- ── match_squad ──────────────────────────────────────────────
+alter table match_squad enable row level security;
+
+create policy "match_squad: own team only"
+  on match_squad for all
+  using (team_id = auth.uid())
+  with check (team_id = auth.uid());
+
 -- ── settings (if exists) ─────────────────────────────────────
 alter table settings enable row level security;
 

@@ -2,13 +2,14 @@
 
 import { useDict } from '@/lib/i18n-context'
 
-export default function PrintButton({ className = '' }: { className?: string }) {
+export default function PrintButton({ className = '', disabled = false }: { className?: string; disabled?: boolean }) {
   const t = useDict()
   return (
     <button
       type="button"
       onClick={() => window.print()}
-      className={`print:hidden inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-surface text-muted hover:text-ink text-sm font-semibold transition-colors active:scale-95 flex-shrink-0 ${className}`}
+      disabled={disabled}
+      className={`print:hidden inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-surface text-muted hover:text-ink text-sm font-semibold transition-colors active:scale-95 flex-shrink-0 disabled:opacity-60 ${className}`}
       style={{ border: '1px solid var(--border-soft)' }}
     >
       <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
