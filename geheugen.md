@@ -662,3 +662,93 @@ consistent was doorgevoerd naar ALLE lezplekken (wel in de preview/weergave via
 `basisFormatieDef`, niet in de editor-`teamsToRows`-initialisatie). Bij een vergelijkbare
 "blijft werken met oude data"-eis in een volgende feature: expliciet navragen of/hoe dat
 getest wordt op **elke** plek waar die data wordt ingelezen, niet alleen de weergave.
+
+## Feature: Wedstrijdselectie, los van opstelling (2026-08-07, commit `c296d02`)
+Trainer kan op het wedstrijdscherm, vóórdat er een opstelling bestaat, een wedstrijdselectie
+samenstellen en exporteren als PDF (browser-print). Gebouwd via de volledige
+feature-factory-keten met drie goedkeuringsrondes (story, brief, en tussentijdse
+ontwerpvragen via `AskUserQuestion`).
+
+### Kernmechaniek — expliciet door de gebruiker bevestigd, niet zelf geïnterpreteerd
+- **Zelfstandig selectiemoment**, los van zowel `attendance` (aanwezigheid) als `lineups`
+  (opstelling) — geen afgeleide, geen synchronisatie, geen relatie in het datamodel. Aantal
+  geselecteerden hoeft niet gelijk te zijn aan aantal aanwezigen.
+- **Geen zichtbare groepering in de PDF.** Keepers staan vooraan puur als sorteervolgorde;
+  géén kop, géén tussenregel, géén witruimte, géén scheidingslijn tussen keepers en
+  veldspelers. Dit was een expliciete correctie op het eerdere brief-voorstel (dat wél
+  "Keepers"/"Veldspelers"-koppen had) — de gebruiker koos voor "gewoon onder elkaar, geen
+  scheiding" toen ernaar gevraagd. Eén doorlopende alfabetische lijst.
+- PDF-kop: `vs <tegenstander>` + wedstrijddatum, verder geen event-info (geen thuis/uit,
+  geen locatie, geen type). PDF-inhoud: uitsluitend spelersnaam, geen rugnummer/positie/foto.
+
+### Datamodel
+- **Nieuwe, zelfstandige tabel `match_squad`**: `id, team_id, event_id (FK events, cascade),
+  player_id (FK players, cascade), created_at`, `UNIQUE(event_id, player_id)`. Aanwezigheid
+  van de rij ís de selectie (geen statuskolom). RLS `team_id = auth.uid()` op USING+WITH CHECK.
+- Drie plekken bijgewerkt (bestaande conventie): losse migratie `supabase/match-squad.sql`
+  (handmatig gedraaid door de eigenaar in de Supabase SQL Editor, vóór de deploy) + gespiegeld
+  in `supabase/schema.sql` (verse installatie) + `supabase/rls.sql` (policy-bron).
+- **Géén `MatchSquad`-type in `lib/types.ts`** — vooraf toegevoegd door de backend-engineer,
+  bleek nergens geconsumeerd (frontend werkt met losse `player_id`-strings) en is na de
+  validatieronde weer verwijderd. Les: geen type vooruit definiëren op een implementatie die
+  nog niet vaststaat.
+
+### Backend
+- `lib/authz.ts` → `assertOwnMatchEvent(supabase, eventId, teamId)`: eigenaarschap **én**
+  `type === 'match'` in één guard, bewust dezelfde niet-onthullende melding
+  (`'Event niet gevonden'`) als `assertOwnEvent` — mag niet verraden wélke check faalde.
+- `lib/match-squad.ts` → `sortSquadForExport(players, locale)`: geeft een **platte array**
+  terug (bewust geen `{keepers, fieldPlayers}`-object) zodat de groepsgrens niet eens
+  uitdrukbaar is in de UI-laag die het consumeert — keeper-voorrang zit uitsluitend in de
+  comparator (`position === 'Keeper'`, alléén primaire positie, `secondary_positions` telt
+  niet mee), met `localeCompare` + id-tiebreak bij identieke namen.
+- `app/actions/match-squad.ts` → `toggleSquadPlayer(eventId, playerId, selected)`: upsert
+  met `onConflict: 'event_id,player_id', ignoreDuplicates: true` (idempotent bij dubbelklik)
+  of delete met alle drie de `.eq()`-filters incl. `team_id`; `genericError()` bij DB-fout;
+  dubbele `revalidatePath` (`/events/{id}/squad` én `/events/{id}`, want de ActionCard's
+  "done"-status op de detailpagina hangt van de tweede af).
+
+### Frontend
+- `app/events/[id]/squad/page.tsx`: server component, drie tenant-gescopede queries
+  (events/match_squad/players). Selecteerbare lijst = **unie** van actieve spelers ∪ spelers
+  die al geselecteerd zijn — zodat een speler die ná selectie inactief wordt gemaakt niet
+  stilzwijgend uit de lijst/PDF verdwijnt (blijft zichtbaar met `t.players.inactiveLabel`).
+- `components/MatchSquadEditor.tsx`: client component, **host van zowel de live
+  selectie-state als het print-blok** (kritiek: niet in de server component, anders toont
+  de PDF de vorige, nog niet gerevalideerde state — zelfde les als bij het trainingsplan
+  eerder). Optimistische toggle met `lastConfirmedRef`-rollbackpatroon bij een falende
+  server action (1-op-1 hergebruikt van `components/TeamIndelingEditor.tsx` — dit ontbrak in
+  de eerste implementatie en werd pas door de validator gevonden: fire-and-forget zonder
+  rollback liet een niet-opgeslagen selectie op het scherm staan).
+- `components/MatchSquadPrintList.tsx`: **mag uit `lib/types.ts` uitsluitend `Player`
+  importeren** — harde, controleerbare architecturale regel tegen het lekken van
+  opstelling-info (geen `FORMATIONS`/`POSITION_GROUPS`/`POSITION_ABBREVIATIONS`/
+  `LineupPosition`). Niet in `.surface-card`/`.glass-card` (zelfde CSS-specificiteitsvalkuil
+  als bij het trainingsplan-afdrukken hierboven).
+- `components/PrintButton.tsx`: optionele `disabled`-prop (default `false`, backwards
+  compatible), zodat exporteren bij een lege selectie niet kan.
+- Scherm-rij per speler is bewust **simpel**: naam + toggleknop, geen avatar/rugnummer —
+  `components/TrainingAttendance.tsx` bleef daardoor ongewijzigd.
+
+### Tests
+- `wedstrijdselectie.acceptance.test.tsx` (46 tests): dekt zowel component- als
+  paginaniveau (404/redirect/cross-tenant waren aanvankelijk alléén unit-getest in de server
+  action — de test-verifier voegde paginaniveau-tests toe die de échte routes renderen).
+  Kernassertie voor het veiligheidskritieke deel: exact één `<ul>`, 0 `<hr>`, geen
+  `FORMATIONS`-sleutel/`POSITION_ABBREVIATIONS`-waarde/`POSITION_GROUPS`-label in het
+  print-blok, plus een regressietest dat het print-blok geen `print:hidden`- of
+  `.surface-card`/`.glass-card`-voorouder heeft.
+- **Gotcha gevonden door de validator**: een eerste versie van de determinisme-test toetste
+  een lokaal her-geïmplementeerde `sortSquadForExportForTest`-kopie i.p.v. de echte
+  `sortSquadForExport` uit `lib/match-squad.ts` — bleef groen als de productiefunctie brak.
+  Gefixt door de echte, geïmporteerde functie te gebruiken. Les: bij een acceptatietest die
+  een pure lib-functie herhaalt "om het simpel te houden", altijd checken of het de
+  productie-export is en niet een test-lokale herimplementatie.
+
+### Bewust geaccepteerd
+- Geen dashboard-todo-koppeling (`lib/todos.mjs`/`task_overrides`), geen maximum aantal
+  spelers, geen automatisch delen vanuit de app (trainer deelt de PDF zelf), geen
+  "neem alle aanwezigen over"-knop — allemaal expliciet out of scope in de story.
+- `MatchSquadEditor` synct zijn `lastConfirmedRef` niet opnieuw bij nieuwe server-props na
+  revalidatie (in tegenstelling tot `TeamIndelingEditor`) — onschadelijk zolang één trainer
+  per team tegelijk werkt; bij gelijktijdige bewerking in twee tabbladen wint de laatste klik.
