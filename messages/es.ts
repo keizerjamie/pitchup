@@ -270,9 +270,12 @@ export const es: Dict = {
     title: 'Convocatoria',
     selectedCount: '{n} seleccionados',
     emptyTeam: 'Añade primero jugadores para poder hacer una convocatoria.',
+    emptyNoAttendance: 'Marca primero jugadores como presentes en este partido para poder hacer una convocatoria.',
+    emptyNoAttendanceLink: 'Ir a la asistencia',
     emptyExportHint: 'Selecciona primero jugadores para poder exportar.',
     toggleLabel: 'Seleccionar',
     saveError: 'No se pudo guardar la convocatoria. Inténtalo de nuevo.',
+    notPresentLabel: 'No presente',
   },
   teamIndeling: {
     heading: 'Reparto de equipos', poolLabel: 'Aún por repartir', poolLabelPrint: 'Sin repartir', teamLabel: 'Equipo {n}', autoAssign: 'Generar automáticamente',

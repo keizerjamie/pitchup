@@ -270,9 +270,12 @@ export const fr: Dict = {
     title: 'Sélection',
     selectedCount: '{n} sélectionné(s)',
     emptyTeam: "Ajoutez d'abord des joueurs pour composer une sélection.",
+    emptyNoAttendance: "Indiquez d'abord des joueurs présents pour ce match pour composer une sélection.",
+    emptyNoAttendanceLink: "Vers les présences",
     emptyExportHint: "Sélectionnez d'abord des joueurs pour pouvoir exporter.",
     toggleLabel: 'Sélectionner',
     saveError: "L'enregistrement de la sélection a échoué. Veuillez réessayer.",
+    notPresentLabel: 'Non présent',
   },
   teamIndeling: {
     heading: 'Répartition des équipes', poolLabel: 'Pas encore réparti', poolLabelPrint: 'Non réparti', teamLabel: 'Équipe {n}', autoAssign: 'Générer automatiquement',

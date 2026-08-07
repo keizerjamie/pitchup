@@ -32,6 +32,9 @@ export async function updateAttendance(
 
   if (error) throw genericError('attendance.updateAttendance', error)
   revalidatePath(`/events/${eventId}`)
+  // De selectiepagina filtert de selecteerbare lijst op aanwezigheid; die hangt
+  // van deze rijen af en moet dus mee-revalideren.
+  revalidatePath(`/events/${eventId}/squad`)
 }
 
 export async function markAbsentForPeriod(
@@ -51,7 +54,7 @@ export async function markAbsentForPeriod(
 
   const { data: events } = await supabase
     .from('events')
-    .select('id')
+    .select('id, type')
     .gte('date', fromDate)
     .lte('date', toDate)
     .eq('team_id', user.id)
@@ -72,6 +75,16 @@ export async function markAbsentForPeriod(
 
   if (error) throw genericError('attendance.markAbsentForPeriod', error)
   revalidatePath(`/players/${playerId}/absence`)
+  // De selectiepagina filtert de selecteerbare lijst op aanwezigheid; die hangt
+  // van deze rijen af en moet dus mee-revalideren. Deze actie raakt een hele
+  // periode, dus per uniek match-event uit dezelfde query (alleen matches
+  // hebben een selectiepagina).
+  const matchEventIds = new Set(
+    events.filter((e) => e.type === 'match').map((e) => e.id as string)
+  )
+  for (const matchEventId of matchEventIds) {
+    revalidatePath(`/events/${matchEventId}/squad`)
+  }
   return events.length
 }
 
@@ -88,6 +101,9 @@ export async function markAllPresent(eventId: string) {
 
   if (error) throw genericError('attendance.markAllPresent', error)
   revalidatePath(`/events/${eventId}`)
+  // De selectiepagina filtert de selecteerbare lijst op aanwezigheid; die hangt
+  // van deze rijen af en moet dus mee-revalideren.
+  revalidatePath(`/events/${eventId}/squad`)
 }
 
 export async function saveLineup(

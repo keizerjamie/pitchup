@@ -12,12 +12,19 @@ interface Props {
   eventId: string
   players: Player[]
   initialSelectedIds: string[]
+  presentPlayerIds: string[]
+  hasAnyActivePlayers: boolean
   opponent: string | null
   dateLabel: string
 }
 
-export default function MatchSquadEditor({ eventId, players, initialSelectedIds, opponent, dateLabel }: Props) {
+export default function MatchSquadEditor({ eventId, players, initialSelectedIds, presentPlayerIds, hasAnyActivePlayers, opponent, dateLabel }: Props) {
   const [selected, setSelected] = useState(() => new Set(initialSelectedIds))
+  // Zuiver een zichtbaarheidsfilter (zie page.tsx): welke spelers voor dit
+  // event als aanwezig geregistreerd staan. Geen koppeling met match_squad
+  // zelf — enkel gebruikt om een niet-aanwezige, al-geselecteerde speler een
+  // duidelijk label te geven i.p.v. hem stilzwijgend te verbergen.
+  const presentIds = new Set(presentPlayerIds)
   const [isPending, startTransition] = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
   const t = useDict()
@@ -59,11 +66,25 @@ export default function MatchSquadEditor({ eventId, players, initialSelectedIds,
   }
 
   if (players.length === 0) {
+    // Twee wezenlijk verschillende lege staten: geen (actieve) spelers in het
+    // team vs. wel spelers maar niemand voor dit event als aanwezig gemeld.
+    // Doorverwijzen naar "speler toevoegen" in het tweede geval zou de
+    // trainer op het verkeerde been zetten.
+    if (!hasAnyActivePlayers) {
+      return (
+        <div className="surface-card p-6 text-center">
+          <p className="text-faint text-sm mb-2">{t.matchSquad.emptyTeam}</p>
+          <p className="text-faint text-sm">
+            <Link href="/players/new" className="text-brand-accent font-bold">{t.players.add}</Link>
+          </p>
+        </div>
+      )
+    }
     return (
       <div className="surface-card p-6 text-center">
-        <p className="text-faint text-sm mb-2">{t.matchSquad.emptyTeam}</p>
+        <p className="text-faint text-sm mb-2">{t.matchSquad.emptyNoAttendance}</p>
         <p className="text-faint text-sm">
-          <Link href="/players/new" className="text-brand-accent font-bold">{t.players.add}</Link>
+          <Link href={`/events/${eventId}`} className="text-brand-accent font-bold">{t.matchSquad.emptyNoAttendanceLink}</Link>
         </p>
       </div>
     )
@@ -96,9 +117,14 @@ export default function MatchSquadEditor({ eventId, players, initialSelectedIds,
                 style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
                 <span className="text-[14.5px] font-bold text-ink truncate">
                   {player.name}
-                  {!player.active && (
+                  {/* Eén label tegelijk: inactief weegt zwaarder dan niet-aanwezig
+                      (zie page.tsx-comment) — een speler is nooit allebei tegelijk
+                      zichtbaar, dat zou verwarrend zijn. */}
+                  {!player.active ? (
                     <span className="ml-2 text-[11px] font-semibold text-faint">({t.players.inactiveLabel})</span>
-                  )}
+                  ) : !presentIds.has(player.id) ? (
+                    <span className="ml-2 text-[11px] font-semibold text-faint">({t.matchSquad.notPresentLabel})</span>
+                  ) : null}
                 </span>
                 <button
                   type="button"

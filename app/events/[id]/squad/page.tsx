@@ -16,20 +16,27 @@ export default async function MatchSquadPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: event }, { data: squad }, { data: allPlayers }] = await Promise.all([
+  const [{ data: event }, { data: squad }, { data: allPlayers }, { data: attendance }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
     supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', user.id),
     supabase.from('players').select('*').eq('team_id', user.id).order('name'),
+    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
   ])
 
   if (!event || event.type !== 'match') notFound()
 
   const selectedIds = new Set((squad ?? []).map((s) => s.player_id))
+  const presentIds = new Set(
+    (attendance ?? []).filter((a) => a.status === 'present').map((a) => a.player_id)
+  )
   const players: Player[] = allPlayers ?? []
-  // Unie van actieve spelers en al-geselecteerde spelers: een speler die ná
-  // selectie inactief wordt gemaakt verdwijnt niet stilzwijgend uit de lijst
-  // (en dus de export) — hij blijft zichtbaar met het inactief-label.
-  const selectable = players.filter((p) => p.active || selectedIds.has(p.id))
+  // Unie van (actieve én aanwezige) spelers en al-geselecteerde spelers: een
+  // speler die ná selectie inactief wordt gemaakt óf niet (meer) aanwezig is
+  // verdwijnt niet stilzwijgend uit de lijst (en dus de export) — hij blijft
+  // zichtbaar met het inactief- resp. niet-aanwezig-label. Dit is uitsluitend
+  // een zichtbaarheidsfilter: match_squad zelf blijft losstaand van attendance.
+  const selectable = players.filter((p) => selectedIds.has(p.id) || (p.active && presentIds.has(p.id)))
+  const hasAnyActivePlayers = players.some((p) => p.active)
   const dateLabel = formatDateLong(event.date, t.browserLocale)
 
   return (
@@ -49,6 +56,8 @@ export default async function MatchSquadPage({ params }: Props) {
         eventId={id}
         players={selectable}
         initialSelectedIds={[...selectedIds]}
+        presentPlayerIds={[...presentIds]}
+        hasAnyActivePlayers={hasAnyActivePlayers}
         opponent={event.opponent}
         dateLabel={dateLabel}
       />

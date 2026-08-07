@@ -41,6 +41,8 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         eventId="e1"
         players={overrides.players ?? players}
         initialSelectedIds={overrides.initialSelectedIds ?? []}
+        presentPlayerIds={overrides.presentPlayerIds ?? []}
+        hasAnyActivePlayers={overrides.hasAnyActivePlayers ?? true}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
         dateLabel={overrides.dateLabel ?? 'zondag 9 augustus 2026'}
       />
@@ -157,10 +159,19 @@ describe('exportknop', () => {
 })
 
 describe('lege staat', () => {
-  it('players: [] toont de kaart-met-link-naar-/players/new, geen crash', () => {
-    expect(() => renderEditor({ players: [] })).not.toThrow()
+  it('players: [] en hasAnyActivePlayers: false toont de kaart-met-link-naar-/players/new, geen crash', () => {
+    expect(() => renderEditor({ players: [], hasAnyActivePlayers: false })).not.toThrow()
     expect(screen.getByText(nl.matchSquad.emptyTeam)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: nl.players.add })).toHaveAttribute('href', '/players/new')
+    expect(screen.queryByRole('button', { name: nl.trainingPlan.print })).not.toBeInTheDocument()
+  })
+
+  it('players: [] en hasAnyActivePlayers: true toont de "meld eerst aanwezigheid"-copy, niet de "voeg speler toe"-copy', () => {
+    expect(() => renderEditor({ players: [], hasAnyActivePlayers: true })).not.toThrow()
+    expect(screen.getByText(nl.matchSquad.emptyNoAttendance)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: nl.matchSquad.emptyNoAttendanceLink })).toHaveAttribute('href', '/events/e1')
+    expect(screen.queryByText(nl.matchSquad.emptyTeam)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: nl.players.add })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: nl.trainingPlan.print })).not.toBeInTheDocument()
   })
 })
@@ -191,5 +202,45 @@ describe('inactieve speler', () => {
     const row = toggle.parentElement as HTMLElement
     expect(within(row).getByText('Oud Gediende')).toBeInTheDocument()
     expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+  })
+})
+
+describe('niet-aanwezige, al-geselecteerde speler', () => {
+  it('een geselecteerde speler die niet in presentPlayerIds staat, toont het niet-aanwezig-label', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Wim Wieling', active: true })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: [],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Wim Wieling` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).getByText('Wim Wieling')).toBeInTheDocument()
+    expect(within(row).getByText(`(${nl.matchSquad.notPresentLabel})`)).toBeInTheDocument()
+    // Nog steeds gewoon te de-selecteren (niet uitgeschakeld).
+    expect(toggle).not.toBeDisabled()
+  })
+
+  it('een geselecteerde, actieve én aanwezige speler toont geen enkel label', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Kees Kramer', active: true })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: ['p1'],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Kees Kramer` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
+    expect(within(row).queryByText(`(${nl.players.inactiveLabel})`)).not.toBeInTheDocument()
+  })
+
+  it('een speler die zowel inactief als niet-aanwezig is, toont uitsluitend het inactief-label (geen dubbel label)', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Oud En Weg', active: false })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: [],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Oud En Weg` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
   })
 })

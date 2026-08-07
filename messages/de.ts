@@ -269,9 +269,12 @@ export const de: Dict = {
     title: 'Kader',
     selectedCount: '{n} ausgewählt',
     emptyTeam: 'Füge zuerst Spieler hinzu, um einen Kader zu nominieren.',
+    emptyNoAttendance: 'Melde zuerst Spieler für dieses Spiel als anwesend, um einen Kader zu nominieren.',
+    emptyNoAttendanceLink: 'Zur Anwesenheit',
     emptyExportHint: 'Wähle zuerst Spieler aus, um exportieren zu können.',
     toggleLabel: 'Auswählen',
     saveError: 'Speichern des Kaders ist fehlgeschlagen. Bitte erneut versuchen.',
+    notPresentLabel: 'Nicht anwesend',
   },
   teamIndeling: {
     heading: 'Teameinteilung', poolLabel: 'Noch einzuteilen', poolLabelPrint: 'Nicht eingeteilt', teamLabel: 'Team {n}', autoAssign: 'Automatisch generieren',

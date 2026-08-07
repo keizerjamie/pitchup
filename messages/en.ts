@@ -373,9 +373,12 @@ export const en: Dict = {
     title: 'Matchday squad',
     selectedCount: '{n} selected',
     emptyTeam: 'Add players first to set a matchday squad.',
+    emptyNoAttendance: 'Mark players present for this match first to set a matchday squad.',
+    emptyNoAttendanceLink: 'Go to attendance',
     emptyExportHint: 'Select players first to be able to export.',
     toggleLabel: 'Select',
     saveError: 'Saving the matchday squad failed. Please try again.',
+    notPresentLabel: 'Not present',
   },
   teamIndeling: {
     heading: 'Team assignment',

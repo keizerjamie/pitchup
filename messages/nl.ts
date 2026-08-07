@@ -405,9 +405,12 @@ export const nl = {
     title: 'Wedstrijdselectie',
     selectedCount: '{n} geselecteerd',
     emptyTeam: 'Voeg eerst spelers toe om een wedstrijdselectie te kunnen maken.',
+    emptyNoAttendance: 'Meld eerst spelers aanwezig voor deze wedstrijd om een wedstrijdselectie te kunnen maken.',
+    emptyNoAttendanceLink: 'Naar aanwezigheid',
     emptyExportHint: 'Selecteer eerst spelers om te kunnen exporteren.',
     toggleLabel: 'Selecteer',
     saveError: 'Opslaan van de wedstrijdselectie is mislukt. Probeer het opnieuw.',
+    notPresentLabel: 'Niet aanwezig',
   },
   teamIndeling: {
     heading: 'Teamindeling',
