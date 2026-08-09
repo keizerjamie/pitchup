@@ -8,12 +8,22 @@ import LanguageSwitcher from '@/components/LanguageSwitcher'
 import DeleteAccountSection from '@/components/DeleteAccountSection'
 import ThemeSelect from '@/components/ThemeSelect'
 import TeamLogoSection from '@/components/TeamLogoSection'
+import ImageIcon from '@/components/icons/ImageIcon'
 
-function SectionCard({ icon, title, children }: { icon: string; title: string; children: React.ReactNode }) {
+// `icon` accepteert ofwel de naam van een glyph uit het zelf-gehoste,
+// gesubsette Material Symbols-icoonfont (`.ms`, app/globals.css:117-140) —
+// de meeste secties hierboven — ofwel al kant-en-klaar React-icoon-element
+// (bv. een inline SVG) voor glyphs die niet in de subset zitten. Zie
+// components/icons/ImageIcon.tsx voor de reden achter die uitzondering.
+function SectionCard({ icon, title, children }: { icon: string | React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div className="surface-card p-5 flex flex-col gap-4">
       <div className="flex items-center gap-2.5">
-        <span className="ms text-[20px] text-primary-strong">{icon}</span>
+        {typeof icon === 'string' ? (
+          <span className="ms text-[20px] text-primary-strong">{icon}</span>
+        ) : (
+          <span className="text-primary-strong flex-shrink-0">{icon}</span>
+        )}
         <span className="font-display text-[16px] font-bold text-ink">{title}</span>
       </div>
       {children}
@@ -65,7 +75,7 @@ export default async function SettingsPage() {
           </SectionCard>
 
           {/* Club logo */}
-          <SectionCard icon="image" title={t.settings.logoSection}>
+          <SectionCard icon={<ImageIcon className="w-5 h-5" />} title={t.settings.logoSection}>
             <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
           </SectionCard>
 

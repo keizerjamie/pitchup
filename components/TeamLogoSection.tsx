@@ -5,6 +5,7 @@ import { uploadTeamLogo, deleteTeamLogo } from '@/app/actions/team-logo'
 import { MAX_LOGO_BYTES } from '@/lib/logo-upload'
 import { useDict } from '@/lib/i18n-context'
 import TeamLogo from '@/components/TeamLogo'
+import ImageIcon from '@/components/icons/ImageIcon'
 
 // Uitsluitend voor de snelle clientzijdige voorcontrole (directe feedback,
 // geen beveiliging) — de server sniffed het echte type uit de magic bytes
@@ -98,7 +99,7 @@ export default function TeamLogoSection({ initialLogoUrl }: Props) {
           src={displayUrl}
           size={64}
           alt={t.settings.logoSection}
-          fallback={<span className="ms text-[28px] text-faint" aria-hidden="true">image</span>}
+          fallback={<ImageIcon className="w-7 h-7 text-faint" />}
         />
         <div className="flex flex-col gap-1">
           {!displayUrl && <span className="text-[12.5px] font-semibold text-faint">{t.settings.logoNone}</span>}
