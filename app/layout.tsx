@@ -37,14 +37,17 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Null on auth pages where there is no session — AppShell hides chrome there.
   const { data: { user } } = await supabase.auth.getUser()
   let teamName: string | null = null
+  let teamLogoUrl: string | null = null
   if (user) {
     const { data } = await supabase
       .from('settings')
-      .select('value')
+      .select('key, value')
       .eq('team_id', user.id)
-      .eq('key', 'team_name')
-      .maybeSingle()
-    teamName = data?.value?.trim() || null
+      .in('key', ['team_name', 'team_logo_url'])
+    for (const row of data ?? []) {
+      if (row.key === 'team_name') teamName = row.value?.trim() || null
+      else if (row.key === 'team_logo_url') teamLogoUrl = row.value || null
+    }
   }
 
   return (
@@ -62,7 +65,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <DictProvider dict={t}>
           <ThemeInit />
-          <AppShell teamName={teamName} userEmail={user?.email ?? null}>{children}</AppShell>
+          <AppShell teamName={teamName} teamLogoUrl={teamLogoUrl} userEmail={user?.email ?? null}>{children}</AppShell>
           <InactivityLogout />
         </DictProvider>
       </body>

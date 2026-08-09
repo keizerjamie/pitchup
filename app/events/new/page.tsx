@@ -125,6 +125,14 @@ function NewEventForm() {
                   ))}
                 </div>
               </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+                  {t.event.gatherTime} <span className="text-gray-400 font-normal">({t.event.optional})</span>
+                </label>
+                <input name="gather_time" type="time"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-gray-900" />
+              </div>
             </>
           )}
 

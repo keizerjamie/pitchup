@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS events (
   type TEXT NOT NULL CHECK (type IN ('training', 'match', 'meting')),
   date DATE NOT NULL,
   time TIME,
+  -- Optionele verzameltijd bij wedstrijden, lokale wandkloktijd net als `time`
+  -- — zie gather-time.sql.
+  gather_time TIME,
   location TEXT,
   match_type TEXT CHECK (match_type IN ('friendly', 'league', 'cup')),
   opponent TEXT,
@@ -120,6 +123,30 @@ CREATE INDEX IF NOT EXISTS idx_match_squad_event ON match_squad(event_id);
 CREATE INDEX IF NOT EXISTS idx_match_squad_team  ON match_squad(team_id);
 CREATE INDEX IF NOT EXISTS idx_task_overrides_event ON task_overrides(event_id);
 CREATE INDEX IF NOT EXISTS idx_task_overrides_team  ON task_overrides(team_id);
+
+-- ── Storage: clublogo-bucket (team-logos) ────────────────────
+-- Structuur hoort hier (verse installatie), policies staan in rls.sql —
+-- zie supabase/team-logo.sql voor de migratie én de toelichting.
+-- Padconventie: team-logos/<team_id>/logo. Vaste, extensieloze bestandsnaam per
+-- team; een nieuwe upload met upsert overschrijft hetzelfde object, dus er kan
+-- per constructie geen wees-bestand ontstaan.
+-- Publiek LEESBAAR (bewuste keuze): de zijbalk en de afdrukkop laden het logo via
+-- een gewone <img src>; een signed URL zou tijdens/na het afdrukken verlopen.
+-- SCHRIJVEN/VERWIJDEREN blijft afgeschermd door de policies in rls.sql.
+-- file_size_limit en allowed_mime_types zijn het tweede, door de database zelf
+-- afgedwongen vangnet naast de validatie in de server action.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'team-logos',
+  'team-logos',
+  true,
+  2097152,                                              -- 2 MB
+  array['image/png', 'image/jpeg', 'image/webp']
+)
+on conflict (id) do update
+  set public             = excluded.public,
+      file_size_limit    = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 -- Row Level Security MUST be enabled — see rls.sql for the policies.
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;

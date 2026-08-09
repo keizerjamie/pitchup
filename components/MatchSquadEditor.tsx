@@ -3,10 +3,13 @@
 import { useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { toggleSquadPlayer } from '@/app/actions/match-squad'
+import { updateGatherTime } from '@/app/actions/events'
 import { Player } from '@/lib/types'
+import type { MatchFormItem } from '@/lib/match-form'
 import { useDict } from '@/lib/i18n-context'
 import PrintButton from '@/components/PrintButton'
 import MatchSquadPrintList from '@/components/MatchSquadPrintList'
+import GatherTimeField from '@/components/GatherTimeField'
 
 interface Props {
   eventId: string
@@ -16,9 +19,33 @@ interface Props {
   hasAnyActivePlayers: boolean
   opponent: string | null
   dateLabel: string
+  teamName: string | null
+  teamLogoUrl: string | null
+  // Inline literal union i.p.v. het `HomeAway`-type — dit component geeft de
+  // waarde uitsluitend door aan MatchSquadPrintList (zie de importbeperking
+  // daar), en trekt dat principe hier door voor de props die er rechtstreeks
+  // naartoe stromen.
+  homeAway: 'home' | 'away' | null
+  kickoffTime: string | null
+  initialGatherTime: string | null
+  formItems: MatchFormItem[]
 }
 
-export default function MatchSquadEditor({ eventId, players, initialSelectedIds, presentPlayerIds, hasAnyActivePlayers, opponent, dateLabel }: Props) {
+export default function MatchSquadEditor({
+  eventId,
+  players,
+  initialSelectedIds,
+  presentPlayerIds,
+  hasAnyActivePlayers,
+  opponent,
+  dateLabel,
+  teamName,
+  teamLogoUrl,
+  homeAway,
+  kickoffTime,
+  initialGatherTime,
+  formItems,
+}: Props) {
   const [selected, setSelected] = useState(() => new Set(initialSelectedIds))
   // Zuiver een zichtbaarheidsfilter (zie page.tsx): welke spelers voor dit
   // event als aanwezig geregistreerd staan. Geen koppeling met match_squad
@@ -35,6 +62,28 @@ export default function MatchSquadEditor({ eventId, players, initialSelectedIds,
   // togglet worden weggeschreven vóór er één faalt. Zelfde patroon als
   // TeamIndelingEditor.tsx (lastConfirmedRef).
   const lastConfirmedRef = useRef<Set<string>>(new Set(initialSelectedIds))
+
+  // Verzameltijd: exact hetzelfde optimistische/rollback-patroon als de
+  // selectie-toggle hierboven, maar losstaand (eigen pending/error-state) —
+  // een mislukte tijd-save mag de spelerselectie niet blokkeren en andersom.
+  const [gatherTime, setGatherTime] = useState<string | null>(initialGatherTime)
+  const [gatherPending, startGatherTransition] = useTransition()
+  const [gatherError, setGatherError] = useState<string | null>(null)
+  const lastConfirmedGatherRef = useRef<string | null>(initialGatherTime)
+
+  function saveGatherTime(next: string | null) {
+    setGatherTime(next)
+    setGatherError(null)
+    startGatherTransition(async () => {
+      try {
+        await updateGatherTime(eventId, next)
+        lastConfirmedGatherRef.current = next
+      } catch {
+        setGatherTime(lastConfirmedGatherRef.current)
+        setGatherError(t.matchSquad.gatherTimeSaveError)
+      }
+    })
+  }
 
   function toggle(playerId: string) {
     const next = !selected.has(playerId)
@@ -109,6 +158,13 @@ export default function MatchSquadEditor({ eventId, players, initialSelectedIds,
           </p>
         )}
 
+        <GatherTimeField
+          value={gatherTime}
+          onChange={saveGatherTime}
+          isPending={gatherPending}
+          error={gatherError}
+        />
+
         <div className="surface-card overflow-hidden">
           {players.map((player, i) => {
             const isSelected = selected.has(player.id)
@@ -152,6 +208,13 @@ export default function MatchSquadEditor({ eventId, players, initialSelectedIds,
         players={players.filter((p) => selected.has(p.id))}
         opponent={opponent}
         dateLabel={dateLabel}
+        teamName={teamName}
+        teamLogoUrl={teamLogoUrl}
+        homeAway={homeAway}
+        gatherTime={gatherTime}
+        kickoffTime={kickoffTime}
+        selectedCount={selected.size}
+        formItems={formItems}
       />
     </>
   )

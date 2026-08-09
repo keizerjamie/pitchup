@@ -61,6 +61,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from 'react'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
@@ -76,6 +78,10 @@ import { sortSquadForExport } from '@/lib/match-squad'
 
 vi.mock('@/app/actions/match-squad', () => ({
   toggleSquadPlayer: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/app/actions/events', () => ({
+  updateGatherTime: vi.fn().mockResolvedValue(undefined),
 }))
 
 import { toggleSquadPlayer } from '@/app/actions/match-squad'
@@ -163,13 +169,27 @@ const mixedPlayers: Player[] = [
   makePlayer({ id: 'p4', name: 'Bram Bakker', position: 'Centrale verdediger', jersey_number: 4, injured: true }),
 ]
 
+// Nieuwe print-props (teamName/teamLogoUrl/homeAway/gatherTime/kickoffTime/
+// selectedCount/formItems) krijgen hier neutrale standaardwaarden die het
+// bestaande, file-lokale gedrag van vóór deze ronde ongewijzigd laten (geen
+// logo/team/tijden/vorm, selectedCount = aantal doorgegeven spelers) — de
+// nieuwe presentatie-eisen zelf worden gedekt door
+// wedstrijdselectie-pdf.acceptance.test.tsx.
 function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintList>[0]> = {}, dict = nl) {
+  const players = overrides.players ?? mixedPlayers
   return render(
     <DictProvider dict={dict}>
       <MatchSquadPrintList
-        players={overrides.players ?? mixedPlayers}
+        players={players}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
         dateLabel={overrides.dateLabel ?? 'zondag 9 augustus 2026'}
+        teamName={'teamName' in overrides ? overrides.teamName ?? null : null}
+        teamLogoUrl={'teamLogoUrl' in overrides ? overrides.teamLogoUrl ?? null : null}
+        homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : null}
+        gatherTime={'gatherTime' in overrides ? overrides.gatherTime ?? null : null}
+        kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
+        selectedCount={overrides.selectedCount ?? players.length}
+        formItems={overrides.formItems ?? []}
       />
     </DictProvider>,
   )
@@ -186,6 +206,12 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         hasAnyActivePlayers={overrides.hasAnyActivePlayers ?? true}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
         dateLabel={overrides.dateLabel ?? 'zondag 9 augustus 2026'}
+        teamName={'teamName' in overrides ? overrides.teamName ?? null : null}
+        teamLogoUrl={'teamLogoUrl' in overrides ? overrides.teamLogoUrl ?? null : null}
+        homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : null}
+        kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
+        initialGatherTime={'initialGatherTime' in overrides ? overrides.initialGatherTime ?? null : null}
+        formItems={overrides.formItems ?? []}
       />
     </DictProvider>,
   )
@@ -201,27 +227,34 @@ const OTHER_TEAM = 'team-2'
 
 type Row = Record<string, unknown>
 
-// Generieke Supabase-tabel-engine die de ECHTE .eq()/.order()/.limit()-
-// method-chain van de productiecode toepast op een in-memory rijenset —
-// zelfde precedent als dashboard-vorm.acceptance.test.tsx. Dit bewijst
-// tenant-isolatie/faalpaden ECHT: vergeet de productiecode een
-// team_id-filter, dan lekt een rij van een ander team ook hier door en faalt
-// de test — in tegenstelling tot een mock die alleen registreert dát .eq()
-// ooit is aangeroepen.
+// Generieke Supabase-tabel-engine die de ECHTE .eq()/.neq()/.lt()/.in()/
+// .order()/.limit()-method-chain van de productiecode toepast op een
+// in-memory rijenset — zelfde precedent als dashboard-vorm.acceptance.test
+// .tsx. Dit bewijst tenant-isolatie/faalpaden ECHT: vergeet de productiecode
+// een team_id-filter, dan lekt een rij van een ander team ook hier door en
+// faalt de test — in tegenstelling tot een mock die alleen registreert dát
+// .eq() ooit is aangeroepen. Uitgebreid (deze ronde) met .neq()/.lt()/.in()
+// en `nullsFirst` in .order(), nodig voor de nieuwe vorm-query in
+// app/events/[id]/squad/page.tsx (zie het API-contract, punt 1).
 function tableFactory(rows: Row[]) {
   return () => {
     const filters: ((r: Row) => boolean)[] = []
-    const orders: { col: string; ascending: boolean }[] = []
+    const orders: { col: string; ascending: boolean; nullsFirst: boolean }[] = []
     let limitN: number | null = null
     function resolveRows(): Row[] {
       let out = rows.filter((r) => filters.every((f) => f(r)))
       if (orders.length > 0) {
         out = [...out].sort((a, b) => {
           for (const o of orders) {
-            const av = a[o.col] as string | number
-            const bv = b[o.col] as string | number
-            if (av < bv) return o.ascending ? -1 : 1
-            if (av > bv) return o.ascending ? 1 : -1
+            const av = a[o.col] as string | number | null | undefined
+            const bv = b[o.col] as string | number | null | undefined
+            const aNull = av === null || av === undefined
+            const bNull = bv === null || bv === undefined
+            if (aNull && bNull) continue
+            if (aNull) return o.nullsFirst ? -1 : 1
+            if (bNull) return o.nullsFirst ? 1 : -1
+            if (av! < bv!) return o.ascending ? -1 : 1
+            if (av! > bv!) return o.ascending ? 1 : -1
           }
           return 0
         })
@@ -235,8 +268,20 @@ function tableFactory(rows: Row[]) {
         filters.push((r) => r[col] === val)
         return chain
       },
-      order: (col: string, opts: { ascending?: boolean } = {}) => {
-        orders.push({ col, ascending: opts.ascending ?? true })
+      neq: (col: string, val: unknown) => {
+        filters.push((r) => r[col] !== val)
+        return chain
+      },
+      lt: (col: string, val: unknown) => {
+        filters.push((r) => (r[col] as string | number) < (val as string | number))
+        return chain
+      },
+      in: (col: string, vals: unknown[]) => {
+        filters.push((r) => vals.includes(r[col]))
+        return chain
+      },
+      order: (col: string, opts: { ascending?: boolean; nullsFirst?: boolean } = {}) => {
+        orders.push({ col, ascending: opts.ascending ?? true, nullsFirst: opts.nullsFirst ?? false })
         return chain
       },
       limit: (n: number) => {
@@ -295,6 +340,11 @@ function makeSupabaseMock(opts: {
   squad?: Row[]
   attendance?: Row[]
   lineups?: Row[]
+  // Nieuw (validator-bevinding, Gap 2): de squad-pagina bevraagt sinds deze
+  // ronde ook `settings` (team_name/team_logo_url). Zonder deze factory zou
+  // elke settings-query altijd een lege tabel treffen en kan een ontbrekend
+  // team_id-filter in de productiecode nooit zichtbaar worden in een test.
+  settings?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const factories: Record<string, () => unknown> = {
@@ -303,6 +353,7 @@ function makeSupabaseMock(opts: {
     match_squad: tableFactory(opts.squad ?? []),
     attendance: tableFactory(opts.attendance ?? []),
     lineups: tableFactory(opts.lineups ?? []),
+    settings: tableFactory(opts.settings ?? []),
     metingen: tableFactory([]),
     training_oefeningen: tableFactory([]),
     match_ratings: tableFactory([]),
@@ -450,7 +501,10 @@ describe('AC5 — wedstrijdkop: "vs <opponent>" + datum; opponent null → geen 
     const { container } = renderPrintList({ opponent: 'FC Rivalen', dateLabel: 'zondag 9 augustus 2026' })
     const block = getPrintBlock(container)
     expect(within(block).getByText(`${nl.lineup.vsLabel} FC Rivalen`)).toBeInTheDocument()
-    expect(within(block).getByText('zondag 9 augustus 2026')).toBeInTheDocument()
+    // De datum komt sinds deze ronde TWEE keer voor (datumregel + de nieuwe
+    // footer, zie MatchSquadPrintList.tsx) — bewust géén regressie, dus
+    // getAllByText i.p.v. getByText.
+    expect(within(block).getAllByText('zondag 9 augustus 2026').length).toBeGreaterThanOrEqual(1)
   })
 
   it('opponent: null → geen vs-regel, maar de datum blijft staan (geen "vs null"/"vs undefined")', () => {
@@ -458,7 +512,8 @@ describe('AC5 — wedstrijdkop: "vs <opponent>" + datum; opponent null → geen 
     const block = getPrintBlock(container)
     expect(block.textContent).not.toMatch(/vs\s*(null|undefined)/i)
     expect(within(block).queryByText(new RegExp(`^${nl.lineup.vsLabel}\\b`))).not.toBeInTheDocument()
-    expect(within(block).getByText('zondag 9 augustus 2026')).toBeInTheDocument()
+    // Zie comment hierboven: de datum staat sinds deze ronde ook in de footer.
+    expect(within(block).getAllByText('zondag 9 augustus 2026').length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -627,21 +682,35 @@ describe('AC11 — i18n: t.lineup.vsLabel beschikbaar in alle vijf talen binnen 
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Story-AC8 (aanvullend) — de kop bevat NOOIT thuis/uit, locatie of
-// wedstrijdtype (de story eist expliciet "verder geen event-info")
+// Story-AC8 (aanvullend) — BEWUSTE WIJZIGING (geen regressie): de nieuwe,
+// goedgekeurde technische brief voor het clublogo/gather-time-vervolg maakt
+// thuis/uit-informatie verplichte nieuwe inhoud van de datumregel (zie
+// MatchSquadPrintList.tsx). De oorspronkelijke assertie hieronder ("bevat
+// GEEN thuis/uit-label") is daarmee achterhaald en is hier vervangen door het
+// omgekeerde: het label IS aanwezig wanneer `homeAway` is meegegeven. De
+// assertie op wedstrijdtype/`match_type` blijft ongewijzigd staan — dat blijft
+// wél uitgesloten, MatchSquadPrintList accepteert nog steeds geen match_type-
+// achtige prop.
 // ═══════════════════════════════════════════════════════════════════════
-describe('Story-AC8 (aanvullend) — geen thuis/uit-label, locatie of wedstrijdtype in het print-blok', () => {
-  it('het print-blok bevat geen enkel thuis/uit-label en geen enkel wedstrijdtype-label', () => {
-    const { container } = renderPrintList({ opponent: 'FC Rivalen' })
+describe('Story-AC8 (aanvullend) — thuis/uit-label IS aanwezig (bewuste wijziging); wedstrijdtype blijft uitgesloten', () => {
+  it('het print-blok toont het thuis-label wanneer homeAway="home" is meegegeven', () => {
+    const { container } = renderPrintList({ opponent: 'FC Rivalen', homeAway: 'home' })
     const block = getPrintBlock(container)
-    expect(block.textContent).not.toContain(nl.calendar.homeLabel)
-    expect(block.textContent).not.toContain(nl.calendar.awayLabel)
+    expect(block.textContent).toContain(nl.calendar.homeLabel)
+  })
+
+  it('het print-blok toont het uit-label wanneer homeAway="away" is meegegeven', () => {
+    const { container } = renderPrintList({ opponent: 'FC Rivalen', homeAway: 'away' })
+    const block = getPrintBlock(container)
+    expect(block.textContent).toContain(nl.calendar.awayLabel)
+  })
+
+  it('geen enkel wedstrijdtype-label (match_type) staat in het print-blok — MatchSquadPrintList accepteert die prop niet', () => {
+    const { container } = renderPrintList({ opponent: 'FC Rivalen', homeAway: 'home' })
+    const block = getPrintBlock(container)
     for (const label of Object.values(nl.event.matchTypes)) {
       expect(block.textContent).not.toContain(label)
     }
-    // Structurele garantie: MatchSquadPrintList accepteert uitsluitend
-    // {players, opponent, dateLabel} als props — home_away/location/match_type
-    // worden niet eens doorgegeven, dus kunnen ook niet per ongeluk lekken.
   })
 })
 
@@ -960,6 +1029,228 @@ describe('Story-AC20 — spelers die tussentijds inactief worden gemaakt terwijl
     // Niet-geselecteerde inactieve speler hoort niet in de (unie van actief +
     // aanwezig + al-geselecteerd) lijst te staan.
     expect(screen.queryByText('Weg Ermee')).not.toBeInTheDocument()
+  })
+})
+
+// ── Deel B — Story-AC5 (vervolgronde: clublogo/vorm-blok) ──
+// Dit criterium ("huidige wedstrijd zelf verschijnt NOOIT in zijn eigen
+// vorm-blok, ook al ligt hij in het verleden") hangt volledig af van de
+// `.neq('id', id)`-clausule in de vorm-query van app/events/[id]/squad/page
+// .tsx. wedstrijdselectie-pdf.acceptance.test.tsx dekt uitdrukkelijk alleen
+// de PRESENTATIE van al doorgegeven formItems (zie de kopcomment daar) en
+// lib/match-form.test.ts test alleen de zuivere rij→item-mapping — geen van
+// beide bewijst dat de query het huidige event daadwerkelijk uitsluit. Deze
+// test rendert daarom de ECHTE pagina met de generieke tabel-engine (met
+// werkende .neq()), zelfde precedent als Story-AC14 hierboven.
+describe('Deel B Story-AC5 — het huidige (afgeronde) event verschijnt nooit in zijn eigen vorm-blok', () => {
+  it('een event dat zelf aan alle vorm-querycriteria voldoet (type match, datum in het verleden, eigen team) wordt tóch uitgesloten van zijn eigen vorm-blok', async () => {
+    const events = [
+      // Het huidige event: zelf ook een afgeronde wedstrijd in het verleden,
+      // zou zonder de .neq('id', id)-uitsluiting gewoon aan de vorm-query
+      // voldoen.
+      matchEventRow({ id: 'e1', date: '2020-01-04', opponent: 'FC Rivalen', goals_for: 3, goals_against: 0 }),
+      matchEventRow({ id: 'e2', date: '2020-01-01', opponent: 'FC Alpha', goals_for: 2, goals_against: 0 }),
+      matchEventRow({ id: 'e3', date: '2020-01-02', opponent: 'FC Beta', goals_for: 2, goals_against: 0 }),
+      matchEventRow({ id: 'e4', date: '2020-01-03', opponent: 'FC Gamma', goals_for: 2, goals_against: 0 }),
+    ]
+    const { container } = await renderSquadPage({
+      events,
+      players: [playerRow()],
+      // Zonder een aanwezige/geselecteerde speler blijft de selecteerbare
+      // lijst leeg en toont de pagina de lege staat (geen print-blok) —
+      // irrelevant voor dít criterium, dus p1 krijgt gewoon een present-rij.
+      attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      id: 'e1',
+    })
+    const block = getPrintBlock(container)
+    // 4 afgeronde wedstrijden zijn beschikbaar (e1..e4), maar zonder e1 zelf
+    // blijven er precies 3 over — zonder de .neq()-uitsluiting zou dit 4 zijn
+    // (binnen de limit(5)).
+    expect(within(block).getAllByText(nl.home.formLetterWin).length).toBe(3)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// ── Validator-bevinding (deze sessie), Gap 2 — tenant-isolatie: settings
+// (team_logo_url/team_name) en de vorm-query zelf ──
+// app/events/[id]/squad/page.tsx voegt sinds deze ronde twee nieuwe,
+// tenant-gescoped queries toe (settings + de vorm-query op `events`). Beide
+// dragen in de productiecode al `.eq('team_id', user.id)`, maar dat werd tot
+// nu toe nergens met een "ghost-rij van een ander team" bewezen — in
+// tegenstelling tot match_squad/attendance hierboven (Story-AC14, "een
+// attendance-rij van een ander team"). Deze twee tests vullen dat gat, met
+// dezelfde ECHTE, filterende tabel-engine (geen call-recording).
+// ═══════════════════════════════════════════════════════════════════════
+describe('Validator-bevinding (Gap 2) — een settings-rij van een ander team lekt niet het clublogo/teamnaam', () => {
+  it('een "ghost"-settings-rij van OTHER_TEAM voor dezelfde key (team_logo_url) beïnvloedt het eigen logo niet: geen <img> want het EIGEN team heeft geen eigen rij', async () => {
+    const { container } = await renderSquadPage({
+      events: [matchEventRow()],
+      players: [playerRow()],
+      attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      // Uitsluitend rijen van OTHER_TEAM, geen enkele rij van TEAM zelf. Als
+      // de productiequery `.eq('team_id', user.id)` op settings ooit zou
+      // wegvallen, zou deze ghost-rij wél doorlekken en verschijnt er ten
+      // onrechte een logo/teamnaam.
+      settings: [
+        { team_id: OTHER_TEAM, key: 'team_logo_url', value: 'https://cdn.example.com/ghost-logo.png' },
+        { team_id: OTHER_TEAM, key: 'team_name', value: 'Spookteam' },
+      ],
+    })
+    const block = getPrintBlock(container)
+    expect(block.querySelector('img')).toBeNull()
+    expect(block.textContent).not.toContain('Spookteam')
+    expect(block.textContent).not.toContain('ghost-logo.png')
+  })
+
+  it('de EIGEN team_logo_url/team_name-rij wordt wél getoond, ook met een gelijktijdige ghost-rij van OTHER_TEAM voor dezelfde keys ernaast', async () => {
+    const { container } = await renderSquadPage({
+      events: [matchEventRow()],
+      players: [playerRow()],
+      attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      settings: [
+        { team_id: TEAM, key: 'team_logo_url', value: 'https://cdn.example.com/eigen-logo.png' },
+        { team_id: TEAM, key: 'team_name', value: 'FC Eigen' },
+        { team_id: OTHER_TEAM, key: 'team_logo_url', value: 'https://cdn.example.com/ghost-logo.png' },
+        { team_id: OTHER_TEAM, key: 'team_name', value: 'Spookteam' },
+      ],
+    })
+    const block = getPrintBlock(container)
+    const img = block.querySelector('img') as HTMLImageElement
+    expect(img).not.toBeNull()
+    expect(img.src).toBe('https://cdn.example.com/eigen-logo.png')
+    expect(block.textContent).toContain('FC Eigen')
+    expect(block.textContent).not.toContain('Spookteam')
+    expect(block.textContent).not.toContain('ghost-logo.png')
+  })
+})
+
+describe('Validator-bevinding (Gap 2) — een afgeronde wedstrijd van een ander team lekt niet in het eigen vorm-blok', () => {
+  it('een wedstrijd van OTHER_TEAM die verder aan alle vorm-querycriteria voldoet (type match, datum in het verleden, niet het huidige event) verschijnt niet in het eigen vorm-blok', async () => {
+    // Dit is NIET dezelfde test als "Deel B Story-AC5" hierboven: die bewijst
+    // dat het HUIDIGE event zichzelf niet in zijn eigen vorm-blok toont
+    // (.neq('id', id)). Hier gaat het om een wedstrijd van een ANDER team,
+    // die toevallig aan alle overige criteria voldoet — dat moet tegengehouden
+    // worden door .eq('team_id', user.id), niet door .neq('id', id).
+    const events = [
+      matchEventRow({ id: 'e1', date: '2020-01-05', opponent: 'FC Rivalen', goals_for: 1, goals_against: 0 }),
+      matchEventRow({
+        id: 'ghost-match',
+        team_id: OTHER_TEAM,
+        date: '2020-01-04',
+        opponent: 'FC Spook',
+        goals_for: 5,
+        goals_against: 0,
+      }),
+    ]
+    const { container } = await renderSquadPage({
+      events,
+      players: [playerRow()],
+      attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      id: 'e1',
+    })
+    const block = getPrintBlock(container)
+    // Zonder de ghost-wedstrijd (en met e1 zelf al uitgesloten) blijft het
+    // vorm-blok leeg: 0 kaartjes, en de tegenstandernaam van de ghost-rij
+    // komt nergens voor.
+    expect(within(block).queryAllByText(nl.home.formLetterWin).length).toBe(0)
+    expect(block.textContent).not.toContain('FC Spook')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// ── Validator-bevinding (deze sessie), Gap 3 — de vorm-query op de
+// squad-pagina heeft geen eigen contractbewaking en de bestaande
+// Deel-B-Story-AC5-test gebruikt uitsluitend 2020-events, waardoor een
+// wegvallende .lt('date', todayLocal())- of .limit(5)-clausule niet zou
+// worden gevangen ──
+// ═══════════════════════════════════════════════════════════════════════
+
+// Broncontract — codeniveau, zelfde precedent als scripts/match-form
+// .acceptance.test.mjs ("de vorm-query in app/page.tsx volgt het afgesproken
+// contract"), maar dan voor de KOPIE van die query in
+// app/events/[id]/squad/page.tsx (met de extra .neq('id', id) erbij en
+// todayLocal() i.p.v. een losse `today`-variabele). Verdwijnt de vorm-query
+// (of één van de verplichte clausules) ooit uit dit bestand, dan faalt deze
+// test hard in plaats van stilzwijgend over te slaan.
+describe('Validator-bevinding (Gap 3) — de vorm-query in app/events/[id]/squad/page.tsx volgt het afgesproken contract', () => {
+  it('bevat tenant-isolatie, alleen wedstrijden, uitsluiting van het huidige event, de cutoff via todayLocal() en .limit(5)', () => {
+    const pageSrc = readFileSync(
+      path.join(__dirname, 'app', 'events', '[id]', 'squad', 'page.tsx'),
+      'utf-8',
+    )
+    const flat = pageSrc.replace(/\s+/g, ' ')
+    const chunks = flat.split("from('events')").slice(1)
+    const queryChunk = chunks.find((c) => c.includes(".lt('date', todayLocal())"))
+    expect(queryChunk, "vorm-query ontbreekt: geen events-query met .lt('date', todayLocal())").toBeTruthy()
+
+    const end = queryChunk!.indexOf('.limit(5)')
+    expect(end, 'vorm-query moet .limit(5) bevatten (nooit meer dan 5 resultaten)').toBeGreaterThanOrEqual(0)
+    const query = queryChunk!.slice(0, end + '.limit(5)'.length)
+
+    expect(query, "tenant-isolatie: .eq('team_id', user.id) verplicht").toContain(".eq('team_id', user.id)")
+    expect(query, "alleen wedstrijden: .eq('type', 'match')").toContain(".eq('type', 'match')")
+    expect(query, "het huidige event moet zichzelf uitsluiten: .neq('id', id)").toContain(".neq('id', id)")
+    expect(query, "cutoff: strikt .lt('date', todayLocal())").toContain(".lt('date', todayLocal())")
+    expect(query).toMatch(/\.order\('date', \{ ascending: false/)
+    expect(query, 'tie-break op created_at aflopend met nullsFirst: false').toMatch(
+      /\.order\('created_at', \{ ascending: false, nullsFirst: false \}\)/,
+    )
+    expect(query, 'laatste tie-break op id aflopend').toMatch(/\.order\('id', \{ ascending: false/)
+  })
+})
+
+describe('Validator-bevinding (Gap 3) — een wedstrijd met een datum in de TOEKOMST verschijnt niet in het vorm-blok', () => {
+  it('een toekomstige wedstrijd die verder aan alle criteria voldoet (eigen team, type match, niet het huidige event) wordt uitgesloten van het vorm-blok', async () => {
+    const events = [
+      matchEventRow({ id: 'e1', date: '2020-01-05', opponent: 'FC Rivalen', goals_for: 1, goals_against: 0 }),
+      // Ver in de toekomst t.o.v. elke realistische testklok — voldoet aan
+      // alle overige criteria (eigen team, type match, niet het huidige
+      // event), maar hoort te worden uitgesloten via .lt('date', todayLocal()).
+      matchEventRow({ id: 'future1', date: '2099-01-01', opponent: 'FC Toekomst', goals_for: 3, goals_against: 0 }),
+    ]
+    const { container } = await renderSquadPage({
+      events,
+      players: [playerRow()],
+      attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      id: 'e1',
+    })
+    const block = getPrintBlock(container)
+    expect(within(block).queryAllByText(nl.home.formLetterWin).length).toBe(0)
+    expect(block.textContent).not.toContain('FC Toekomst')
+  })
+})
+
+describe('Validator-bevinding (Gap 3) — meer dan 5 afgeronde wedstrijden in het verleden → precies 5 kaartjes, en wel de 5 meest recente', () => {
+  it('7 afgeronde wedstrijden leveren precies 5 kaartjes op: de 5 met de meest recente datum, niet de 2 oudste', async () => {
+    const events = [
+      matchEventRow({ id: 'e1', date: '2020-02-01', opponent: 'FC Rivalen', goals_for: 1, goals_against: 0 }),
+      ...Array.from({ length: 7 }, (_, i) =>
+        matchEventRow({
+          id: `m${i + 1}`,
+          date: `2020-01-0${i + 1}`,
+          opponent: `FC M${i + 1}`,
+          goals_for: 3,
+          goals_against: 0,
+        }),
+      ),
+    ]
+    const { container } = await renderSquadPage({
+      events,
+      players: [playerRow()],
+      attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      id: 'e1',
+    })
+    const block = getPrintBlock(container)
+    // Precies 5 kaartjes — nooit meer, ondanks 7 beschikbare wedstrijden.
+    expect(within(block).getAllByText(nl.home.formLetterWin).length).toBe(5)
+    // De 5 MEEST RECENTE (m3..m7, data 01-03 t/m 01-07) horen erbij...
+    for (const opponent of ['FC M3', 'FC M4', 'FC M5', 'FC M6', 'FC M7']) {
+      expect(block.textContent).toContain(opponent)
+    }
+    // ...de 2 OUDSTE (m1, m2) horen er terecht NIET bij.
+    for (const opponent of ['FC M1', 'FC M2']) {
+      expect(block.textContent).not.toContain(opponent)
+    }
   })
 })
 

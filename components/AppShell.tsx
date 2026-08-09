@@ -8,14 +8,17 @@ import SidebarNav from '@/components/SidebarNav'
 import PageTransition from '@/components/PageTransition'
 import GlobalFab from '@/components/GlobalFab'
 import ThemeToggle from '@/components/ThemeToggle'
+import TeamLogo from '@/components/TeamLogo'
 
 export default function AppShell({
   children,
   teamName,
+  teamLogoUrl,
   userEmail,
 }: {
   children: React.ReactNode
   teamName: string | null
+  teamLogoUrl: string | null
   userEmail: string | null
 }) {
   const pathname = usePathname()
@@ -37,12 +40,19 @@ export default function AppShell({
       >
         {/* Logo + team */}
         <Link href="/" className="flex items-center gap-3 px-5 pt-6 pb-5">
-          <div
-            className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center"
-            style={{ background: 'var(--color-brand)', boxShadow: '0 8px 20px -8px rgba(13,61,56,.5)' }}
-          >
-            <Image src="/logo.png" alt="Pitchup" width={40} height={40} />
-          </div>
+          <TeamLogo
+            src={teamLogoUrl}
+            size={40}
+            alt={teamName ? `${teamName} logo` : 'Pitchup'}
+            fallback={
+              <div
+                className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center"
+                style={{ background: 'var(--color-brand)', boxShadow: '0 8px 20px -8px rgba(13,61,56,.5)' }}
+              >
+                <Image src="/logo.png" alt="Pitchup" width={40} height={40} />
+              </div>
+            }
+          />
           <div className="flex flex-col leading-tight min-w-0">
             <span className="font-display font-bold text-ink text-lg tracking-tight">Pitchup</span>
             {teamName && (
@@ -64,12 +74,19 @@ export default function AppShell({
       >
         <div className="flex items-center px-4 h-14 gap-3">
           <Link href="/" className="flex items-center gap-2.5">
-            <div
-              className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center"
-              style={{ background: 'var(--color-brand)' }}
-            >
-              <Image src="/logo.png" alt="Pitchup" width={32} height={32} />
-            </div>
+            <TeamLogo
+              src={teamLogoUrl}
+              size={32}
+              alt={teamName ? `${teamName} logo` : 'Pitchup'}
+              fallback={
+                <div
+                  className="w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 flex items-center justify-center"
+                  style={{ background: 'var(--color-brand)' }}
+                >
+                  <Image src="/logo.png" alt="Pitchup" width={32} height={32} />
+                </div>
+              }
+            />
             <span className="font-display font-bold text-ink text-base tracking-tight">Pitchup</span>
           </Link>
           <ThemeToggle className="ml-auto" />

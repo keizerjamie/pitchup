@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
 import { genericError, logError } from '@/lib/errors'
+import { TEAM_LOGO_BUCKET, teamLogoPath } from '@/lib/logo-upload'
 import { getSiteUrl } from '@/lib/site-url'
 import {
   PASSWORD_RESET_POLICY,
@@ -206,6 +207,18 @@ export async function deleteAccount() {
     logError('auth.deleteAccount', { code: 'service_role_key_missing' })
     throw new Error('Account verwijderen is nu niet mogelijk. Neem contact op met de beheerder.')
   }
+
+  // Het clublogo staat in Storage en hangt dus aan geen enkele tabel; zonder
+  // deze stap zou het bestand na accountverwijdering blijven bestaan (AVG).
+  // Bucket en pad komen uit lib/logo-upload.ts — dezelfde bron als
+  // app/actions/team-logo.ts, zodat een wijziging van de padconventie deze
+  // opruiming niet stil kan laten missen.
+  // Bewust logError en géén throw: een ontbrekend object — een team dat nooit
+  // een logo uploadde — mag de accountverwijdering niet blokkeren.
+  const { error: storageError } = await supabase.storage
+    .from(TEAM_LOGO_BUCKET)
+    .remove([teamLogoPath(user.id)])
+  if (storageError) logError('auth.deleteAccount.storage', storageError)
 
   // Delete all data owned by this team. RLS restricts each delete to the
   // caller's own rows; events/players cascade to attendance, lineups,

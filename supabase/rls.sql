@@ -76,6 +76,57 @@ create policy "settings: team_id = auth.uid()"
   using (team_id = auth.uid())
   with check (team_id = auth.uid());
 
+-- ── storage.objects (team-logos) ─────────────────────────────
+-- Ook opgenomen in supabase/team-logo.sql (zelfde dubbele-opname als
+-- match_squad). Let op: hier hangt de isolatie NIET aan een team_id-KOLOM —
+-- storage.objects heeft die niet — maar aan de padconventie
+-- team-logos/<team_id>/logo. (storage.foldername(name))[1] is het eerste
+-- padsegment en moet gelijk zijn aan auth.uid(). De bucket zelf is publiek
+-- LEESBAAR (nodig voor <img src> in de zijbalk en de afdrukkop); schrijven en
+-- verwijderen blijft afgeschermd door onderstaande policies.
+--
+-- GEEN "alter table storage.objects enable row level security" hier: die tabel
+-- is eigendom van de interne supabase_storage_admin-rol, dus de SQL Editor
+-- mag dat niet uitvoeren ("must be owner of table objects"). Niet nodig ook:
+-- RLS staat op storage.objects in elk Supabase-project al standaard aan.
+drop policy if exists "team-logos: insert own folder" on storage.objects;
+create policy "team-logos: insert own folder" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'team-logos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Een upload met upsert:true op een BESTAAND object is een UPDATE, geen INSERT:
+-- zonder deze policy zou alleen de eerste upload slagen.
+drop policy if exists "team-logos: update own folder" on storage.objects;
+create policy "team-logos: update own folder" on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'team-logos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'team-logos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "team-logos: delete own folder" on storage.objects;
+create policy "team-logos: delete own folder" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'team-logos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "team-logos: select own folder" on storage.objects;
+create policy "team-logos: select own folder" on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'team-logos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
 -- ── Verification query ───────────────────────────────────────
 -- Run this after enabling to verify all tables have RLS enabled:
 -- select tablename, rowsecurity from pg_tables

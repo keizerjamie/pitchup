@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
+import { TEAM_LOGO_BUCKET, teamLogoPath } from '@/lib/logo-upload'
 import {
   SIGN_IN_POLICY,
   SIGN_IN_IP_POLICY,
@@ -35,10 +36,14 @@ function makeSupabase(opts: {
   signUpResult?: { data: { user: unknown; session: unknown }; error: AuthError }
   updateUserError?: AuthError
   tableError?: { table: string; error: { code?: string; message: string } }
+  storageRemoveError?: { code?: string; message: string }
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   type Eq = { col: string; val: unknown }
   const calls = {
+    // `naTabellen` legt de volgorde vast: het logobestand moet vóór de
+    // tabel-opruimlus verwijderd worden.
+    storageRemove: [] as { bucket: string; paths: string[]; naTabellen: number }[],
     deletes: [] as { table: string; eqs: Eq[] }[],
     inserts: [] as { table: string; payload: Record<string, unknown> }[],
     signIn: [] as { email: string; password: string }[],
@@ -66,6 +71,14 @@ function makeSupabase(opts: {
 
   const supabase = {
     from: (t: string) => chain(t),
+    storage: {
+      from: (bucket: string) => ({
+        remove: async (paths: string[]) => {
+          calls.storageRemove.push({ bucket, paths, naTabellen: calls.deletes.length })
+          return { data: opts.storageRemoveError ? null : [], error: opts.storageRemoveError ?? null }
+        },
+      }),
+    },
     auth: {
       getUser: async () => ({ data: { user } }),
       signInWithPassword: async (creds: { email: string; password: string }) => {
@@ -570,5 +583,50 @@ describe('deleteAccount', () => {
     use(makeSupabase({ user: null }))
 
     await expect(deleteAccount()).rejects.toThrow('Niet ingelogd')
+  })
+
+  it('verwijdert het clublogo uit Storage vóór de tabel-opruimlus (AVG)', async () => {
+    const m = makeSupabase()
+    use(m)
+    const { admin } = makeAdmin()
+    vi.mocked(createAdminClient).mockReturnValue(admin as unknown as ReturnType<typeof createAdminClient>)
+
+    await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
+
+    // Bewust tegen de gedeelde constanten uit lib/logo-upload.ts en niet tegen
+    // letterlijke strings: zo faalt deze test zodra deleteAccount weer een eigen
+    // pad zou opbouwen. De vorm van dat pad zelf is vastgelegd in
+    // lib/logo-upload.test.ts.
+    expect(m.calls.storageRemove).toEqual([
+      { bucket: TEAM_LOGO_BUCKET, paths: [teamLogoPath('team-1')], naTabellen: 0 },
+    ])
+  })
+
+  it('laat een storage-fout de rest van de verwijdering niet blokkeren', async () => {
+    const m = makeSupabase({
+      storageRemoveError: { code: '404', message: 'Object not found: team-1/logo' },
+    })
+    use(m)
+    const { admin, deleteUser } = makeAdmin()
+    vi.mocked(createAdminClient).mockReturnValue(admin as unknown as ReturnType<typeof createAdminClient>)
+
+    await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
+
+    expect(m.calls.deletes.map((d) => d.table)).toEqual([
+      'oefeningen', 'metingen', 'attendance', 'lineups', 'events', 'players', 'settings',
+    ])
+    expect(deleteUser).toHaveBeenCalledWith('team-1')
+    expect(m.calls.signOut).toBe(1)
+    expect(loggedText()).toContain('auth.deleteAccount.storage')
+    expect(loggedText()).not.toContain('Object not found')
+  })
+
+  it('raakt Storage niet aan zonder service-role-key', async () => {
+    const m = makeSupabase()
+    use(m)
+    vi.mocked(createAdminClient).mockReturnValue(null)
+
+    await expect(deleteAccount()).rejects.toThrow('Account verwijderen is nu niet mogelijk')
+    expect(m.calls.storageRemove).toHaveLength(0)
   })
 })

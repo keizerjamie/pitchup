@@ -10,8 +10,14 @@ vi.mock('@/app/actions/match-squad', () => ({
   toggleSquadPlayer: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('@/app/actions/events', () => ({
+  updateGatherTime: vi.fn().mockResolvedValue(undefined),
+}))
+
 import { toggleSquadPlayer } from '@/app/actions/match-squad'
+import { updateGatherTime } from '@/app/actions/events'
 const mockToggle = toggleSquadPlayer as unknown as ReturnType<typeof vi.fn>
+const mockUpdateGatherTime = updateGatherTime as unknown as ReturnType<typeof vi.fn>
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
@@ -45,6 +51,12 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         hasAnyActivePlayers={overrides.hasAnyActivePlayers ?? true}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
         dateLabel={overrides.dateLabel ?? 'zondag 9 augustus 2026'}
+        teamName={'teamName' in overrides ? overrides.teamName ?? null : null}
+        teamLogoUrl={'teamLogoUrl' in overrides ? overrides.teamLogoUrl ?? null : null}
+        homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : null}
+        kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
+        initialGatherTime={'initialGatherTime' in overrides ? overrides.initialGatherTime ?? null : null}
+        formItems={overrides.formItems ?? []}
       />
     </DictProvider>,
   )
@@ -64,6 +76,18 @@ function stubPrint() {
 async function clickToggle(name: string) {
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name }))
+  })
+}
+
+// Zelfde reden als clickToggle hierboven: saveGatherTime loopt via een async
+// transition (startGatherTransition), dus wrappen in act(async) zodat de
+// microtask (resolve/reject van updateGatherTime) is afgehandeld vóór de
+// volgende assertie.
+async function typeAndSaveGatherTime(value: string) {
+  const input = screen.getByLabelText(nl.matchSquad.gatherTimeEditLabel)
+  fireEvent.change(input, { target: { value } })
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: nl.matchSquad.gatherTimeSave }))
   })
 }
 
@@ -132,6 +156,60 @@ describe('mislukte save', () => {
       'aria-pressed',
       'true',
     )
+  })
+})
+
+describe('verzameltijd - mislukte save', () => {
+  it('rolt de verzameltijd terug naar de laatst bevestigde waarde en toont de i18n-foutmelding zonder rauwe servertekst', async () => {
+    mockUpdateGatherTime.mockRejectedValueOnce(new Error('Netwerkfout 500'))
+    renderEditor({ initialGatherTime: '18:00:00' })
+    const input = screen.getByLabelText(nl.matchSquad.gatherTimeEditLabel)
+    expect(input).toHaveValue('18:00')
+
+    await typeAndSaveGatherTime('19:30')
+    expect(mockUpdateGatherTime).toHaveBeenCalledWith('e1', '19:30')
+
+    // Rollback: terug naar de laatst bevestigde waarde (initialGatherTime),
+    // niet naar leeg en niet naar de mislukte nieuwe waarde '19:30'.
+    expect(input).toHaveValue('18:00')
+    expect(input).not.toHaveValue('19:30')
+    expect(input).not.toHaveValue('')
+
+    // Foutmelding zichtbaar via de eigen i18n-string, geen rauwe servertekst.
+    expect(screen.getByText(nl.matchSquad.gatherTimeSaveError)).toBeInTheDocument()
+    expect(screen.queryByText('Netwerkfout 500')).not.toBeInTheDocument()
+  })
+
+  it('een volgende, geslaagde wijziging wist de eerdere foutmelding', async () => {
+    mockUpdateGatherTime.mockRejectedValueOnce(new Error('Netwerkfout 500'))
+    renderEditor({ initialGatherTime: '18:00:00' })
+
+    await typeAndSaveGatherTime('19:30')
+    expect(screen.getByText(nl.matchSquad.gatherTimeSaveError)).toBeInTheDocument()
+
+    // Deze tweede save slaagt (default-mock resolved), dus de fout hoort te
+    // verdwijnen en de nieuwe waarde te blijven staan.
+    await typeAndSaveGatherTime('20:15')
+    expect(screen.queryByText(nl.matchSquad.gatherTimeSaveError)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(nl.matchSquad.gatherTimeEditLabel)).toHaveValue('20:15')
+  })
+
+  it('normaliseert een teruggerolde "HH:MM:SS"-waarde naar "HH:MM" in het invoerveld (GatherTimeField-resync na rollback)', async () => {
+    // initialGatherTime komt hier ruw uit de database (met seconden) binnen,
+    // exact zoals lastConfirmedGatherRef die bij mount vastlegt. Na een
+    // mislukte save rolt MatchSquadEditor terug naar deze ruwe waarde, en
+    // GatherTimeField moet die zelf normaliseren (GatherTimeField.tsx:37-40) —
+    // dit is de enige test die dat pad end-to-end doorloopt.
+    mockUpdateGatherTime.mockRejectedValueOnce(new Error('Netwerkfout 500'))
+    renderEditor({ initialGatherTime: '18:00:00' })
+    const input = screen.getByLabelText(nl.matchSquad.gatherTimeEditLabel)
+
+    await typeAndSaveGatherTime('19:30')
+
+    // Het veld toont "HH:MM", nooit de ruwe "HH:MM:SS" die lastConfirmedGatherRef
+    // intern bewaart.
+    expect(input).toHaveValue('18:00')
+    expect(input).not.toHaveValue('18:00:00')
   })
 })
 

@@ -2,7 +2,8 @@ import { notFound, redirect } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createClient } from '@/lib/supabase/server'
 import { Player } from '@/lib/types'
-import { formatDateLong } from '@/lib/utils'
+import { formatDateLong, todayLocal } from '@/lib/utils'
+import { toMatchFormItems } from '@/lib/match-form'
 import MatchSquadEditor from '@/components/MatchSquadEditor'
 import { getDict } from '@/lib/i18n'
 
@@ -16,11 +17,26 @@ export default async function MatchSquadPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: event }, { data: squad }, { data: allPlayers }, { data: attendance }] = await Promise.all([
+  const [{ data: event }, { data: squad }, { data: allPlayers }, { data: attendance }, { data: settingsRows }, { data: formRows }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
     supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', user.id),
     supabase.from('players').select('*').eq('team_id', user.id).order('name'),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
+    supabase.from('settings').select('key, value').eq('team_id', user.id).in('key', ['team_name', 'team_logo_url']),
+    // Vorm van de laatste 5 afgeronde wedstrijden (dit event zelf uitgesloten,
+    // ongeacht zijn eigen datum) — zelfde order-clausules als de
+    // dashboardquery in app/page.tsx, zie het API-contract van de
+    // backend-engineer voor toMatchFormItems().
+    supabase.from('events')
+      .select('id, date, opponent, goals_for, goals_against')
+      .eq('team_id', user.id)
+      .eq('type', 'match')
+      .neq('id', id)
+      .lt('date', todayLocal())
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+      .limit(5),
   ])
 
   if (!event || event.type !== 'match') notFound()
@@ -38,6 +54,12 @@ export default async function MatchSquadPage({ params }: Props) {
   const selectable = players.filter((p) => selectedIds.has(p.id) || (p.active && presentIds.has(p.id)))
   const hasAnyActivePlayers = players.some((p) => p.active)
   const dateLabel = formatDateLong(event.date, t.browserLocale)
+
+  const settingsMap: Record<string, string> = {}
+  for (const row of settingsRows ?? []) settingsMap[row.key] = row.value
+  const teamName = settingsMap['team_name']?.trim() || null
+  const teamLogoUrl = settingsMap['team_logo_url'] || null
+  const formItems = toMatchFormItems(formRows ?? [])
 
   return (
     <div className="max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
@@ -60,6 +82,12 @@ export default async function MatchSquadPage({ params }: Props) {
         hasAnyActivePlayers={hasAnyActivePlayers}
         opponent={event.opponent}
         dateLabel={dateLabel}
+        teamName={teamName}
+        teamLogoUrl={teamLogoUrl}
+        homeAway={event.home_away}
+        kickoffTime={event.time}
+        initialGatherTime={event.gather_time}
+        formItems={formItems}
       />
     </div>
   )

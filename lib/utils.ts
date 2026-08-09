@@ -38,6 +38,23 @@ export function formatDateLong(dateStr: string, locale = 'nl-NL'): string {
   })
 }
 
+// Kloktijd in 'HH:MM' (24-uurs, met leidende nul). Eén bron van waarheid voor
+// tijd-validatie in de server actions (createEvent, updateGatherTime);
+// naamgeving en vorm spiegelen isDateString() in lib/season-dates.ts.
+//
+// Bewust géén tijdzone-conversie: events.time en events.gather_time zijn kale
+// lokale wandkloktijden (TIME-kolommen), precies zoals de trainer ze invoert.
+//
+// Naast het formaat wordt ook het BEREIK gecontroleerd: '24:00' en '25:00'
+// passen wel in /^\d{2}:\d{2}$/ maar zijn geen geldige kloktijd. Zonder die
+// controle zou zo'n waarde pas in Postgres stuklopen en als generieke
+// databasefout bij de gebruiker landen in plaats van als nette invoerfout.
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+export function isTimeString(value: unknown): value is string {
+  return typeof value === 'string' && TIME_RE.test(value)
+}
+
 export function formatTime(timeStr: string | null): string {
   if (!timeStr) return ''
   return timeStr.slice(0, 5)

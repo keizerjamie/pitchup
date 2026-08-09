@@ -251,6 +251,10 @@ export interface FootballEvent {
   match_type: MatchType | null
   opponent: string | null
   home_away: HomeAway | null
+  // Optionele verzameltijd, alleen relevant voor 'match'-events. Achteraf
+  // aanpasbaar op de squad-pagina (app/events/[id]/squad/page.tsx), zie
+  // updateGatherTime (app/actions/events.ts).
+  gather_time: string | null
   notes: string | null
   doelstelling: string | null
   goals_for: number | null

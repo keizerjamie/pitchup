@@ -7,6 +7,7 @@ import TrainingScheduleForm from '@/components/TrainingScheduleForm'
 import LanguageSwitcher from '@/components/LanguageSwitcher'
 import DeleteAccountSection from '@/components/DeleteAccountSection'
 import ThemeSelect from '@/components/ThemeSelect'
+import TeamLogoSection from '@/components/TeamLogoSection'
 
 function SectionCard({ icon, title, children }: { icon: string; title: string; children: React.ReactNode }) {
   return (
@@ -61,6 +62,11 @@ export default async function SettingsPage() {
               <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.languageSection}</div>
               <LanguageSwitcher />
             </div>
+          </SectionCard>
+
+          {/* Club logo */}
+          <SectionCard icon="image" title={t.settings.logoSection}>
+            <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
           </SectionCard>
 
           {/* Attendance default */}
