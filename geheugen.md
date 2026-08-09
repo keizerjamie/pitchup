@@ -752,3 +752,40 @@ ontwerpvragen via `AskUserQuestion`).
 - `MatchSquadEditor` synct zijn `lastConfirmedRef` niet opnieuw bij nieuwe server-props na
   revalidatie (in tegenstelling tot `TeamIndelingEditor`) — onschadelijk zolang één trainer
   per team tegelijk werkt; bij gelijktijdige bewerking in twee tabbladen wint de laatste klik.
+
+### Vervolg: aanwezigheidsfilter (2026-08-07, commit `5280b3e`)
+Zelfde dag, aparte goedkeuringsronde. De selecteerbare lijst op `/events/[id]/squad` toont
+voortaan alleen spelers met `attendance.status === 'present'` voor dit event, verenigd met
+spelers die al in `match_squad` zitten (die verdwijnen nooit stilzwijgend — zelfde regel als
+bij inactieve spelers). Bevestigd door de gebruiker via `AskUserQuestion`: een al-geselecteerde
+speler blijft zichtbaar met een label (`t.matchSquad.notPresentLabel`) als hij niet (meer)
+aanwezig is; label-prioriteit is inactief > niet-aanwezig, nooit beide tegelijk. **Puur een
+zichtbaarheidsfilter** — `app/actions/match-squad.ts` (de mutatie) is bewust niet aangeraakt en
+blijft volledig onafhankelijk van `attendance`.
+
+- `app/events/[id]/squad/page.tsx`: vierde tenant-gescopede query op `attendance`; filter
+  `p => selectedIds.has(p.id) || (p.active && presentIds.has(p.id))`. Nieuwe verplichte prop
+  `hasAnyActivePlayers` (afgeleid van de **ongefilterde** spelerslijst, niet van de gefilterde
+  selecteerbare lijst) onderscheidt twee lege-staten in `MatchSquadEditor.tsx`: "geen actieve
+  spelers in het team" (bestaande copy, link naar `/players/new`) vs. "team heeft spelers, maar
+  niemand aanwezig gemeld" (nieuwe copy `matchSquad.emptyNoAttendance`, link naar de
+  eventpagina). Eerste versie verwarde deze twee en stuurde de trainer ten onrechte naar
+  "speler toevoegen" — gevonden door de validator, niet door de eerste testronde.
+  `presentPlayerIds` is een **verplichte** prop (geen optionele met stille `?? []`-fallback),
+  bewust verhard na een validator-bevinding.
+- **Cache-consistentie**: `attendance`-schrijfacties moeten voortaan ook `/events/{id}/squad`
+  revalideren, niet alleen `/events/{id}` — dat gat werd drie keer na elkaar gevonden
+  (`updateAttendance`, `markAllPresent`, `markAbsentForPeriod`) omdat de squad-pagina nu ook uit
+  `attendance` leest. `markAbsentForPeriod` loopt over meerdere events tegelijk; revalideert nu
+  per uniek geraakt match-event uit de al opgehaalde events-query (geen extra DB-call). **Les
+  voor een volgende feature die een bestaande tabel erbij gaat lezen**: check meteen alle
+  server actions die die tabel muteren op hun `revalidatePath`-set, niet pas als de validator
+  het één voor één blootlegt.
+- i18n: `matchSquad.notPresentLabel`/`emptyNoAttendance` in alle 5 talen. FR-vertaling van
+  `notPresentLabel` was aanvankelijk `'Absent'` — te sterk, want het label geldt ook voor
+  status `'unknown'` (nog geen reactie), niet alleen echt afgemelde spelers; gecorrigeerd naar
+  het neutralere `'Non présent'`, consistent met de andere vier talen.
+- Testgaten die pas bij validatie naar boven kwamen (niet bij de eerste implementatie): geen
+  test voor tenant-isolatie van de nieuwe `attendance`-query (ghost-rij ander team), en geen
+  test voor de `p.active &&`-clausule zelf (een inactieve maar wél-aanwezige, nog
+  niet-geselecteerde speler moet uitgesloten blijven) — beide alsnog toegevoegd.
