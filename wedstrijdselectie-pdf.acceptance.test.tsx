@@ -140,6 +140,44 @@ describe('Kop — logo (indien aanwezig) + teamnaam + exportTitle', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
+// Team-volgorde en -grootte in de matchup-kop — directe gebruikerswens
+// bovenop het ontwerp: de thuisploeg staat altijd op regel 1 (standaard
+// voetbalconventie), en het eigen team is altijd groter/groener dan de
+// tegenstander, ongeacht de volgorde.
+// ═══════════════════════════════════════════════════════════════════════
+describe('Team-volgorde en -grootte — thuisploeg eerst, eigen team altijd groter', () => {
+  it('thuiswedstrijd: eigen team op regel 1 (groter), tegenstander op regel 2 (kleiner)', () => {
+    const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'home' })
+    const block = getPrintBlock(container)
+    const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
+    const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
+    expect(ownEl.className).toContain('text-4xl')
+    expect(opponentEl.className).toContain('text-3xl')
+    // Eigen team staat DOM-technisch vóór de tegenstander (regel 1 vs regel 2).
+    expect(ownEl.compareDocumentPosition(opponentEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('uitwedstrijd: tegenstander (dan thuisploeg) op regel 1 (kleiner), eigen team op regel 2 (groter)', () => {
+    const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'away' })
+    const block = getPrintBlock(container)
+    const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
+    const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
+    expect(opponentEl.className).toContain('text-3xl')
+    expect(ownEl.className).toContain('text-4xl')
+    // Tegenstander staat DOM-technisch vóór het eigen team (regel 1 vs regel 2).
+    expect(opponentEl.compareDocumentPosition(ownEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('homeAway=null (fallback): eigen team blijft eerst staan, zoals vóór deze ronde', () => {
+    const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: null })
+    const block = getPrintBlock(container)
+    const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
+    const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
+    expect(ownEl.compareDocumentPosition(opponentEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
 // Datumregel + thuis/uit
 // ═══════════════════════════════════════════════════════════════════════
 describe('Datumregel — dagnaam+datum + thuis/uit-label', () => {
@@ -212,15 +250,22 @@ describe('Verzamel- en aftraptijd', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Sectiekop "SELECTIE" + aantal + "OPGEROEPEN"
+// Sectiekop "SELECTIE" + aantal + "SPELERS · OPGEROEPEN"
 // ═══════════════════════════════════════════════════════════════════════
-describe('Sectiekop SELECTIE — aantal + statisch "OPGEROEPEN"-label, geen tweede statistiek', () => {
-  it('toont t.matchSquad.sectionSelection, het aantal en t.matchSquad.calledUpLabel', () => {
+describe('Sectiekop SELECTIE — aantal + statisch "SPELERS · OPGEROEPEN"-label, geen tweede statistiek', () => {
+  it('toont t.matchSquad.sectionSelection, het aantal en t.matchSquad.playersLabel + calledUpLabel', () => {
     const { container } = renderPrintList({ selectedCount: 7 })
     const block = getPrintBlock(container)
     expect(block.textContent).toContain(nl.matchSquad.sectionSelection)
     expect(block.textContent).toContain('7')
+    expect(block.textContent).toContain(nl.matchSquad.playersLabel)
     expect(block.textContent).toContain(nl.matchSquad.calledUpLabel)
+  })
+
+  it('gebruikt het exacte samengestelde formaat "{n} SPELERS · OPGEROEPEN"', () => {
+    const { container } = renderPrintList({ selectedCount: 16 })
+    const block = getPrintBlock(container)
+    expect(block.textContent).toContain(`16 ${nl.matchSquad.playersLabel} · ${nl.matchSquad.calledUpLabel}`)
   })
 })
 
@@ -228,11 +273,37 @@ describe('Sectiekop SELECTIE — aantal + statisch "OPGEROEPEN"-label, geen twee
 // Vorm-blok: 0, 1-4 en 5 items — nooit verborgen
 // ═══════════════════════════════════════════════════════════════════════
 describe('Vorm-blok — toont zoveel kaartjes als er items zijn, blok nooit verborgen', () => {
-  it('0 items: het blok (heading) blijft staan, geen kaartjes', () => {
+  it('0 items: het blok (heading) blijft staan, geen kaartjes, geen samenvattingsregel', () => {
     const { container } = renderPrintList({ formItems: [] })
     const block = getPrintBlock(container)
     expect(within(block).getByText(nl.matchSquad.formHeading)).toBeInTheDocument()
     expect(within(block).queryAllByText(nl.home.formLetterWin).length).toBe(0)
+    expect(block.textContent).not.toMatch(/GEWONNEN|GELIJK|VERLOREN/)
+  })
+
+  it('3 items (1 win, 1 gelijk, 1 verlies): de samenvattingsregel toont "1 GEWONNEN · 1 GELIJK · 1 VERLOREN"', () => {
+    const { container } = renderPrintList({
+      formItems: [
+        formItem({ id: 'a', result: 'win' }),
+        formItem({ id: 'b', result: 'draw' }),
+        formItem({ id: 'c', result: 'loss' }),
+      ],
+    })
+    const block = getPrintBlock(container)
+    expect(block.textContent).toContain(nl.matchSquad.formSummaryWon.replace('{n}', '1'))
+    expect(block.textContent).toContain(nl.matchSquad.formSummaryDrawn.replace('{n}', '1'))
+    expect(block.textContent).toContain(nl.matchSquad.formSummaryLost.replace('{n}', '1'))
+  })
+
+  it('vorm-kaartje: geen "vs "-prefix voor de tegenstander, en de datum toont geen dagnaam-afkorting', () => {
+    const { container } = renderPrintList({
+      formItems: [formItem({ id: 'a', opponent: 'FC Kolping', date: '2026-08-01' })],
+    })
+    const block = getPrintBlock(container)
+    expect(block.textContent).toContain('FC Kolping')
+    expect(block.textContent).not.toMatch(new RegExp(`${nl.lineup.vsLabel}\\s*FC Kolping`))
+    expect(block.textContent).toContain('1 aug')
+    expect(block.textContent).not.toMatch(/\bza\b/)
   })
 
   it('3 items (1-4): precies 3 kaartjes', () => {
@@ -345,6 +416,7 @@ describe('i18n — nieuwe matchSquad-sleutels in alle 5 talen', () => {
     expect(block.textContent).toContain(dict.matchSquad.gatherTimeLabel)
     expect(block.textContent).toContain(dict.matchSquad.kickoffTimeLabel)
     expect(block.textContent).toContain(dict.matchSquad.sectionSelection)
+    expect(block.textContent).toContain(dict.matchSquad.playersLabel)
     expect(block.textContent).toContain(dict.matchSquad.calledUpLabel)
     expect(within(block).getByText(dict.matchSquad.footerGenerated)).toBeInTheDocument()
   })
@@ -404,10 +476,14 @@ describe('Story-AC11 (Deel B) — MatchFormCards rendert geen <ul>/<li>, ook nie
     expect(uls.length).toBe(1)
     expect(uls[0].querySelectorAll('li').length).toBe(1)
 
-    // Het vorm-blok zelf (alles na de "VORM · LAATSTE 5"-kop) bevat geen
-    // enkel <li>.
+    // Het vorm-blok zelf (alles na de "VORM · LAATSTE 5"-kop, inclusief de
+    // samenvattingsregel en de kaartjes) bevat geen enkel <li>. BEWUSTE
+    // AANPASSING (frontend-fix): de kop staat sinds deze ronde in een eigen
+    // flex-rij samen met de samenvattingsregel, dus scopen we via .closest()
+    // op de buitenste vorm-blok-container i.p.v. één niveau omhoog.
     const formHeading = within(block).getByText(nl.matchSquad.formHeading)
-    const formSection = formHeading.parentElement as HTMLElement
+    const formSection = formHeading.closest('.border-t-4') as HTMLElement
+    expect(formSection).not.toBeNull()
     expect(formSection.querySelectorAll('li').length).toBe(0)
     expect(formSection.querySelectorAll('ul').length).toBe(0)
   })
@@ -418,13 +494,19 @@ describe('Story-AC11 (Deel B) — MatchFormCards rendert geen <ul>/<li>, ook nie
 // ongeluk een FORMATIONS-sleutel (bv. "4-3-3") vormen door aaneenschakeling.
 // ═══════════════════════════════════════════════════════════════════════
 describe('Story-AC12 (Deel B) — score-notatie vormt nooit een FORMATIONS-sleutel', () => {
-  it('scores worden met een dubbele punt weergegeven (bv. "4:3"), nooit met een liggend streepje', () => {
+  // BEWUSTE AANPASSING (frontend-fix, ontwerp-precisie): scores gebruiken
+  // sinds deze ronde een en-dash (–, U+2013) i.p.v. een dubbele punt — zie de
+  // uitgebreide comment boven FORM_STYLE in MatchFormCards.tsx. Een en-dash
+  // matcht nooit het gewone koppelteken (-, U+002D) dat elke FORMATIONS-
+  // sleutel gebruikt, dus blijft de garantie hieronder intact.
+  it('scores worden met een en-dash weergegeven (bv. "4–3"), nooit met een gewoon koppelteken of dubbele punt', () => {
     const { container } = renderPrintList({
       formItems: [formItem({ id: 'a', goalsFor: 4, goalsAgainst: 3, opponent: 'FC X' })],
     })
     const block = getPrintBlock(container)
-    expect(block.textContent).toContain('4:3')
+    expect(block.textContent).toContain('4–3')
     expect(block.textContent).not.toContain('4-3')
+    expect(block.textContent).not.toContain('4:3')
   })
 
   it('geen enkele FORMATIONS-sleutel komt voor in het print-blok, ook niet met opeenvolgende scores die er qua cijfers op lijken (4-3-3, 3-5-2, 4-4-2)', () => {

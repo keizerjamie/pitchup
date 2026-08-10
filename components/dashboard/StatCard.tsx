@@ -11,7 +11,7 @@ export default function StatCard({
   children,
 }: {
   label: string
-  icon: string
+  icon: string | ReactNode
   value: ReactNode
   unit?: string
   sub?: string
@@ -21,7 +21,11 @@ export default function StatCard({
     <div className="surface-card p-[17px] flex flex-col gap-2.5">
       <div className="flex items-center justify-between">
         <span className="text-[12.5px] font-bold text-muted">{label}</span>
-        <span className="ms text-[20px] text-brand-accent">{icon}</span>
+        {typeof icon === 'string' ? (
+          <span className="ms text-[20px] text-brand-accent">{icon}</span>
+        ) : (
+          <span className="text-brand-accent flex-shrink-0">{icon}</span>
+        )}
       </div>
       <div className="font-display text-[32px] font-bold text-ink leading-none">
         {value}

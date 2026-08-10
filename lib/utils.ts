@@ -28,6 +28,18 @@ export function formatDate(dateStr: string, locale = 'nl-NL'): string {
   })
 }
 
+// Compacte variant van formatDate(): dag + maand, GEEN dagnaam. Losstaand van
+// formatDate() (die blijft ongewijzigd, wordt elders gebruikt/getest) — nodig
+// voor de vorm-kaartjes in MatchFormCards.tsx, waar het ontwerp alleen "9 aug"
+// toont en geen "za 9 aug".
+export function formatDateShort(dateStr: string, locale = 'nl-NL'): string {
+  const date = new Date(dateStr + 'T00:00:00')
+  return date.toLocaleDateString(locale, {
+    day: 'numeric',
+    month: 'short',
+  })
+}
+
 export function formatDateLong(dateStr: string, locale = 'nl-NL'): string {
   const date = new Date(dateStr + 'T00:00:00')
   return date.toLocaleDateString(locale, {

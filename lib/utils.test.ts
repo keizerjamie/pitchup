@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isTimeString } from '@/lib/utils'
+import { isTimeString, formatDateShort } from '@/lib/utils'
 
 describe('isTimeString', () => {
   it('accepteert een geldige kloktijd met leidende nul', () => {
@@ -42,5 +42,15 @@ describe('isTimeString', () => {
 
   it('weigert tekst', () => {
     expect(isTimeString('abc')).toBe(false)
+  })
+})
+
+describe('formatDateShort', () => {
+  it('toont dag + maand, GEEN dagnaam (in tegenstelling tot formatDate)', () => {
+    expect(formatDateShort('2026-08-01', 'nl-NL')).toBe('1 aug')
+  })
+
+  it('respecteert de meegegeven locale', () => {
+    expect(formatDateShort('2026-08-01', 'en-US')).toBe('Aug 1')
   })
 })

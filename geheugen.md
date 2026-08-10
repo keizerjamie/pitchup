@@ -789,3 +789,106 @@ blijft volledig onafhankelijk van `attendance`.
   test voor tenant-isolatie van de nieuwe `attendance`-query (ghost-rij ander team), en geen
   test voor de `p.active &&`-clausule zelf (een inactieve maar wél-aanwezige, nog
   niet-geselecteerde speler moet uitgesloten blijven) — beide alsnog toegevoegd.
+
+## Feature: Clublogo-upload + herstijlde wedstrijdselectie-PDF (2026-08-09, commits `b45a993`/`b7eca13`)
+Trainer kan in de instellingen een clublogo uploaden; dat vervangt overal het Pitchup-logo
+(zijbalk, PDF). De wedstrijdselectie-PDF is bovendien herstijld naar een extern, door de
+gebruiker aangeleverd ontwerp (Claude Design-link) en uitgebreid met logo, tijden, thuis/uit
+en een vormblok. Gebouwd via de volledige feature-factory-keten, twee samenhangende stories
+(A: logo, B: PDF-verrijking), meerdere goedkeuringsrondes via `AskUserQuestion`.
+
+### Kernbeslissingen — expliciet door de gebruiker bevestigd
+- **Logo vervangt overal het Pitchup-logo** (zijbalk/`AppShell` én PDF) zodra geüpload — sluit
+  aan bij "huisstijl toevoegen aan de app". Dit wordt op termijn een **Pro/betaalde feature**,
+  maar het abonnementensysteem bestaat nog niet — bewust **nu al ongated gebouwd**, gating is
+  een aparte, latere taak.
+- **Publieke Storage-bucket** (`team-logos`) — expliciet akkoord, omdat een private bucket met
+  signed URLs de PDF-kop kan laten leeglopen (vervallen link tijdens/na het printen).
+- **Geen aanvoerder-markering** — zat in het ontwerp, expliciet door de gebruiker geschrapt.
+- **Geen zichtbare wedstrijddag-label in de footer** (zou dubbelen met de dagnaam die al in de
+  datumregel staat) — footer is precies 3 elementen: teamnaam · datum · "Gegenereerd met Pitchup".
+
+### Datamodel
+- **Eerste Supabase Storage-bucket ooit in deze app** (`supabase/team-logo.sql`): `team-logos`,
+  publiek leesbaar, 2MB-limiet, PNG/JPEG/WebP. RLS op `storage.objects` hangt aan de
+  **padconventie** `team-logos/<team_id>/logo` (`(storage.foldername(name))[1] = auth.uid()::text`)
+  — geen `team_id`-kolom zoals bij gewone tabellen. Vier policies nodig: insert/update/delete/
+  select. **De UPDATE-policy is makkelijk te vergeten** — een upload met `upsert:true` op een
+  al bestaand object is een UPDATE, geen INSERT; zonder die policy slaagt alleen de eerste upload.
+- **Supabase SQL Editor mag `alter table storage.objects enable row level security` niet
+  uitvoeren** — foutmelding `must be owner of table objects` (die tabel is eigendom van de
+  interne `supabase_storage_admin`-rol). Niet erg: RLS staat op `storage.objects` in elk
+  Supabase-project al standaard aan, dus die regel moet gewoon weg (gebeurd in beide migraties).
+- Logo-URL zelf staat in de **bestaande** generieke `settings`-tabel (key `team_logo_url`, met
+  een `?v=<timestamp>`-cache-buster omdat het opslagpad vast is per team) — geen nieuwe tabel.
+- Nieuwe kolom `events.gather_time TIME` (optioneel, lokale wandkloktijd, zelfde patroon als
+  het bestaande `time`-veld — geen timestamptz).
+- **Conventie bevestigd voor Storage-migraties**: bucket-creatie hoort ook gespiegeld in
+  `schema.sql` (verse installatie), niet alleen in de losse migratie — dat werd in de eerste
+  ronde vergeten en moest achteraf worden toegevoegd.
+
+### Backend
+- `lib/logo-upload.ts`: `sniffImageMimeType()` — magic-byte-detectie (PNG/JPEG/WebP), **`file.type`
+  van de client wordt nooit vertrouwd** als content-type bij de upload (triviaal te vervalsen;
+  zou een `text/html`-object op het publieke Supabase-domein kunnen opleveren). Ook
+  `TEAM_LOGO_BUCKET`/`teamLogoPath()` als gedeelde constanten — bewust hier en niet in
+  `app/actions/team-logo.ts`, want **`'use server'`-bestanden mogen alleen async functies
+  exporteren**; een `export const` daar verwijdert stilzwijgend ALLE exports uit de module bij
+  de build (typecheck/lint/vitest zien dit niet — alleen `npm run build` vangt het). Nieuwe
+  regel voor CLAUDE.md-achtige afspraken: **draai bij elke wijziging aan een `'use server'`-
+  bestand ook `npm run build`**, niet alleen de standaardchecks.
+- `app/actions/team-logo.ts`: `uploadTeamLogo`/`deleteTeamLogo` geven `{error}` terug (geen
+  throw) — ander contract dan de meeste andere actions in deze app, bewust voor eenvoudige
+  foutweergave naast een formveld.
+- `app/actions/events.ts`: nieuwe `updateGatherTime(eventId, gatherTime)` (throwt wél, zelfde
+  contract als `toggleSquadPlayer`) — er bestaat GEEN "wedstrijd bewerken"-flow in deze app
+  (alleen `createEvent`/`deleteEvent`), dus dit is een klein, op zichzelf staand mutatie-endpoint
+  i.p.v. een volledige edit-pagina.
+- `lib/utils.ts`: nieuwe `isTimeString()` (verplaatst uit een lokale `TIME_RE` in
+  `events.ts`) — valideert nu ook het geldige bereik (00:00-23:59), niet alleen het formaat
+  `HH:MM` — een bewuste verstrenging t.o.v. de oude regex, want de brief-eisen spraken elkaar
+  tegen (letterlijk "zelfde gedrag" vs. "moet 25:00 weigeren").
+- `deleteAccount()` (`app/actions/auth.ts`) ruimt nu ook het logo-Storage-object op vóór de
+  tabel-loop (AVG) — met `logError`, niet `throw`, zodat een ontbrekend bestand de rest van de
+  verwijdering niet blokkeert.
+
+### Frontend — "geen opstelling-info"-regel uitgebreid, niet versoepeld
+`components/MatchSquadPrintList.tsx` mag uit `@/lib/types` nog steeds **uitsluitend** `Player`
+importeren (regel uit de eerdere wedstrijdselectie-feature) — nieuwe content (logo, tijden,
+vorm-blok) is expliciet beargumenteerd als "identificerend/logistiek, geen tactische info" en
+gaat via `homeAway` als inline literal union en `MatchFormItem` uit het nieuwe `lib/match-form.ts`,
+niet via `@/lib/types`. `components/MatchFormCards.tsx` (het vormblok) gebruikt bewust géén
+`<ul>`/`<li>` — zou de bestaande "precies één `<ul>` in het print-blok"-garantie breken.
+
+`components/GatherTimeField.tsx` normaliseert een binnenkomende DB-waarde (`"17:30:00"`) naar
+`"HH:MM"` via de bestaande `formatTime()` — **dit ontbrak in de eerste versie** en veroorzaakte
+een echte bug: een bestaande verzameltijd kon nooit opnieuw opgeslagen worden (server weigerde
+het `HH:MM:SS`-formaat). Les: bij een nieuw bewerkveld dat een DB-`TIME`-kolom rechtstreeks in
+een `<input type="time">` zet, altijd expliciet normaliseren — er was in deze app nog geen
+precedent voor "DB-tijd terug een invoerveld in" (bestaande tijdvelden waren altijd alleen-lezen
+weergave via `formatTime()`).
+
+### Visuele stijl — de kern van de oorspronkelijke opdracht, bijna gemist
+De eerste implementatieronde bouwde de PDF-inhoud/structuur correct maar **zonder enige Tailwind-
+opmaak** — de validator ving dit als "belangrijk", niet triviaal, omdat de hele uitbreiding
+startte met een door de gebruiker aangeleverd visueel ontwerp. Gefixt met een donkergroen/
+mintgroen kleurenschema (`emerald-900`/`emerald-600`), kaartranden, tweekoloms naamlijst via CSS
+`columns-2` (geen aparte DOM-structuur nodig), tweekoloms tijden-blok met `divide-x`, gekleurde
+vorm-badges. **Les: bij "bouw dit ontwerp na" een aparte, expliciete styling-eis in de brief/
+story opnemen — structuur+inhoud en visuele opmaak zijn twee aparte dingen die allebei
+geverifieerd moeten worden, niet impliciet meegenomen met "toon deze data".**
+
+### Icoonfont-gotcha (bevestigd bug, tweede keer dat dit voorkomt)
+`public/fonts/material-symbols-rounded.woff2` is **zelf-gehost en gesubset** — alleen de
+iconnamen die er destijds expliciet in zijn opgenomen werken; een nieuwe naam (`"image"`) toont
+gewoon de letterlijke tekst i.p.v. een pictogram (geen crash, geen typefout, dus makkelijk over
+het hoofd te zien zonder visueel te testen). Empirisch getest: van een hele reeks logische
+kandidaat-iconen werkte er **geen enkele**. Precedent-fix (al eerder toegepast bij
+`PrintButton.tsx`): een **inline SVG** i.p.v. het icoonfont voor elk nieuw icoon. Nieuw gedeeld
+component `components/icons/ImageIcon.tsx`; `SectionCard`'s `icon`-prop (`app/settings/page.tsx`)
+is verbreed naar `string | React.ReactNode` zodat bestaande `.ms`-aanroepen (`palette`,
+`how_to_reg`, `calendar_month`) ongewijzigd blijven werken naast een nieuwe SVG-aanroep.
+**Tijdens het testen bleek ook een bestaand, niet-gerelateerd icoon (`insights`, de "Vorm"-tegel
+op het dashboard) al langer kapot te zijn** — niet in deze sessie gefixt (buiten scope), wel als
+losse taak geflagd. **Les: bij elk nieuw icoon in deze app, altijd visueel verifiëren in de
+browser vóór live-gang — `npm test`/typecheck vangen een ontbrekend font-glyph niet.**

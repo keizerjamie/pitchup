@@ -758,18 +758,19 @@ describe('Vorm-strip staat in de hoofdelement-slot (value), niet in een ondersch
   })
 })
 
-describe('Vorm-tegel gebruikt het "insights"-icoon', () => {
-  it('binnen de tegel staat een element met class "ms" en tekstinhoud "insights"', async () => {
+describe('Vorm-tegel gebruikt een inline-SVG-icoon (niet het "insights"-iconfont-ligatuur)', () => {
+  it('binnen de tegel staat een <svg>, en geen element met class "ms" en tekstinhoud "insights" (die glyph zit niet in de subset — zie ChartBarIcon.tsx)', async () => {
     await renderDashboard({
       events: [matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 1, goals_against: 0 })],
     })
-    const iconEl = Array.from(vormCard().querySelectorAll('.ms')).find((el) => el.textContent === 'insights')
-    expect(iconEl).toBeTruthy()
+    expect(vormCard().querySelector('svg')).not.toBeNull()
+    const brokenGlyph = Array.from(vormCard().querySelectorAll('.ms')).find((el) => el.textContent === 'insights')
+    expect(brokenGlyph).toBeUndefined()
   })
 })
 
 describe('Vorm-tegel toont geen cijfer meer (het getal is vervangen door de strip)', () => {
-  it('happy-path met wedstrijden → de tegel-inhoud bevat geen enkel cijfer (alleen "Vorm", het icoon-ligatuur "insights" en W/G/V-letters)', async () => {
+  it('happy-path met wedstrijden → de tegel-inhoud bevat geen enkel cijfer (alleen "Vorm" en W/G/V-letters; het icoon is een SVG, geen tekst)', async () => {
     await renderDashboard({
       events: [
         matchRow({ id: 'a', date: addDaysFixed(TODAY, -1), goals_for: 2, goals_against: 0 }),

@@ -84,10 +84,32 @@ export default function MatchSquadPrintList({
         {homeAwayLabel && <> · {homeAwayLabel}</>}
       </p>
 
+      {/* Volgorde volgt thuis/uit (thuisploeg altijd op regel 1, standaard
+          voetbalconventie): bij een uitwedstrijd staat de tegenstander (dan
+          de thuisploeg) eerst, bij een thuiswedstrijd het eigen team eerst.
+          Zonder homeAway (fallback, niet expliciet gespecificeerd) blijft het
+          eigen team eerst staan, zoals voorheen. Grootte is bewust NIET
+          symmetrisch: het eigen team is groter/groener (nadruk), de
+          tegenstander iets kleiner/donkerder — dit wijkt bewust af van het
+          ontwerp (waar beide regels ongeveer gelijk groot zijn), directe
+          gebruikerswens. */}
       {opponentLine && (
         <div className="mt-2">
-          {ownTeamLine && <p className="text-2xl font-extrabold text-emerald-600">{ownTeamLine}</p>}
-          <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
+          {ownTeamLine ? (
+            homeAway === 'away' ? (
+              <>
+                <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
+                <p className="text-4xl font-extrabold text-emerald-600">{ownTeamLine}</p>
+              </>
+            ) : (
+              <>
+                <p className="text-4xl font-extrabold text-emerald-600">{ownTeamLine}</p>
+                <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
+              </>
+            )
+          ) : (
+            <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
+          )}
         </div>
       )}
 
@@ -116,7 +138,7 @@ export default function MatchSquadPrintList({
       {/* Sectiekop + aantal + statisch label — geen tweede statistiek */}
       <div className="mt-5 flex items-end justify-between">
         <p className="text-lg font-extrabold text-emerald-900">{t.matchSquad.sectionSelection}</p>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{selectedCount} {t.matchSquad.calledUpLabel}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
       </div>
 
       {/* Twee kolommen puur via CSS (`columns-2`) — de onderliggende <ul>/<li>

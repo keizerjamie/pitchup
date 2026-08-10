@@ -11,6 +11,7 @@ import TodoList, { TaskType, TodoItem } from '@/components/dashboard/TodoList'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
 import QuickActions from '@/components/dashboard/QuickActions'
 import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
+import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
 
@@ -318,7 +319,7 @@ export default async function DashboardPage() {
             </span>
           </div>
         </StatCard>
-        <StatCard label={t.home.statForm} icon="insights" value={
+        <StatCard label={t.home.statForm} icon={<ChartBarIcon className="w-5 h-5" />} value={
           recentForm.length > 0
             ? <FormStrip items={recentForm} t={t} />
             : <span className="text-[13px] font-semibold text-faint">{t.home.formEmpty}</span>

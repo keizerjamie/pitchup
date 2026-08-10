@@ -41,15 +41,21 @@ describe('MatchFormCards', () => {
     }
   })
 
-  it('toont de juiste letter, score, tegenstander en datum', () => {
-    const { container } = renderCards([item({ id: 'a', result: 'win', goalsFor: 3, goalsAgainst: 1, opponent: 'FC Test' })])
+  it('toont de juiste letter, score (en-dash), tegenstander (geen "vs"-prefix) en datum (geen dagnaam)', () => {
+    const { container } = renderCards([item({ id: 'a', result: 'win', goalsFor: 3, goalsAgainst: 1, opponent: 'FC Test', date: '2026-08-01' })])
     expect(screen.getByText(nl.home.formLetterWin)).toBeInTheDocument()
     // De overige velden staan als losse tekstnodes naast elkaar (geen eigen
     // omhullend element) — getByText matcht daar niet op, dus we toetsen op
     // de samengevoegde tekst van het kaartje.
     expect(container.textContent).toContain(nl.home.formWin)
-    expect(container.textContent).toContain('3:1')
+    expect(container.textContent).toContain('3–1')
+    expect(container.textContent).not.toContain('3:1')
     expect(container.textContent).toContain('FC Test')
+    // Geen "vs "-prefix meer voor de tegenstandernaam in dit kaartje.
+    expect(container.textContent).not.toMatch(new RegExp(`${nl.lineup.vsLabel}\\s*FC Test`))
+    // Datum zonder dagnaam-afkorting ("1 aug", niet "za 1 aug").
+    expect(container.textContent).toContain('1 aug')
+    expect(container.textContent).not.toMatch(/\bza\b/)
   })
 
   it('opponent: null → geen "vs null"/"vs undefined" in de tekst', () => {
@@ -61,12 +67,26 @@ describe('MatchFormCards', () => {
     const { container } = renderCards([
       item({ id: 'a', result: 'unknown', goalsFor: null, goalsAgainst: null }),
     ])
-    expect(container.textContent).not.toMatch(/\d+:\d+/)
+    expect(container.textContent).not.toMatch(/\d+[:–]\d+/)
     expect(screen.getByText(nl.home.formLetterUnknown)).toBeInTheDocument()
   })
 
-  it('lege array → geen kaartjes, maar het blok zelf blijft renderen (heading blijft staan)', () => {
-    renderCards([])
+  it('lege array → geen kaartjes, maar het blok zelf blijft renderen (heading blijft staan), geen samenvattingsregel', () => {
+    const { container } = renderCards([])
     expect(screen.getByText(nl.matchSquad.formHeading)).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/GEWONNEN|GELIJK|VERLOREN/)
+  })
+
+  it('samenvattingsregel telt win/draw/loss correct, "unknown" telt nergens in mee', () => {
+    const { container } = renderCards([
+      item({ id: 'a', result: 'win' }),
+      item({ id: 'b', result: 'win' }),
+      item({ id: 'c', result: 'draw' }),
+      item({ id: 'd', result: 'loss' }),
+      item({ id: 'e', result: 'unknown', goalsFor: null, goalsAgainst: null }),
+    ])
+    expect(container.textContent).toContain(nl.matchSquad.formSummaryWon.replace('{n}', '2'))
+    expect(container.textContent).toContain(nl.matchSquad.formSummaryDrawn.replace('{n}', '1'))
+    expect(container.textContent).toContain(nl.matchSquad.formSummaryLost.replace('{n}', '1'))
   })
 })
