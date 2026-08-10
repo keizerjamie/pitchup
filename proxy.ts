@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-function buildCsp(nonce: string): string {
+export function buildCsp(nonce: string): string {
   const isDev = process.env.NODE_ENV === 'development'
   const supabaseOrigin = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).origin
   const supabaseWs = supabaseOrigin.replace('https://', 'wss://')
@@ -13,7 +13,11 @@ function buildCsp(nonce: string): string {
     // 'unsafe-inline' is required: nonces cannot cover style *attributes*,
     // which the app uses extensively.
     `style-src 'self' 'unsafe-inline'`,
-    `img-src 'self' blob: data:`,
+    // Supabase-origin is nodig voor het clublogo: dat komt uit Storage en wordt
+    // met een gewone <img src="https://<ref>.supabase.co/storage/..."> geladen
+    // (zie components/TeamLogo.tsx). Zonder deze bron blokkeert de browser de
+    // afbeelding stil — zichtbaar in zijbalk én wedstrijdselectie-PDF.
+    `img-src 'self' blob: data: ${supabaseOrigin}`,
     `font-src 'self'`,
     `connect-src 'self' ${supabaseOrigin} ${supabaseWs}${isDev ? ' ws:' : ''}`,
     `object-src 'none'`,
