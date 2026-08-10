@@ -111,6 +111,13 @@ body {
   font-family: var(--font-display), system-ui, sans-serif;
 }
 
+/* PDF-only display font (Archivo Black) — uitsluitend voor de
+   wedstrijdselectie-export (MatchSquadPrintList.tsx/MatchFormCards.tsx), niet
+   app-breed. Zie app/layout.tsx voor de font-definitie. */
+.font-pdf-display {
+  font-family: var(--font-pdf-display), system-ui, sans-serif;
+}
+
 /* Material Symbols Rounded — self-hosted from public/fonts (no external request,
    so it works inside sandboxed previews). block display prevents ligature-text
    flashing while the font loads. */

@@ -1097,7 +1097,14 @@ describe('Validator-bevinding (Gap 2) — een settings-rij van een ander team le
       ],
     })
     const block = getPrintBlock(container)
-    expect(block.querySelector('img')).toBeNull()
+    // Scoped op de kop-container zelf (`.border-b-4`), niet op het hele
+    // print-blok: er staat sinds deze ronde ook altijd een vast Pitchup-
+    // app-logo (/logo.png) in de footer, los van een team-eigen
+    // team_logo_url — dat is bewust en irrelevant voor deze ghost-rij-
+    // garantie, die uitsluitend over het CLUBlogo in de kop gaat.
+    const kop = block.querySelector('.border-b-4') as HTMLElement
+    expect(kop).not.toBeNull()
+    expect(kop.querySelector('img')).toBeNull()
     expect(block.textContent).not.toContain('Spookteam')
     expect(block.textContent).not.toContain('ghost-logo.png')
   })

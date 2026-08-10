@@ -113,7 +113,13 @@ describe('Kop — logo (indien aanwezig) + teamnaam + exportTitle', () => {
   it('zonder teamLogoUrl: GEEN <img> en geen placeholder-icoon in de kop, teamnaam blijft staan', () => {
     const { container } = renderPrintList({ teamLogoUrl: null, teamName: 'FC Voorbeeld' })
     const block = getPrintBlock(container)
-    expect(block.querySelector('img')).toBeNull()
+    // Scoped op de kop-container zelf (`.border-b-4`), niet op het hele
+    // print-blok: sinds deze ronde staat er ook altijd een (vast) Pitchup-
+    // app-logo in de footer (naast "GEGENEREERD MET PITCHUP"), los van
+    // teamLogoUrl — dat is bewust en onafhankelijk van deze kop-garantie.
+    const kop = block.querySelector('.border-b-4') as HTMLElement
+    expect(kop).not.toBeNull()
+    expect(kop.querySelector('img')).toBeNull()
     expect(within(block).getAllByText('FC Voorbeeld').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -151,8 +157,8 @@ describe('Team-volgorde en -grootte — thuisploeg eerst, eigen team altijd grot
     const block = getPrintBlock(container)
     const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
     const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
-    expect(ownEl.className).toContain('text-4xl')
-    expect(opponentEl.className).toContain('text-3xl')
+    expect(ownEl.className).toContain('text-6xl')
+    expect(opponentEl.className).toContain('text-xl')
     // Eigen team staat DOM-technisch vóór de tegenstander (regel 1 vs regel 2).
     expect(ownEl.compareDocumentPosition(opponentEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -162,8 +168,8 @@ describe('Team-volgorde en -grootte — thuisploeg eerst, eigen team altijd grot
     const block = getPrintBlock(container)
     const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
     const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
-    expect(opponentEl.className).toContain('text-3xl')
-    expect(ownEl.className).toContain('text-4xl')
+    expect(opponentEl.className).toContain('text-xl')
+    expect(ownEl.className).toContain('text-6xl')
     // Tegenstander staat DOM-technisch vóór het eigen team (regel 1 vs regel 2).
     expect(opponentEl.compareDocumentPosition(ownEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -342,6 +348,21 @@ describe('Footer — precies drie elementen', () => {
     expect(footer.textContent).toContain('FC Voorbeeld')
     expect(footer.textContent).toContain('zondag 9 augustus 2026')
     expect(footer.textContent).toContain(nl.matchSquad.footerGenerated)
+  })
+
+  // Pitchup-app-logo (het vaste app-logo, `public/logo.png` — NIET het
+  // clublogo van teamLogoUrl/TeamLogo dat in de kop staat) naast
+  // "GEGENEREERD MET PITCHUP": zit binnen hetzelfde derde footer-element,
+  // dus de "precies drie children"-garantie hierboven blijft intact — deze
+  // test bewijst expliciet dat het logo daadwerkelijk aanwezig is en waar.
+  it('toont het vaste Pitchup-app-logo (/logo.png) binnen het "GEGENEREERD MET PITCHUP"-element, altijd, los van teamLogoUrl', () => {
+    const { container } = renderPrintList({ teamLogoUrl: null })
+    const block = getPrintBlock(container)
+    const generatedEl = within(block).getByText(nl.matchSquad.footerGenerated)
+    const img = generatedEl.querySelector('img') as HTMLImageElement
+    expect(img).not.toBeNull()
+    expect(img.src).toContain('/logo.png')
+    expect(img.alt).toBe('Pitchup')
   })
 })
 

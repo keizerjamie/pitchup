@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next'
-import { Space_Grotesk, Manrope } from 'next/font/google'
+import { Space_Grotesk, Manrope, Archivo_Black } from 'next/font/google'
 import './globals.css'
 import AppShell from '@/components/AppShell'
 import InactivityLogout from '@/components/InactivityLogout'
@@ -13,6 +13,17 @@ import ThemeInit from '@/components/ThemeInit'
 // actual font-family assignment (see --font-display / --font-body).
 const display = Space_Grotesk({ subsets: ['latin'], variable: '--font-display' })
 const body = Manrope({ subsets: ['latin'], variable: '--font-body' })
+// PDF-only display font (wedstrijdselectie-export): "vierkanter" dan Space
+// Grotesk, uitsluitend gebruikt door MatchSquadPrintList.tsx/MatchFormCards.tsx
+// via .font-pdf-display (globals.css). Archivo Black heeft maar één statisch
+// gewicht, dus `weight` is hier verplicht (i.t.t. de variable-fonts hierboven
+// die een gewichtenrange ondersteunen). next/font/google's eigen typedefinitie
+// (node_modules/next/dist/compiled/@next/font/dist/google/index.d.ts) labelt
+// dat ene gewicht als '400', ondanks dat het lettertype visueel "black"/zwaar
+// is — dat is hoe Google Fonts deze specifieke familie zelf categoriseert
+// ("regular" is hier het enige/zwaarste beschikbare snit). '900' bestaat niet
+// als optie en geeft een TS-typefout.
+const pdfDisplay = Archivo_Black({ subsets: ['latin'], weight: ['400'], variable: '--font-pdf-display' })
 
 export const metadata: Metadata = {
   title: 'Pitchup',
@@ -51,7 +62,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   }
 
   return (
-    <html lang={t.locale} className={`${display.variable} ${body.variable}`} suppressHydrationWarning>
+    <html lang={t.locale} className={`${display.variable} ${body.variable} ${pdfDisplay.variable}`} suppressHydrationWarning>
       <head>
         {/* Apply the saved/system theme before first paint to avoid a flash.
             Rendered into <head> so it runs before the body renders. */}

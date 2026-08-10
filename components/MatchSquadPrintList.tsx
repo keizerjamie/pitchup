@@ -73,13 +73,13 @@ export default function MatchSquadPrintList({
       <div className="flex items-start justify-between gap-4 border-b-4 border-emerald-900 pb-4">
         <div className="flex items-center gap-3">
           {teamLogoUrl && <TeamLogo src={teamLogoUrl} size={40} alt={teamName ?? 'Pitchup'} fallback={null} />}
-          {teamName && <span className="text-xl font-extrabold text-emerald-900">{teamName}</span>}
+          {teamName && <span className="font-pdf-display text-xl font-black text-emerald-900">{teamName}</span>}
         </div>
-        <span className="text-xs font-bold uppercase tracking-wide text-emerald-600">{t.matchSquad.exportTitle}</span>
+        <span className="font-pdf-display text-xs font-extrabold uppercase tracking-wide text-emerald-600">{t.matchSquad.exportTitle}</span>
       </div>
 
       {/* Datumregel: dagnaam+datum + thuis/uit */}
-      <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-emerald-600">
+      <p className="mt-3 text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">
         {dateLabel}
         {homeAwayLabel && <> · {homeAwayLabel}</>}
       </p>
@@ -98,17 +98,17 @@ export default function MatchSquadPrintList({
           {ownTeamLine ? (
             homeAway === 'away' ? (
               <>
-                <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
-                <p className="text-4xl font-extrabold text-emerald-600">{ownTeamLine}</p>
+                <p className="font-pdf-display text-xl font-black text-emerald-900">{opponentLine}</p>
+                <p className="font-pdf-display text-6xl font-black text-emerald-600">{ownTeamLine}</p>
               </>
             ) : (
               <>
-                <p className="text-4xl font-extrabold text-emerald-600">{ownTeamLine}</p>
-                <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
+                <p className="font-pdf-display text-6xl font-black text-emerald-600">{ownTeamLine}</p>
+                <p className="font-pdf-display text-xl font-black text-emerald-900">{opponentLine}</p>
               </>
             )
           ) : (
-            <p className="text-3xl font-extrabold text-emerald-900">{opponentLine}</p>
+            <p className="font-pdf-display text-3xl font-black text-emerald-900">{opponentLine}</p>
           )}
         </div>
       )}
@@ -122,14 +122,14 @@ export default function MatchSquadPrintList({
         <div className="mt-4 flex divide-x divide-emerald-900 border-t border-b border-emerald-900">
           {gather && (
             <div className="flex-1 px-4 py-2">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t.matchSquad.gatherTimeLabel}</p>
-              <p className="text-2xl font-extrabold text-emerald-900">{gather}</p>
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-gray-500">{t.matchSquad.gatherTimeLabel}</p>
+              <p className="text-2xl font-black text-emerald-900">{gather}</p>
             </div>
           )}
           {kickoff && (
             <div className="flex-1 px-4 py-2">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">{t.matchSquad.kickoffTimeLabel}</p>
-              <p className="text-2xl font-extrabold text-emerald-900">{kickoff}</p>
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-gray-500">{t.matchSquad.kickoffTimeLabel}</p>
+              <p className="text-2xl font-black text-emerald-900">{kickoff}</p>
             </div>
           )}
         </div>
@@ -137,8 +137,8 @@ export default function MatchSquadPrintList({
 
       {/* Sectiekop + aantal + statisch label — geen tweede statistiek */}
       <div className="mt-5 flex items-end justify-between">
-        <p className="text-lg font-extrabold text-emerald-900">{t.matchSquad.sectionSelection}</p>
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
+        <p className="font-pdf-display text-lg font-black text-emerald-900">{t.matchSquad.sectionSelection}</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-gray-500">{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
       </div>
 
       {/* Twee kolommen puur via CSS (`columns-2`) — de onderliggende <ul>/<li>
@@ -146,7 +146,7 @@ export default function MatchSquadPrintList({
           sortSquadForExport) blijft ongewijzigd. */}
       <ul className="mt-2 columns-2 gap-x-6">
         {sorted.map((p) => (
-          <li key={p.id} className="break-inside-avoid border-b border-gray-200 py-1 text-sm font-bold">{p.name}</li>
+          <li key={p.id} className="break-inside-avoid border-b border-gray-200 py-1 text-sm font-extrabold">{p.name}</li>
         ))}
       </ul>
 
@@ -158,9 +158,13 @@ export default function MatchSquadPrintList({
           toegevoegd aan de datum-span zelf, zodat het aantal children op 3
           blijft staan. */}
       <div className="mt-6 flex items-center border-t border-gray-300 pt-3 text-[11px] text-gray-500">
-        <span>{teamName}</span>
-        <span className={teamName ? "before:content-['·'] before:mx-1" : undefined}>{dateLabel}</span>
-        <span className="ml-auto font-extrabold uppercase tracking-wide text-emerald-600">{t.matchSquad.footerGenerated}</span>
+        <span className="font-semibold">{teamName}</span>
+        <span className={teamName ? "font-semibold before:content-['·'] before:mx-1" : 'font-semibold'}>{dateLabel}</span>
+        <span className="ml-auto flex items-center gap-1.5 font-black uppercase tracking-wide text-emerald-600">
+          {/* eslint-disable-next-line @next/next/no-img-element -- zie TeamLogo.tsx-kopcomment: dit printbestand gebruikt bewust <img>, geen next/image, om diezelfde print-timing-reden; /logo.png is hier weliswaar lokaal (geen remotePatterns-issue), maar next/image zou dat voordeel bij afdrukken alsnog tenietdoen (async optimizer-ronde) en breekt de consistente <img>-stijl van dit bestand */}
+          <img src="/logo.png" alt="Pitchup" className="h-4 w-4 object-contain" />
+          {t.matchSquad.footerGenerated}
+        </span>
       </div>
     </div>
   )
