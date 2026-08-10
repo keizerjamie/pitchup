@@ -928,3 +928,23 @@ in plaats van te gokken. Concrete correcties t.o.v. de eerste stylingronde:
   working tree (de `insights`-icoonfix hierboven, zelf als losse taak gespawned tijdens deze
   sessie) — bevestigt nogmaals: bij twijfel over een onverwacht gewijzigd bestand, controleer of
   het bij eigen werk hoort vóór je commit (`git diff <bestand>` lezen, nooit blind `git add -A`).
+
+### Vervolg: logo laadde nergens — CSP blokkeerde het stil (2026-08-10, commit `439a166`)
+Ná live-gang meldde de gebruiker dat het geüploade clublogo nergens laadde (kapot-beeld-icoon
+zijbalk, leeg in de PDF). **Oorzaak: `proxy.ts`'s Content-Security-Policy** (`img-src 'self' blob:
+data:`) bevatte het Supabase-domein niet — `components/TeamLogo.tsx` gebruikt bewust een gewone
+`<img src="https://<ref>.supabase.co/storage/...">` (geen `next/image`, zie eerdere sectie), en de
+browser blokkeert zo'n bron stilzwijgend als hij niet in `img-src` staat. Geen netwerkfout die als
+"mislukt" oogt — gewoon een CSP-violation in de console, makkelijk te missen zonder browser-check.
+`connect-src` had het Supabase-origin al wél (nodig voor de Supabase-client zelf); `img-src` was de
+vergeten directive. Fix: `img-src 'self' blob: data: ${supabaseOrigin}` — dezelfde variabele die
+`connect-src` al gebruikte. Nieuw `proxy.test.ts` bewaakt voortaan de CSP-inhoud (er was nul
+testdekking op deze security-header, alleen `scripts/smoke.mjs` checkte dát hij bestond).
+**Verificatiemethode zonder file-upload-tool in de browserharness**: een `<img>` naar een
+NIET-bestaand pad op het echte Supabase-project injecteren en op console-CSP-violations checken —
+een CSP-block en een 404 zien er verschillend uit (block = géén request, violation-log; 404 =
+`complete:true, naturalWidth:0`, geen violation). Zo kon de fix bevestigd worden zonder een
+werkend bestand te hoeven uploaden.
+**Blijvende les**: elke nieuwe externe bron in de UI (Storage, CDN, extern lettertype, analytics)
+moet expliciet langs de CSP in `proxy.ts` — dit is een cross-cutting bestand dat buiten de
+"bestanden die wijzigen"-lijst van een feature-brief valt en daardoor makkelijk gemist wordt.
