@@ -948,3 +948,32 @@ werkend bestand te hoeven uploaden.
 **Blijvende les**: elke nieuwe externe bron in de UI (Storage, CDN, extern lettertype, analytics)
 moet expliciet langs de CSP in `proxy.ts` — dit is een cross-cutting bestand dat buiten de
 "bestanden die wijzigen"-lijst van een feature-brief valt en daardoor makkelijk gemist wordt.
+
+### Vervolg: typografie zwaarder, vierkanter lettertype, Pitchup-logo in footer (2026-08-10, commit `fd21ac8`)
+Drie kleine, opeenvolgende stylingrondes op verzoek van de gebruiker, bovenop de eerdere
+exacte-ontwerp-fix:
+- **Zwaardere typografie overal**: `font-extrabold`→`font-black` op koppen/cijfers,
+  `font-bold`/`font-semibold`→minimaal `font-bold` op secundaire tekst, in zowel
+  `MatchSquadPrintList.tsx` als `MatchFormCards.tsx`. Grootteverschil eigen team/tegenstander in de
+  matchup-regel fors vergroot (was `text-4xl`/`text-3xl`, nu `text-6xl`/`text-xl`) — bewuste,
+  asymmetrische keuze, wijkt af van het originele ontwerp (daar ongeveer gelijke groottes).
+- **Nieuw display-lettertype, uitsluitend voor deze PDF**: `Archivo Black` via `next/font/google`
+  in `app/layout.tsx` (eigen CSS-variabele `--font-pdf-display`, eigen utility `.font-pdf-display`
+  in `app/globals.css`, naast — niet in plaats van — de bestaande `--font-display`/`.font-display`
+  (Space Grotesk) die app-breed blijft). Toegepast op alleen de prominente koppen (teamnaam,
+  matchup-regels, "WEDSTRIJDSELECTIE", "SELECTIE", "VORM · LAATSTE 5"), niet op spelersnamen/
+  labels/footer. **Google Fonts labelt Archivo Black's enige snit zelf als `weight: '400'`**, niet
+  `'900'` — ondanks het visueel zware karakter. `weight: ['900']` geeft een TS-typefout.
+- **Pitchup-app-logo (`/logo.png`) in de footer**, naast "GEGENEREERD MET PITCHUP" — een gewone
+  `<img>` (niet `next/image`, consistent met de rest van dit printbestand), binnen het bestaande
+  derde footer-element (niet als los vierde kind — de "footer heeft precies 3 children"-testgarantie
+  bleef zo intact).
+- **Turbopack-CSS-cache-valkuil weer opgetreden** (zelfde klasse als eerder bij het
+  trainingsplan-afdrukken en de eerste font-poging in deze ronde): een nieuwe utility-klasse in
+  `globals.css` (`.font-pdf-display`) werd pas zichtbaar ná `rm -rf .next` + dev-server-herstart —
+  ervoor bleef de computed `font-family` gewoon het body-font tonen, ondanks dat de CSS-variabele
+  zelf (`getComputedStyle(document.documentElement).getPropertyValue('--font-pdf-display')`) al wél
+  correct "Archivo Black" teruggaf. **Diagnosetip die hier werkte**: als een CSS-variabele wél
+  correct resolvet maar de klasse die hem gebruikt toch geen effect heeft, is het bijna altijd een
+  stale Turbopack-CSS-build, niet een cascade-/specificiteitsprobleem — reflex moet zijn: eerst
+  `rm -rf .next` + herstart proberen vóórdat je in cascade-lagen/specificiteit gaat graven.
