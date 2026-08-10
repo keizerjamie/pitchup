@@ -889,6 +889,42 @@ component `components/icons/ImageIcon.tsx`; `SectionCard`'s `icon`-prop (`app/se
 is verbreed naar `string | React.ReactNode` zodat bestaande `.ms`-aanroepen (`palette`,
 `how_to_reg`, `calendar_month`) ongewijzigd blijven werken naast een nieuwe SVG-aanroep.
 **Tijdens het testen bleek ook een bestaand, niet-gerelateerd icoon (`insights`, de "Vorm"-tegel
-op het dashboard) al langer kapot te zijn** — niet in deze sessie gefixt (buiten scope), wel als
-losse taak geflagd. **Les: bij elk nieuw icoon in deze app, altijd visueel verifiëren in de
-browser vóór live-gang — `npm test`/typecheck vangen een ontbrekend font-glyph niet.**
+op het dashboard) al langer kapot te zijn** — als losse taak geflagd en apart (gelijktijdig)
+opgelost met exact hetzelfde patroon: `components/icons/ChartBarIcon.tsx`, `StatCard`'s
+`icon`-prop verbreed naar `string | ReactNode` (commit `3ed0460`). **Les: bij elk nieuw icoon in
+deze app, altijd visueel verifiëren in de browser vóór live-gang — `npm test`/typecheck vangen
+een ontbrekend font-glyph niet; het faalt stil als letterlijke tekst, geen crash.**
+
+### Vervolg: PDF exact op het ontwerp matchen (2026-08-10, commit `3ed0460`)
+Eerste versie van de PDF-styling (zie hierboven) was een eigen, benaderende interpretatie van het
+ontwerp — de gebruiker wilde het **letterlijk exacte** ontwerp, niet een eigen invulling. Kon de
+brondata/CSS van het gedeelde Claude Design-artifact niet uitlezen (cross-origin iframe, geen
+toegang tot de content-URL) — opgelost door de gerenderde screenshots zeer nauwkeurig te bestuderen
+in plaats van te gokken. Concrete correcties t.o.v. de eerste stylingronde:
+- **Team-volgorde volgt thuis/uit**: de thuisploeg staat altijd op de eerste regel, de uitploeg op
+  de tweede (voetbalconventie — bij een uitwedstrijd dus de tegenstander eerst). **Los daarvan,
+  expliciet door de gebruiker gevraagd** (wijkt af van het ontwerp, waar beide regels gelijk groot
+  zijn): het eigen team staat in een groter lettertype dan de tegenstander, ongeacht de volgorde.
+- Vorm-blok kreeg de in het ontwerp aanwezige, in de eerste ronde vergeten samenvattingsregel
+  ("N GEWONNEN · N GELIJK · N VERLOREN") naast de "VORM · LAATSTE 5"-kop.
+- Vorm-kaartjes: geen "vs"-prefix meer bij de tegenstander (was `{vsLabel} {opponent}`, ontwerp
+  toont kaal de naam), score met en-dash i.p.v. dubbele punt (`formatDateShort`-precedent: nieuwe,
+  losstaande util naast `formatDate`, geen dagnaam), badges vergroot met effen (W/V) resp.
+  outline-stijl (G) i.p.v. kleine transparante rgba-vlakjes.
+- "SELECTIE"-sectiekop miste het woord "SPELERS" (`"{n} OPGEROEPEN"` i.p.v. `"{n} SPELERS ·
+  OPGEROEPEN"`) — nieuwe i18n-key `playersLabel` in alle 5 talen.
+- **Browser-verificatiemethode die werkte voor dit print-blok**: `document.querySelectorAll('*')`
+  filteren op `classList.contains('hidden') && [...classList].some(c => c.startsWith('print:'))`
+  om het `hidden print:block`-element te vinden, dan `classList.remove('hidden')` +
+  `style.display='block'` en de rest van `main` verbergen — betrouwbaarder dan proberen de
+  `@media print`-CSS-regels zelf te herschrijven (die aanpak vond het element niet, vermoedelijk
+  door hoe Tailwind v4 print-varianten compileert).
+- **Testgotcha (kostte tijd, geen echte bug):** een reeds open browser-tab bleef een allang-
+  opgeloste `t.matchSquad.formSummaryWon`-`undefined`-fout tonen (i18n-key ontbrak nog in een
+  eerdere buildstand) ook ná `rm -rf .next` + dev-server-herstart — de rauwe module-cache van de
+  browser-tab zelf was het probleem, niet de code. **Altijd een gloednieuwe tab gebruiken bij
+  verwarrende "fout die niet weg wil" tijdens handmatig testen, vóór dieper te graven.**
+- **Gelijktijdige sessie (weer)**: tijdens deze ronde stond er wéér een andere sessie in dezelfde
+  working tree (de `insights`-icoonfix hierboven, zelf als losse taak gespawned tijdens deze
+  sessie) — bevestigt nogmaals: bij twijfel over een onverwacht gewijzigd bestand, controleer of
+  het bij eigen werk hoort vóór je commit (`git diff <bestand>` lezen, nooit blind `git add -A`).
