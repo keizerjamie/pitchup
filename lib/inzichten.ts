@@ -10,6 +10,7 @@
 
 import { matchResult } from '@/lib/match-analysis.mjs'
 import { isDateString, toUtcMs } from '@/lib/season-dates'
+import { addDays, todayLocal } from '@/lib/utils'
 import type { MatchResult, MatchType } from '@/lib/types'
 
 // Bovengrens op het aantal wedstrijdrijen dat de doelpuntengrafiek ophaalt.
@@ -18,7 +19,10 @@ import type { MatchResult, MatchType } from '@/lib/types'
 // lib/season-dates.ts. 200 wedstrijden is ruim meer dan een echt seizoen.
 export const MAX_SEIZOEN_WEDSTRIJDEN = 200
 
-// ── Rijtypes van de vier RPC's (supabase/inzichten.sql) ───────────────
+// Standaard lengte van de top-/worst-lijstjes (top 5 / worst 5).
+export const TOP_WORST_AANTAL = 5
+
+// ── Rijtypes van de zes RPC's (supabase/inzichten.sql) ────────────────
 // De Supabase-client is ongetypeerd (lib/supabase/server.ts:7), dus elk
 // rpc()-resultaat krijgt bij de aanroep een expliciete `as <RijType>[]`.
 
@@ -55,6 +59,25 @@ export interface SpelerRatingPunt {
   datum: string // 'YYYY-MM-DD'
   tegenstander: string | null
   rating: number
+}
+
+// inzichten_rating_per_speler — één rij per actieve speler met minstens één
+// rating binnen het venster, oplopend op naam.
+export interface RatingPerSpelerRij {
+  player_id: string
+  naam: string
+  gemiddelde: number
+  aantal: number
+}
+
+// inzichten_aanwezigheid_per_speler — één rij per actieve speler met minstens
+// één aanwezigheidsregistratie binnen het (geclampte) venster, oplopend op
+// naam. Alleen 'unknown'-registraties levert 0/0 op: dan is er geen percentage.
+export interface AanwezigheidPerSpelerRij {
+  player_id: string
+  naam: string
+  aanwezig: number
+  afwezig: number
 }
 
 // ── Overige weergavetypes ────────────────────────────────────────────
@@ -94,6 +117,19 @@ export interface VormTelling {
 export interface Seizoensvenster {
   start: string // 'YYYY-MM-DD'
   end: string // 'YYYY-MM-DD'
+}
+
+// Eén speler in de aanwezigheids-top/worst. `percentage` is hier bewust NIET
+// nullable: rijen zonder enige aanwezig/afwezig-registratie hebben geen
+// zinvol cijfer om op te ranken en vallen al in topWorstAanwezigheid() weg.
+export interface AanwezigheidPerSpeler extends AanwezigheidPerSpelerRij {
+  percentage: number
+}
+
+// Twee lijstjes uit dezelfde dataset: de n hoogste en de n laagste.
+export interface TopWorst<T> {
+  top: T[]
+  worst: T[]
 }
 
 // Rij-vorm waar telVorm() genoeg aan heeft: zowel DoelpuntItem als de
@@ -170,6 +206,77 @@ export function telVorm(items: UitslagRij[]): VormTelling {
   return telling
 }
 
+// ── Top 5 / worst 5 per speler ───────────────────────────────────────
+
+// Gedeelde snij-logica voor beide top/worst-lijstjes. `waarde` levert het
+// getal waarop gesorteerd wordt.
+//
+// BEWUSTE, SIMPELE REGEL: bij minder dan 2n spelers mogen top en worst
+// dezelfde speler bevatten. Met 3 spelers zijn "de beste 3" en "de slechtste
+// 3" nu eenmaal dezelfde drie namen; er wordt niet stilzwijgend gededupliceerd
+// of afgekapt, want dan zou de coach bij een kleine selectie een half lijstje
+// zien zonder te weten waarom.
+//
+// Gelijke waarden krijgen een vaste tweede sleutel (naam, dan player_id), zodat
+// dezelfde dataset altijd dezelfde volgorde geeft — anders zou een pagina-
+// refresh de namen kunnen laten wisselen. De invoer wordt nooit gemuteerd.
+function snijTopWorst<T extends { naam: string; player_id: string }>(
+  rows: T[],
+  waarde: (row: T) => number,
+  n: number,
+): TopWorst<T> {
+  const aantal = Math.max(0, Math.trunc(n))
+  const tieBreak = (a: T, b: T) =>
+    a.naam === b.naam ? (a.player_id < b.player_id ? -1 : a.player_id > b.player_id ? 1 : 0)
+      : a.naam < b.naam ? -1 : 1
+
+  const oplopend = [...rows].sort((a, b) => {
+    const verschil = waarde(a) - waarde(b)
+    return verschil !== 0 ? verschil : tieBreak(a, b)
+  })
+  const aflopend = [...rows].sort((a, b) => {
+    const verschil = waarde(b) - waarde(a)
+    return verschil !== 0 ? verschil : tieBreak(a, b)
+  })
+
+  return { top: aflopend.slice(0, aantal), worst: oplopend.slice(0, aantal) }
+}
+
+// Top n en worst n op gemiddelde wedstrijdrating. Voedt zich met álle rijen
+// van inzichten_rating_per_speler: één RPC-aanroep levert beide lijstjes.
+export function topWorstRating(
+  rows: RatingPerSpelerRij[],
+  n: number = TOP_WORST_AANTAL,
+): TopWorst<RatingPerSpelerRij> {
+  return snijTopWorst(rows, (row) => row.gemiddelde, n)
+}
+
+// Top n en worst n op aanwezigheidspercentage. Het percentage komt uit de
+// bestaande berekenAanwezigheidPercentage(), zodat het per speler exact zo
+// wordt afgerond als de team-brede kaart en het dashboard.
+//
+// Spelers zonder enige aanwezig/afwezig-registratie (percentage null) doen NIET
+// mee: die hebben geen cijfer om op te ranken en zouden anders als "0%" onderaan
+// de worst-lijst belanden terwijl er gewoon geen data is.
+export function topWorstAanwezigheid(
+  rows: AanwezigheidPerSpelerRij[],
+  n: number = TOP_WORST_AANTAL,
+): TopWorst<AanwezigheidPerSpeler> {
+  const metPercentage: AanwezigheidPerSpeler[] = []
+  for (const row of rows) {
+    const percentage = berekenAanwezigheidPercentage(row.aanwezig, row.afwezig)
+    if (percentage === null) continue
+    metPercentage.push({
+      player_id: row.player_id,
+      naam: row.naam,
+      aanwezig: row.aanwezig,
+      afwezig: row.afwezig,
+      percentage,
+    })
+  }
+  return snijTopWorst(metPercentage, (row) => row.percentage, n)
+}
+
 // ── Seizoensvenster ──────────────────────────────────────────────────
 
 // Is dit een bruikbaar seizoensvenster? Beide datums moeten bestaande
@@ -200,4 +307,36 @@ export function seizoensVenster(
   if (!isDateString(start) || !isDateString(end)) return null
   if (!isGeldigSeizoensvenster(start, end)) return null
   return { start, end }
+}
+
+// Hetzelfde seizoensvenster, maar afgeknipt op gisteren: nooit een datum ná
+// vandaag. De aanwezigheidscijfers (kaart "Aanwezigheid" en "Trainingsopkomst
+// per maand") mogen niet meetellen wat nog niet gespeeld is — al ingeplande
+// trainingen/wedstrijden hebben nog geen registraties en zouden de opkomst
+// anders kunstmatig omlaag trekken.
+//
+// Waarom gisteren en niet vandaag: exact dezelfde grens als de vorm-/laatste-5-
+// query op het dashboard en op deze pagina zelf (`.lt('date', today)`,
+// app/inzichten/page.tsx). "Vandaag" telt daar ook niet mee, omdat de training
+// van vanavond nog niet is afgevinkt. Eén conventie in de hele app.
+//
+// Tijdzone: bewust dezelfde semantiek als de rest van de app — `todayLocal()`
+// (lib/utils.ts) leest de klok van de server/omgeving. Datzelfde bekende gat
+// geldt al voor de vorm-cutoff; hier wordt het niet stilzwijgend anders gedaan.
+//
+// Ligt het hele seizoen nog in de toekomst, dan komt `end` vóór `start` te
+// liggen. Dat is geen fout: zo'n venster levert in SQL nul rijen op
+// (`e.date >= p_start and e.date <= p_end` kan niet waar zijn) en de kaarten
+// tonen hun bestaande lege staat.
+export function verledenSeizoensVenster(
+  venster: Seizoensvenster,
+  vandaag: string = todayLocal(),
+): Seizoensvenster {
+  const gisteren = addDays(vandaag, -1)
+  // Onbruikbare klokwaarde: liever het rauwe venster dan 'NaN-NaN-NaN' naar de
+  // database sturen.
+  if (!isDateString(gisteren)) return { start: venster.start, end: venster.end }
+  // 'YYYY-MM-DD' heeft een vaste breedte, dus alfabetisch = chronologisch.
+  const end = gisteren < venster.end ? gisteren : venster.end
+  return { start: venster.start, end }
 }

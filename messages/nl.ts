@@ -628,6 +628,17 @@ export const nl = {
     statusLabel: 'Status',
     countLabel: 'Aantal',
     resultLabel: 'Uitslag',
+    topWorstRatingsTitle: 'Beste & minste spelerratings',
+    topWorstRatingsDescription: 'Gemiddelde wedstrijdrating per speler, dit seizoen',
+    topWorstRatingsEmpty: 'Nog geen spelerratings dit seizoen',
+    topWorstRatingsWaarde: '{gemiddelde} ({aantal} wedstrijden)',
+    topWorstAanwezigheidTitle: 'Beste & minste aanwezigheid',
+    topWorstAanwezigheidDescription: 'Aanwezigheidspercentage per speler, dit seizoen',
+    topWorstAanwezigheidEmpty: 'Nog geen aanwezigheidsgegevens per speler dit seizoen',
+    topWorstAanwezigheidWaarde: '{percentage}% ({aanwezig} van {totaal})',
+    bestLabel: 'Beste',
+    worstLabel: 'Minste',
+    topWorstOverlapHint: 'Gelijke cijfers: dezelfde namen kunnen in beide lijstjes staan.',
   },
 }
 

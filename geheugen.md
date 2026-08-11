@@ -977,3 +977,85 @@ exacte-ontwerp-fix:
   correct resolvet maar de klasse die hem gebruikt toch geen effect heeft, is het bijna altijd een
   stale Turbopack-CSS-build, niet een cascade-/specificiteitsprobleem — reflex moet zijn: eerst
   `rm -rf .next` + herstart proberen vóórdat je in cascade-lagen/specificiteit gaat graven.
+
+### Feature: Inzichtenpagina met grafieken (2026-08-11, commit `4f83352`)
+Nieuwe route `/inzichten`: 5 grafiekkaarten over het huidige seizoen — aanwezigheidspercentage,
+wedstrijdvorm (hergebruikt `FormStrip`), doelpunten voor/tegen (met client-side wedstrijdtype-
+filter alle/league/friendly/cup), trainingsopkomst per maand, en spelerratings (teamgemiddelde +
+lazy-geladen per-speler-reeks). Ontsloten via een tegel in `QuickActions` en een item in
+`SidebarNav` (niet in de mobiele `Navigation`-tabbalk — die heeft `TAB_COUNT=4` hardcoded en is
+bewust met rust gelaten). Toegang is nu vrij/gratis; de gebruiker gaf aan dat dit **later een
+Pro-feature wordt**, dus geen aannames van permanente vrije toegang inbouwen bij vervolgwerk hier.
+
+**Seizoensvenster**: hergebruikt de al bestaande `season_start`/`season_end`-instellingen
+(`settings`-tabel, ingesteld via Instellingen → Trainingsschema). Ontbreekt dat venster (of is
+`season_end < season_start`), dan toont de hele pagina één lege staat met link naar instellingen —
+geen enkele databasecall wordt dan uitgevoerd.
+
+**Nieuw patroon: SQL-aggregatie via Postgres-RPC's i.p.v. ophalen+JS-reduce.** Dit was de eerste
+plek in de codebase met `.rpc(...)`-gebruik. Zes functies in `supabase/inzichten.sql`
+(`inzichten_aanwezigheid`, `inzichten_training_opkomst_per_maand`,
+`inzichten_rating_team_per_wedstrijd`, `inzichten_rating_speler`, en sinds de feedback-ronde
+hieronder ook `inzichten_rating_per_speler` en `inzichten_aanwezigheid_per_speler`), allemaal
+`security invoker`
+(NOOIT `definer` — anders wordt RLS omzeild) mét een expliciet `team_id = auth.uid()`-filter erin
+als tweede laag; geen enkele functie neemt een `team_id`-parameter aan. **Dit bestand wordt niet
+automatisch uitgevoerd bij een deploy** — moet handmatig in de Supabase SQL Editor gedraaid worden
+(zelfde patroon als `training-plan.sql`/`performance-indexes.sql` eerder). Zolang dat niet gebeurd
+is, geeft PostgREST `PGRST202` ("function not found") terug; de pagina vangt dat per grafiek af
+(elke kaart toont dan gewoon zijn eigen lege staat, de rest van de pagina blijft werken) — bevestigd
+door zelf in te loggen en te zien dat dat inderdaad zo werkt vóórdat de migratie gedraaid was.
+
+**A11y-valkuil, tweemaal in dezelfde ronde gemist**: `role="img"` impliceert in WAI-ARIA
+"children presentational: true" — een screenreader leest dan alleen het `aria-label` en negeert
+alles eronder, dus een `sr-only`-detailtabel (`ChartDataTable`) die ÍN die wrapper genest zit is
+voor assistive technology onbereikbaar, ook al staat hij gewoon in de DOM (en dus "onzichtbaar"
+groen in een test die alleen checkt of de tabel bestaat). Fix: de tabel als sibling ná de
+`role="img"`-div plaatsen, niet erbinnen. Dit werd pas gevonden doordat de test-verifier een
+structurele test toevoegde (checkt afwezigheid van `table.sr-only` binnen `[role="img"]`) in plaats
+van alleen "bestaat de tabel" te testen — en zelfs die eerste ronde miste nog één component
+(`AanwezigheidChart.tsx`) tot een tweede, strengere testpas.
+
+**Icoon-subset-gotcha wéér opgetreden** (zie eerdere sectie over het clublogo/CSP): `icon="trophy"`
+bestaat niet in de gesubsette Material Symbols-font en rendert dan stil de letterlijke tekst
+"trophy" — geen test/typecheck vangt dat. Gebruik alleen iconen met bewezen precedent elders in de
+app (`emoji_events`, `scoreboard`, `groups`, `sports_soccer`, `calendar_month` zijn bevestigd
+aanwezig); bij twijfel visueel controleren in de preview.
+
+**recharts (`^3.10.1`) is de eerste chart-library in dit project.** Kleuren gaan via bestaande
+CSS-tokens (`.chart-fill-*`/`.chart-stroke-*`-klassen in `globals.css`, plus `var(--token)` als
+inline-prop waar recharts zelf anders een hardcoded hex-fallback zet — className alléén is niet
+genoeg, recharts zet zonder expliciete kleur-prop soms toch `stroke="#ccc"`/`fill="#666"`). Bewust
+geaccepteerd: ratings van spelers met `active=false` worden met terugwerkende kracht uit het
+teamgemiddelde gefilterd (kan een eerder getoond gemiddelde met terugwerkende kracht doen
+verschuiven), en de vorm-cutoff erft het bekende `todayLocal()`-tijdzonegat (00:00–02:00 NL-tijd)
+— exact hetzelfde gedrag als het bestaande dashboard, geen nieuwe regressie.
+
+### Vervolg: geen toekomstige events + top/worst performers (2026-08-11)
+Post-launch feedback op de net live gegane inzichtenpagina, dezelfde dag verwerkt:
+- **Geen toekomstige events in de aanwezigheidscijfers.** De team-brede "Aanwezigheid"-kaart
+  (training+wedstrijd samen, scope ongewijzigd) en "Trainingsopkomst per maand" telden eerst het
+  hele seizoensvenster mee, dus ook nog-niet-gespeelde toekomstige trainingen — die hebben vaak al
+  een team-default attendance-status (`app/actions/events.ts`) en scheven het percentage. Fix:
+  nieuwe pure functie `verledenSeizoensVenster()` in `lib/inzichten.ts` klemt het eindpunt af op
+  `min(seizoenEinde, gisteren)` — hergebruikt bestaande `todayLocal()`/`addDays()`, zelfde
+  `.lt('date', today)`-conventie als de vorm-cutoff elders. Toegepast op precies 3 RPC's:
+  `inzichten_aanwezigheid`, `inzichten_training_opkomst_per_maand`,
+  `inzichten_aanwezigheid_per_speler`. De rating-RPC's en de doelpunten/vorm-queries zijn bewust
+  NIET geclampt — die zijn al impliciet verleden-only (een uitslag/rating bestaat pas na afloop).
+- **Twee nieuwe RPC's voor top 5 / worst 5 performers**: `inzichten_rating_per_speler` (gemiddelde
+  rating per actieve speler) en `inzichten_aanwezigheid_per_speler` (aanwezigheidspercentage per
+  actieve speler). Beide filteren bewust op `players.active = true` — een asymmetrie t.o.v. de
+  team-brede aanwezigheidskaart, die dat expliciet niet doet (met comment in de SQL gedocumenteerd).
+  Eén RPC per metric levert de volledige, gesorteerde lijst; `topWorstRating()`/
+  `topWorstAanwezigheid()` in `lib/inzichten.ts` slicen zelf top-N/worst-N (stabiele tie-break op
+  naam, dan player_id). Bewust geaccepteerd: bij minder dan 2×N spelers overlappen top en worst
+  (geen dedupe) — de UI toont dan een neutrale hint ("Gelijke cijfers: dezelfde namen kunnen in
+  beide lijstjes staan"); die hint kan ook bij een GROTE groep verschijnen als er toevallig een
+  gelijke waarde op de grens ligt, dus de tekst verwijst bewust niet naar groepsgrootte.
+- **Live bevestigd** (test-account, 2026-08-11): na het draaien van de eerste SQL-batch (4
+  functies) werkten `inzichten_aanwezigheid`/`inzichten_training_opkomst_per_maand` al met echte
+  data; de twee nieuwe functies gaven daarna, zoals verwacht, `PGRST202` totdat de uitgebreide
+  `supabase/inzichten.sql` (nu 6 functies, `create or replace` dus veilig opnieuw te draaien)
+  opnieuw in de Supabase SQL Editor gedraaid wordt. Elke ontbrekende functie faalt per kaart, nooit
+  de hele pagina.

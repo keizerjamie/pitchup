@@ -5,7 +5,7 @@
 -- For the trainingsplanner tables (metingen/oefeningen/training_oefeningen),
 -- see training-plan.sql (fresh install) and oefening-bibliotheek.sql (migratie).
 -- De inzichtenpagina (/inzichten) voegt geen tabellen of kolommen toe, maar wel
--- vier aggregatiefuncties (RPC) plus twee indexen — draai daarvoor ook
+-- zes aggregatiefuncties (RPC) plus twee indexen — draai daarvoor ook
 -- inzichten.sql; zonder dat bestaan de RPC's niet en blijft /inzichten leeg.
 
 CREATE TABLE IF NOT EXISTS players (

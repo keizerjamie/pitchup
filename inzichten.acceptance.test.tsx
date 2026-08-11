@@ -60,6 +60,18 @@
 //   AC28 → describe('basis-toegankelijkheid op paginaniveau')
 //   AC29 → describe('AC29 — geen minimumdrempel: 1 datapunt wordt getoond')
 //   AC30 → describe('AC30 — RPC-aanroepen bevatten nooit een team_id-param')
+//
+// ── Feedback-ronde 2 (post-launch, deze uitbreiding) ────────────────────
+//   FC1 → describe('toekomstige events tellen niet mee in de aanwezigheidscijfers')
+//          (bestaande bouwer-tests, zie die describe) +
+//          describe('FC1 — team-Aanwezigheid combineert verleden én toekomst binnen één venster')
+//   FC2 → describe('toekomstige events tellen niet mee in de aanwezigheidscijfers')
+//          (bestaande bouwer-tests, zie die describe)
+//   FC3 → describe('FC3 — Top 5 / worst 5 spelerratings')
+//   FC4 → describe('FC4 — Top 5 / worst 5 aanwezigheid per speler')
+//   FC5 → describe('FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC's')
+//   FC6 → volledige testrun van dit bestand (zie testverslag): alle 30
+//          bestaande AC's + de bestaande bouwer-uitbreidingen blijven groen.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
@@ -329,6 +341,65 @@ function rpcRatingSpeler(db: Db, args: Row) {
   return rows
 }
 
+// inzichten_rating_per_speler — zelfde filters als rpcTeamRating, maar
+// gegroepeerd per speler i.p.v. per wedstrijd. Voedt de top 5 / worst 5 op
+// gemiddelde rating.
+function rpcRatingPerSpeler(db: Db, args: Row) {
+  const { p_start, p_end } = args as { p_start: string; p_end: string }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const players = new Map(db.players.map((p) => [p.id as string, p]))
+  const byPlayer = new Map<string, number[]>()
+  for (const r of db.match_ratings) {
+    if (r.team_id !== TEAM) continue
+    const e = events.get(r.event_id as string)
+    if (!e || e.team_id !== TEAM || e.type !== 'match') continue
+    if (!inRange(e.date as string, p_start, p_end)) continue
+    const p = players.get(r.player_id as string)
+    if (!p || p.team_id !== TEAM || !p.active) continue
+    const arr = byPlayer.get(p.id as string) ?? []
+    arr.push(r.rating as number)
+    byPlayer.set(p.id as string, arr)
+  }
+  return Array.from(byPlayer.entries())
+    .map(([playerId, ratings]) => ({
+      player_id: playerId,
+      naam: players.get(playerId)!.name,
+      gemiddelde: ratings.reduce((a, b) => a + b, 0) / ratings.length,
+      aantal: ratings.length,
+    }))
+    .sort((a, b) => String(a.naam).localeCompare(String(b.naam)))
+}
+
+// inzichten_aanwezigheid_per_speler — zoals rpcAanwezigheid (type <> 'meting'),
+// maar per speler én mét active-filter (bewust anders dan de team-brede kaart,
+// zie de comment in supabase/inzichten.sql). Voedt de top 5 / worst 5 op
+// aanwezigheidspercentage.
+function rpcAanwezigheidPerSpeler(db: Db, args: Row) {
+  const { p_start, p_end } = args as { p_start: string; p_end: string }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const players = new Map(db.players.map((p) => [p.id as string, p]))
+  const byPlayer = new Map<string, { aanwezig: number; afwezig: number }>()
+  for (const a of db.attendance) {
+    if (a.team_id !== TEAM) continue
+    const e = events.get(a.event_id as string)
+    if (!e || e.team_id !== TEAM || e.type === 'meting') continue
+    if (!inRange(e.date as string, p_start, p_end)) continue
+    const p = players.get(a.player_id as string)
+    if (!p || p.team_id !== TEAM || !p.active) continue
+    const cur = byPlayer.get(p.id as string) ?? { aanwezig: 0, afwezig: 0 }
+    if (a.status === 'present') cur.aanwezig++
+    else if (a.status === 'absent') cur.afwezig++
+    byPlayer.set(p.id as string, cur)
+  }
+  return Array.from(byPlayer.entries())
+    .map(([playerId, telling]) => ({
+      player_id: playerId,
+      naam: players.get(playerId)!.name,
+      ...telling,
+    }))
+    .sort((a, b) => String(a.naam).localeCompare(String(b.naam)))
+}
+
 interface Db {
   events: Row[]
   attendance: Row[]
@@ -341,6 +412,8 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_training_opkomst_per_maand: rpcMaandOpkomst,
   inzichten_rating_team_per_wedstrijd: rpcTeamRating,
   inzichten_rating_speler: rpcRatingSpeler,
+  inzichten_rating_per_speler: rpcRatingPerSpeler,
+  inzichten_aanwezigheid_per_speler: rpcAanwezigheidPerSpeler,
 }
 
 function makeSupabaseMock(opts: {
@@ -424,6 +497,32 @@ function aanwezigheidPercentage(): string | null {
 // aria-label = t.home.formLabel.
 function vormGroup(): HTMLElement {
   return screen.getByRole('group', { name: nl.home.formLabel })
+}
+
+// ── Feedback-ronde 2 helpers: Top 5/worst 5-kaarten (FC3/FC4) ──────────
+// Zowel TopWorstRatings als TopWorstAanwezigheid gebruiken exact dezelfde
+// bestLabel/worstLabel-tekst ("Beste"/"Minste"), dus elke lookup moet eerst
+// scopen op de kaart (via de unieke titel) vóór hij binnen die kaart zoekt.
+function topWorstCard(titleText: string): HTMLElement {
+  return screen.getByText(titleText).closest('.surface-card') as HTMLElement
+}
+
+function topWorstSublist(card: HTMLElement, label: string): HTMLOListElement {
+  const heading = within(card).getByText(label)
+  return heading.parentElement!.querySelector('ol') as HTMLOListElement
+}
+
+// Namen, in de volgorde waarin ze in het lijstje ("Beste" of "Minste") staan.
+function topWorstNames(card: HTMLElement, label: string): string[] {
+  const list = topWorstSublist(card, label)
+  return Array.from(list.querySelectorAll('li')).map((li) => li.firstElementChild?.textContent ?? '')
+}
+
+// Het waarde-tekstje (2e span) naast een specifieke naam binnen één lijstje.
+function topWorstValueFor(card: HTMLElement, label: string, naam: string): string | null {
+  const list = topWorstSublist(card, label)
+  const li = Array.from(list.querySelectorAll('li')).find((el) => el.firstElementChild?.textContent === naam)
+  return li?.lastElementChild?.textContent ?? null
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -573,6 +672,127 @@ describe('seizoensgrens middenin een maand', () => {
 
     // Alleen de 2 aanwezigheden binnen het venster tellen mee (2 present, 0 absent → 100%).
     expect(aanwezigheidPercentage()).toBe('100%')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Feedback 1/2 — geen toekomstige events in de aanwezigheidscijfers: het
+// venster van inzichten_aanwezigheid en inzichten_training_opkomst_per_maand
+// stopt bij gisteren (verledenSeizoensVenster(), lib/inzichten.ts), ook als
+// het seizoen nog doorloopt.
+// ═══════════════════════════════════════════════════════════════════════
+describe('toekomstige events tellen niet mee in de aanwezigheidscijfers', () => {
+  // Seizoen loopt door tot ver ná TODAY (2026-10-15).
+  const settings = seasonSettings('2026-07-01', '2027-06-30')
+
+  it('een al ingeplande training van morgen verlaagt het aanwezigheidspercentage niet', async () => {
+    const { rpcCalls } = await renderInzichten({
+      settings,
+      events: [
+        eventRow({ id: 'gisteren', type: 'training', date: '2026-10-14' }),
+        eventRow({ id: 'morgen', type: 'training', date: '2026-10-16' }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 'gisteren', status: 'present' }),
+        // Nog niet afgevinkt → zou als 'absent' meetellen zonder de cutoff.
+        attendanceRow({ event_id: 'morgen', status: 'absent' }),
+      ],
+    })
+
+    expect(aanwezigheidPercentage()).toBe('100%')
+
+    const aanwezigheidCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid')!
+    expect(aanwezigheidCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+    const opkomstCall = rpcCalls.find((c) => c.name === 'inzichten_training_opkomst_per_maand')!
+    expect(opkomstCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+  })
+
+  it('een training van vandaag telt (nog) niet mee — zelfde grens als de vorm-cutoff', async () => {
+    await renderInzichten({
+      settings,
+      events: [
+        eventRow({ id: 'gisteren', type: 'training', date: '2026-10-14' }),
+        eventRow({ id: 'vandaag', type: 'training', date: TODAY }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 'gisteren', status: 'present' }),
+        attendanceRow({ event_id: 'vandaag', status: 'absent' }),
+      ],
+    })
+
+    expect(aanwezigheidPercentage()).toBe('100%')
+  })
+
+  it('een maand die volledig in de toekomst ligt verschijnt niet als rij in de trainingsopkomst', async () => {
+    await renderInzichten({
+      settings,
+      events: [
+        eventRow({ id: 'sep-training', type: 'training', date: '2026-09-10' }),
+        eventRow({ id: 'nov-training', type: 'training', date: '2026-11-10' }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 'sep-training', status: 'present' }),
+        attendanceRow({ event_id: 'nov-training', status: 'absent' }),
+      ],
+    })
+
+    const tables = document.querySelectorAll('table')
+    const opkomstTable = Array.from(tables).find((tb) => tb.querySelector('caption')?.textContent?.includes('maanden'))!
+    expect(opkomstTable.textContent).toMatch(/Sep 2026/)
+    expect(opkomstTable.textContent).not.toMatch(/Nov 2026/)
+    expect(opkomstTable.querySelectorAll('tbody tr')).toHaveLength(1)
+  })
+
+  it('de rating-/doelpuntenkaarten houden het volledige seizoensvenster — die zijn per definitie verleden-only', async () => {
+    const { rpcCalls } = await renderInzichten({
+      settings,
+      events: [eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC' })],
+      players: [playerRow({ id: PLAYER_ACTIVE, active: true })],
+      matchRatings: [ratingRow({ event_id: 'match-1', player_id: PLAYER_ACTIVE, rating: 8 })],
+    })
+
+    const teamRatingCall = rpcCalls.find((c) => c.name === 'inzichten_rating_team_per_wedstrijd')!
+    expect(teamRatingCall.args).toEqual({ p_start: '2026-07-01', p_end: '2027-06-30' })
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Feedback 3 (datakant) — de twee nieuwe per-speler-RPC's worden bij het
+// laden aangeroepen met het juiste venster. De bijbehorende top 5/worst 5-
+// kaarten bouwt de frontend-engineer; hier wordt alleen de query-integratie
+// vastgelegd.
+// ═══════════════════════════════════════════════════════════════════════
+describe('per-speler-RPC\'s voor top 5 / worst 5', () => {
+  it('rating per speler krijgt het volle seizoensvenster, aanwezigheid per speler het geclampte venster', async () => {
+    const { rpcCalls } = await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2027-06-30'),
+      events: [eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC' })],
+      players: [playerRow({ id: PLAYER_ACTIVE, active: true })],
+      matchRatings: [ratingRow({ event_id: 'match-1', player_id: PLAYER_ACTIVE, rating: 8 })],
+    })
+
+    const ratingCall = rpcCalls.find((c) => c.name === 'inzichten_rating_per_speler')!
+    expect(ratingCall.args).toEqual({ p_start: '2026-07-01', p_end: '2027-06-30' })
+
+    const aanwezigheidCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid_per_speler')!
+    expect(aanwezigheidCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+  })
+
+  it('een falende per-speler-RPC blokkeert de bestaande kaarten niet en lekt geen ruwe fout', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2026-12-31'),
+      events: [eventRow({ id: 'training-1', type: 'training', date: '2026-09-10' })],
+      attendance: [attendanceRow({ event_id: 'training-1', status: 'present' })],
+      rpcErrors: {
+        inzichten_rating_per_speler: { message: 'db down (simulated)', code: '500' },
+        inzichten_aanwezigheid_per_speler: { message: 'db down (simulated)', code: '500' },
+      },
+    })
+
+    expect(aanwezigheidPercentage()).toBe('100%')
+    expect(document.body.textContent).not.toMatch(/db down \(simulated\)/i)
+    errorSpy.mockRestore()
   })
 })
 
@@ -1188,5 +1408,247 @@ describe('AC30 — RPC-aanroepen bevatten nooit een team_id-parameter', () => {
     const args = call.args as Record<string, unknown>
     expect(args).toMatchObject({ p_player: PLAYER_ACTIVE })
     expect(Object.keys(args)).not.toContain('team_id')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// FC1 (aanvulling) — de team-brede Aanwezigheid-kaart combineert
+// verleden- én toekomstige events binnen HETZELFDE seizoensvenster: het
+// percentage moet uitsluitend uit de verleden-events komen. De bestaande
+// describe('toekomstige events tellen niet mee in de aanwezigheidscijfers')
+// hierboven (van de bouwers) bewijst dit al met gescheiden events per test;
+// dit blok voegt de door de story met name genoemde situatie toe waarin
+// verleden- én toekomst-registraties in ÉÉN venster samen voorkomen.
+// ═══════════════════════════════════════════════════════════════════════
+describe('FC1 — team-Aanwezigheid combineert verleden én toekomst binnen één venster', () => {
+  it('een training van gisteren (absent) en een training van morgen (present, nog niet gespeeld) samen: alleen gisteren telt mee', async () => {
+    const { rpcCalls } = await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2027-06-30'),
+      events: [
+        eventRow({ id: 'verleden', type: 'training', date: '2026-10-14' }),
+        eventRow({ id: 'toekomst', type: 'training', date: '2026-10-20' }),
+      ],
+      attendance: [
+        // Verleden: 1x afwezig → zou zonder clamp al 0% opleveren als de
+        // toekomst-registratie hieronder meetelt (1 present/1 absent = 50%).
+        attendanceRow({ event_id: 'verleden', status: 'absent' }),
+        // Toekomst: nog niet gespeeld, maar er staat toch al een registratie
+        // (bv. een testfixture-fout of een te vroeg weggeschreven rij) — deze
+        // mag het percentage niet beïnvloeden.
+        attendanceRow({ event_id: 'toekomst', status: 'present' }),
+      ],
+    })
+
+    // Zonder de FC1-cutoff: 1 present + 1 absent = 50%. Mét de cutoff (alleen
+    // "verleden" telt): 0 present + 1 absent = 0%.
+    expect(aanwezigheidPercentage()).toBe('0%')
+
+    const call = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid')!
+    expect(call.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// FC3 — Top 5 / worst 5 spelerratings (TopWorstRatings, gevoed door
+// inzichten_rating_per_speler → topWorstRating() in lib/inzichten.ts)
+// ═══════════════════════════════════════════════════════════════════════
+describe('FC3 — Top 5 / worst 5 spelerratings', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+  const match = eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC' })
+
+  const P_PIET = 'cccccccc-0000-0000-0000-000000000001'
+  const P_JAN = 'cccccccc-0000-0000-0000-000000000002'
+  const P_KLAAS = 'cccccccc-0000-0000-0000-000000000003'
+
+  it('top = hoogste gemiddelde eerst, worst = laagste eerst, gelijke waarden op naam gesorteerd, inactieve spelers nooit — en bij <10 spelers overlappen top/worst bewust', async () => {
+    const { rpcCalls } = await renderInzichten({
+      settings,
+      events: [match],
+      players: [
+        playerRow({ id: P_PIET, name: 'Piet Peters', active: true }),
+        playerRow({ id: P_JAN, name: 'Jan Jansen', active: true }),
+        playerRow({ id: P_KLAAS, name: 'Klaas Klaassen', active: true }),
+        playerRow({ id: PLAYER_INACTIVE, name: 'Inactieve Uitblinker', active: false }),
+      ],
+      matchRatings: [
+        ratingRow({ event_id: 'match-1', player_id: P_PIET, rating: 9 }),
+        ratingRow({ event_id: 'match-1', player_id: P_JAN, rating: 5 }),
+        ratingRow({ event_id: 'match-1', player_id: P_KLAAS, rating: 5 }),
+        // Hoogste rating van allemaal, maar inactief — mag nergens verschijnen.
+        ratingRow({ event_id: 'match-1', player_id: PLAYER_INACTIVE, rating: 10 }),
+      ],
+    })
+
+    const card = topWorstCard(nl.insights.topWorstRatingsTitle)
+
+    // Top: aflopend op gemiddelde; Jan/Klaas zijn gelijk (5) en staan op naam
+    // gesorteerd (Jan < Klaas).
+    expect(topWorstNames(card, nl.insights.bestLabel)).toEqual(['Piet Peters', 'Jan Jansen', 'Klaas Klaassen'])
+    // Worst: oplopend op gemiddelde, zelfde tie-break.
+    expect(topWorstNames(card, nl.insights.worstLabel)).toEqual(['Jan Jansen', 'Klaas Klaassen', 'Piet Peters'])
+
+    // Inactieve speler komt nergens voor, ondanks de hoogste rating.
+    expect(within(card).queryByText('Inactieve Uitblinker')).toBeNull()
+
+    // 3 spelers < 2×TOP_WORST_AANTAL(5): bewuste overlap, met toelichting.
+    expect(within(card).getByText(nl.insights.topWorstOverlapHint)).toBeInTheDocument()
+
+    // De RPC voor dit onderwerp krijgt het volle (niet-geclampte) seizoensvenster.
+    const call = rpcCalls.find((c) => c.name === 'inzichten_rating_per_speler')!
+    expect(call.args).toEqual({ p_start: '2026-07-01', p_end: '2026-12-31' })
+  })
+
+  it('0 spelers met ratings binnen het venster → lege staat op de kaart, geen verzonnen cijfers', async () => {
+    await renderInzichten({
+      settings,
+      events: [match],
+      players: [playerRow({ id: P_PIET, name: 'Piet Peters', active: true })],
+      // Geen matchRatings → RPC levert 0 rijen.
+    })
+
+    const card = topWorstCard(nl.insights.topWorstRatingsTitle)
+    expect(within(card).getByText(nl.insights.topWorstRatingsEmpty)).toBeInTheDocument()
+    expect(within(card).queryByText(nl.insights.bestLabel)).toBeNull()
+    expect(within(card).queryByText(nl.insights.worstLabel)).toBeNull()
+    expect(within(card).queryByText('Piet Peters')).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// FC4 — Top 5 / worst 5 aanwezigheid per speler (TopWorstAanwezigheid,
+// gevoed door inzichten_aanwezigheid_per_speler → topWorstAanwezigheid())
+// ═══════════════════════════════════════════════════════════════════════
+describe('FC4 — Top 5 / worst 5 aanwezigheid per speler', () => {
+  const P_A = 'dddddddd-0000-0000-0000-000000000001'
+
+  it('gebruikt hetzelfde geclampte (verleden-only) venster als de team-Aanwezigheid-kaart: een nog niet gespeelde training telt niet mee in het percentage', async () => {
+    const { rpcCalls } = await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2027-06-30'), // seizoen loopt door ná TODAY (2026-10-15)
+      events: [
+        eventRow({ id: 'gisteren', type: 'training', date: '2026-10-14' }),
+        eventRow({ id: 'morgen', type: 'training', date: '2026-10-16' }),
+      ],
+      players: [playerRow({ id: P_A, name: 'Actieve Speler', active: true })],
+      attendance: [
+        attendanceRow({ event_id: 'gisteren', player_id: P_A, status: 'present' }),
+        // Nog niet gespeeld — zou zonder de clamp 50% i.p.v. 100% opleveren.
+        attendanceRow({ event_id: 'morgen', player_id: P_A, status: 'absent' }),
+      ],
+    })
+
+    const card = topWorstCard(nl.insights.topWorstAanwezigheidTitle)
+    expect(topWorstValueFor(card, nl.insights.bestLabel, 'Actieve Speler')).toBe(
+      nl.insights.topWorstAanwezigheidWaarde.replace('{percentage}', '100').replace('{aanwezig}', '1').replace('{totaal}', '1'),
+    )
+
+    const teamCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid')!
+    const perSpelerCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid_per_speler')!
+    expect(perSpelerCall.args).toEqual(teamCall.args)
+    expect(perSpelerCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+  })
+
+  it('alleen actieve spelers, 0-registraties (null%) uitgesloten, 0%-spelers (wél registraties) tellen wél mee, en kleine selecties overlappen', async () => {
+    const P_GOOD = 'dddddddd-0000-0000-0000-000000000002'
+    const P_ZERO = 'dddddddd-0000-0000-0000-000000000003'
+    const P_UNKNOWN = 'dddddddd-0000-0000-0000-000000000004'
+    const P_INACTIVE_100 = 'dddddddd-0000-0000-0000-000000000005'
+
+    await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2026-12-31'),
+      events: [
+        eventRow({ id: 't1', type: 'training', date: '2026-09-10' }),
+        eventRow({ id: 't2', type: 'training', date: '2026-09-11' }),
+      ],
+      players: [
+        playerRow({ id: P_GOOD, name: 'Goede Speler', active: true }),
+        playerRow({ id: P_ZERO, name: 'Afwezige Speler', active: true }),
+        playerRow({ id: P_UNKNOWN, name: 'Onbekende Speler', active: true }),
+        playerRow({ id: P_INACTIVE_100, name: 'Inactieve Volledige Speler', active: false }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 't1', player_id: P_GOOD, status: 'present' }),
+        attendanceRow({ event_id: 't1', player_id: P_ZERO, status: 'absent' }),
+        attendanceRow({ event_id: 't2', player_id: P_ZERO, status: 'absent' }),
+        // Uitsluitend 'unknown' → RPC levert 0/0 → percentage null → uitgesloten.
+        attendanceRow({ event_id: 't1', player_id: P_UNKNOWN, status: 'unknown' }),
+        // Inactief, ondanks 100% aanwezigheid: mag niet verschijnen.
+        attendanceRow({ event_id: 't1', player_id: P_INACTIVE_100, status: 'present' }),
+      ],
+    })
+
+    const card = topWorstCard(nl.insights.topWorstAanwezigheidTitle)
+
+    // P_ZERO heeft wél registraties (2x afwezig) en hoort als 0% mee te tellen.
+    expect(topWorstValueFor(card, nl.insights.worstLabel, 'Afwezige Speler')).toBe(
+      nl.insights.topWorstAanwezigheidWaarde.replace('{percentage}', '0').replace('{aanwezig}', '0').replace('{totaal}', '2'),
+    )
+    expect(topWorstValueFor(card, nl.insights.bestLabel, 'Goede Speler')).toBe(
+      nl.insights.topWorstAanwezigheidWaarde.replace('{percentage}', '100').replace('{aanwezig}', '1').replace('{totaal}', '1'),
+    )
+
+    // P_UNKNOWN (0/0, geen percentage) staat nergens.
+    expect(within(card).queryByText('Onbekende Speler')).toBeNull()
+    // Inactieve speler staat nergens, ondanks 100%.
+    expect(within(card).queryByText('Inactieve Volledige Speler')).toBeNull()
+
+    // 2 spelers met percentage < 2×TOP_WORST_AANTAL(5): bewuste overlap.
+    expect(within(card).getByText(nl.insights.topWorstOverlapHint)).toBeInTheDocument()
+    expect(topWorstNames(card, nl.insights.bestLabel).sort()).toEqual(['Afwezige Speler', 'Goede Speler'])
+    expect(topWorstNames(card, nl.insights.worstLabel).sort()).toEqual(['Afwezige Speler', 'Goede Speler'])
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC's: nooit data van een
+// ander team, en nooit een team_id-achtige parameter vanuit de aanroeper.
+// ═══════════════════════════════════════════════════════════════════════
+describe('FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC\'s', () => {
+  it('spelers/ratings/aanwezigheid van een ander team_id komen niet terug in de top/worst-kaarten, en de RPC-args bevatten geen team_id', async () => {
+    const OTHER_PLAYER = 'eeeeeeee-0000-0000-0000-000000000001'
+    const { rpcCalls } = await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2026-12-31'),
+      events: [
+        eventRow({ id: 'eigen-match', team_id: TEAM, type: 'match', date: '2026-09-05', opponent: 'DVC' }),
+        eventRow({ id: 'ander-match', team_id: OTHER_TEAM, type: 'match', date: '2026-09-06', opponent: 'Indringer FC' }),
+        eventRow({ id: 'eigen-training', team_id: TEAM, type: 'training', date: '2026-09-01' }),
+        eventRow({ id: 'ander-training', team_id: OTHER_TEAM, type: 'training', date: '2026-09-01' }),
+      ],
+      players: [
+        playerRow({ id: PLAYER_ACTIVE, team_id: TEAM, name: 'Eigen Ster', active: true }),
+        // Ander team, maar wél active=true, met een HOGERE rating/aanwezigheid
+        // dan het eigen team — als tenant-isolatie faalt, zou deze speler de
+        // eigen top-lijst kunnen "kapen".
+        playerRow({ id: OTHER_PLAYER, team_id: OTHER_TEAM, name: 'Vreemde Ster', active: true }),
+      ],
+      matchRatings: [
+        ratingRow({ team_id: TEAM, event_id: 'eigen-match', player_id: PLAYER_ACTIVE, rating: 6 }),
+        ratingRow({ team_id: OTHER_TEAM, event_id: 'ander-match', player_id: OTHER_PLAYER, rating: 10 }),
+      ],
+      attendance: [
+        attendanceRow({ team_id: TEAM, event_id: 'eigen-training', player_id: PLAYER_ACTIVE, status: 'present' }),
+        attendanceRow({ team_id: OTHER_TEAM, event_id: 'ander-training', player_id: OTHER_PLAYER, status: 'present' }),
+      ],
+    })
+
+    // "Eigen Ster" staat met maar 1 speler in zowel de top- als de
+    // worst-lijst (bewuste overlap bij een kleine selectie), vandaar
+    // getAllByText i.p.v. getByText.
+    const ratingCard = topWorstCard(nl.insights.topWorstRatingsTitle)
+    expect(within(ratingCard).getAllByText('Eigen Ster').length).toBeGreaterThan(0)
+    expect(within(ratingCard).queryByText('Vreemde Ster')).toBeNull()
+
+    const aanwCard = topWorstCard(nl.insights.topWorstAanwezigheidTitle)
+    expect(within(aanwCard).getAllByText('Eigen Ster').length).toBeGreaterThan(0)
+    expect(within(aanwCard).queryByText('Vreemde Ster')).toBeNull()
+
+    const ratingCall = rpcCalls.find((c) => c.name === 'inzichten_rating_per_speler')!
+    const aanwCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid_per_speler')!
+    for (const call of [ratingCall, aanwCall]) {
+      const keys = Object.keys(call.args as Record<string, unknown>)
+      expect(keys).not.toContain('team_id')
+      expect(keys).not.toContain('p_team')
+      expect(keys).not.toContain('teamId')
+      expect(keys.sort()).toEqual(['p_end', 'p_start'])
+    }
   })
 })

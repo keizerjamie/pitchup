@@ -8,15 +8,20 @@ import { todayLocal } from '@/lib/utils'
 import { matchResult } from '@/lib/match-analysis.mjs'
 import {
   seizoensVenster,
+  verledenSeizoensVenster,
   berekenAanwezigheidPercentage,
   toMaandOpkomst,
   telVorm,
+  topWorstRating,
+  topWorstAanwezigheid,
   MAX_SEIZOEN_WEDSTRIJDEN,
   type AanwezigheidRij,
   type MaandOpkomstRij,
   type TeamRatingRij,
   type DoelpuntItem,
   type SpelerOptie,
+  type RatingPerSpelerRij,
+  type AanwezigheidPerSpelerRij,
 } from '@/lib/inzichten'
 import type { FormStripItem } from '@/components/dashboard/FormStrip'
 import AanwezigheidChart from '@/components/inzichten/AanwezigheidChart'
@@ -24,6 +29,8 @@ import OpkomstPerMaandChart from '@/components/inzichten/OpkomstPerMaandChart'
 import RatingsChart from '@/components/inzichten/RatingsChart'
 import DoelpuntenChart from '@/components/inzichten/DoelpuntenChart'
 import VormChart from '@/components/inzichten/VormChart'
+import TopWorstRatings from '@/components/inzichten/TopWorstRatings'
+import TopWorstAanwezigheid from '@/components/inzichten/TopWorstAanwezigheid'
 
 export default async function InzichtenPage() {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
@@ -60,17 +67,30 @@ export default async function InzichtenPage() {
 
   const today = todayLocal()
 
+  // Aanwezigheidscijfers kijken alleen naar wat al geweest is: het venster
+  // stopt bij gisteren, ook als het seizoen nog doorloopt. Zonder deze grens
+  // tellen al ingeplande (nog niet afgevinkte) trainingen/wedstrijden als
+  // "niemand aanwezig" mee. Zelfde cutoff als de vorm-query hieronder
+  // (`.lt('date', today)`). De rating-, doelpunten- en vormgrafieken hebben dit
+  // niet nodig: die zijn per definitie verleden-only (een uitslag of rating
+  // bestaat pas ná de wedstrijd).
+  const verleden = verledenSeizoensVenster(venster, today)
+
   const [
     aanwezigheidResult,
     maandOpkomstResult,
     teamRatingResult,
+    ratingPerSpelerResult,
+    aanwezigheidPerSpelerResult,
     vormResult,
     doelpuntenResult,
     spelersResult,
   ] = await Promise.all([
-    supabase.rpc('inzichten_aanwezigheid', { p_start: venster.start, p_end: venster.end }),
-    supabase.rpc('inzichten_training_opkomst_per_maand', { p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_aanwezigheid', { p_start: verleden.start, p_end: verleden.end }),
+    supabase.rpc('inzichten_training_opkomst_per_maand', { p_start: verleden.start, p_end: verleden.end }),
     supabase.rpc('inzichten_rating_team_per_wedstrijd', { p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_rating_per_speler', { p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_aanwezigheid_per_speler', { p_start: verleden.start, p_end: verleden.end }),
     supabase.from('events')
       .select('id, date, goals_for, goals_against')
       .eq('team_id', user.id)
@@ -118,6 +138,15 @@ export default async function InzichtenPage() {
 
   const teamRating: TeamRatingRij[] = unwrap<TeamRatingRij>('inzichten.teamRating', teamRatingResult)
 
+  // Top 5 / worst 5: één RPC per onderwerp levert álle spelers, het snijden in
+  // twee lijstjes gebeurt hier (lib/inzichten.ts) — geen tweede databaseronde.
+  const ratingTopWorst = topWorstRating(
+    unwrap<RatingPerSpelerRij>('inzichten.ratingPerSpeler', ratingPerSpelerResult),
+  )
+  const aanwezigheidTopWorst = topWorstAanwezigheid(
+    unwrap<AanwezigheidPerSpelerRij>('inzichten.aanwezigheidPerSpeler', aanwezigheidPerSpelerResult),
+  )
+
   const vormRows = unwrap<{ id: string; goals_for: number | null; goals_against: number | null }>(
     'inzichten.vorm',
     vormResult,
@@ -149,6 +178,8 @@ export default async function InzichtenPage() {
         <OpkomstPerMaandChart data={maandOpkomst} t={t} />
         <RatingsChart teamData={teamRating} spelers={spelers} t={t} />
         <DoelpuntenChart items={doelpunten} t={t} />
+        <TopWorstRatings data={ratingTopWorst} t={t} />
+        <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />
         <div className="lg:col-span-2">
           <VormChart items={vormItems} telling={vormTelling} t={t} />
         </div>
