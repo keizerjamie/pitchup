@@ -71,6 +71,23 @@
   --chip-amber-fg: #fbbf24;
 }
 
+/* Grafiekkleuren voor recharts (components/inzichten/*) — als CSS-klassen in
+   plaats van JS/hex-props, zodat ze automatisch meewisselen met het
+   :root[data-theme="dark"]-blok hierboven. SVG-presentatie-attributen (bv.
+   stroke="#hex" die recharts standaard zou toevoegen) hebben altijd een lagere
+   prioriteit dan een CSS-klasse, dus deze klassen overschrijven recharts'
+   eigen defaults zonder inline stroke/fill-props nodig te hebben. Nooit een
+   hex-kleur of getComputedStyle() gebruiken op deze elementen. */
+.chart-stroke-primary { stroke: var(--primary); }
+.chart-fill-primary { fill: var(--primary); }
+.chart-fill-green { fill: var(--chip-green-fg); }
+.chart-fill-red { fill: var(--chip-red-fg); }
+.chart-fill-amber { fill: var(--chip-amber-fg); }
+.chart-fill-track { fill: var(--track); }
+.chart-grid { stroke: var(--border-soft); }
+.chart-axis { fill: var(--faint); }
+.chart-axis text { fill: var(--faint); }
+
 /* Follow the OS preference until the user makes an explicit choice (the script
    only sets data-theme when a stored choice exists or to seed system pref). */
 

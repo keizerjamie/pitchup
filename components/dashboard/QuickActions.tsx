@@ -9,6 +9,11 @@ export default function QuickActions({ t }: { t: Dict }) {
     { href: '/events',      icon: 'calendar_month', label: t.home.qaCalendar },
     { href: '/oefeningen',  icon: 'sports_soccer', label: t.home.qaOefeningen },
     { href: '/periodisering', icon: 'monitoring', label: t.home.qaPeriodization },
+    // 'scoreboard' zit (net als de overige iconen hierboven) in de gesubsette
+    // Material Symbols-font (public/fonts/material-symbols-rounded.woff2) —
+    // geverifieerd via de GSUB-ligatuurtabel, want een ontbrekende glyph
+    // toont anders letterlijk de tekst i.p.v. een icoon (zie ChartBarIcon.tsx).
+    { href: '/inzichten', icon: 'scoreboard', label: t.home.qaInsights },
   ]
   return (
     <div className="surface-card p-4 flex flex-col gap-3">

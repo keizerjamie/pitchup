@@ -17,6 +17,12 @@ CREATE INDEX IF NOT EXISTS idx_oefeningen_team ON oefeningen(team_id);
 CREATE INDEX IF NOT EXISTS idx_match_ratings_team ON match_ratings(team_id);
 CREATE INDEX IF NOT EXISTS idx_match_events_team ON match_events(team_id);
 
+-- Samengestelde indexen voor de inzichtenpagina (/inzichten): die aggregeert
+-- per team over een heel seizoen en joint attendance/match_ratings op event_id.
+-- Staan ook in supabase/inzichten.sql, zodat die migratie op zichzelf compleet is.
+CREATE INDEX IF NOT EXISTS idx_attendance_team_event    ON attendance(team_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_match_ratings_team_event ON match_ratings(team_id, event_id);
+
 -- Verificatie: toon alle indexen per tabel
 -- select tablename, indexname from pg_indexes
 -- where schemaname = 'public' order by tablename;

@@ -36,6 +36,9 @@ export default function SidebarNav({
     { href: '/events',        label: t.nav.calendar,      icon: 'calendar_month' },
     { href: '/oefeningen',    label: t.nav.oefeningen,    icon: 'sports_soccer' },
     { href: '/periodisering', label: t.nav.periodization, icon: 'monitoring' },
+    // 'scoreboard' zit in de gesubsette Material Symbols-font — geverifieerd
+    // via de GSUB-ligatuurtabel (zie components/dashboard/QuickActions.tsx).
+    { href: '/inzichten',     label: t.nav.insights,      icon: 'scoreboard' },
     { href: '/settings',      label: t.nav.settings,      icon: 'settings' },
   ]
 
