@@ -93,6 +93,11 @@ export default function CalendarView({ events, attendanceMap }: Props) {
               className="h-9 px-3 rounded-xl text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors">
               {t.calendar.today}
             </button>
+            <Link href="/events/bulk"
+              className="hidden md:flex h-10 rounded-xl px-3 items-center gap-1.5 text-[13.5px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors flex-shrink-0">
+              <span className="ms text-[19px]">upload_file</span>
+              <span>{t.event.bulk.fabLabel}</span>
+            </Link>
             <Link href="/events/new"
               className="h-10 rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0" style={{ background: 'var(--primary)' }}>
               <span className="ms text-[19px]">add</span>

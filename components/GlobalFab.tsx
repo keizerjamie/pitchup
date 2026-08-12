@@ -83,6 +83,13 @@ export default function GlobalFab() {
       bg: 'rgba(37,99,235,0.12)',
     },
     {
+      label: t.event.bulk.fabLabel,
+      href: '/events/bulk',
+      icon: <MatchIcon />,
+      color: '#2563eb',
+      bg: 'rgba(37,99,235,0.12)',
+    },
+    {
       label: t.players.add,
       href: '/players/new',
       icon: <PlayerIcon />,
