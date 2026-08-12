@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { genericError } from '@/lib/errors'
 import { MAX_SEASON_DAYS, isDateString, seasonTrainingDates } from '@/lib/season-dates'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
+import { buildAttendanceRow } from '@/lib/attendance-rows'
+import { AttendanceStatus } from '@/lib/types'
 
 export async function getDefaultAttendance(): Promise<'present' | 'unknown'> {
   const supabase = await createClient()
@@ -182,25 +184,32 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
       .select('id, date')
     if (error) throw genericError('settings.generateSeasonTrainings', error)
 
-    const { data: players } = await supabase.from('players').select('id').eq('active', true).eq('team_id', user.id)
-    const defaultStatus = settings['default_attendance'] ?? 'present'
+    // `injured` hoort erbij: een geblesseerde speler moet ook op een nieuw
+    // gegenereerde training meteen op 'absent' komen, net als markInjured dat
+    // voor bestaande events doet (app/actions/players.ts:124-132).
+    const { data: players, error: playersError } = await supabase.from('players').select('id, injured').eq('active', true).eq('team_id', user.id)
+    // Hard falen, zoals bij de periodequery hierboven: stil doorgaan zou elke
+    // gegenereerde training de standaardstatus geven terwijl de speler
+    // geblesseerd of afgemeld is.
+    if (playersError) throw genericError('settings.generateSeasonTrainings.players', playersError)
+    // De instelling is bij het opslaan al beperkt tot 'present' | 'unknown'
+    // (saveSettings, regel 40); getAllSettings levert hem als kale string terug.
+    const defaultStatus = (settings['default_attendance'] ?? 'present') as AttendanceStatus
 
     if (players && players.length > 0 && inserted) {
       const attendanceRecords = inserted.flatMap((ev) => {
         const periodByPlayer = periodIdByPlayerForDate(periods ?? [], ev.date)
         // Alle rijen krijgen dezelfde sleutels — PostgREST weigert een
-        // bulk-insert met afwijkende kolommen, dus absence_period_id gaat ook
-        // mee als hij null is.
-        return players.map((p) => {
-          const periodId = periodByPlayer.get(p.id) ?? null
-          return {
-            event_id: ev.id,
-            player_id: p.id,
-            status: periodId ? 'absent' : defaultStatus,
-            team_id: user.id,
-            absence_period_id: periodId,
-          }
-        })
+        // bulk-insert met afwijkende kolommen, dus buildAttendanceRow zet ze
+        // altijd alle zes.
+        return players.map((p) => buildAttendanceRow({
+          eventId: ev.id,
+          playerId: p.id,
+          teamId: user.id,
+          defaultStatus,
+          injured: p.injured === true,
+          periodId: periodByPlayer.get(p.id) ?? null,
+        }))
       })
       const { error: attendanceError } = await supabase.from('attendance').insert(attendanceRecords)
       if (attendanceError) throw genericError('settings.generateSeasonTrainings.attendance', attendanceError)

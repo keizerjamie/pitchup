@@ -9,6 +9,7 @@ import { assertOwnMatchEvent } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
 import { isTimeString } from '@/lib/utils'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
+import { buildAttendanceRow } from '@/lib/attendance-rows'
 
 // 'meting' events worden alleen nog via saveNulmeting (periodisering) aangemaakt
 const VALID_EVENT_TYPES: EventType[] = ['training', 'match']
@@ -61,8 +62,11 @@ export async function createEvent(formData: FormData) {
 
   // Meting events have no attendance records
   if (type !== 'meting') {
-    const [{ data: players }, defaultStatus, { data: periods, error: periodsError }] = await Promise.all([
-      supabase.from('players').select('id').eq('active', true).eq('team_id', user.id),
+    const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] = await Promise.all([
+      // `injured` hoort erbij: een geblesseerde speler moet ook op een NIEUW
+      // event meteen op 'absent' komen, net als markInjured dat voor bestaande
+      // events doet (app/actions/players.ts:124-132).
+      supabase.from('players').select('id, injured').eq('active', true).eq('team_id', user.id),
       getDefaultAttendance().catch(() => 'present' as const),
       // Lopende afmeldperiodes die déze datum dekken (grenzen inclusief):
       // from_date <= date <= to_date. Vaste sortering zodat de herkomst bij
@@ -80,22 +84,24 @@ export async function createEvent(formData: FormData) {
     // Bewust hard falen: stil doorgaan zou het event met standaard-aanwezigheid
     // opleveren, terwijl de trainer de speler al had afgemeld.
     if (periodsError) throw genericError('events.createEvent.periods', periodsError)
+    // Zelfde reden voor de spelerslijst: zonder `injured` zou een geblesseerde
+    // speler stilzwijgend op de standaardstatus belanden. Vóór de insert, zodat
+    // er dan helemaal geen rijen worden weggeschreven.
+    if (playersError) throw genericError('events.createEvent.players', playersError)
 
     if (players && players.length > 0) {
       const periodByPlayer = periodIdByPlayerForDate(periods ?? [], date)
       await supabase.from('attendance').insert(
         // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
-        // met afwijkende kolommen, dus absence_period_id gaat altijd mee.
-        players.map((p) => {
-          const periodId = periodByPlayer.get(p.id) ?? null
-          return {
-            event_id: data.id,
-            player_id: p.id,
-            status: periodId ? 'absent' : defaultStatus,
-            team_id: user.id,
-            absence_period_id: periodId,
-          }
-        })
+        // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
+        players.map((p) => buildAttendanceRow({
+          eventId: data.id,
+          playerId: p.id,
+          teamId: user.id,
+          defaultStatus,
+          injured: p.injured === true,
+          periodId: periodByPlayer.get(p.id) ?? null,
+        }))
       )
     }
   }

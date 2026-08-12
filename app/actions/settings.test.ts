@@ -410,8 +410,8 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
     await generateSeasonTrainings()
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: 'ap-1' },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: 'ap-1' },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
     ])
   })
 
@@ -429,8 +429,8 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
 
     const rows = attendanceRows(m)
     expect(rows.filter((r) => r.event_id === 'e1')).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: 'ap-1' },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: 'ap-1' },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
     ])
     for (const row of rows.filter((r) => r.event_id === 'e2')) {
       expect(row.status).toBe('present')
@@ -459,9 +459,10 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
       )
       expect(row.absence_period_id).toBeNull()
+      expect(row.injury_set).toBe(false)
     }
   })
 
@@ -491,6 +492,85 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
     await expect(generateSeasonTrainings()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
 
     expect(logged()).toContain('settings.generateSeasonTrainings.periods')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
+  })
+})
+
+// ────────────────────────────────────────────────
+// generateSeasonTrainings — blessure
+// ────────────────────────────────────────────────
+// Anders dan een afmeldperiode kent een blessure geen datumbereik: zolang
+// players.injured true is, geldt hij voor élke gegenereerde training.
+
+describe('generateSeasonTrainings — blessure', () => {
+  function metBlessure(
+    events: { id: string; date: string }[],
+    players: { id: string; injured?: boolean }[],
+    extra: Record<string, TableResult> = {},
+  ) {
+    return metSeizoen({
+      events: { data: events, error: null },
+      players: { data: players, error: null },
+      absence_periods: { data: [], error: null },
+      ...extra,
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
+  }
+
+  it('zet een geblesseerde speler op elke gegenereerde training op absent, ook zonder enige periode', async () => {
+    const m = metBlessure(
+      [{ id: 'e1', date: '2026-01-12' }, { id: 'e2', date: '2026-01-26' }],
+      [{ id: 'p1', injured: true }, { id: 'p2', injured: false }],
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    const rows = attendanceRows(m)
+    const geblesseerd = rows.filter((r) => r.player_id === 'p1')
+    expect(geblesseerd).toHaveLength(2)
+    for (const row of geblesseerd) {
+      expect(row.status).toBe('absent')
+      expect(row.injury_set).toBe(true)
+      expect(row.absence_period_id).toBeNull()
+    }
+
+    const fit = rows.filter((r) => r.player_id === 'p2')
+    expect(fit).toHaveLength(2)
+    for (const row of fit) {
+      expect(row.status).toBe('present')
+      expect(row.injury_set).toBe(false)
+    }
+  })
+
+  it('combineert blessure en een dekkende periode: absent met beide markeringen', async () => {
+    const m = metBlessure(
+      [{ id: 'e1', date: '2026-01-12' }],
+      [{ id: 'p1', injured: true }],
+      { absence_periods: { data: [{ id: 'ap-1', player_id: 'p1', from_date: '2026-01-10', to_date: '2026-01-20' }], error: null } },
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    expect(attendanceRows(m)[0]).toEqual({
+      event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1',
+      injury_set: true, absence_period_id: 'ap-1',
+    })
+  })
+
+  it('faalt zichtbaar (en generiek) als de spelersquery mislukt', async () => {
+    gebruikSupabase(metBlessure([{ id: 'e1', date: '2026-01-12' }], [], {
+      players: { data: null, error: { code: '42501', message: 'permission denied for table players' } },
+    }))
+
+    await expect(generateSeasonTrainings()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('settings.generateSeasonTrainings.players')
     expect(logged()).toContain('42501')
     expect(logged()).not.toContain('permission denied')
   })

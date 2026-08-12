@@ -212,8 +212,8 @@ describe('createEvent — afmeldperiode', () => {
     await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
     ])
   })
 
@@ -226,14 +226,14 @@ describe('createEvent — afmeldperiode', () => {
     await expect(createEvent(form(WEDSTRIJD))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
     ])
   })
 
   it('geeft elke rij dezelfde sleutels, ook zonder enige periode', async () => {
     // PostgREST weigert een bulk-insert waarin de objecten verschillende
-    // kolommen hebben; absence_period_id moet dus altijd mee.
+    // kolommen hebben; absence_period_id en injury_set moeten dus altijd mee.
     const m = metPeriode([])
     use(m)
 
@@ -241,10 +241,11 @@ describe('createEvent — afmeldperiode', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
       )
       expect(row.status).toBe('present')
       expect(row.absence_period_id).toBeNull()
+      expect(row.injury_set).toBe(false)
     }
   })
 
@@ -285,6 +286,96 @@ describe('createEvent — afmeldperiode', () => {
     // afgemelde speler stilzwijgend als aanwezig in de lijst staan.
     expect(m.calls.insert.find((i) => i.table === 'attendance')).toBeUndefined()
     expect(logged()).toContain('events.createEvent.periods')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
+  })
+})
+
+// ────────────────────────────────────────────────
+// createEvent — blessure
+// ────────────────────────────────────────────────
+// Gespiegeld aan het afmeldperiode-blok hierboven: een speler met
+// players.injured = true moet op een NIEUW event meteen absent + injury_set
+// krijgen, precies zoals markInjured dat voor bestaande events doet
+// (app/actions/players.ts:124-132).
+
+describe('createEvent — blessure', () => {
+  const PLAYER_A = 'p1'
+  const PLAYER_B = 'p2'
+  const PERIOD_1 = 'ap-1'
+
+  // Speler A is geblesseerd, speler B niet.
+  function metBlessure(
+    players: { id: string; injured?: boolean }[],
+    periods: unknown[] = [],
+    extra: Record<string, TableResult> = {},
+  ) {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: 'e1', type: 'match' }, error: null },
+        players: { data: players, error: null },
+        attendance: { data: null, error: null },
+        absence_periods: { data: periods, error: null },
+        ...extra,
+      },
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
+  }
+
+  it('zet een geblesseerde speler op absent met injury_set en laat de teamgenoot op de standaardstatus', async () => {
+    const m = metBlessure([{ id: PLAYER_A, injured: true }, { id: PLAYER_B, injured: false }])
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: true, absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+    ])
+  })
+
+  it('doet hetzelfde voor een wedstrijd', async () => {
+    const m = metBlessure([{ id: PLAYER_A, injured: true }, { id: PLAYER_B, injured: false }])
+    use(m)
+
+    await expect(createEvent(form(WEDSTRIJD))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: true, absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+    ])
+  })
+
+  it('combineert blessure en een dekkende periode: absent met beide markeringen', async () => {
+    const m = metBlessure(
+      [{ id: PLAYER_A, injured: true }, { id: PLAYER_B, injured: false }],
+      [{ id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-09-01', to_date: '2026-09-30' }],
+    )
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)[0]).toEqual({
+      event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1',
+      injury_set: true, absence_period_id: PERIOD_1,
+    })
+  })
+
+  it('geeft een generieke melding bij een databasefout op de spelersquery', async () => {
+    const m = metBlessure([], [], {
+      players: { data: null, error: { code: '42501', message: 'permission denied for table players' } },
+    })
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    // Bewust géén aanwezigheidsrijen: zonder de injured-vlag zou een
+    // geblesseerde speler stilzwijgend als aanwezig in de lijst staan.
+    expect(m.calls.insert.find((i) => i.table === 'attendance')).toBeUndefined()
+    expect(logged()).toContain('events.createEvent.players')
     expect(logged()).toContain('42501')
     expect(logged()).not.toContain('permission denied')
   })

@@ -11,6 +11,7 @@ import { deleteEvent } from '@/app/actions/events'
 import { getDict } from '@/lib/i18n'
 import { analyseBestaat as computeAnalyseBestaat } from '@/lib/match-analysis.mjs'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
+import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { genericError } from '@/lib/errors'
 
 interface Props {
@@ -124,30 +125,32 @@ export default async function EventDetailPage({ params }: Props) {
 
     const periodByPlayer = periodIdByPlayerForDate(periods ?? [], event.date)
 
-    const { error: backfillError } = await supabase.from('attendance').insert(
-      // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
-      // met afwijkende kolommen, dus absence_period_id gaat altijd mee.
-      missingPlayers.map((p) => {
-        const periodId = periodByPlayer.get(p.id) ?? null
-        return {
-          event_id: id,
-          player_id: p.id,
-          status: periodId ? 'absent' : 'unknown',
-          team_id: user.id,
-          absence_period_id: periodId,
-        }
-      })
-    )
+    // Eén keer opgebouwd en daarna hergebruikt voor de attendanceMap hieronder:
+    // de pagina moet exact tonen wat er is weggeschreven. Een geblesseerde
+    // speler (players.injured, al opgehaald met de select('*') hierboven) komt
+    // net als bij een lopende periode op 'absent' — anders herintroduceert deze
+    // backfill precies het bugsymptoom dat markInjured moest oplossen.
+    const backfillRows = missingPlayers.map((p) => buildAttendanceRow({
+      eventId: id,
+      playerId: p.id,
+      teamId: user.id,
+      defaultStatus: 'unknown',
+      injured: p.injured === true,
+      periodId: periodByPlayer.get(p.id) ?? null,
+    }))
+
+    // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
+    // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
+    const { error: backfillError } = await supabase.from('attendance').insert(backfillRows)
     // Zonder deze check zou de lus hieronder de attendanceMap vullen alsof de
     // insert lukte: de coach ziet dan statussen die nooit zijn opgeslagen.
     // Zelfde harde faal als settings.generateSeasonTrainings.attendance
     // (app/actions/settings.ts:206).
     if (backfillError) throw genericError('eventDetail.backfill.attendance', backfillError)
 
-    for (const p of missingPlayers) {
-      const periodId = periodByPlayer.get(p.id) ?? null
-      attendanceMap.set(p.id, periodId ? 'absent' : 'unknown')
-    }
+    // Dezelfde rijen als de insert hierboven: de gerenderde status kan zo niet
+    // uit de pas lopen met wat er daadwerkelijk in de database staat.
+    for (const row of backfillRows) attendanceMap.set(row.player_id, row.status)
   }
 
   const initialStatuses = Object.fromEntries(attendanceMap) as Record<string, AttendanceStatus>
