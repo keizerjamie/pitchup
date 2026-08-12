@@ -84,6 +84,22 @@ describe('generateDiagram', () => {
     expect(los.markers.filter((m) => m.teamIndex === 0)).toHaveLength(10)
   })
 
+  it('grootte 1 en 2 worden nu wél getekend (kleine oefenvormen als 1v1/2v2)', () => {
+    for (const grootte of [1, 2]) {
+      const d = generateDiagram([{ grootte, formaties: [] }], 0, null)
+      const teamMarkers = d.markers.filter((m) => m.teamIndex === 0)
+      expect(teamMarkers, `grootte=${grootte}`).toHaveLength(grootte)
+      expect(teamMarkers.every((m) => m.rol === 'speler')).toBe(true)
+      expect(teamMarkers.every(within)).toBe(true)
+    }
+
+    // 1v1: twee teams van 1 → elk team krijgt zijn eigen marker in de eigen helft.
+    const duel = generateDiagram([{ grootte: 1, formaties: [] }, { grootte: 1, formaties: [] }], 0, null)
+    expect(duel.markers).toHaveLength(2)
+    expect(duel.markers.map((m) => m.teamIndex)).toEqual([0, 1])
+    expect(duel.markers.every(within)).toBe(true)
+  })
+
   it('legacy multi-select-data: het diagram volgt de alfabetisch eerste (basis)', () => {
     // Productiedata van vóór de single-select kan nog meerdere waarden bevatten.
     const alle = opties(4)

@@ -47,7 +47,7 @@ describe('genereerFormaties — controle-uitkomsten', () => {
     expect(lijst.map((f) => f.key)).toEqual(['1-0-1', '2-0-0'])
   })
 
-  it('2 veldspelers, alle linies gevuld → leeg (de enige lege combinatie)', () => {
+  it('2 veldspelers, alle linies gevuld → leeg (N < 3 kan geen V+M+A>=1 vullen)', () => {
     expect(genereerFormaties(2, true)).toEqual([])
   })
 
@@ -268,16 +268,63 @@ describe('formatiesVoorTeam', () => {
     expect(formatiesVoorTeam({ grootte: 10 }, VRIJE_LINIES).length).toBeGreaterThan(0)
   })
 
-  it('alleen 3-tal + inclusief keeper + partijen_groot is leeg', () => {
+  // De onderliggende regel: een combinatie is leeg dan en slechts dan als er geen
+  // veldspelers over zijn (N <= 0), of als partijen_groot alle drie de linies eist
+  // terwijl er minder dan 3 veldspelers zijn. Het 11-tal gebruikt de gecureerde
+  // lijst en is daarom nooit leeg.
+  it('leeg ⟺ N <= 0 of (partijen_groot en N < 3) — exhaustief over alle groottes', () => {
     for (const grootte of VALID_TEAM_SIZES) {
       for (const keeperInGrootte of [true, false]) {
+        const N = aantalVeldspelers({ grootte, keeperInGrootte })
         for (const categorie of OEFENING_CATEGORIES) {
           const leeg = formatiesVoorTeam({ grootte, keeperInGrootte }, categorie).length === 0
-          const verwachtLeeg = grootte === 3 && keeperInGrootte && categorie === 'partijen_groot'
+          const verwachtLeeg =
+            grootte !== 11 && (N <= 0 || (categorie === 'partijen_groot' && N < 3))
           expect(leeg, `${grootte}/${keeperInGrootte}/${categorie}`).toBe(verwachtLeeg)
         }
       }
     }
+  })
+
+  it('de volledige set lege combinaties, expliciet benoemd', () => {
+    const leegVerwacht: [number, boolean, OefeningCategorie[]][] = [
+      // grootte 1 inclusief keeper → 0 veldspelers → nooit een formatie.
+      [1, true, [...OEFENING_CATEGORIES]],
+      // Te weinig veldspelers voor V>=1, M>=1 én A>=1.
+      [1, false, ['partijen_groot']],
+      [2, true, ['partijen_groot']],
+      [2, false, ['partijen_groot']],
+      [3, true, ['partijen_groot']],
+    ]
+    for (const [grootte, keeperInGrootte, categorieen] of leegVerwacht) {
+      for (const categorie of categorieen) {
+        expect(
+          formatiesVoorTeam({ grootte, keeperInGrootte }, categorie),
+          `${grootte}/${keeperInGrootte}/${categorie}`,
+        ).toHaveLength(0)
+      }
+    }
+  })
+
+  it('kleine groottes leveren buiten partijen_groot wél formaties op', () => {
+    for (const categorie of OEFENING_CATEGORIES.filter((c) => c !== 'partijen_groot')) {
+      // 1 zonder keeper = 1 veldspeler, 2 zonder keeper = 2, 2 met keeper = 1.
+      expect(
+        formatiesVoorTeam({ grootte: 1, keeperInGrootte: false }, categorie).length,
+        `1/false/${categorie}`,
+      ).toBeGreaterThan(0)
+      expect(
+        formatiesVoorTeam({ grootte: 2, keeperInGrootte: true }, categorie).length,
+        `2/true/${categorie}`,
+      ).toBeGreaterThan(0)
+      expect(
+        formatiesVoorTeam({ grootte: 2, keeperInGrootte: false }, categorie).length,
+        `2/false/${categorie}`,
+      ).toBeGreaterThan(0)
+    }
+    // En bij 3 zonder keeper (N=3) is zelfs partijen_groot haalbaar: 1-1-1.
+    expect(formatiesVoorTeam({ grootte: 3, keeperInGrootte: false }, 'partijen_groot').map((f) => f.key))
+      .toEqual(['1-1-1'])
   })
 })
 
@@ -369,7 +416,7 @@ describe('isFormatieGeldigVoorTeam', () => {
 })
 
 describe('VALID_TEAM_SIZES', () => {
-  it('3 t/m 11, inclusief 10', () => {
-    expect(VALID_TEAM_SIZES).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11])
+  it('1 t/m 11, inclusief 1 en 2 (kleine oefenvormen) en 10', () => {
+    expect(VALID_TEAM_SIZES).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
   })
 })

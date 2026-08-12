@@ -206,6 +206,80 @@ describe('OefeningEditor — teams (dynamische lijst)', () => {
     expect(screen.getByRole('group', { name: nl.oefeningen.formation })).toBeInTheDocument()
   })
 
+  it('de teamgrootte-select bevat nu ook de opties 1 en 2, naast de bestaande 3-11', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+
+    const sizeSelect = screen.getAllByLabelText(nl.oefeningen.teamSize)[0] as HTMLSelectElement
+    const values = Array.from(sizeSelect.options)
+      .map((o) => o.value)
+      .filter((v) => v !== '')
+    expect(values).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'])
+  })
+
+  it('grootte 2, exclusief keeper, buiten categorie partijen_groot: toont formatie-opties (AC4)', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText(nl.trainingPlan.category), { target: { value: 'overig' } })
+
+    const keeperGroup = screen.getByRole('group', { name: nl.oefeningen.keeperLabel })
+    fireEvent.click(within(keeperGroup).getByRole('button', { name: nl.oefeningen.keeperExcluded }))
+
+    const group = screen.getByRole('group', { name: nl.oefeningen.formation })
+    expect(within(group).getAllByRole('button').length).toBeGreaterThan(0)
+  })
+
+  it('grootte 1 inclusief keeper (0 veldspelers): in élke categorie disabled "geen formaties"-status i.p.v. chips', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '1' } })
+
+    // Categorie is standaard al 'partijen_groot'.
+    expect(formatiesVoorTeam({ grootte: 1, keeperInGrootte: true }, 'partijen_groot')).toHaveLength(0)
+    expect(screen.queryByRole('group', { name: nl.oefeningen.formation })).not.toBeInTheDocument()
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+
+    // Ook bij een categorie die normaal een lege linie toestaat (bv. 'overig') blijft dit leeg: 0 veldspelers.
+    fireEvent.change(screen.getByLabelText(nl.trainingPlan.category), { target: { value: 'overig' } })
+    expect(formatiesVoorTeam({ grootte: 1, keeperInGrootte: true }, 'overig')).toHaveLength(0)
+    expect(screen.queryByRole('group', { name: nl.oefeningen.formation })).not.toBeInTheDocument()
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+
+    // En bij nog een andere categorie.
+    fireEvent.change(screen.getByLabelText(nl.trainingPlan.category), { target: { value: 'positiespel' } })
+    expect(screen.queryByRole('group', { name: nl.oefeningen.formation })).not.toBeInTheDocument()
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+  })
+
+  it('grootte 1 én grootte 2 zijn in categorie partijen_groot altijd te klein (min. 3 veldspelers vereist), met en zonder keeper', () => {
+    renderEditor()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    const sizeSelect = screen.getAllByLabelText(nl.oefeningen.teamSize)[0]
+
+    // Categorie is standaard al 'partijen_groot'. Grootte 1, inclusief keeper (default).
+    fireEvent.change(sizeSelect, { target: { value: '1' } })
+    expect(formatiesVoorTeam({ grootte: 1, keeperInGrootte: true }, 'partijen_groot')).toHaveLength(0)
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+
+    // Grootte 1, exclusief keeper.
+    let keeperGroup = screen.getByRole('group', { name: nl.oefeningen.keeperLabel })
+    fireEvent.click(within(keeperGroup).getByRole('button', { name: nl.oefeningen.keeperExcluded }))
+    expect(formatiesVoorTeam({ grootte: 1, keeperInGrootte: false }, 'partijen_groot')).toHaveLength(0)
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+
+    // Grootte 2, nog steeds exclusief keeper (blijft behouden bij grootte-wissel, behalve bij 11).
+    fireEvent.change(sizeSelect, { target: { value: '2' } })
+    expect(formatiesVoorTeam({ grootte: 2, keeperInGrootte: false }, 'partijen_groot')).toHaveLength(0)
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+
+    // Grootte 2, inclusief keeper.
+    keeperGroup = screen.getByRole('group', { name: nl.oefeningen.keeperLabel })
+    fireEvent.click(within(keeperGroup).getByRole('button', { name: nl.oefeningen.keeperIncluded }))
+    expect(formatiesVoorTeam({ grootte: 2, keeperInGrootte: true }, 'partijen_groot')).toHaveLength(0)
+    expect(screen.getByTestId('geen-formaties-0')).toHaveTextContent(nl.oefeningen.noFormationsAvailable)
+  })
+
   it('teamgrootte 10 is nu gewoon bruikbaar (toont formatie-opties)', () => {
     renderEditor()
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))

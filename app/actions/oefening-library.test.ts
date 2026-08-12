@@ -243,10 +243,21 @@ describe('createOefening', () => {
   })
 
   it('faalt bij een ongeldige teamgrootte', async () => {
-    for (const grootte of [2, 12, 0]) {
+    for (const grootte of [0, 12]) {
       use(makeSupabase())
       await expect(createOefening(baseInput({ teams: [{ grootte, formaties: [] }] })))
         .rejects.toThrow('Ongeldige teamgrootte')
+    }
+  })
+
+  it('accepteert grootte 1 en 2 (nieuw: kleine oefenvormen als 1v1/2v2)', async () => {
+    for (const grootte of [1, 2]) {
+      const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+      use(m)
+      await createOefening(baseInput({ teams: [{ grootte, formaties: [] }] }))
+      expect(m.calls.insert[0].payload.teams).toEqual([
+        { grootte, formaties: [], keeperInGrootte: true },
+      ])
     }
   })
 

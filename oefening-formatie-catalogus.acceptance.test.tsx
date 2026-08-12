@@ -333,7 +333,7 @@ describe('AC5/AC6 — categorie-afhankelijke linie-nul-regel (AC6 herzien)', () 
     // Grootte 11 gebruikt de bestaande gecureerde lijst (formationsForSize), niet
     // de generator met de tie-break-regel (zie AC4) — buiten scope van deze regel.
     const generatorGroottes = VALID_TEAM_SIZES.filter((g) => g !== 11)
-    expect(generatorGroottes).toEqual([3, 4, 5, 6, 7, 8, 9, 10])
+    expect(generatorGroottes).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
 
     const vNulGevallen: string[] = []
     for (const grootte of generatorGroottes) {
@@ -602,14 +602,26 @@ describe('AC19 — lege catalogus toont een disabled-status, geen crash en geen 
 })
 
 // ════════════════════════════════════════════════════════════════════════
-// AC20 — Teamgrootte buiten 3-11 geweigerd (10 nu geldig; 2 en 12 nooit).
+// AC20 — Teamgrootte buiten 1-11 geweigerd (1, 2 en 10 zijn geldig; 0 en 12 nooit).
 // ════════════════════════════════════════════════════════════════════════
-describe('AC20 — teamgrootte moet binnen 3-11 vallen', () => {
-  it('grootte 2 en grootte 12 worden geweigerd met "Ongeldige teamgrootte"', async () => {
-    for (const grootte of [2, 12]) {
+describe('AC20 — teamgrootte moet binnen 1-11 vallen', () => {
+  it('grootte 0 en grootte 12 worden geweigerd met "Ongeldige teamgrootte"', async () => {
+    for (const grootte of [0, 12]) {
       use(makeSupabase())
       await expect(createOefening(baseInput({ teams: [{ grootte, formaties: [] }] })))
         .rejects.toThrow('Ongeldige teamgrootte')
+    }
+  })
+
+  it('grootte 1 en grootte 2 zijn geldig (kleine oefenvormen als 1v1/2v2)', async () => {
+    for (const grootte of [1, 2]) {
+      const m = makeSupabase({ tables: { oefeningen: { data: { id: 'x' }, error: null } } })
+      use(m)
+      await expect(createOefening(baseInput({ teams: [{ grootte, formaties: [] }] })))
+        .resolves.toEqual({ id: 'x' })
+      expect(m.calls.insert[0].payload.teams).toEqual([
+        { grootte, formaties: [], keeperInGrootte: true },
+      ])
     }
   })
 

@@ -24,9 +24,13 @@ export const MAX_VERDEDIGERS = 5
 export const MAX_MIDDENVELDERS = 5
 export const MAX_AANVALLERS = 3
 
-// Ondersteunde teamgroottes voor een oefening-team (10 is hier wél geldig, in
-// tegenstelling tot de oude gecureerde FORMATIONS_BY_TEAM_SIZE).
-export const VALID_TEAM_SIZES = [3, 4, 5, 6, 7, 8, 9, 10, 11]
+// Ondersteunde teamgroottes voor een oefening-team. 10 is hier wél geldig, in
+// tegenstelling tot de oude gecureerde FORMATIONS_BY_TEAM_SIZE; 1 en 2 zijn
+// toegevoegd zodat kleine oefenvormen (1v1, 2v2) ook als team gekozen kunnen
+// worden. Let op: bij 1 of 2 spelers is de catalogus soms leeg (bv. grootte 1
+// inclusief keeper = 0 veldspelers, of partijen_groot met minder dan 3
+// veldspelers) — het team wordt dan zonder formatie los getekend.
+export const VALID_TEAM_SIZES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 export type Compositie = { v: number; m: number; a: number }
 
