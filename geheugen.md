@@ -602,7 +602,7 @@ oefening-team weer **één** formatie, maar nu uit een **automatisch gegenereerd
   zelfde importcyclus-reden als eerder bij `normalizeOefeningTeam`): de generator
   (`genereerFormaties`), positie-layout (`layoutPosities`), en de team-brede resolvers
   (`formatiesVoorTeam`, `basisFormatieDef`, `isFormatieGeldigVoorTeam`,
-  `aantalVeldspelers`, `VALID_TEAM_SIZES = [3..11]`). `basisFormatieDef` en
+  `aantalVeldspelers`, `VALID_TEAM_SIZES = [1..11]` sinds 2026-08-12, was `[3..11]`). `basisFormatieDef` en
   `isFormationValidForSize` zijn hierheen VERHUISD uit `lib/types.ts` (niet meer daar
   exporteren).
 - **`FORMATIONS`/`FORMATIONS_BY_TEAM_SIZE`/`formationsForSize` blijven inhoudelijk
@@ -634,14 +634,28 @@ oefening-team weer **één** formatie, maar nu uit een **automatisch gegenereerd
   — de gebruiker koos expliciet voor "geen marker bij exclusief keeper" toen ernaar gevraagd.
 - Tactiekdiagram van gegenereerde formaties toont geen V/M/A-tekstlabel meer op de posities
   (rol is af te lezen uit de positie op het veld); de K-labeling blijft staan.
+- **Teamgrootte 1 en 2 toegevoegd (2026-08-12)**: `VALID_TEAM_SIZES` uitgebreid van
+  `[3..11]` naar `[1..11]` (`lib/formaties.ts:27-33`) — enige productiecode-wijziging,
+  want UI-select, servervalidatie (`lib/oefening.ts:61`) en het diagram-filter
+  (`lib/diagram.ts:104`) lezen allemaal uit deze ene constante. Geen migratie nodig (geen
+  CHECK-constraint op `grootte` in `supabase/*.sql`). Bewust geaccepteerd, niet als bug
+  behandeld: grootte 1 + keeper aan is in élke categorie leeg (0 veldspelers, niet alleen
+  bij `partijen_groot` zoals voorheen grootte 3); grootte 1/2 in `partijen_groot` is altijd
+  leeg (rekenkundig onmogelijk, <3 veldspelers); grootte 1/2 zonder keeper tekent de
+  veldspeler(s) via de bestaande tie-break (`beterDan`) op de verdedigingslijn, niet
+  gecentreerd. `TeamIndelingEditor`/`lib/spelerindeling.ts` werkten al teamgrootte-
+  onafhankelijk (`grootte > 0`), dus neutralen indelen bij grootte 1/2 werkte al zonder
+  wijziging. Acceptatietest: `kleine-teams-1v1-2v2.acceptance.test.tsx` (nieuw, root).
 
 ### UI
 - `components/OefeningEditor.tsx`: single-select chips (verving de multi-toggle + "Alles
   selecteren" volledig), keeper-schakelaar per team (verborgen/geforceerd `true` bij
   grootte 11), teamgrootte-/categorie-/keeper-wissel filtert de bestaande selectie
   stilzwijgend via `isFormatieGeldigVoorTeam` (geen melding, bevestigd door de gebruiker).
-  Lege-catalogus-geval (enige in het hele bereik: grootte 3 + `partijen_groot` + inclusief
-  keeper) toont een disabled-status met de nieuwe key `oefeningen.noFormationsAvailable`
+  Lege-catalogus-gevallen (sinds `VALID_TEAM_SIZES` ook 1 en 2 bevat, niet meer enkel
+  grootte 3 + `partijen_groot` + inclusief keeper: ook élke categorie bij grootte 1 +
+  keeper (0 veldspelers), en grootte 1/2 + `partijen_groot` ongeacht keeper-stand — zie
+  bullet hieronder) tonen een disabled-status met de key `oefeningen.noFormationsAvailable`
   (bewust apart van het bestaande `noFormation`, dat een andere betekenis heeft: "geen
   keuze gemaakt" vs. "geen keuze mogelijk").
 - i18n: `formations`/`selectAllFormations` (van de teruggedraaide feature) verwijderd uit
