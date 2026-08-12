@@ -1141,3 +1141,31 @@ import, rate-limiting, clubkleuren). Bij het committen is expliciet per bestand 
 `git add -A`) om alleen de 25 bestanden van deze feature mee te nemen — controleer bij twijfel
 `git status`/`git diff` op gedeelde bestanden (`schema.sql`, `rls.sql`) vóór je commit als er
 meerdere sessies actief kunnen zijn.
+
+## Feature: Blessure automatisch afwezig bij nieuwe events (2026-08-12)
+Vervolg op afmeldperiodes hierboven — zelfde bugklasse, nu voor `players.injured`. `markInjured`
+paste de blessure alleen toe op events die op dat moment al bestonden; een training/wedstrijd die
+daarna werd aangemaakt terwijl de speler nog geblesseerd was, kreeg gewoon de standaardstatus.
+
+- **Geen migratie, geen UI-wijziging** — `players.injured` en `attendance.injury_set` bestonden
+  al, dit was puur een ontbrekende check op drie plekken.
+- **Nieuwe gedeelde helper `lib/attendance-rows.ts`** (`buildAttendanceRow()`): één bron van
+  waarheid voor `status`/`injury_set`/`absence_period_id` van een NIEUWE attendance-rij —
+  `status = (periodId || injured) ? 'absent' : defaultStatus`. Gebruikt door `createEvent`
+  (`events.ts`), `generateSeasonTrainings` (`settings.ts`) en de backfill
+  (`events/[id]/page.tsx`). Reden voor de helper i.p.v. inline herhalen: dit is exact hoe de vorige
+  bug ontstond (drie plekken die dezelfde regel net iets anders implementeerden).
+  **Vergeet niet:** een vierde plek die nieuwe attendance-rijen aanmaakt, komt er ooit bij een
+  nieuwe feature door — check dan altijd of die ook via `buildAttendanceRow` moet lopen.
+- **Blessure + afmeldperiode mogen tegelijk gelden** op één rij (`injury_set: true` én
+  `absence_period_id: <id>` samen) — bewust, zodat bij het intrekken van de periode de blessure de
+  rij nog steeds op `absent` houdt (bestaand gedrag `revokeAbsencePeriod`, ongewijzigd).
+- **Bewust géén datumvergelijking**: `players.injured` is een boolean zonder periode, dus ook een
+  nieuw event met een datum in het verleden krijgt de blessure mee. Asymmetrisch met
+  `markRecovered`, die alleen toekomstige rijen terugdraait — een zo'n verleden-event blijft dus
+  na herstel permanent `absent` staan (bewust geaccepteerd, niet gefixt).
+- **Bekende, bewust niet meegenomen 4e plek met dezelfde bugklasse:** `app/actions/events-bulk.ts`
+  (bulk-wedstrijden-import, ander-sessie-werk) mist zowel de `injured`- als de periode-check. Trek
+  dit bij een volgende sessie langs `buildAttendanceRow` — let op dat die code bewust niet hard
+  faalt maar een `attendanceFailed`-signaal teruggeeft, dus de aanpak wijkt iets af van de andere
+  drie plekken.
