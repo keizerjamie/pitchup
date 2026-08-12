@@ -89,6 +89,8 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : '19:00'}
         selectedCount={overrides.selectedCount ?? players.length}
         formItems={overrides.formItems ?? []}
+        primaryColor={overrides.primaryColor ?? '#004f3b'}
+        secondaryColor={overrides.secondaryColor ?? '#009966'}
       />
     </DictProvider>,
   )
@@ -394,6 +396,8 @@ describe('Live-update — verzameltijd-wijziging beweegt het print-blok direct m
           kickoffTime="19:00"
           initialGatherTime={null}
           formItems={[]}
+          primaryColor="#004f3b"
+          secondaryColor="#009966"
         />
       </DictProvider>,
     )

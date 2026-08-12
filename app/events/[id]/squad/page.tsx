@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Player } from '@/lib/types'
 import { formatDateLong, todayLocal } from '@/lib/utils'
 import { toMatchFormItems } from '@/lib/match-form'
+import { resolveClubColors } from '@/lib/club-colors'
 import MatchSquadEditor from '@/components/MatchSquadEditor'
 import { getDict } from '@/lib/i18n'
 
@@ -22,7 +23,8 @@ export default async function MatchSquadPage({ params }: Props) {
     supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', user.id),
     supabase.from('players').select('*').eq('team_id', user.id).order('name'),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('settings').select('key, value').eq('team_id', user.id).in('key', ['team_name', 'team_logo_url']),
+    supabase.from('settings').select('key, value').eq('team_id', user.id)
+      .in('key', ['team_name', 'team_logo_url', 'team_color_primary', 'team_color_secondary']),
     // Vorm van de laatste 5 afgeronde wedstrijden (dit event zelf uitgesloten,
     // ongeacht zijn eigen datum) — zelfde order-clausules als de
     // dashboardquery in app/page.tsx, zie het API-contract van de
@@ -59,6 +61,13 @@ export default async function MatchSquadPage({ params }: Props) {
   for (const row of settingsRows ?? []) settingsMap[row.key] = row.value
   const teamName = settingsMap['team_name']?.trim() || null
   const teamLogoUrl = settingsMap['team_logo_url'] || null
+  // Clubkleuren worden hier serverzijdig geresolved (ingestelde waarde óf
+  // fallback), zodat de printweergave altijd kant-en-klare hexstrings krijgt en
+  // nooit zelf hoeft te beslissen wat "niet ingesteld" betekent.
+  // Doorgeven aan MatchSquadEditor als primaryColor={clubColors.primary} /
+  // secondaryColor={clubColors.secondary} doet de frontend-engineer, samen met
+  // de propsdefinitie in dat component (frontend-scope).
+  const clubColors = resolveClubColors(settingsMap)
   const formItems = toMatchFormItems(formRows ?? [])
 
   return (
@@ -88,6 +97,8 @@ export default async function MatchSquadPage({ params }: Props) {
         kickoffTime={event.time}
         initialGatherTime={event.gather_time}
         formItems={formItems}
+        primaryColor={clubColors.primary}
+        secondaryColor={clubColors.secondary}
       />
     </div>
   )

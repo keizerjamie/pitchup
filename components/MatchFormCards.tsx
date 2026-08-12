@@ -70,9 +70,9 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
   ].join(' · ')
 
   return (
-    <div className="mt-6 border-t-4 border-emerald-900 pt-4">
+    <div className="mt-6 border-t-4 pt-4" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
       <div className="flex items-end justify-between gap-2">
-        <p className="font-pdf-display text-sm font-black text-emerald-900">{t.matchSquad.formHeading}</p>
+        <p className="font-pdf-display text-sm font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{t.matchSquad.formHeading}</p>
         {items.length > 0 && (
           <p className="text-xs font-bold uppercase tracking-wide text-gray-500">{summaryText}</p>
         )}

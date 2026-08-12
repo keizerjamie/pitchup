@@ -57,6 +57,8 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
         initialGatherTime={'initialGatherTime' in overrides ? overrides.initialGatherTime ?? null : null}
         formItems={overrides.formItems ?? []}
+        primaryColor={overrides.primaryColor ?? '#004f3b'}
+        secondaryColor={overrides.secondaryColor ?? '#009966'}
       />
     </DictProvider>,
   )

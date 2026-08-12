@@ -467,4 +467,22 @@ body::after {
      (app/events/[id]/lineup/page.tsx, buiten scope van deze wijziging) niet
      wordt meegeraakt. */
   .print-attendance-col.lg\:sticky { position: static !important; }
+
+  /* Clubkleuren-hulpklassen (Clubkleuren-feature): het trainingsplan gebruikt
+     deze op de gedeelde scherm/print-DOM i.p.v. inline style (de
+     wedstrijdselectie-PDF, een print-only blok, krijgt de kleuren wél via
+     inline style met dezelfde CSS-custom-properties, zie
+     MatchSquadPrintList.tsx). Bewust NIET in een `@layer` (dat verliest de
+     cascade-strijd van de Tailwind-utilities hierboven, zie o.a. de
+     `.print-attendance-col`-toelichting hierboven). De CSS-vars zelf worden
+     gezet op de page-root (app/events/[id]/training-plan/page.tsx) en erven
+     naar alle kinderen; de fallback-hex hieronder is dezelfde gecorrigeerde
+     Tailwind v4-waarde als CLUB_COLOR_FALLBACK in lib/club-colors.ts. */
+  .print-club-primary   { color: var(--club-primary, #004f3b) !important; }
+  .print-club-secondary { color: var(--club-secondary, #009966) !important; }
+  .print-club-border    { border-color: var(--club-primary, #004f3b) !important; }
+  .print-club-bg-primary {
+    background: var(--club-primary, #004f3b) !important;
+    color: #ffffff !important;
+  }
 }

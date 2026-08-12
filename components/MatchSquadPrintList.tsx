@@ -21,6 +21,11 @@ interface Props {
   kickoffTime: string | null
   selectedCount: number
   formItems: MatchFormItem[]
+  // Kale strings, geen import van elders (zie de importbeperking hierboven):
+  // al server-side geresolved (ingesteld óf fallback), dus hier geen
+  // fallback-logica of null-checks nodig.
+  primaryColor: string
+  secondaryColor: string
 }
 
 // Print-only presentatie van de wedstrijdselectie (dual-markup-patroon, zie
@@ -46,6 +51,8 @@ export default function MatchSquadPrintList({
   kickoffTime,
   selectedCount,
   formItems,
+  primaryColor,
+  secondaryColor,
 }: Props) {
   const t = useDict()
   const sorted = sortSquadForExport(players, t.browserLocale)
@@ -68,18 +75,18 @@ export default function MatchSquadPrintList({
   const kickoff = formatTime(kickoffTime)
 
   return (
-    <div className="hidden print:block bg-stone-50 text-gray-900">
+    <div className="hidden print:block bg-stone-50 text-gray-900" style={{ '--club-primary': primaryColor, '--club-secondary': secondaryColor } as React.CSSProperties}>
       {/* Kop: logo (alleen als aanwezig, geen placeholder) + teamnaam links, titel rechts */}
-      <div className="flex items-start justify-between gap-4 border-b-4 border-emerald-900 pb-4">
+      <div className="flex items-start justify-between gap-4 border-b-4 pb-4" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
         <div className="flex items-center gap-3">
           {teamLogoUrl && <TeamLogo src={teamLogoUrl} size={40} alt={teamName ?? 'Pitchup'} fallback={null} />}
-          {teamName && <span className="font-pdf-display text-xl font-black text-emerald-900">{teamName}</span>}
+          {teamName && <span className="font-pdf-display text-xl font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{teamName}</span>}
         </div>
-        <span className="font-pdf-display text-xs font-extrabold uppercase tracking-wide text-emerald-600">{t.matchSquad.exportTitle}</span>
+        <span className="font-pdf-display text-xs font-extrabold uppercase tracking-wide" style={{ color: 'var(--club-secondary, #009966)' }}>{t.matchSquad.exportTitle}</span>
       </div>
 
       {/* Datumregel: dagnaam+datum + thuis/uit */}
-      <p className="mt-3 text-[11px] font-extrabold uppercase tracking-wide text-emerald-600">
+      <p className="mt-3 text-[11px] font-extrabold uppercase tracking-wide" style={{ color: 'var(--club-secondary, #009966)' }}>
         {dateLabel}
         {homeAwayLabel && <> · {homeAwayLabel}</>}
       </p>
@@ -98,17 +105,17 @@ export default function MatchSquadPrintList({
           {ownTeamLine ? (
             homeAway === 'away' ? (
               <>
-                <p className="font-pdf-display text-xl font-black text-emerald-900">{opponentLine}</p>
-                <p className="font-pdf-display text-6xl font-black text-emerald-600">{ownTeamLine}</p>
+                <p className="font-pdf-display text-xl font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{opponentLine}</p>
+                <p className="font-pdf-display text-6xl font-black" style={{ color: 'var(--club-secondary, #009966)' }}>{ownTeamLine}</p>
               </>
             ) : (
               <>
-                <p className="font-pdf-display text-6xl font-black text-emerald-600">{ownTeamLine}</p>
-                <p className="font-pdf-display text-xl font-black text-emerald-900">{opponentLine}</p>
+                <p className="font-pdf-display text-6xl font-black" style={{ color: 'var(--club-secondary, #009966)' }}>{ownTeamLine}</p>
+                <p className="font-pdf-display text-xl font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{opponentLine}</p>
               </>
             )
           ) : (
-            <p className="font-pdf-display text-3xl font-black text-emerald-900">{opponentLine}</p>
+            <p className="font-pdf-display text-3xl font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{opponentLine}</p>
           )}
         </div>
       )}
@@ -119,17 +126,17 @@ export default function MatchSquadPrintList({
           wanneer er ook daadwerkelijk twee kolommen zijn (bij één tijd is er
           niets om van te scheiden). */}
       {(gather || kickoff) && (
-        <div className="mt-4 flex divide-x divide-emerald-900 border-t border-b border-emerald-900">
+        <div className="mt-4 flex border-t border-b" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
           {gather && (
-            <div className="flex-1 px-4 py-2">
+            <div className="flex-1 px-4 py-2" style={kickoff ? { borderRight: '1px solid var(--club-primary, #004f3b)' } : undefined}>
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-gray-500">{t.matchSquad.gatherTimeLabel}</p>
-              <p className="text-2xl font-black text-emerald-900">{gather}</p>
+              <p className="text-2xl font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{gather}</p>
             </div>
           )}
           {kickoff && (
             <div className="flex-1 px-4 py-2">
               <p className="text-[11px] font-extrabold uppercase tracking-wide text-gray-500">{t.matchSquad.kickoffTimeLabel}</p>
-              <p className="text-2xl font-black text-emerald-900">{kickoff}</p>
+              <p className="text-2xl font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{kickoff}</p>
             </div>
           )}
         </div>
@@ -137,7 +144,7 @@ export default function MatchSquadPrintList({
 
       {/* Sectiekop + aantal + statisch label — geen tweede statistiek */}
       <div className="mt-5 flex items-end justify-between">
-        <p className="font-pdf-display text-lg font-black text-emerald-900">{t.matchSquad.sectionSelection}</p>
+        <p className="font-pdf-display text-lg font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{t.matchSquad.sectionSelection}</p>
         <p className="text-xs font-bold uppercase tracking-wide text-gray-500">{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
       </div>
 
@@ -160,7 +167,7 @@ export default function MatchSquadPrintList({
       <div className="mt-6 flex items-center border-t border-gray-300 pt-3 text-[11px] text-gray-500">
         <span className="font-semibold">{teamName}</span>
         <span className={teamName ? "font-semibold before:content-['·'] before:mx-1" : 'font-semibold'}>{dateLabel}</span>
-        <span className="ml-auto flex items-center gap-1.5 font-black uppercase tracking-wide text-emerald-600">
+        <span className="ml-auto flex items-center gap-1.5 font-black uppercase tracking-wide" style={{ color: 'var(--club-secondary, #009966)' }}>
           {/* eslint-disable-next-line @next/next/no-img-element -- zie TeamLogo.tsx-kopcomment: dit printbestand gebruikt bewust <img>, geen next/image, om diezelfde print-timing-reden; /logo.png is hier weliswaar lokaal (geen remotePatterns-issue), maar next/image zou dat voordeel bij afdrukken alsnog tenietdoen (async optimizer-ronde) en breekt de consistente <img>-stijl van dit bestand */}
           <img src="/logo.png" alt="Pitchup" className="h-4 w-4 object-contain" />
           {t.matchSquad.footerGenerated}

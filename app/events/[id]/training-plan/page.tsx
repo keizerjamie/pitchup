@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams } from '@/lib/types'
 import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
+import { resolveClubColors } from '@/lib/club-colors'
 import BackButton from '@/components/BackButton'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import AttendanceSummary from '@/components/AttendanceSummary'
@@ -29,15 +30,27 @@ export default async function TrainingPlanPage({ params }: Props) {
   if (!event || event.type !== 'training') notFound()
 
   // ── Attendance overview: who is present / not present for this training ──
-  const [{ data: playersData }, { data: attendanceData }] = await Promise.all([
+  // De settings-query loopt in dezelfde batch mee (geen extra roundtrip) en is
+  // net als de andere queries op team_id gescoped.
+  const [{ data: playersData }, { data: attendanceData }, { data: settingsRows }] = await Promise.all([
     supabase.from('players').select('*').eq('team_id', user.id).eq('active', true)
       .order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
+    supabase.from('settings').select('key, value').eq('team_id', user.id)
+      .in('key', ['team_color_primary', 'team_color_secondary']),
   ])
   const activePlayers: Player[] = playersData ?? []
   const presentIds = new Set((attendanceData ?? []).filter((a) => a.status === 'present').map((a) => a.player_id))
   const presentPlayers = activePlayers.filter((p) => presentIds.has(p.id))
   const absentPlayers = activePlayers.filter((p) => !presentIds.has(p.id))
+
+  // Clubkleuren serverzijdig geresolved (ingestelde waarde óf fallback), zodat
+  // de printweergave altijd kant-en-klare hexstrings krijgt. Het doorgeven aan
+  // de componenten en het toepassen in de DOM (CSS-variabelen/klassen) is
+  // frontend-scope — zie de overdracht bij deze feature.
+  const settingsMap: Record<string, string> = {}
+  for (const row of settingsRows ?? []) settingsMap[row.key] = row.value
+  const clubColors = resolveClubColors(settingsMap)
 
   // ── Find latest meting event before this training ──
   const { data: metingEvents } = await supabase
@@ -97,17 +110,20 @@ export default async function TrainingPlanPage({ params }: Props) {
     : null
 
   return (
-    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6 print:py-0 print:space-y-[3mm]">
+    <div
+      className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6 print:py-0 print:space-y-[3mm]"
+      style={{ '--club-primary': clubColors.primary, '--club-secondary': clubColors.secondary } as React.CSSProperties}
+    >
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 print:border-b-2 print:pb-[1mm] print-club-border">
         <BackButton fallback={`/events/${id}`} className="print:hidden text-gray-400 hover:text-gray-600 flex-shrink-0">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
         <div className="min-w-0 flex-1 print:flex print:items-baseline print:gap-2">
-          <h1 className="text-xl font-bold text-gray-900 print:text-sm">{t.event.trainingPlan}</h1>
-          <p className="text-sm text-gray-500 print:text-xs">{formatDateLong(event.date, t.browserLocale)}</p>
+          <h1 className="text-xl font-bold text-gray-900 print:text-sm print-club-primary">{t.event.trainingPlan}</h1>
+          <p className="text-sm text-gray-500 print:text-xs print-club-secondary">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
         <PrintButton />
       </div>

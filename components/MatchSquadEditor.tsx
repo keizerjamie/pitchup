@@ -29,6 +29,10 @@ interface Props {
   kickoffTime: string | null
   initialGatherTime: string | null
   formItems: MatchFormItem[]
+  // Kale strings, puur doorgegeven aan MatchSquadPrintList — geen state, geen
+  // logica hier.
+  primaryColor: string
+  secondaryColor: string
 }
 
 export default function MatchSquadEditor({
@@ -45,6 +49,8 @@ export default function MatchSquadEditor({
   kickoffTime,
   initialGatherTime,
   formItems,
+  primaryColor,
+  secondaryColor,
 }: Props) {
   const [selected, setSelected] = useState(() => new Set(initialSelectedIds))
   // Zuiver een zichtbaarheidsfilter (zie page.tsx): welke spelers voor dit
@@ -215,6 +221,8 @@ export default function MatchSquadEditor({
         kickoffTime={kickoffTime}
         selectedCount={selected.size}
         formItems={formItems}
+        primaryColor={primaryColor}
+        secondaryColor={secondaryColor}
       />
     </>
   )

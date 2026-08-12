@@ -107,7 +107,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
           bestaande tests, zoals ook bij poolLabel/poolLabelPrint
           (TeamIndelingEditor.tsx). */}
       <div className="hidden print:block print:text-[9px] print:leading-snug">
-        <p className="print:font-bold print:mb-[1mm]">
+        <p className="print:font-bold print:mb-[1mm] print-club-primary">
           {t.event.attendance} ({present.length}/{present.length + absent.length})
         </p>
         {present.length > 0 && (
@@ -119,7 +119,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
         )}
         {absent.length > 0 && (
           <>
-            <p className="print:font-bold print:mt-[2mm] print:mb-[1mm]">
+            <p className="print:font-bold print:mt-[2mm] print:mb-[1mm] print-club-primary">
               {t.event.absentStat} ({absent.length})
             </p>
             <ul>

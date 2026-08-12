@@ -8,6 +8,7 @@ import LanguageSwitcher from '@/components/LanguageSwitcher'
 import DeleteAccountSection from '@/components/DeleteAccountSection'
 import ThemeSelect from '@/components/ThemeSelect'
 import TeamLogoSection from '@/components/TeamLogoSection'
+import ClubColorsSection from '@/components/ClubColorsSection'
 import ImageIcon from '@/components/icons/ImageIcon'
 
 // `icon` accepteert ofwel de naam van een glyph uit het zelf-gehoste,
@@ -77,6 +78,14 @@ export default async function SettingsPage() {
           {/* Club logo */}
           <SectionCard icon={<ImageIcon className="w-5 h-5" />} title={t.settings.logoSection}>
             <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
+          </SectionCard>
+
+          {/* Club colours */}
+          <SectionCard icon="palette" title={t.settings.clubColorsSection}>
+            <ClubColorsSection
+              initialPrimary={settings['team_color_primary'] ?? null}
+              initialSecondary={settings['team_color_secondary'] ?? null}
+            />
           </SectionCard>
 
           {/* Attendance default */}

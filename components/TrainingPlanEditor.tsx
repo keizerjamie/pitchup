@@ -339,7 +339,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                 <div key={k.id} className="print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root">
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                      <span className="w-7 h-7 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted print:w-[4mm] print:h-[4mm] print:text-[8px]">
+                      <span className="w-7 h-7 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted print:w-[4mm] print:h-[4mm] print:text-[8px] print-club-bg-primary">
                         {idx + 1}
                       </span>
                       <div className="print:hidden flex flex-col">
