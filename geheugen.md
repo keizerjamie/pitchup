@@ -1073,3 +1073,71 @@ Post-launch feedback op de net live gegane inzichtenpagina, dezelfde dag verwerk
   `supabase/inzichten.sql` (nu 6 functies, `create or replace` dus veilig opnieuw te draaien)
   opnieuw in de Supabase SQL Editor gedraaid wordt. Elke ontbrekende functie faalt per kaart, nooit
   de hele pagina.
+
+## Feature: Afmeldperiodes (2026-08-12)
+Coach registreert een afwezigheidsperiode voor een speler; die wordt nu automatisch toegepast op
+élk nieuw event binnen die periode (niet alleen op events die al bestonden op het moment van
+registreren) en kan met terugwerkende kracht worden ingetrokken. Gebouwd via de
+feature-factory-keten, 3 validatierondes.
+
+### Datamodel
+- **`absence_periods`** (nieuw): `id, team_id, player_id, from_date, to_date, created_at`. De rij
+  ZELF is de periode — geen `revoked_at` (intrekken = harde delete, geen historie-eis), geen
+  uniciteit op `(player_id, from_date, to_date)` (overlappende periodes zijn bewust toegestaan en
+  werken onafhankelijk van elkaar). Grenzen inclusief. Staat vóór `attendance` in `schema.sql`
+  omdat die tabel ernaar verwijst.
+- **`attendance.absence_period_id`** (nieuw, `UUID NULL REFERENCES absence_periods ON DELETE SET
+  NULL`) — de **herkomst**: welke periode zette deze rij op `absent`? `NULL` = handmatig/blessure/
+  default, blijft bij intrekken altijd met rust. FK i.p.v. boolean (zoals het bestaande
+  `injury_set`-patroon) omdat bij overlappende periodes per rij moet vastliggen WELKE periode hem
+  zette — anders zou intrekken van periode A ook periode B's rijen raken.
+- Migratie: `supabase/absence-periods.sql` (draaien in Supabase SQL Editor vóór deze code effect
+  heeft — zonder de migratie falen alle vier de aangepaste server actions op een onbekende
+  tabel/kolom).
+
+### Waar de periode wordt toegepast (drie plekken, allemaal via `lib/absence-periods.ts`)
+- `createEvent` (`app/actions/events.ts`) — los aangemaakte training/wedstrijd.
+- `generateSeasonTrainings` (`app/actions/settings.ts`) — bulk-seizoensgeneratie; periodequery
+  draait **één keer vóór de lus** (bereik-overlap, niet per event) en matcht op `date`, niet op
+  array-index (PostgREST garandeert geen volgorde-gelijkheid met de insert-batch).
+- Backfill-pad op `app/events/[id]/page.tsx` — vult ontbrekende attendance-rijen aan (bijv. een
+  speler die tijdens event-aanmaak inactief was en later weer actief werd); dit was geen onderdeel
+  van de oorspronkelijke brief maar een tijdens de bouw ontdekte derde plek met hetzelfde gat, met
+  goedkeuring alsnog meegenomen.
+- Pure helpers `coversDate`/`findCoveringPeriod`/`periodIdByPlayerForDate` (`lib/absence-periods.ts`)
+  worden door alle drie én door de client gedeeld — geen losse datumlogica per plek. Overal kale
+  `YYYY-MM-DD`-stringvergelijking, nooit een `Date`-object (tijdzone-veilig, zelfde conventie als
+  de rest van de codebase).
+
+### Intrekken (`revokeAbsencePeriod`, `app/actions/attendance.ts`)
+- Werkt met **terugwerkende kracht**, ook op verstreken events (bewuste afwijking van
+  `markRecovered`, die juist alleen toekomstige events aanpast).
+- Regel voor welke rijen terugvallen naar de team-default: `row.injury_set || row.status !==
+  'absent'`. Dus: een rij die nog steeds `absent` staat (het onaangeroerde resultaat van de
+  periode) valt terug; een rij die de coach ondertussen handmatig naar `present` of `unknown`
+  zette, of die een blessure-markering heeft, blijft ongemoeid — alleen de herkomst
+  (`absence_period_id`) wordt gewist.
+- Bij overlappende periodes: intrekken van periode A draagt de herkomst van een rij over naar
+  periode B als B dezelfde datum nog dekt, in plaats van de rij zomaar terug te zetten.
+- Elke query/write hier is team-gescoped; onbekend/al-ingetrokken/ander-team geven allemaal
+  identiek `'Periode niet gevonden'` (geen info-lek over welk geval het was).
+
+### Frontend
+- `components/PlayerAbsenceList.tsx` — intrekbare periodelijst. State-sync na `router.refresh()`
+  gaat via het **"adjust state during render"-patroon** (precedent: `TeamIndelingEditor.tsx`), niet
+  via een `useEffect` — anders blijft lokale state na een refresh de oude, optimistisch teruggezette
+  waarden tonen (React her-initialiseert `useState` niet vanzelf bij nieuwe props).
+
+### Bewust opengelaten (na 3 validatierondes, klein genoeg om te accepteren)
+- Twee gelijktijdige page-loads van hetzelfde event kunnen de backfill-insert in een zeldzame race
+  op de `UNIQUE(event_id, player_id)`-constraint laten stuiten (23505) — zelfherstellend na een
+  refresh, bewust geen `upsert`/`ignoreDuplicates` van gemaakt.
+- De periode-knop en de intrek-knop blokkeren elkaar niet kruislings tijdens elkaars laadstatus
+  (wel allebei de per-event statusknoppen tijdens hun eigen actie) — randgeval, zelfherstellend.
+
+### Samenwerking met parallelle sessie
+Tijdens deze feature liep er tegelijk een andere sessie in dezelfde werkmap (bulk-wedstrijden-
+import, rate-limiting, clubkleuren). Bij het committen is expliciet per bestand gestaged (geen
+`git add -A`) om alleen de 25 bestanden van deze feature mee te nemen — controleer bij twijfel
+`git status`/`git diff` op gedeelde bestanden (`schema.sql`, `rls.sql`) vóór je commit als er
+meerdere sessies actief kunnen zijn.
