@@ -59,7 +59,7 @@
 //      story, dus dit is niet volledig af te dekken door de bestaande
 //      component-tests in MatchSquadEditor.test.tsx alleen.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -75,6 +75,7 @@ import { FORMATIONS, POSITION_ABBREVIATIONS, POSITION_GROUPS } from '@/lib/types
 import MatchSquadEditor from '@/components/MatchSquadEditor'
 import MatchSquadPrintList from '@/components/MatchSquadPrintList'
 import { sortSquadForExport } from '@/lib/match-squad'
+import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 
 vi.mock('@/app/actions/match-squad', () => ({
   toggleSquadPlayer: vi.fn().mockResolvedValue(undefined),
@@ -240,8 +241,17 @@ type Row = Record<string, unknown>
 // .eq() ooit is aangeroepen. Uitgebreid (deze ronde) met .neq()/.lt()/.in()
 // en `nullsFirst` in .order(), nodig voor de nieuwe vorm-query in
 // app/events/[id]/squad/page.tsx (zie het API-contract, punt 1).
-function tableFactory(rows: Row[]) {
+// `opts` (deze ronde) maakt faalpaden testbaar zonder het bestaande gedrag te
+// raken: `error` laat een select falen ({ data: null, error }), `insertError`
+// een insert, en `onInsert` legt de payload vast zodat een test kan bewijzen
+// dat er bij een fout géén rij is weggeschreven (zelfde bewijsvoering als
+// m.calls.insert in app/actions/events.test.ts:286).
+function tableFactory(
+  rows: Row[],
+  opts: { error?: unknown; insertError?: unknown; onInsert?: (payload: Row[]) => void } = {},
+) {
   return () => {
+    const failure = opts.error ?? null
     const filters: ((r: Row) => boolean)[] = []
     const orders: { col: string; ascending: boolean; nullsFirst: boolean }[] = []
     let limitN: number | null = null
@@ -280,6 +290,17 @@ function tableFactory(rows: Row[]) {
         filters.push((r) => (r[col] as string | number) < (val as string | number))
         return chain
       },
+      // .lte()/.gte() zijn nodig voor de periode-range-query in
+      // app/events/[id]/page.tsx (bevinding 2: backfill-pad respecteert
+      // lopende afmeldperiodes) — zelfde patroon als de bestaande .lt().
+      lte: (col: string, val: unknown) => {
+        filters.push((r) => (r[col] as string | number) <= (val as string | number))
+        return chain
+      },
+      gte: (col: string, val: unknown) => {
+        filters.push((r) => (r[col] as string | number) >= (val as string | number))
+        return chain
+      },
       in: (col: string, vals: unknown[]) => {
         filters.push((r) => vals.includes(r[col]))
         return chain
@@ -292,10 +313,14 @@ function tableFactory(rows: Row[]) {
         limitN = n
         return chain
       },
-      maybeSingle: () => Promise.resolve({ data: resolveRows()[0] ?? null }),
-      single: () => Promise.resolve({ data: resolveRows()[0] ?? null }),
-      insert: () => Promise.resolve({ data: null, error: null }),
-      then: (resolve: (v: { data: Row[] }) => unknown) => resolve({ data: resolveRows() }),
+      maybeSingle: () => Promise.resolve({ data: failure ? null : resolveRows()[0] ?? null, error: failure }),
+      single: () => Promise.resolve({ data: failure ? null : resolveRows()[0] ?? null, error: failure }),
+      insert: (payload: Row[]) => {
+        opts.onInsert?.(payload)
+        return Promise.resolve({ data: null, error: opts.insertError ?? null })
+      },
+      then: (resolve: (v: { data: Row[] | null; error: unknown }) => unknown) =>
+        resolve({ data: failure ? null : resolveRows(), error: failure }),
     }
     return chain
   }
@@ -349,15 +374,29 @@ function makeSupabaseMock(opts: {
   // elke settings-query altijd een lege tabel treffen en kan een ontbrekend
   // team_id-filter in de productiecode nooit zichtbaar worden in een test.
   settings?: Row[]
+  // Nieuw (validator-bevinding 2): de event-detailpagina raadpleegt sinds
+  // deze ronde ook `absence_periods` in het backfill-pad (zie het blok
+  // "Story-AC (bevinding 2)" verderop).
+  absencePeriods?: Row[]
+  // Faalpaden van het backfill-blok (fix-ronde): een falende periodequery
+  // resp. een falende backfill-insert, plus een haak om te bewijzen wát er
+  // (niet) is weggeschreven.
+  absencePeriodsError?: unknown
+  attendanceInsertError?: unknown
+  onAttendanceInsert?: (payload: Row[]) => void
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const factories: Record<string, () => unknown> = {
     events: tableFactory(opts.events ?? []),
     players: tableFactory(opts.players ?? []),
     match_squad: tableFactory(opts.squad ?? []),
-    attendance: tableFactory(opts.attendance ?? []),
+    attendance: tableFactory(opts.attendance ?? [], {
+      insertError: opts.attendanceInsertError,
+      onInsert: opts.onAttendanceInsert,
+    }),
     lineups: tableFactory(opts.lineups ?? []),
     settings: tableFactory(opts.settings ?? []),
+    absence_periods: tableFactory(opts.absencePeriods ?? [], { error: opts.absencePeriodsError }),
     metingen: tableFactory([]),
     training_oefeningen: tableFactory([]),
     match_ratings: tableFactory([]),
@@ -1435,5 +1474,208 @@ describe('Aanwezigheidsfilter — inactieve, wél-aanwezige maar NIET-geselectee
     // p1 is inactief: ondanks een present-attendance-rij en zonder
     // al-geselecteerd te zijn, hoort hij uitgesloten te blijven.
     expect(screen.queryByText('Inactief Maar Aanwezig')).not.toBeInTheDocument()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Story-AC (bevinding 2, validator) — het backfill-pad op de
+// event-detailpagina (app/events/[id]/page.tsx:93-99) vult een ontbrekende
+// attendance-rij niet langer blind met 'unknown', maar raadpleegt
+// absence_periods: valt de event-datum binnen een lopende periode van de
+// speler, dan wordt de rij op 'absent' gezet (met absence_period_id) —
+// exact hetzelfde gedrag als createEvent (app/actions/events.ts:70-99) en
+// generateSeasonTrainings (app/actions/settings.ts:158-190). Scenario: een
+// speler wordt afgemeld voor een periode terwijl hij inactief is (of het
+// event wordt aangemaakt terwijl de speler inactief is), createEvent maakt
+// dan geen attendance-rij aan (active=true-filter), de speler wordt weer
+// actief, en de coach opent de eventpagina — de ontbrekende rij moet dan
+// alsnog 'absent' worden, niet 'unknown'.
+// ═══════════════════════════════════════════════════════════════════════
+// "Afwezig" komt zowel in de stat-kaart als in het label van elke
+// StatusButton voor (zelfde dubbele-tekst-valkuil als hierboven beschreven,
+// zie messages/nl.ts) — filter daarom op de DIV van de stat-kaart, niet op
+// de SPAN van de knop.
+function absentStatValue(): HTMLElement {
+  const label = screen.getAllByText(nl.event.absentStat).find((el) => el.tagName === 'DIV')!
+  return label.nextElementSibling as HTMLElement
+}
+
+function absencePeriodRow(overrides: Row = {}): Row {
+  return {
+    id: 'period-1',
+    team_id: TEAM,
+    player_id: 'p1',
+    from_date: '2026-08-01',
+    to_date: '2026-08-31',
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+describe('Story-AC (bevinding 2) — backfill van een ontbrekende attendance-rij respecteert een lopende afmeldperiode', () => {
+  it('vult de ontbrekende rij met status "absent" wanneer de event-datum binnen een lopende periode van de speler valt', async () => {
+    const player = playerRow({ id: 'p1', name: 'Terug Actief', active: true })
+    const event = matchEventRow({ id: 'e1', type: 'training', date: '2026-08-15', match_type: null, opponent: null, home_away: null })
+    await renderEventPage({
+      events: [event],
+      players: [player],
+      attendance: [], // geen rij voor p1 — createEvent sloeg hem over toen hij nog inactief was
+      absencePeriods: [absencePeriodRow({ player_id: 'p1', from_date: '2026-08-01', to_date: '2026-08-31' })],
+    })
+
+    const row = screen.getByText('Terug Actief').closest('div')!.parentElement as HTMLElement
+    expect(within(row).getByRole('button', { name: new RegExp(nl.event.absentStat) })).toHaveAttribute('aria-pressed', 'true')
+
+    // De stat-kaart "Afwezig" telt 1, niet "Onbekend".
+    expect(absentStatValue()).toHaveTextContent('1')
+    const unknownStatValue = screen.getByText(nl.event.unknownStat).closest('div')!.nextElementSibling as HTMLElement
+    expect(unknownStatValue).toHaveTextContent('0')
+  })
+
+  it('vult de ontbrekende rij met status "unknown" wanneer er géén lopende periode is — geen regressie', async () => {
+    const player = playerRow({ id: 'p1', name: 'Geen Periode', active: true })
+    const event = matchEventRow({ id: 'e1', type: 'training', date: '2026-08-15', match_type: null, opponent: null, home_away: null })
+    await renderEventPage({
+      events: [event],
+      players: [player],
+      attendance: [],
+      absencePeriods: [],
+    })
+
+    const row = screen.getByText('Geen Periode').closest('div')!.parentElement as HTMLElement
+    expect(within(row).getByRole('button', { name: new RegExp(nl.event.absentStat) })).toHaveAttribute('aria-pressed', 'false')
+
+    const unknownStatValue = screen.getByText(nl.event.unknownStat).closest('div')!.nextElementSibling as HTMLElement
+    expect(unknownStatValue).toHaveTextContent('1')
+    expect(absentStatValue()).toHaveTextContent('0')
+  })
+
+  it('vult de rij ook met "unknown" wanneer de periode van een ANDER team dezelfde speler/datum dekt (tenant-isolatie)', async () => {
+    const player = playerRow({ id: 'p1', name: 'Ander Team Periode', active: true })
+    const event = matchEventRow({ id: 'e1', type: 'training', date: '2026-08-15', match_type: null, opponent: null, home_away: null })
+    await renderEventPage({
+      events: [event],
+      players: [player],
+      attendance: [],
+      absencePeriods: [absencePeriodRow({ team_id: OTHER_TEAM, player_id: 'p1', from_date: '2026-08-01', to_date: '2026-08-31' })],
+    })
+
+    const row = screen.getByText('Ander Team Periode').closest('div')!.parentElement as HTMLElement
+    expect(within(row).getByRole('button', { name: new RegExp(nl.event.absentStat) })).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Fix-ronde (bevinding: stille fout in de backfill) — faalt de periodequery
+// of de backfill-insert zelf, dan mag de pagina NIET half doorlopen. Zonder
+// deze checks levert een gefaalde periodequery `periods === null` op en zou
+// een speler die wél binnen een lopende periode valt permanent op 'unknown'
+// worden weggeschreven (het is een insert, geen render). De pagina faalt
+// daarom hard met de generieke melding, net als de twee zusterplekken met
+// exact dezelfde logica: app/actions/events.ts:82 en
+// app/actions/settings.ts:171 (zie ook de faalpad-test in
+// app/actions/events.test.ts:276).
+// ═══════════════════════════════════════════════════════════════════════
+describe('Fix — backfill schrijft niets weg als de periodequery of de insert faalt', () => {
+  const player = playerRow({ id: 'p1', name: 'Binnen Periode', active: true })
+  const trainingEvent = matchEventRow({
+    id: 'e1', type: 'training', date: '2026-08-15', match_type: null, opponent: null, home_away: null,
+  })
+  const dekkendePeriode = absencePeriodRow({ player_id: 'p1', from_date: '2026-08-01', to_date: '2026-08-31' })
+
+  let consoleError: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    consoleError.mockRestore()
+  })
+
+  function logged() {
+    return consoleError.mock.calls.map((args: unknown[]) => args.join(' ')).join('\n')
+  }
+
+  function mountEventPage(opts: Parameters<typeof makeSupabaseMock>[0] = {}) {
+    const inserts: Row[][] = []
+    vi.mocked(createClient).mockResolvedValue(
+      makeSupabaseMock({
+        ...opts,
+        onAttendanceInsert: (payload) => inserts.push(payload),
+      }) as unknown as Awaited<ReturnType<typeof createClient>>,
+    )
+    return { inserts, render: () => EventDetailPage({ params: Promise.resolve({ id: 'e1' }) }) }
+  }
+
+  it('faalt de periodequery, dan wordt er GEEN attendance-rij weggeschreven (dus ook geen foute "unknown" voor een speler binnen een periode)', async () => {
+    const { inserts, render: renderPage } = mountEventPage({
+      events: [trainingEvent],
+      players: [player],
+      attendance: [],
+      absencePeriods: [dekkendePeriode],
+      absencePeriodsError: { code: '42501', message: 'permission denied for table absence_periods' },
+    })
+
+    await expect(renderPage()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    // Kern van de bevinding: zonder de errorcheck zou hier precies één insert
+    // staan met status 'unknown' en absence_period_id null — permanent fout,
+    // terwijl de speler binnen dekkendePeriode valt.
+    expect(inserts).toEqual([])
+  })
+
+  it('logt bij een gefaalde periodequery alleen context + foutcode, nooit de ruwe databasemelding', async () => {
+    const { render: renderPage } = mountEventPage({
+      events: [trainingEvent],
+      players: [player],
+      attendance: [],
+      absencePeriods: [dekkendePeriode],
+      absencePeriodsError: { code: '42501', message: 'permission denied for table absence_periods' },
+    })
+
+    await expect(renderPage()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('eventDetail.backfill.periods')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
+  })
+
+  it('faalt de backfill-insert zelf, dan rendert de pagina niet alsof de rijen bestaan', async () => {
+    const { inserts, render: renderPage } = mountEventPage({
+      events: [trainingEvent],
+      players: [player],
+      attendance: [],
+      absencePeriods: [dekkendePeriode],
+      attendanceInsertError: { code: '23503', message: 'insert or update on table "attendance" violates foreign key constraint' },
+    })
+
+    await expect(renderPage()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    // De insert is wél geprobeerd (met de juiste inhoud), maar mislukte — de
+    // pagina mag die statussen dan niet als feit tonen.
+    expect(inserts).toHaveLength(1)
+    expect(logged()).toContain('eventDetail.backfill.attendance')
+    expect(logged()).toContain('23503')
+    expect(logged()).not.toContain('foreign key constraint')
+  })
+
+  it('contrast: zonder fout schrijft dezelfde situatie wél "absent" met de periode-herkomst weg', async () => {
+    const { inserts, render: renderPage } = mountEventPage({
+      events: [trainingEvent],
+      players: [player],
+      attendance: [],
+      absencePeriods: [dekkendePeriode],
+    })
+
+    await renderPage()
+
+    expect(inserts).toEqual([[{
+      event_id: 'e1',
+      player_id: 'p1',
+      status: 'absent',
+      team_id: TEAM,
+      absence_period_id: 'period-1',
+    }]])
   })
 })

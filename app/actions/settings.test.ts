@@ -23,6 +23,7 @@ function makeSupabase(opts: {
   const tables = opts.tables ?? {}
   type Filter = { op: string; col: string; val: unknown }
   const calls = {
+    select: [] as { table: string; filters: Filter[] }[],
     insert: [] as { table: string; payload: unknown }[],
     upsert: [] as { table: string; payload: unknown }[],
     delete: [] as { table: string; filters: Filter[] }[],
@@ -32,7 +33,9 @@ function makeSupabase(opts: {
     const result = tables[table] ?? { data: [], error: null }
     const filters: Filter[] = []
     const c: Record<string, unknown> = {}
-    c.select = () => c
+    c.select = () => { calls.select.push({ table, filters }); return c }
+    // Sortering van de afmeldperiode-query: alleen doorgeven, niet vastleggen.
+    c.order = () => c
     for (const op of ['eq', 'gte', 'lte', 'gt', 'lt', 'in']) {
       c[op] = (col: string, val: unknown) => { filters.push({ op, col, val }); return c }
     }
@@ -283,8 +286,10 @@ describe('generateSeasonTrainings', () => {
   })
 
   it('maakt de aanwezigheidsrijen team-gescoped aan', async () => {
+    // `date` hoort erbij: de code haalt hem op met .select('id, date') om de
+    // afmeldperiodes op datum te kunnen matchen.
     const m = metSeizoen({
-      events: { data: [{ id: 'e1' }], error: null },
+      events: { data: [{ id: 'e1', date: '2026-01-12' }], error: null },
       players: { data: [{ id: 'p1' }, { id: 'p2' }], error: null },
     })
     gebruikSupabase(m)
@@ -367,6 +372,127 @@ describe('generateSeasonTrainings', () => {
     }))
 
     await expect(generateSeasonTrainings()).rejects.toThrow(`maximaal ${MAX_SEASON_DAYS} dagen`)
+  })
+})
+
+// ────────────────────────────────────────────────
+// generateSeasonTrainings — afmeldperiode
+// ────────────────────────────────────────────────
+
+describe('generateSeasonTrainings — afmeldperiode', () => {
+  // Let op: de events-fixture doet in deze mock dubbel dienst — hij is zowel het
+  // antwoord op "welke trainingen bestaan al" als op de insert-select. De datums
+  // hieronder zijn dus tegelijk de reeds bestaande én de teruggegeven rijen.
+  function metPeriodes(
+    events: { id: string; date: string }[],
+    periods: unknown[],
+    extra: Record<string, TableResult> = {},
+  ) {
+    return metSeizoen({
+      events: { data: events, error: null },
+      players: { data: [{ id: 'p1' }, { id: 'p2' }], error: null },
+      absence_periods: { data: periods, error: null },
+      ...extra,
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
+  }
+
+  it('zet een speler met een dekkende periode op absent en de rest op de standaardstatus', async () => {
+    const m = metPeriodes(
+      [{ id: 'e1', date: '2026-01-12' }],
+      [{ id: 'ap-1', player_id: 'p1', from_date: '2026-01-10', to_date: '2026-01-20' }],
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: 'ap-1' },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+    ])
+  })
+
+  it('differentieert per event: alleen de training binnen de periode wordt absent', async () => {
+    // Bewijs dat er op DATUM gematcht wordt en niet op array-index: de
+    // teruggegeven rijen (05 en 26 januari) hebben andere datums dan de batch
+    // die wordt ingevoegd (12 en 19 januari).
+    const m = metPeriodes(
+      [{ id: 'e1', date: '2026-01-05' }, { id: 'e2', date: '2026-01-26' }],
+      [{ id: 'ap-1', player_id: 'p1', from_date: '2026-01-01', to_date: '2026-01-06' }],
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    const rows = attendanceRows(m)
+    expect(rows.filter((r) => r.event_id === 'e1')).toEqual([
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: 'ap-1' },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+    ])
+    for (const row of rows.filter((r) => r.event_id === 'e2')) {
+      expect(row.status).toBe('present')
+      expect(row.absence_period_id).toBeNull()
+    }
+  })
+
+  it('telt de grensdatums van de periode mee', async () => {
+    const m = metPeriodes(
+      [{ id: 'e1', date: '2026-01-12' }],
+      [{ id: 'ap-1', player_id: 'p1', from_date: '2026-01-12', to_date: '2026-01-12' }],
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    expect(attendanceRows(m)[0]).toMatchObject({ status: 'absent', absence_period_id: 'ap-1' })
+  })
+
+  it('geeft elke rij dezelfde sleutels, ook zonder enige periode', async () => {
+    // PostgREST weigert een bulk-insert met afwijkende kolommen per object.
+    const m = metPeriodes([{ id: 'e1', date: '2026-01-12' }], [])
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    for (const row of attendanceRows(m)) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
+      )
+      expect(row.absence_period_id).toBeNull()
+    }
+  })
+
+  it('haalt de periodes één keer op, niet per event, met een bereik-overlap op het seizoen', async () => {
+    const m = metPeriodes(
+      [{ id: 'e1', date: '2026-01-05' }, { id: 'e2', date: '2026-01-12' }],
+      [{ id: 'ap-1', player_id: 'p1', from_date: '2026-01-01', to_date: '2026-01-06' }],
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    const periodSelects = m.calls.select.filter((s) => s.table === 'absence_periods')
+    expect(periodSelects).toHaveLength(1)
+    expect(periodSelects[0].filters).toEqual([
+      { op: 'eq', col: 'team_id', val: 'team-1' },
+      { op: 'lte', col: 'from_date', val: '2026-01-31' },
+      { op: 'gte', col: 'to_date', val: '2026-01-01' },
+    ])
+  })
+
+  it('faalt zichtbaar (en generiek) als de periodequery mislukt', async () => {
+    gebruikSupabase(metPeriodes([{ id: 'e1', date: '2026-01-12' }], [], {
+      absence_periods: { data: null, error: { code: '42501', message: 'permission denied for table absence_periods' } },
+    }))
+
+    await expect(generateSeasonTrainings()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('settings.generateSeasonTrainings.periods')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
   })
 })
 

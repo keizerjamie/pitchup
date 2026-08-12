@@ -40,6 +40,11 @@ function makeSupabase(opts: {
     const c: Record<string, unknown> = {}
     c.select = () => { calls.select.push({ table, eqs }); return c }
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // Datumfilters en sortering van de afmeldperiode-query: alleen doorgeven,
+    // niet vastleggen — de eq-lijst blijft zo de tenant-check.
+    c.gte = () => c
+    c.lte = () => c
+    c.order = () => c
     c.insert = (payload: unknown) => { calls.insert.push({ table, payload }); return c }
     c.update = (payload: Record<string, unknown>) => {
       calls.update.push({ table, payload, eqs })
@@ -167,6 +172,121 @@ describe('createEvent — verzameltijd', () => {
     await expect(createEvent(form({ ...WEDSTRIJD, gather_time: '25:00' })))
       .rejects.toThrow('Ongeldig tijdstip')
     expect(m.calls.insert).toHaveLength(0)
+  })
+})
+
+// ────────────────────────────────────────────────
+// createEvent — afmeldperiode
+// ────────────────────────────────────────────────
+
+describe('createEvent — afmeldperiode', () => {
+  const PLAYER_A = 'p1'
+  const PLAYER_B = 'p2'
+  const PERIOD_1 = 'ap-1'
+
+  // Speler A zit in een periode die de eventdatum dekt, speler B niet.
+  function metPeriode(periods: unknown[], extra: Record<string, TableResult> = {}) {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: 'e1', type: 'match' }, error: null },
+        players: { data: [{ id: PLAYER_A }, { id: PLAYER_B }], error: null },
+        attendance: { data: null, error: null },
+        absence_periods: { data: periods, error: null },
+        ...extra,
+      },
+    })
+  }
+
+  const LOPENDE_PERIODE = [
+    { id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-09-01', to_date: '2026-09-30' },
+  ]
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
+  }
+
+  it('zet een speler met een lopende periode op absent en de rest op de standaardstatus', async () => {
+    const m = metPeriode(LOPENDE_PERIODE)
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
+    ])
+  })
+
+  it('doet hetzelfde voor een wedstrijd', async () => {
+    const m = metPeriode([
+      { id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-09-12', to_date: '2026-09-12' },
+    ])
+    use(m)
+
+    await expect(createEvent(form(WEDSTRIJD))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
+    ])
+  })
+
+  it('geeft elke rij dezelfde sleutels, ook zonder enige periode', async () => {
+    // PostgREST weigert een bulk-insert waarin de objecten verschillende
+    // kolommen hebben; absence_period_id moet dus altijd mee.
+    const m = metPeriode([])
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    for (const row of attendanceRows(m)) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
+      )
+      expect(row.status).toBe('present')
+      expect(row.absence_period_id).toBeNull()
+    }
+  })
+
+  it('laat een periode die de datum net niet dekt ongemoeid', async () => {
+    const m = metPeriode([
+      { id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-09-01', to_date: '2026-09-09' },
+    ])
+    use(m)
+
+    // TRAINING is op 2026-09-10, één dag na het einde van de periode.
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    for (const row of attendanceRows(m)) {
+      expect(row.status).toBe('present')
+      expect(row.absence_period_id).toBeNull()
+    }
+  })
+
+  it('haalt de periodes team-gescoped op', async () => {
+    const m = metPeriode(LOPENDE_PERIODE)
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    const periodSelect = m.calls.select.find((s) => s.table === 'absence_periods')!
+    expect(periodSelect.eqs).toEqual([{ col: 'team_id', val: 'team-1' }])
+  })
+
+  it('geeft een generieke melding bij een databasefout op de periodequery', async () => {
+    const m = metPeriode([], {
+      absence_periods: { data: null, error: { code: '42501', message: 'permission denied for table absence_periods' } },
+    })
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    // Bewust géén aanwezigheidsrijen met de standaardstatus: dan zou een
+    // afgemelde speler stilzwijgend als aanwezig in de lijst staan.
+    expect(m.calls.insert.find((i) => i.table === 'attendance')).toBeUndefined()
+    expect(logged()).toContain('events.createEvent.periods')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
   })
 })
 

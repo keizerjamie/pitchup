@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Afmeldperiodes per speler — zie absence-periods.sql. De rij ZELF is de
+-- periode: zolang hij bestaat, krijgt elk nieuw event binnen [from_date,
+-- to_date] voor deze speler automatisch status 'absent'. Grenzen zijn
+-- INCLUSIEF; overlappende periodes zijn bewust toegestaan (geen unieke
+-- constraint). Staat vóór attendance omdat die tabel ernaar verwijst.
+CREATE TABLE IF NOT EXISTS absence_periods (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL,
+  player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  from_date DATE NOT NULL,
+  to_date DATE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT absence_periods_range CHECK (from_date <= to_date)
+);
+
 CREATE TABLE IF NOT EXISTS attendance (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   team_id UUID NOT NULL,
@@ -54,6 +69,11 @@ CREATE TABLE IF NOT EXISTS attendance (
   player_id UUID REFERENCES players(id) ON DELETE CASCADE NOT NULL,
   status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('present', 'absent', 'unknown')),
   injury_set BOOLEAN NOT NULL DEFAULT false,
+  -- Herkomst van een absent-status: welke afmeldperiode zette deze rij? NULL =
+  -- handmatig/blessure/default en blijft bij het intrekken van een periode
+  -- ongemoeid. FK i.p.v. boolean omdat bij overlappende periodes per rij moet
+  -- vastliggen WELKE periode hem zette.
+  absence_period_id UUID REFERENCES absence_periods(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(event_id, player_id)
 );
@@ -116,6 +136,10 @@ CREATE INDEX IF NOT EXISTS idx_events_date ON events(date DESC);
 CREATE INDEX IF NOT EXISTS idx_events_team ON events(team_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_event ON attendance(event_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_player ON attendance(player_id);
+CREATE INDEX IF NOT EXISTS idx_attendance_absence_period ON attendance(absence_period_id);
+CREATE INDEX IF NOT EXISTS idx_absence_periods_team   ON absence_periods(team_id);
+CREATE INDEX IF NOT EXISTS idx_absence_periods_player ON absence_periods(player_id);
+CREATE INDEX IF NOT EXISTS idx_absence_periods_dates  ON absence_periods(from_date, to_date);
 CREATE INDEX IF NOT EXISTS idx_players_active ON players(active);
 CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);
 CREATE INDEX IF NOT EXISTS idx_match_ratings_event ON match_ratings(event_id);
@@ -155,6 +179,7 @@ on conflict (id) do update
 ALTER TABLE players ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE absence_periods ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lineups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_ratings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE match_events ENABLE ROW LEVEL SECURITY;

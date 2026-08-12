@@ -6,6 +6,7 @@ import { Position, POSITIONS, AttendanceStatus } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { todayLocal } from '@/lib/utils'
 import { genericError } from '@/lib/errors'
+import { assertOwnPlayer } from '@/lib/authz'
 
 function validatePlayerInput(formData: FormData) {
   const name = (formData.get('name') as string | null)?.trim() ?? ''
@@ -86,27 +87,12 @@ export async function deletePlayer(id: string) {
   revalidatePath('/players')
 }
 
-// Guard tegen callers die een id van een ander team meegeven: RLS houdt de data
-// onzichtbaar, maar de UNIQUE(event_id, player_id)-constraint zou een forged
-// insert alsnog de eigen writes van het bezittende team kunnen laten blokkeren.
-// Spiegelt assertOwnPlayer uit app/actions/attendance.ts:16-19.
-async function assertOwnPlayer(playerId: string, teamId: string) {
-  const supabase = await createClient()
-  const { data } = await supabase
-    .from('players')
-    .select('id')
-    .eq('id', playerId)
-    .eq('team_id', teamId)
-    .maybeSingle()
-  if (!data) throw new Error('Speler niet gevonden')
-}
-
 export async function markInjured(playerId: string): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  await assertOwnPlayer(playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, user.id)
 
   const today = todayLocal()
 
@@ -169,7 +155,7 @@ export async function markRecovered(playerId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  await assertOwnPlayer(playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, user.id)
 
   const today = todayLocal()
 
@@ -187,7 +173,10 @@ export async function markRecovered(playerId: string): Promise<void> {
 
     // a. Nog-afwezige, door-blessure-gezette TOEKOMSTIGE rijen terug naar default.
     //    Bewust future-only + status='absent': verleden-historie en handmatige
-    //    afwezigheden blijven ongemoeid.
+    //    afwezigheden blijven ongemoeid. Ook rijen die aan een lopende
+    //    afmeldperiode hangen blijven staan (.is('absence_period_id', null)):
+    //    hersteld van een blessure zijn is geen reden om een afmelding op te
+    //    heffen — die wordt via revokeAbsencePeriod ingetrokken.
     const { error: restoreError } = await supabase
       .from('attendance')
       .update({ status: defaultStatus, injury_set: false })
@@ -195,6 +184,7 @@ export async function markRecovered(playerId: string): Promise<void> {
       .eq('player_id', playerId)
       .eq('injury_set', true)
       .eq('status', 'absent')
+      .is('absence_period_id', null)
       .in('event_id', futureEventIds)
     if (restoreError) throw genericError('players.markRecovered.restore', restoreError)
   }

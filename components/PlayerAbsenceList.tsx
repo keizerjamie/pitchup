@@ -1,18 +1,28 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { updateAttendance, markAbsentForPeriod } from '@/app/actions/attendance'
-import { AttendanceStatus, FootballEvent } from '@/lib/types'
-import { formatTime } from '@/lib/utils'
+import { useRouter } from 'next/navigation'
+import { updateAttendance, markAbsentForPeriod, revokeAbsencePeriod } from '@/app/actions/attendance'
+import { AttendanceStatus, FootballEvent, AbsencePeriod } from '@/lib/types'
+import { formatDate, formatTime } from '@/lib/utils'
+import { findCoveringPeriod } from '@/lib/absence-periods'
 import { useDict } from '@/lib/i18n-context'
 
 interface EventWithStatus extends FootballEvent {
   status: AttendanceStatus
 }
 
+// Alleen de velden die deze pagina's query daadwerkelijk selecteert
+// (app/players/[id]/absence/page.tsx). player_id zit erbij omdat de gedeelde
+// helpers uit lib/absence-periods.ts (findCoveringPeriod) dat veld vereisen;
+// created_at is hier nooit nodig en wordt bewust niet opgehaald.
+type PeriodRange = Pick<AbsencePeriod, 'id' | 'player_id' | 'from_date' | 'to_date'>
+
 interface Props {
   playerId: string
   events: EventWithStatus[]
+  periods: PeriodRange[]
+  defaultStatus: 'present' | 'unknown'
 }
 
 function todayStr() {
@@ -20,15 +30,36 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function PlayerAbsenceList({ playerId, events: initialEvents }: Props) {
+export default function PlayerAbsenceList({ playerId, events: initialEvents, periods: initialPeriods, defaultStatus }: Props) {
   const [events, setEvents] = useState(initialEvents)
+  const [periods, setPeriods] = useState(initialPeriods)
   const [, startTransition] = useTransition()
   const [isPeriodPending, startPeriodTransition] = useTransition()
+  const [isRevokePending, startRevokeTransition] = useTransition()
   const t = useDict()
+  const router = useRouter()
 
   const [fromDate, setFromDate] = useState(todayStr)
   const [toDate, setToDate] = useState('')
   const [periodResult, setPeriodResult] = useState<number | null>(null)
+  const [periodError, setPeriodError] = useState<string | null>(null)
+  const [revokeError, setRevokeError] = useState<string | null>(null)
+
+  // Sync wanneer de server (na router.refresh()) nieuwe props stuurt — zelfde
+  // "adjust state during render"-patroon als components/TeamIndelingEditor.tsx
+  // (i.p.v. een cascaderende useEffect). Een `useState`-initializer draait
+  // niet opnieuw zolang deze component niet remount, dus zonder deze sync
+  // blijft de lokale (optimistisch teruggezette) state hangen na revoke.
+  const [prevInitialEvents, setPrevInitialEvents] = useState(initialEvents)
+  if (prevInitialEvents !== initialEvents) {
+    setPrevInitialEvents(initialEvents)
+    setEvents(initialEvents)
+  }
+  const [prevInitialPeriods, setPrevInitialPeriods] = useState(initialPeriods)
+  if (prevInitialPeriods !== initialPeriods) {
+    setPrevInitialPeriods(initialPeriods)
+    setPeriods(initialPeriods)
+  }
 
   function setStatus(eventId: string, next: AttendanceStatus) {
     setEvents((prev) =>
@@ -41,15 +72,56 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents }: P
 
   function handlePeriodAbsence() {
     if (!fromDate || !toDate || fromDate > toDate) return
-    const affected = events.filter((e) => e.date >= fromDate && e.date <= toDate).length
+    setPeriodError(null)
+    setPeriodResult(null)
+    const previousEvents = events
+    // Optimistische eerste-orde-benadering: de definitieve teller komt uit de
+    // `affected`-waarde van de server (zie hieronder) — die telt ook events
+    // buiten deze lokaal geladen (toekomstige) lijst mee.
     setEvents((prev) =>
       prev.map((e) =>
         e.date >= fromDate && e.date <= toDate ? { ...e, status: 'absent' as AttendanceStatus } : e
       )
     )
-    setPeriodResult(affected)
     startPeriodTransition(async () => {
-      await markAbsentForPeriod(playerId, fromDate, toDate)
+      try {
+        const { periodId, affected } = await markAbsentForPeriod(playerId, fromDate, toDate)
+        setPeriods((prev) => [...prev, { id: periodId, player_id: playerId, from_date: fromDate, to_date: toDate }])
+        setPeriodResult(affected)
+      } catch (err) {
+        setEvents(previousEvents)
+        setPeriodError(err instanceof Error ? err.message : t.players.periodError)
+      }
+    })
+  }
+
+  function handleRevoke(periodId: string) {
+    const revoked = periods.find((p) => p.id === periodId)
+    if (!revoked) return
+    setRevokeError(null)
+    const previousPeriods = periods
+    const previousEvents = events
+    const remaining = periods.filter((p) => p.id !== periodId)
+    setPeriods(remaining)
+    setEvents((prev) =>
+      prev.map((e) => {
+        if (e.date < revoked.from_date || e.date > revoked.to_date) return e
+        const stillCovered = findCoveringPeriod(remaining, e.date)
+        return { ...e, status: stillCovered ? ('absent' as AttendanceStatus) : (defaultStatus as AttendanceStatus) }
+      })
+    )
+    startRevokeTransition(async () => {
+      try {
+        await revokeAbsencePeriod(periodId)
+        // De server houdt handmatige en blessure-rijen bewust op 'absent';
+        // de optimistische update hierboven kent dat onderscheid niet. Een
+        // refresh haalt de definitieve serverstaat op.
+        router.refresh()
+      } catch (err) {
+        setPeriods(previousPeriods)
+        setEvents(previousEvents)
+        setRevokeError(err instanceof Error ? err.message : t.players.periodRevokeError)
+      }
     })
   }
 
@@ -84,7 +156,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents }: P
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => { setFromDate(e.target.value); setPeriodResult(null) }}
+                onChange={(e) => { setFromDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
                 className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
               />
             </div>
@@ -94,7 +166,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents }: P
                 type="date"
                 value={toDate}
                 min={fromDate}
-                onChange={(e) => { setToDate(e.target.value); setPeriodResult(null) }}
+                onChange={(e) => { setToDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
                 className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
               />
             </div>
@@ -114,6 +186,44 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents }: P
                 ? t.players.periodNone
                 : `${periodResult} ${t.players.periodSuccess}`}
             </p>
+          )}
+
+          {periodError && !isPeriodPending && (
+            <div className="bg-red-100 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{periodError}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Period list */}
+      <div className="rounded-2xl border border-gray-100 overflow-hidden">
+        <div className="bg-gray-50 px-4 pt-4 pb-3 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-800 text-sm">{t.players.periodListTitle}</h3>
+        </div>
+        <div className="px-4 py-4 bg-white space-y-3">
+          {revokeError && !isRevokePending && (
+            <div className="bg-red-100 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{revokeError}</div>
+          )}
+          {periods.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center">{t.players.periodListEmpty}</p>
+          ) : (
+            <div className="space-y-2">
+              {periods.map((period) => {
+                const rangeLabel = `${formatDate(period.from_date, t.browserLocale)} – ${formatDate(period.to_date, t.browserLocale)}`
+                return (
+                  <div key={period.id} className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-gray-700">{rangeLabel}</span>
+                    <button
+                      onClick={() => handleRevoke(period.id)}
+                      disabled={isRevokePending}
+                      aria-label={t.players.periodRevokeAria.replace('{range}', rangeLabel)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-red-100 hover:text-red-700 transition-all disabled:opacity-40"
+                    >
+                      {t.players.periodRevoke}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       </div>
@@ -164,7 +274,8 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents }: P
                   <div className="flex-shrink-0 flex gap-2">
                     <button
                       onClick={() => !isPresent && setStatus(event.id, 'present')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      disabled={isPeriodPending || isRevokePending}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
                         isPresent
                           ? 'bg-green-500 text-white'
                           : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-700'
@@ -173,7 +284,8 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents }: P
                     </button>
                     <button
                       onClick={() => !isAbsent && setStatus(event.id, 'absent')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      disabled={isPeriodPending || isRevokePending}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
                         isAbsent
                           ? 'bg-red-500 text-white'
                           : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-700'

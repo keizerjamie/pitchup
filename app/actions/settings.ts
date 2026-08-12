@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { genericError } from '@/lib/errors'
 import { MAX_SEASON_DAYS, isDateString, seasonTrainingDates } from '@/lib/season-dates'
+import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 
 export async function getDefaultAttendance(): Promise<'present' | 'unknown'> {
   const supabase = await createClient()
@@ -154,22 +155,53 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
     return { created: 0, skipped: 0 }
   }
 
+  // Eén keer vóór de lus: alle afmeldperiodes die met het seizoen OVERLAPPEN
+  // (from_date <= seizoenseinde EN to_date >= seizoensstart). Dat is bewust een
+  // bereikvergelijking, geen puntcheck — welke periode een concrete
+  // trainingsdatum dekt, bepaalt periodIdByPlayerForDate() daarna in-memory.
+  // Vaste sortering voor een deterministische herkomst bij overlap.
+  const { data: periods, error: periodsError } = await supabase
+    .from('absence_periods')
+    .select('id, player_id, from_date, to_date')
+    .eq('team_id', user.id)
+    .lte('from_date', seasonEnd)
+    .gte('to_date', seasonStart)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+  if (periodsError) throw genericError('settings.generateSeasonTrainings.periods', periodsError)
+
   let created = 0
   for (let i = 0; i < toCreate.length; i += 50) {
     const batch = toCreate.slice(i, i + 50)
+    // `date` moet mee: PostgREST garandeert niet dat de teruggegeven rijen in
+    // dezelfde volgorde staan als de batch, dus de afmeldperiodes worden op
+    // datum gematcht en nooit op array-index.
     const { data: inserted, error } = await supabase
       .from('events')
       .insert(batch)
-      .select('id')
+      .select('id, date')
     if (error) throw genericError('settings.generateSeasonTrainings', error)
 
     const { data: players } = await supabase.from('players').select('id').eq('active', true).eq('team_id', user.id)
     const defaultStatus = settings['default_attendance'] ?? 'present'
 
     if (players && players.length > 0 && inserted) {
-      const attendanceRecords = inserted.flatMap((ev) =>
-        players.map((p) => ({ event_id: ev.id, player_id: p.id, status: defaultStatus, team_id: user.id }))
-      )
+      const attendanceRecords = inserted.flatMap((ev) => {
+        const periodByPlayer = periodIdByPlayerForDate(periods ?? [], ev.date)
+        // Alle rijen krijgen dezelfde sleutels — PostgREST weigert een
+        // bulk-insert met afwijkende kolommen, dus absence_period_id gaat ook
+        // mee als hij null is.
+        return players.map((p) => {
+          const periodId = periodByPlayer.get(p.id) ?? null
+          return {
+            event_id: ev.id,
+            player_id: p.id,
+            status: periodId ? 'absent' : defaultStatus,
+            team_id: user.id,
+            absence_period_id: periodId,
+          }
+        })
+      })
       const { error: attendanceError } = await supabase.from('attendance').insert(attendanceRecords)
       if (attendanceError) throw genericError('settings.generateSeasonTrainings.attendance', attendanceError)
     }

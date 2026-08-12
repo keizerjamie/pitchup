@@ -6,6 +6,7 @@ import PlayerAbsenceList from '@/components/PlayerAbsenceList'
 import BackButton from '@/components/BackButton'
 import { getDict } from '@/lib/i18n'
 import { todayLocal } from '@/lib/utils'
+import { getDefaultAttendance } from '@/app/actions/settings'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -19,10 +20,12 @@ export default async function PlayerAbsencePage({ params }: Props) {
 
   const today = todayLocal()
 
-  const [{ data: player }, { data: events }, { data: attendance }] = await Promise.all([
+  const [{ data: player }, { data: events }, { data: attendance }, { data: periods }, defaultStatus] = await Promise.all([
     supabase.from('players').select('*').eq('id', id).eq('team_id', user.id).single(),
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(60),
     supabase.from('attendance').select('event_id, status').eq('player_id', id).eq('team_id', user.id),
+    supabase.from('absence_periods').select('id, player_id, from_date, to_date').eq('player_id', id).eq('team_id', user.id).order('from_date', { ascending: true }).limit(60),
+    getDefaultAttendance(),
   ])
 
   if (!player) notFound()
@@ -64,7 +67,12 @@ export default async function PlayerAbsencePage({ params }: Props) {
       <div className="bg-white rounded-2xl border border-gray-100 p-5">
         <h2 className="font-semibold text-gray-800 mb-1">{t.players.attendanceTitle}</h2>
         <p className="text-sm text-gray-500 mb-4">{t.players.attendanceHint}</p>
-        <PlayerAbsenceList playerId={id} events={eventsWithStatus} />
+        <PlayerAbsenceList
+          playerId={id}
+          events={eventsWithStatus}
+          periods={periods ?? []}
+          defaultStatus={defaultStatus}
+        />
       </div>
     </div>
   )

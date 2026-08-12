@@ -28,6 +28,16 @@ create policy "attendance: team_id = auth.uid()"
   using (team_id = auth.uid())
   with check (team_id = auth.uid());
 
+-- ── absence_periods ──────────────────────────────────────────
+-- Ook opgenomen in supabase/absence-periods.sql (zelfde dubbele-opname als
+-- match_squad).
+alter table absence_periods enable row level security;
+
+create policy "absence_periods: own team only"
+  on absence_periods for all
+  using (team_id = auth.uid())
+  with check (team_id = auth.uid());
+
 -- ── lineups ──────────────────────────────────────────────────
 alter table lineups enable row level security;
 

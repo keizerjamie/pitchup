@@ -8,6 +8,7 @@ import { getDefaultAttendance } from '@/app/actions/settings'
 import { assertOwnMatchEvent } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
 import { isTimeString } from '@/lib/utils'
+import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 
 // 'meting' events worden alleen nog via saveNulmeting (periodisering) aangemaakt
 const VALID_EVENT_TYPES: EventType[] = ['training', 'match']
@@ -60,19 +61,41 @@ export async function createEvent(formData: FormData) {
 
   // Meting events have no attendance records
   if (type !== 'meting') {
-    const [{ data: players }, defaultStatus] = await Promise.all([
+    const [{ data: players }, defaultStatus, { data: periods, error: periodsError }] = await Promise.all([
       supabase.from('players').select('id').eq('active', true).eq('team_id', user.id),
       getDefaultAttendance().catch(() => 'present' as const),
+      // Lopende afmeldperiodes die déze datum dekken (grenzen inclusief):
+      // from_date <= date <= to_date. Vaste sortering zodat de herkomst bij
+      // overlappende periodes deterministisch is.
+      supabase
+        .from('absence_periods')
+        .select('id, player_id, from_date, to_date')
+        .eq('team_id', user.id)
+        .lte('from_date', date)
+        .gte('to_date', date)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true }),
     ])
 
+    // Bewust hard falen: stil doorgaan zou het event met standaard-aanwezigheid
+    // opleveren, terwijl de trainer de speler al had afgemeld.
+    if (periodsError) throw genericError('events.createEvent.periods', periodsError)
+
     if (players && players.length > 0) {
+      const periodByPlayer = periodIdByPlayerForDate(periods ?? [], date)
       await supabase.from('attendance').insert(
-        players.map((p) => ({
-          event_id: data.id,
-          player_id: p.id,
-          status: defaultStatus,
-          team_id: user.id,
-        }))
+        // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
+        // met afwijkende kolommen, dus absence_period_id gaat altijd mee.
+        players.map((p) => {
+          const periodId = periodByPlayer.get(p.id) ?? null
+          return {
+            event_id: data.id,
+            player_id: p.id,
+            status: periodId ? 'absent' : defaultStatus,
+            team_id: user.id,
+            absence_period_id: periodId,
+          }
+        })
       )
     }
   }

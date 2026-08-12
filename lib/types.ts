@@ -283,12 +283,28 @@ export interface MatchEvent {
   created_at: string
 }
 
+// Een geregistreerde afmeldperiode van één speler. De rij ZELF is de periode:
+// zolang hij bestaat, krijgt elk nieuw event binnen [from_date, to_date] voor
+// deze speler automatisch status 'absent'. Intrekken = de rij verwijderen.
+// Datums zijn kale kalenderdatums (YYYY-MM-DD); created_at is UTC (timestamptz).
+export interface AbsencePeriod {
+  id: string
+  player_id: string
+  from_date: string
+  to_date: string
+  created_at: string
+}
+
 export interface Attendance {
   id: string
   event_id: string
   player_id: string
   status: AttendanceStatus
   injury_set: boolean
+  // Herkomst van een 'absent'-status: wélke afmeldperiode zette deze rij? null =
+  // handmatig, door blessure of gewoon de standaardstatus — die rijen blijven bij
+  // het intrekken van een periode ongemoeid.
+  absence_period_id: string | null
   created_at: string
 }
 

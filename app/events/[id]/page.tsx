@@ -10,6 +10,8 @@ import DeleteButton from '@/components/DeleteButton'
 import { deleteEvent } from '@/app/actions/events'
 import { getDict } from '@/lib/i18n'
 import { analyseBestaat as computeAnalyseBestaat } from '@/lib/match-analysis.mjs'
+import { periodIdByPlayerForDate } from '@/lib/absence-periods'
+import { genericError } from '@/lib/errors'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -92,10 +94,60 @@ export default async function EventDetailPage({ params }: Props) {
 
   const missingPlayers = allPlayers.filter((p) => !attendanceMap.has(p.id))
   if (missingPlayers.length > 0) {
-    await supabase.from('attendance').insert(
-      missingPlayers.map((p) => ({ event_id: id, player_id: p.id, status: 'unknown', team_id: user.id }))
+    // Een ontbrekende rij kan komen doordat het event is aangemaakt terwijl de
+    // speler (nog) inactief was — createEvent maakt dan geen attendance-rij
+    // aan (app/actions/events.ts:65 filtert op active=true). Is de speler
+    // inmiddels weer actief én valt deze event-datum binnen een lopende
+    // afmeldperiode, dan moet de backfill 'absent' invullen in plaats van
+    // 'unknown' — anders herintroduceert deze pagina exact het bugsymptoom
+    // dat de periode-afmelding moest oplossen. Zelfde patroon als
+    // createEvent (app/actions/events.ts:70-77).
+    const { data: periods, error: periodsError } = await supabase
+      .from('absence_periods')
+      .select('id, player_id, from_date, to_date')
+      .eq('team_id', user.id)
+      .in('player_id', missingPlayers.map((p) => p.id))
+      .lte('from_date', event.date)
+      .gte('to_date', event.date)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+    // Faalt deze query, dan mag de backfill NIET doorlopen: `periods` is dan
+    // null en elke ontbrekende speler zou blijvend op 'unknown' worden gezet
+    // (dit is een insert, geen render) — precies het bugsymptoom dat de
+    // afmeldperiode moest oplossen, maar dan persistent in de database. Deze
+    // pagina heeft geen eigen patroon voor faalbare queries (de andere queries
+    // hierboven kennen alleen `if (!event) notFound()`), dus faalt dit pad
+    // hard zoals de twee zusterplekken met exact dezelfde logica:
+    // createEvent (app/actions/events.ts:82) en generateSeasonTrainings
+    // (app/actions/settings.ts:171).
+    if (periodsError) throw genericError('eventDetail.backfill.periods', periodsError)
+
+    const periodByPlayer = periodIdByPlayerForDate(periods ?? [], event.date)
+
+    const { error: backfillError } = await supabase.from('attendance').insert(
+      // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
+      // met afwijkende kolommen, dus absence_period_id gaat altijd mee.
+      missingPlayers.map((p) => {
+        const periodId = periodByPlayer.get(p.id) ?? null
+        return {
+          event_id: id,
+          player_id: p.id,
+          status: periodId ? 'absent' : 'unknown',
+          team_id: user.id,
+          absence_period_id: periodId,
+        }
+      })
     )
-    for (const p of missingPlayers) attendanceMap.set(p.id, 'unknown')
+    // Zonder deze check zou de lus hieronder de attendanceMap vullen alsof de
+    // insert lukte: de coach ziet dan statussen die nooit zijn opgeslagen.
+    // Zelfde harde faal als settings.generateSeasonTrainings.attendance
+    // (app/actions/settings.ts:206).
+    if (backfillError) throw genericError('eventDetail.backfill.attendance', backfillError)
+
+    for (const p of missingPlayers) {
+      const periodId = periodByPlayer.get(p.id) ?? null
+      attendanceMap.set(p.id, periodId ? 'absent' : 'unknown')
+    }
   }
 
   const initialStatuses = Object.fromEntries(attendanceMap) as Record<string, AttendanceStatus>
