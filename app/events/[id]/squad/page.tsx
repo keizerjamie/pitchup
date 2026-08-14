@@ -30,7 +30,7 @@ export default async function MatchSquadPage({ params }: Props) {
     // dashboardquery in app/page.tsx, zie het API-contract van de
     // backend-engineer voor toMatchFormItems().
     supabase.from('events')
-      .select('id, date, opponent, goals_for, goals_against')
+      .select('id, date, opponent, goals_for, goals_against, home_away')
       .eq('team_id', user.id)
       .eq('type', 'match')
       .neq('id', id)

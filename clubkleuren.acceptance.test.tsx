@@ -242,6 +242,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
 function formItem(overrides: Partial<MatchFormItem> = {}): MatchFormItem {
   return {
     id: 'm1', result: 'win', goalsFor: 2, goalsAgainst: 1, opponent: 'FC X', date: '2026-08-01',
+    homeAway: null,
     ...overrides,
   }
 }

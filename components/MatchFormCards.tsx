@@ -1,4 +1,4 @@
-import type { MatchFormItem } from '@/lib/match-form'
+import { orderedScore, type MatchFormItem } from '@/lib/match-form'
 import type { MatchResult } from '@/lib/types'
 import { formatDateShort } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
@@ -78,7 +78,9 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
-        {items.map((item) => (
+        {items.map((item) => {
+          const score = orderedScore(item)
+          return (
           <div key={item.id} className="min-w-[104px] flex-1 basis-[104px] rounded-md border border-gray-300 p-3">
             <span
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-base font-black"
@@ -94,8 +96,8 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
                 kleine kaartje), maar blijft als tekst in de DOM staan — o.a.
                 MatchFormCards.test.tsx toetst hierop via container.textContent. */}
             <span className="sr-only">{label[item.result]}</span>
-            {item.result !== 'unknown' && item.goalsFor !== null && item.goalsAgainst !== null && (
-              <p className="mt-1 text-sm font-black text-gray-900">{item.goalsFor}–{item.goalsAgainst}</p>
+            {item.result !== 'unknown' && score !== null && (
+              <p className="mt-1 text-sm font-black text-gray-900">{score.first}–{score.second}</p>
             )}
             {/* Geen "vs "-prefix meer hier (wel elders in het print-blok, bij
                 de hoofd-matchup) — het ontwerp toont in deze kaartjes alleen
@@ -105,7 +107,8 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
             )}
             <p className="text-[10px] uppercase text-gray-500">{formatDateShort(item.date, t.browserLocale)}</p>
           </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

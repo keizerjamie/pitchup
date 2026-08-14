@@ -64,6 +64,7 @@ function formItem(overrides: Partial<MatchFormItem> = {}): MatchFormItem {
     goalsAgainst: 1,
     opponent: 'FC X',
     date: '2026-08-01',
+    homeAway: null,
     ...overrides,
   }
 }
@@ -312,6 +313,15 @@ describe('Vorm-blok — toont zoveel kaartjes als er items zijn, blok nooit verb
     expect(block.textContent).not.toMatch(new RegExp(`${nl.lineup.vsLabel}\\s*FC Kolping`))
     expect(block.textContent).toContain('1 aug')
     expect(block.textContent).not.toMatch(/\bza\b/)
+  })
+
+  it('uitwedstrijd met verlies: de score in het vorm-kaartje staat in thuis-uit-volgorde (tegenstander eerst), niet eigen team eerst — Nederhorst-scenario', () => {
+    const { container } = renderPrintList({
+      formItems: [formItem({ id: 'a', result: 'loss', goalsFor: 2, goalsAgainst: 5, homeAway: 'away', opponent: 'Nederhorst' })],
+    })
+    const block = getPrintBlock(container)
+    expect(block.textContent).toContain('5–2')
+    expect(block.textContent).not.toContain('2–5')
   })
 
   it('3 items (1-4): precies 3 kaartjes', () => {

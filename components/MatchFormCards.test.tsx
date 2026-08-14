@@ -13,6 +13,7 @@ function item(overrides: Partial<MatchFormItem> = {}): MatchFormItem {
     goalsAgainst: 1,
     opponent: 'FC Rivalen',
     date: '2026-08-01',
+    homeAway: null,
     ...overrides,
   }
 }
@@ -56,6 +57,14 @@ describe('MatchFormCards', () => {
     // Datum zonder dagnaam-afkorting ("1 aug", niet "za 1 aug").
     expect(container.textContent).toContain('1 aug')
     expect(container.textContent).not.toMatch(/\bza\b/)
+  })
+
+  it('uitwedstrijd (homeAway: "away") toont de score als thuisploeg–uitploeg (tegenstander eerst), niet eigen team eerst — Nederhorst-scenario uit de bugmelding', () => {
+    const { container } = renderCards([
+      item({ id: 'a', result: 'loss', goalsFor: 2, goalsAgainst: 5, homeAway: 'away', opponent: 'Nederhorst' }),
+    ])
+    expect(container.textContent).toContain('5–2')
+    expect(container.textContent).not.toContain('2–5')
   })
 
   it('opponent: null → geen "vs null"/"vs undefined" in de tekst', () => {

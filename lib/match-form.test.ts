@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { toMatchFormItems } from '@/lib/match-form'
+import { toMatchFormItems, orderedScore } from '@/lib/match-form'
+import type { MatchFormItem } from '@/lib/match-form'
 
 // De W/G/V-uitkomst komt uit de echte matchResult() (lib/match-analysis.mjs);
 // die wordt hier bewust NIET gemockt, zodat deze test breekt als de mapping en
@@ -11,14 +12,24 @@ const rij = (over: Partial<Parameters<typeof toMatchFormItems>[0][number]> = {})
   opponent: 'DVC',
   goals_for: 3,
   goals_against: 1,
+  home_away: 'home' as 'home' | 'away' | null,
   ...over,
 })
 
 describe('toMatchFormItems', () => {
   it('mapt alle velden naar de weergavevorm', () => {
     expect(toMatchFormItems([rij()])).toEqual([
-      { id: 'e1', result: 'win', goalsFor: 3, goalsAgainst: 1, opponent: 'DVC', date: '2026-08-01' },
+      { id: 'e1', result: 'win', goalsFor: 3, goalsAgainst: 1, opponent: 'DVC', date: '2026-08-01', homeAway: 'home' },
     ])
+  })
+
+  it('mapt home_away naar homeAway, inclusief uit en onbekend', () => {
+    const items = toMatchFormItems([
+      rij({ id: 'thuis', home_away: 'home' }),
+      rij({ id: 'uit', home_away: 'away' }),
+      rij({ id: 'onbekend', home_away: null }),
+    ])
+    expect(items.map((i) => i.homeAway)).toEqual(['home', 'away', null])
   })
 
   it('leidt winst, gelijk en verlies af via matchResult', () => {
@@ -75,5 +86,59 @@ describe('toMatchFormItems', () => {
     toMatchFormItems(rows)
 
     expect(rows).toEqual(kopie)
+  })
+})
+
+const item = (over: Partial<MatchFormItem> = {}): MatchFormItem => ({
+  id: 'm1',
+  result: 'win',
+  goalsFor: 3,
+  goalsAgainst: 1,
+  opponent: 'DVC',
+  date: '2026-08-01',
+  homeAway: 'home',
+  ...over,
+})
+
+describe('orderedScore', () => {
+  it('draait de score om bij een uitwedstrijd: thuisploeg (tegenstander) eerst', () => {
+    // Bugmelding: uit tegen Nederhorst met 5-2 verloren (goals_for 2,
+    // goals_against 5) hoort als "5–2" te tonen, niet als "2–5".
+    expect(orderedScore(item({ homeAway: 'away', result: 'loss', goalsFor: 2, goalsAgainst: 5 }))).toEqual({
+      first: 5,
+      second: 2,
+    })
+  })
+
+  it('houdt bij een thuiswedstrijd het eigen team eerst', () => {
+    expect(orderedScore(item({ homeAway: 'home', goalsFor: 3, goalsAgainst: 1 }))).toEqual({ first: 3, second: 1 })
+  })
+
+  it('valt zonder bekende thuis/uit terug op eigen team eerst', () => {
+    expect(orderedScore(item({ homeAway: null, result: 'draw', goalsFor: 2, goalsAgainst: 2 }))).toEqual({
+      first: 2,
+      second: 2,
+    })
+  })
+
+  it('draait ook een uitzege om (niet alleen verlies)', () => {
+    expect(orderedScore(item({ homeAway: 'away', goalsFor: 4, goalsAgainst: 0 }))).toEqual({ first: 0, second: 4 })
+  })
+
+  it('houdt 0-0 kloppend in elke thuis/uit-variant', () => {
+    for (const homeAway of ['home', 'away', null] as const) {
+      expect(orderedScore(item({ homeAway, result: 'draw', goalsFor: 0, goalsAgainst: 0 }))).toEqual({
+        first: 0,
+        second: 0,
+      })
+    }
+  })
+
+  it('geeft null zodra een van beide doelpuntenaantallen ontbreekt', () => {
+    for (const homeAway of ['home', 'away', null] as const) {
+      expect(orderedScore(item({ homeAway, result: 'unknown', goalsFor: null, goalsAgainst: 2 }))).toBeNull()
+      expect(orderedScore(item({ homeAway, result: 'unknown', goalsFor: 2, goalsAgainst: null }))).toBeNull()
+      expect(orderedScore(item({ homeAway, result: 'unknown', goalsFor: null, goalsAgainst: null }))).toBeNull()
+    }
   })
 })
