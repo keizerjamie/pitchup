@@ -2,12 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { assertOwnEvent, assertOwnOefening } from '@/lib/authz'
+import { assertOwnEvent, assertOwnOefening, getOwnPlayerIds } from '@/lib/authz'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 import { validateSpelerindeling } from '@/lib/spelerindeling'
+import { validateParallelSpelers, assertGeenOverlap } from '@/lib/parallel-groep'
 import { joinedCategorie } from '@/lib/periodization'
 import { clampStapOverride } from '@/lib/periodization-stappen'
-import { genericError } from '@/lib/errors'
+import { genericError, logError } from '@/lib/errors'
 
 // ────────────────────────────────────────────────
 // Meting
@@ -237,13 +238,34 @@ export async function removeOefeningFromTraining(koppelingId: string, eventId: s
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  // Eerst de eventuele parallelle groep lezen: na het verwijderen is niet meer
+  // te achterhalen bij welke groep deze koppeling hoorde. Op event_id gescoped,
+  // zodat een koppeling uit een ándere training van dit team de opruiming niet
+  // op het verkeerde event laat draaien.
+  const { data: koppeling } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_groep_id')
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .maybeSingle()
+  const groepId = (koppeling as { parallel_groep_id?: string | null } | null)?.parallel_groep_id ?? null
+
   const { error } = await supabase
     .from('training_oefeningen')
     .delete()
     .eq('id', koppelingId)
+    .eq('event_id', eventId)
     .eq('team_id', user.id)
 
   if (error) throw genericError('trainingPlan.removeOefeningFromTraining', error)
+
+  // Blijft er één lid over, dan is het geen parallelle groep meer.
+  await ruimEenzameGroepOp(supabase, eventId, user.id, groepId)
+  await normaliseerBlokVolgorde(supabase, eventId, user.id)
+
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
@@ -372,6 +394,10 @@ export async function saveSpelerindeling(
 }
 
 // Volledige herordening van de koppelingen binnen een training.
+//
+// Blok-bewust: koppelingen die in dezelfde parallelle groep zitten vormen één
+// blok en houden dezelfde `volgorde`. Blind `volgorde = i` per id schrijven zou
+// die invariant breken. De client-signatuur blijft ongewijzigd.
 export async function reorderKoppelingen(eventId: string, orderedIds: string[]): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -379,14 +405,419 @@ export async function reorderKoppelingen(eventId: string, orderedIds: string[]):
 
   await assertOwnEvent(supabase, eventId, user.id)
 
-  for (let i = 0; i < orderedIds.length; i++) {
+  await normaliseerBlokVolgorde(supabase, eventId, user.id, orderedIds)
+
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// ────────────────────────────────────────────────
+// Parallelle oefeningen: blok-volgorde
+// ────────────────────────────────────────────────
+// Zie supabase/parallelle-oefeningen.sql en lib/parallel-groep.ts. Alle leden
+// van één parallelle groep delen dezelfde `volgorde` (het blok); verschillende
+// blokken hebben verschillende, aaneengesloten waarden 0..m-1.
+
+type KoppelingRij = {
+  id: string
+  volgorde: number | null
+  parallel_groep_id: string | null
+  created_at: string | null
+}
+
+// Alle koppelingen van deze training, tenant- én event-gescoped.
+async function haalKoppelingRijen(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  eventId: string,
+  teamId: string,
+): Promise<KoppelingRij[]> {
+  const { data } = await supabase
+    .from('training_oefeningen')
+    .select('id, volgorde, parallel_groep_id, created_at')
+    .eq('event_id', eventId)
+    .eq('team_id', teamId)
+    .order('volgorde', { ascending: true })
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+  return Array.isArray(data) ? (data as KoppelingRij[]) : []
+}
+
+// Deterministische rijvolgorde. Met `orderedIds` (herordening door de client)
+// wegen die posities het zwaarst; rijen die er niet in staan volgen daarna op
+// hun huidige volgorde, created_at en id.
+function sorteerRijen(rijen: KoppelingRij[], orderedIds?: string[]): KoppelingRij[] {
+  const rang = new Map<string, number>()
+  for (const [i, id] of (orderedIds ?? []).entries()) if (!rang.has(id)) rang.set(id, i)
+
+  return [...rijen].sort(
+    (a, b) =>
+      (rang.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rang.get(b.id) ?? Number.MAX_SAFE_INTEGER) ||
+      (a.volgorde ?? 0) - (b.volgorde ?? 0) ||
+      String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')) ||
+      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  )
+}
+
+// Kent elk blok (parallelle groep óf losse koppeling) bij eerste voorkomen het
+// volgende blok-nummer toe en schrijft dat naar élk lid van dat blok. Schrijft
+// alleen rijen waarvan de waarde daadwerkelijk verandert. Wordt aangeroepen na
+// iedere groepsmutatie en bij het herordenen.
+async function normaliseerBlokVolgorde(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  eventId: string,
+  teamId: string,
+  orderedIds?: string[],
+): Promise<void> {
+  const rijen = sorteerRijen(await haalKoppelingRijen(supabase, eventId, teamId), orderedIds)
+
+  const blokIndex = new Map<string, number>()
+  let volgende = 0
+  for (const rij of rijen) {
+    const sleutel = rij.parallel_groep_id ?? `k:${rij.id}`
+    if (!blokIndex.has(sleutel)) blokIndex.set(sleutel, volgende++)
+  }
+
+  for (const rij of rijen) {
+    const nieuw = blokIndex.get(rij.parallel_groep_id ?? `k:${rij.id}`) ?? 0
+    if (rij.volgorde === nieuw) continue
     const { error } = await supabase
       .from('training_oefeningen')
-      .update({ volgorde: i })
-      .eq('id', orderedIds[i])
+      .update({ volgorde: nieuw })
+      .eq('id', rij.id)
+      .eq('event_id', eventId)
+      .eq('team_id', teamId)
+    if (error) throw genericError('trainingPlan.normaliseerBlokVolgorde', error)
+  }
+}
+
+// Een parallelle groep heeft minimaal twee leden. Blijft er na een mutatie nog
+// één over, dan vervalt de groep: dat lid wordt weer een gewone koppeling en
+// zijn groepsindeling wordt gewist (de kolom hoort leeg te zijn zonder groep).
+async function ruimEenzameGroepOp(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  eventId: string,
+  teamId: string,
+  groepId: string | null,
+): Promise<void> {
+  if (!groepId) return
+
+  const { data } = await supabase
+    .from('training_oefeningen')
+    .select('id')
+    .eq('event_id', eventId)
+    .eq('team_id', teamId)
+    .eq('parallel_groep_id', groepId)
+  const leden = Array.isArray(data) ? (data as { id: string }[]) : []
+  if (leden.length !== 1) return
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({ parallel_groep_id: null, parallel_spelers: [] })
+    .eq('id', leden[0].id)
+    .eq('event_id', eventId)
+    .eq('team_id', teamId)
+  if (error) throw genericError('trainingPlan.ruimEenzameGroepOp', error)
+}
+
+// ────────────────────────────────────────────────
+// Parallelle oefeningen: groepen beheren
+// ────────────────────────────────────────────────
+
+// Twee of meer koppelingen tot één parallelle groep smeden. De groepssleutel
+// wordt server-side gegenereerd; de client levert hem nooit aan.
+export async function vormParallelGroep(
+  eventId: string,
+  koppelingIds: string[],
+): Promise<{ groepId: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  const ids = [...new Set(koppelingIds)]
+  if (ids.length < 2) throw new Error('Minimaal twee oefeningen voor een parallelle groep')
+
+  // Alle leden moeten koppelingen van DEZE training van DIT team zijn: een
+  // ontbrekende rij betekent een vreemd of onbestaand id.
+  const { data } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_groep_id')
+    .in('id', ids)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+  const rijen = Array.isArray(data) ? (data as { id: string; parallel_groep_id: string | null }[]) : []
+  if (rijen.length !== ids.length) throw new Error('Koppeling niet gevonden')
+  if (rijen.some((rij) => rij.parallel_groep_id)) {
+    throw new Error('Koppeling zit al in een parallelle groep')
+  }
+
+  const groepId = crypto.randomUUID()
+
+  for (const id of ids) {
+    const { error } = await supabase
+      .from('training_oefeningen')
+      .update({ parallel_groep_id: groepId })
+      .eq('id', id)
       .eq('event_id', eventId)
       .eq('team_id', user.id)
-    if (error) throw genericError('trainingPlan.reorderKoppelingen', error)
+    if (error) throw genericError('trainingPlan.vormParallelGroep', error)
+  }
+
+  // Het blok neemt de laagste volgorde van zijn leden over; de rest schuift op.
+  await normaliseerBlokVolgorde(supabase, eventId, user.id)
+
+  revalidatePath(`/events/${eventId}/training-plan`)
+  return { groepId }
+}
+
+// Losse koppeling aan een bestaande parallelle groep toevoegen. De nieuwkomer
+// start met een lege groepsindeling; bestaande leden blijven onaangeroerd.
+export async function voegToeAanParallelGroep(
+  eventId: string,
+  koppelingId: string,
+  groepId: string,
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  const { data: koppeling } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_groep_id')
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .maybeSingle()
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+  if ((koppeling as { parallel_groep_id?: string | null }).parallel_groep_id) {
+    throw new Error('Koppeling zit al in een parallelle groep')
+  }
+
+  // De groepssleutel komt van de client en wordt nooit blind weggeschreven:
+  // hij moet minstens één lid hebben binnen deze training van dit team. Dat
+  // sluit meteen een groep-id van een ander team uit.
+  const { data: bestaandLid } = await supabase
+    .from('training_oefeningen')
+    .select('id')
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .eq('parallel_groep_id', groepId)
+    .limit(1)
+    .maybeSingle()
+  if (!bestaandLid) throw new Error('Ongeldige parallelle groep')
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({ parallel_groep_id: groepId, parallel_spelers: [] })
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+  if (error) throw genericError('trainingPlan.voegToeAanParallelGroep', error)
+
+  await normaliseerBlokVolgorde(supabase, eventId, user.id)
+
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Koppeling uit haar parallelle groep halen. Idempotent: een koppeling die al
+// geen groep heeft levert geen fout op.
+export async function haalUitParallelGroep(eventId: string, koppelingId: string): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  const { data: koppeling } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_groep_id')
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .maybeSingle()
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+  const groepId = (koppeling as { parallel_groep_id?: string | null }).parallel_groep_id ?? null
+
+  // Buiten een groep hoort de groepsindeling leeg te zijn.
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({ parallel_groep_id: null, parallel_spelers: [] })
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+  if (error) throw genericError('trainingPlan.haalUitParallelGroep', error)
+
+  if (groepId) {
+    await ruimEenzameGroepOp(supabase, eventId, user.id, groepId)
+    await normaliseerBlokVolgorde(supabase, eventId, user.id)
+  }
+
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Welke spelers doen deze oefening binnen de parallelle groep? Platte lijst
+// player_id's — GEEN teamindeling: `spelerindeling` (saveSpelerindeling) blijft
+// hier volledig los van staan. Argumentvolgorde bewust gelijk aan
+// saveSpelerindeling.
+export async function saveParallelIndeling(
+  koppelingId: string,
+  eventId: string,
+  spelerIds: string[],
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  const { data: koppeling } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_groep_id')
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .maybeSingle()
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+  const groepId = (koppeling as { parallel_groep_id?: string | null }).parallel_groep_id ?? null
+  if (!groepId) throw new Error('Koppeling zit niet in een parallelle groep')
+
+  // De andere leden van dezelfde groep, om dubbele indeling te weren. Alleen
+  // binnen dit event en dit team — de groepssleutel alleen is niet genoeg.
+  const { data: andere } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_spelers')
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .eq('parallel_groep_id', groepId)
+    .neq('id', koppelingId)
+  const andereLeden = Array.isArray(andere)
+    ? (andere as { id: string; parallel_spelers?: string[] | null }[])
+    : []
+
+  // Validatieset: alle eigen spelers (geen active-filter — zelfde afweging als
+  // saveSpelerindeling).
+  const ownPlayerIds = await getOwnPlayerIds(supabase, user.id)
+  const clean = validateParallelSpelers(spelerIds, { ownPlayerIds })
+  assertGeenOverlap(clean, andereLeden.map((lid) => lid.parallel_spelers))
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({ parallel_spelers: clean })
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+
+  if (error) throw genericError('trainingPlan.saveParallelIndeling', error)
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Eén speler in één server-aanroep van het ene groepslid naar het andere
+// verplaatsen. Bestaat naast saveParallelIndeling omdat een verplaatsing via
+// twee losse aanroepen (bron leegmaken, doel aanvullen) halverwege kan stranden:
+// de speler staat dan bij niemand meer, terwijl de client alleen een foutmelding
+// ziet en terugrolt naar zijn laatst bevestigde verdeling. Pool→lid en lid→pool
+// blijven via saveParallelIndeling lopen: die raken maar één rij.
+export async function verplaatsParallelSpeler(
+  eventId: string,
+  vanKoppelingId: string,
+  naarKoppelingId: string,
+  spelerId: string,
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  if (vanKoppelingId === naarKoppelingId) throw new Error('Bron en doel zijn dezelfde oefening')
+
+  // Beide leden in één select, gescoped op event_id + team_id: een ontbrekende
+  // rij betekent een vreemd, onbestaand of niet bij deze training horend id.
+  const { data } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_groep_id, parallel_spelers')
+    .in('id', [vanKoppelingId, naarKoppelingId])
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+  const rijen = Array.isArray(data)
+    ? (data as { id: string; parallel_groep_id: string | null; parallel_spelers?: string[] | null }[])
+    : []
+  const van = rijen.find((rij) => rij.id === vanKoppelingId)
+  const naar = rijen.find((rij) => rij.id === naarKoppelingId)
+  if (!van || !naar) throw new Error('Koppeling niet gevonden')
+
+  const groepId = van.parallel_groep_id ?? null
+  if (!groepId || !naar.parallel_groep_id) throw new Error('Koppeling zit niet in een parallelle groep')
+  if (naar.parallel_groep_id !== groepId) {
+    throw new Error('Koppelingen zitten niet in dezelfde parallelle groep')
+  }
+
+  // Stond de speler daar niet (meer), dan is de client-staat verouderd; dan
+  // niets schrijven, anders zou de speler op twee plekken tegelijk landen.
+  const vanSpelers = Array.isArray(van.parallel_spelers)
+    ? van.parallel_spelers.filter((id): id is string => typeof id === 'string')
+    : []
+  if (!vanSpelers.includes(spelerId)) throw new Error('Speler niet gevonden')
+
+  const naarSpelers = Array.isArray(naar.parallel_spelers)
+    ? naar.parallel_spelers.filter((id): id is string => typeof id === 'string')
+    : []
+
+  // De overige leden van dezelfde groep (bron en doel uitgezonderd), om dubbele
+  // indeling te weren — zelfde afweging als saveParallelIndeling.
+  const { data: andere } = await supabase
+    .from('training_oefeningen')
+    .select('id, parallel_spelers')
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .eq('parallel_groep_id', groepId)
+    .neq('id', vanKoppelingId)
+    .neq('id', naarKoppelingId)
+  const andereLeden = Array.isArray(andere)
+    ? (andere as { id: string; parallel_spelers?: string[] | null }[])
+    : []
+
+  const ownPlayerIds = await getOwnPlayerIds(supabase, user.id)
+  const cleanNaar = validateParallelSpelers([...naarSpelers, spelerId], { ownPlayerIds })
+  assertGeenOverlap(cleanNaar, andereLeden.map((lid) => lid.parallel_spelers))
+
+  // De bron houdt exact over wat er al stond, minus deze speler: geen
+  // hervalidatie, zodat een verplaatsing niet stukloopt op een reeds opgeslagen
+  // id dat inmiddels geen eigen speler meer is.
+  const cleanVan = vanSpelers.filter((id) => id !== spelerId)
+
+  const { error: vanError } = await supabase
+    .from('training_oefeningen')
+    .update({ parallel_spelers: cleanVan })
+    .eq('id', vanKoppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+  if (vanError) throw genericError('trainingPlan.verplaatsParallelSpeler.van', vanError)
+
+  const { error: naarError } = await supabase
+    .from('training_oefeningen')
+    .update({ parallel_spelers: cleanNaar })
+    .eq('id', naarKoppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+
+  if (naarError) {
+    // Twee rijen, geen transactie: slaagt de eerste update en faalt de tweede,
+    // dan zou de speler bij niemand meer staan terwijl de client op de fout
+    // terugrolt naar de oude verdeling. Die stille afwijking blijft dan in de DB
+    // hangen tot de volgende refresh. Daarom eerst de bron herstellen, dan pas
+    // gooien; lukt het herstel ook niet, dan loggen we dat apart — de gebruiker
+    // krijgt hoe dan ook dezelfde generieke fout.
+    const { error: herstelError } = await supabase
+      .from('training_oefeningen')
+      .update({ parallel_spelers: vanSpelers })
+      .eq('id', vanKoppelingId)
+      .eq('event_id', eventId)
+      .eq('team_id', user.id)
+    if (herstelError) logError('trainingPlan.verplaatsParallelSpeler.herstel', herstelError)
+    throw genericError('trainingPlan.verplaatsParallelSpeler.naar', naarError)
   }
 
   revalidatePath(`/events/${eventId}/training-plan`)

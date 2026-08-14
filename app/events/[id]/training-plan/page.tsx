@@ -73,7 +73,8 @@ export default async function TrainingPlanPage({ params }: Props) {
     latestMetingEvent
       ? supabase.from('metingen').select('*').eq('event_id', latestMetingEvent.id).eq('team_id', user.id).single()
       : Promise.resolve({ data: null }),
-    supabase.from('training_oefeningen').select('*, oefeningen(*)').eq('event_id', id).eq('team_id', user.id).order('volgorde'),
+    supabase.from('training_oefeningen').select('*, oefeningen(*)').eq('event_id', id).eq('team_id', user.id)
+      .order('volgorde').order('created_at', { ascending: true }).order('id', { ascending: true }),
     supabase.from('oefeningen').select('*').eq('team_id', user.id).order('naam'),
   ])
 

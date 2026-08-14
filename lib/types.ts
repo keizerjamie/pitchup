@@ -223,6 +223,11 @@ export interface Oefening {
 // in de pool.
 export type Spelerindeling = string[][]
 
+// Platte lijst player_id's die aan één oefening BINNEN een parallelle groep is
+// toegewezen. Bewust geen string[][]: dit is géén teamindeling — een speler aan
+// een parallelle oefening toewijzen zet hem NIET in een team van die oefening.
+export type ParallelSpelers = string[]
+
 // Koppeling van een bibliotheek-oefening aan één training (event).
 export interface TrainingOefening {
   id: string
@@ -233,6 +238,16 @@ export interface TrainingOefening {
   stap_override: number | null
   genest_in: string | null
   spelerindeling: Spelerindeling
+  // Parallelle groep (supabase/parallelle-oefeningen.sql). Alle koppelingen van
+  // één training met dezelfde `parallel_groep_id` draaien naast elkaar en delen
+  // dezelfde `volgorde`; NULL = gewone sequentiële koppeling.
+  //
+  // Optioneel getypeerd, net zoals de leeslaag `spelerindeling` behandelt: zolang
+  // de migratie in een omgeving nog niet gedraaid heeft levert de server voor
+  // deze kolommen `undefined`. Alle consumenten (lib/parallel-groep.ts) vangen
+  // dat af met `?? null` resp. `?? []`.
+  parallel_groep_id?: string | null
+  parallel_spelers?: ParallelSpelers
   created_at: string
 }
 

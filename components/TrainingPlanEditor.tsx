@@ -1,16 +1,19 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect } from 'react'
+import { useState, useTransition, useRef, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, TrainingOefeningWithData } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
+import { vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
+import { blokkenVanKoppelingen, blokLabel } from '@/lib/parallel-groep'
 import { clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningPicker from '@/components/OefeningPicker'
 import TeamIndelingEditor from '@/components/TeamIndelingEditor'
+import ParallelGroepEditor from '@/components/ParallelGroepEditor'
 import { useDict } from '@/lib/i18n-context'
 
 interface Props {
@@ -51,6 +54,26 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     setKoppelingen(initialOefeningen)
   }
 
+  // Render-eenheid: losse koppelingen ÉN parallelle groepen als één blok (zie
+  // lib/parallel-groep.ts). Gememoized op `koppelingen` (niet elke render
+  // herberekend) zodat `blok.leden`-arrays referentieel stabiel blijven zolang
+  // `koppelingen` zelf niet wijzigt — ParallelGroepEditor leunt hier verder
+  // niet blindelings op (zie de waarde-signatuur daar), maar dit voorkomt
+  // onnodig werk bij re-renders die niets met de oefeningen te maken hebben
+  // (bv. de doelstelling typen).
+  const blokken = useMemo(() => blokkenVanKoppelingen(koppelingen), [koppelingen])
+
+  // Doorlopende nummering van de bestaande parallelle groepen in dit event,
+  // voor de "Groep {n}"-optielabels in het "Parallel aan"-veld (los van de
+  // blok-badge-nummering "1a/1b", die per lid al zijn eigen label heeft).
+  const parallelGroepNummers = useMemo(
+    () =>
+      blokken
+        .filter((b) => b.groepId !== null)
+        .map((b, i) => ({ groepId: b.groepId as string, number: i + 1 })),
+    [blokken],
+  )
+
   const [showPicker, setShowPicker] = useState(false)
   const [pickerPresetCategorie, setPickerPresetCategorie] = useState<OefeningCategorie | undefined>(undefined)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -61,6 +84,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   // de rauwe serverfout tonen — zelfde principe als TeamIndelingEditor's
   // saveError).
   const [stapOverrideErrors, setStapOverrideErrors] = useState<Record<string, string>>({})
+
+  // Foutmeldingen per koppeling voor een mislukte parallelle-groep-mutatie via
+  // het "Parallel aan"-veld (nooit de rauwe serverfout tonen — zelfde principe
+  // als stapOverrideErrors hierboven).
+  const [parallelErrors, setParallelErrors] = useState<Record<string, string>>({})
 
   // Laatst bevestigde stap_override per koppeling (server-waarde óf een
   // succesvol opgeslagen waarde) — bron voor de rollback bij een mislukte
@@ -106,16 +134,97 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     })
   }
 
-  function move(index: number, dir: -1 | 1) {
-    const newIndex = index + dir
-    if (newIndex < 0 || newIndex >= koppelingen.length) return
-    const reordered = [...koppelingen]
-    const [item] = reordered.splice(index, 1)
+  // Werkt op blok-index (een blok is óf één losse koppeling, óf een hele
+  // parallelle groep — zie `blokken` hierboven). De nieuwe `orderedIds` is de
+  // platgeslagen blokkenlijst; `reorderKoppelingen` blijft ongewijzigd
+  // aangeroepen, de server is al blok-bewust (normaliseerBlokVolgorde).
+  function move(blokIndex: number, dir: -1 | 1) {
+    const newIndex = blokIndex + dir
+    if (newIndex < 0 || newIndex >= blokken.length) return
+    const reordered = [...blokken]
+    const [item] = reordered.splice(blokIndex, 1)
     reordered.splice(newIndex, 0, item)
-    setKoppelingen(reordered)
-    startTransition(async () => {
-      await reorderKoppelingen(eventId, reordered.map((k) => k.id))
+    const orderedIds = reordered.flatMap((b) => b.leden.map((l) => l.id))
+
+    // Optimistisch: ken elk blok dezelfde blok-volgorde toe als de server
+    // straks zou berekenen (normaliseerBlokVolgorde: 0..m-1 op volgorde van
+    // eerste voorkomen), zodat `blokkenVanKoppelingen` (die op `volgorde`
+    // sorteert) de nieuwe volgorde meteen weerspiegelt — zonder te wachten op
+    // de server-revalidatie.
+    const volgordeByBlokSleutel = new Map<string, number>()
+    reordered.forEach((b, i) => {
+      const sleutel = b.groepId ?? `k:${b.leden[0].id}`
+      volgordeByBlokSleutel.set(sleutel, i)
     })
+    setKoppelingen((prev) =>
+      prev.map((k) => {
+        const sleutel = k.parallel_groep_id ?? `k:${k.id}`
+        const volgorde = volgordeByBlokSleutel.get(sleutel)
+        return volgorde !== undefined ? { ...k, volgorde } : k
+      }),
+    )
+
+    startTransition(async () => {
+      await reorderKoppelingen(eventId, orderedIds)
+    })
+  }
+
+  // "Parallel aan"-veld: raw is '' (niet parallel), `groep:<id>` (bij een
+  // bestaande groep voegen) of `naast:<koppelingId>` (samen met een andere,
+  // nog niet-gegroepeerde koppeling een nieuwe groep vormen). Optimistisch
+  // bijgewerkt met rollback naar de vorige waarde bij een serverfout —
+  // generieke i18n-melding, nooit de rauwe serverstring.
+  function handleParallelChange(koppelingId: string, raw: string) {
+    const previous = koppelingen.find((k) => k.id === koppelingId)
+    if (!previous) return
+
+    setParallelErrors((prev) => {
+      if (!(koppelingId in prev)) return prev
+      const rest = { ...prev }
+      delete rest[koppelingId]
+      return rest
+    })
+
+    if (raw === '') {
+      if (!previous.parallel_groep_id) return
+      setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, parallel_groep_id: null, parallel_spelers: [] } : k)))
+      startTransition(async () => {
+        try {
+          await haalUitParallelGroep(eventId, koppelingId)
+        } catch {
+          setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? previous : k)))
+          setParallelErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.parallelOpslaanMislukt }))
+        }
+      })
+      return
+    }
+
+    if (raw.startsWith('groep:')) {
+      const groepId = raw.slice('groep:'.length)
+      startTransition(async () => {
+        try {
+          await voegToeAanParallelGroep(eventId, koppelingId, groepId)
+          setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, parallel_groep_id: groepId, parallel_spelers: [] } : k)))
+        } catch {
+          setParallelErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.parallelOpslaanMislukt }))
+        }
+      })
+      return
+    }
+
+    if (raw.startsWith('naast:')) {
+      const otherId = raw.slice('naast:'.length)
+      startTransition(async () => {
+        try {
+          const { groepId } = await vormParallelGroep(eventId, [koppelingId, otherId])
+          setKoppelingen((prev) =>
+            prev.map((k) => (k.id === koppelingId || k.id === otherId ? { ...k, parallel_groep_id: groepId } : k)),
+          )
+        } catch {
+          setParallelErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.parallelOpslaanMislukt }))
+        }
+      })
+    }
   }
 
   function handleStepOverrideChange(koppelingId: string, raw: string, categorie: string) {
@@ -295,12 +404,53 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           </div>
         ) : (
           <div className="space-y-2 print:space-y-[3mm]">
-            {koppelingen.map((k, idx) => {
+            {blokken.map((blok, blokIndex) => {
+              // Een blok is een echte parallelle groep zodra het ≥2 leden
+              // heeft (blokkenVanKoppelingen degradeert een eenzaam lid al
+              // naar groepId: null, dit is een extra defensieve check).
+              const isGroup = blok.groepId !== null && blok.leden.length > 1
+              return (
+                <div key={blok.key} className={isGroup ? 'print:break-inside-avoid' : undefined}>
+                  <div
+                    className={
+                      isGroup
+                        ? 'flex flex-col sm:flex-row flex-wrap gap-3 print:flex-row print:gap-[2mm] print:break-inside-avoid'
+                        : undefined
+                    }
+                  >
+                    {blok.leden.map((k, ledenIndex) => {
               const o = k.oefeningen
               const catStep = currentSteps[o.categorie]
               const catMeta = ALL_CATS.find(c => c.key === o.categorie)
               const parent = k.genest_in ? koppelingen.find((other) => other.id === k.genest_in) : null
               const isExpanded = expandedId === k.id
+
+              // "Parallel aan"-opties: bij een reeds gegroepeerde koppeling
+              // alleen de eigen groep (voor de select-waarde) + de mogelijkheid
+              // om te ontgroeperen; anders elke bestaande groep (voegToeAan) en
+              // elke ANDERE niet-gegroepeerde koppeling in dit event (vormGroep)
+              // — ongeacht positie (V5, de server normaliseert de blok-volgorde).
+              const currentGroupId = k.parallel_groep_id ?? null
+              const parallelOptions: { value: string; label: string }[] = currentGroupId
+                ? (() => {
+                    const eigenGroep = parallelGroepNummers.find((pg) => pg.groepId === currentGroupId)
+                    return eigenGroep
+                      ? [{ value: `groep:${currentGroupId}`, label: t.parallelGroep.groepLabel.replace('{n}', String(eigenGroep.number)) }]
+                      : []
+                  })()
+                : [
+                    ...parallelGroepNummers.map((pg) => ({
+                      value: `groep:${pg.groepId}`,
+                      label: t.parallelGroep.groepLabel.replace('{n}', String(pg.number)),
+                    })),
+                    ...koppelingen
+                      .filter((other) => other.id !== k.id && !other.parallel_groep_id)
+                      .map((other) => ({
+                        value: `naast:${other.id}`,
+                        label: t.trainingPlan.parallelNaastOption.replace('{name}', other.oefeningen.naam),
+                      })),
+                  ]
+              const parallelDisabled = !currentGroupId && parallelOptions.length === 0
 
               // Stap-inhoud (Arbeid/Herhalingen/Rust HH/Series/Rust series),
               // alleen voor de 5 tabel-categorieën + steigerungs
@@ -336,17 +486,27 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                 // overlapt de gefloate namenkolom, maar de klasse staat op
                 // alle kaarten — vanaf oefening 2 staan ze toch al onder de
                 // kolom, dus `flow-root` daar is een no-op.
-                <div key={k.id} className="print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root">
+                <div
+                  key={k.id}
+                  className={
+                    isGroup
+                      ? 'flex-1 min-w-[240px] print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root'
+                      : 'print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root'
+                  }
+                >
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                      <span className="w-7 h-7 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted print:w-[4mm] print:h-[4mm] print:text-[8px] print-club-bg-primary">
-                        {idx + 1}
+                      {/* Badge: "3" voor een los blok, "3a"/"3b"/... voor de
+                          leden van een parallelle groep (blokLabel). Breedte
+                          buigt mee voor twee tekens (min-w i.p.v. een vaste w-7). */}
+                      <span className="min-w-[1.75rem] h-7 px-1 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted print:min-w-[4mm] print:h-[4mm] print:px-[0.5mm] print:text-[8px] print-club-bg-primary">
+                        {blokLabel(blokIndex, blok.leden.length, ledenIndex)}
                       </span>
                       <div className="print:hidden flex flex-col">
                         <button
                           type="button"
-                          onClick={() => move(idx, -1)}
-                          disabled={idx === 0}
+                          onClick={() => move(blokIndex, -1)}
+                          disabled={blokIndex === 0}
                           aria-label={t.trainingPlan.moveUp}
                           className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
                         >
@@ -354,8 +514,8 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         </button>
                         <button
                           type="button"
-                          onClick={() => move(idx, 1)}
-                          disabled={idx === koppelingen.length - 1}
+                          onClick={() => move(blokIndex, 1)}
+                          disabled={blokIndex === blokken.length - 1}
                           aria-label={t.trainingPlan.moveDown}
                           className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
                         >
@@ -417,6 +577,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         {parent && (
                           <span className="text-xs text-faint">
                             {t.trainingPlan.nestedInBadge.replace('{name}', parent.oefeningen.naam)}
+                          </span>
+                        )}
+                        {isGroup && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
+                            {t.trainingPlan.parallelBadge}
                           </span>
                         )}
                       </div>
@@ -485,9 +650,12 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           de resterende breedte ernaast. De kaarthoogte wordt
                           zo max(diagram, teamindeling) i.p.v. de som. */}
                       {(o.diagram || o.teams.length > 0) && (
-                        <div className="mt-2 print:mt-[1mm] print:float-left print:w-[42mm] print:mr-[3mm]">
+                        // Binnen een parallelle groep (isGroup) is de kolom te
+                        // smal voor de gefloate volle-breedte-stijl: geen float,
+                        // smaller diagram/formatievelden.
+                        <div className={isGroup ? 'mt-2 print:mt-[1mm] print:float-none print:w-[32mm] print:mr-[3mm]' : 'mt-2 print:mt-[1mm] print:float-left print:w-[42mm] print:mr-[3mm]'}>
                           {o.diagram ? (
-                            <DiagramView diagram={o.diagram} sizePx={110} className="print:w-[42mm]!" />
+                            <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[32mm]!' : 'print:w-[42mm]!'} />
                           ) : (
                             <div className="flex flex-wrap gap-2 print:flex-col print:gap-[1mm]">
                               {o.teams.map((tm, i) => {
@@ -498,7 +666,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                                     positions={basis?.positions ?? []}
                                     label={`${tm.grootte}${basis ? ` · ${basis.label}` : ''}`}
                                     sizePx={56}
-                                    className="print:w-[30mm]!"
+                                    className={isGroup ? 'print:w-[22mm]!' : 'print:w-[30mm]!'}
                                   />
                                 )
                               })}
@@ -615,7 +783,39 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           ))}
                         </select>
                       </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.parallelLabel}</label>
+                        <select
+                          value={currentGroupId ? `groep:${currentGroupId}` : ''}
+                          disabled={parallelDisabled}
+                          onChange={(e) => handleParallelChange(k.id, e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface disabled:opacity-50"
+                        >
+                          <option value="">{t.trainingPlan.parallelNoneOption}</option>
+                          {parallelOptions.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
+                        {parallelErrors[k.id] && (
+                          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1 mt-1">
+                            {parallelErrors[k.id]}
+                          </p>
+                        )}
+                      </div>
                     </div>
+                  )}
+                </div>
+              )
+                    })}
+                  </div>
+                  {isGroup && (
+                    <ParallelGroepEditor
+                      eventId={eventId}
+                      groepId={blok.groepId as string}
+                      leden={blok.leden}
+                      players={players}
+                      presentPlayerIds={presentPlayerIds}
+                    />
                   )}
                 </div>
               )

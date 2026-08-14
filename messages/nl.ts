@@ -317,6 +317,11 @@ export const nl = {
     nestedInBadge: 'Genest in {name}',
     print: 'Afdrukken',
     stapOpslaanMislukt: 'Opslaan van de stap is mislukt. Probeer het opnieuw.',
+    parallelLabel: 'Parallel aan (tegelijk uitvoeren)',
+    parallelNoneOption: '— niet parallel —',
+    parallelNaastOption: 'Naast: {name}',
+    parallelBadge: 'Parallel',
+    parallelOpslaanMislukt: 'Wijzigen van de parallelle groep is mislukt. Probeer het opnieuw.',
   },
   oefeningen: {
     navLabel: 'Oefeningen',
@@ -507,6 +512,28 @@ export const nl = {
     dragHint: 'Sleep een speler naar een team of tik erop om te selecteren.',
     teamDropZoneLabel: 'Sleepzone voor {team}',
     poolDropZoneLabel: 'Sleepzone voor de pool met nog in te delen spelers',
+  },
+  parallelGroep: {
+    heading: 'Parallelle verdeling',
+    dragHint: 'Sleep een speler naar een oefening of tik erop om te selecteren.',
+    poolLabel: 'Nog in te delen',
+    // Print-only label, bewust anders dan `poolLabel` (zelfde valkuil als
+    // TeamIndelingEditor's poolLabelPrint): identieke tekst in scherm- én
+    // printblok laat getByText in tests struikelen.
+    poolLabelPrint: 'Nog niet ingedeeld',
+    emptyPool: 'Alle aanwezige spelers zijn ingedeeld',
+    remove: 'Uit oefening halen',
+    moveTo: 'Verplaats naar {target}',
+    absentWarning: 'Afgemeld',
+    unknownPlayer: 'Onbekende speler',
+    tekort: '{n} te weinig',
+    overschot: '{n} te veel',
+    nietIngedeeld: '{n} speler(s) nog niet ingedeeld',
+    compleet: 'Verdeling compleet',
+    geenEis: 'Geen vast aantal',
+    saveError: 'Opslaan van de parallelle indeling is mislukt. Probeer het opnieuw.',
+    dropZoneLabel: 'Sleepzone voor {target}',
+    groepLabel: 'Groep {n}',
   },
   analysis: {
     title: 'Wedstrijdanalyse',
