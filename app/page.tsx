@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { addDays, daysUntil, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
+import { logError } from '@/lib/errors'
 import DashboardHero from '@/components/dashboard/DashboardHero'
 import StatCard from '@/components/dashboard/StatCard'
 import NextMatch from '@/components/dashboard/NextMatch'
@@ -43,6 +44,7 @@ export default async function DashboardPage() {
     { data: todoCandidateEvents },
     { data: trainingDateRows },
     { data: recentMatchRows },
+    { data: guestPlayerRows, error: guestPlayerError },
   ] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
     supabase.from('players').select('id, name, position, jersey_number, injured').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
@@ -64,6 +66,13 @@ export default async function DashboardPage() {
       .order('created_at', { ascending: false, nullsFirst: false })
       .order('id', { ascending: false })
       .limit(5),
+    // Gastspelers tellen niet mee in de opkomsttegel hieronder, zodat het
+    // dashboard hetzelfde percentage toont als /inzichten (dat de gasten in
+    // SQL wegfiltert — supabase/inzichten.sql). Bewust een APARTE query zonder
+    // active-filter: de telling kijkt vandaag naar álle attendance-rijen van de
+    // aankomende events, ook die van inactief geworden spelers, en dat gedrag
+    // blijft ongewijzigd.
+    supabase.from('players').select('id').eq('team_id', user.id).eq('type', 'guest'),
   ])
 
   const teamName = teamNameRow?.value?.trim() || null
@@ -105,13 +114,23 @@ export default async function DashboardPage() {
 
   // ── Stat cards (all real data) ──
   let totalPresent = 0, totalAbsent = 0
+  // Faalt de gast-query, dan weten we niet wie gast is. Doortellen zou de
+  // gasten stilzwijgend meerekenen en dus een te hoog percentage tonen dat
+  // bovendien afwijkt van /inzichten — zonder enig signaal aan de trainer.
+  // Daarom valt de tegel terug op "geen getal" (—): liever niets tonen dan een
+  // verkeerd getal. Alleen een statisch label naar de log, geen ruwe melding.
+  if (guestPlayerError) logError('dashboard.guestPlayers', guestPlayerError)
+  const guestPlayerIds = new Set((guestPlayerRows ?? []).map((p: { id: string }) => p.id))
   for (const a of allAttendance) {
+    // Een gast telt in teller noch noemer mee — zelfde regel als
+    // inzichten_aanwezigheid, anders wijken de twee getallen van elkaar af.
+    if (guestPlayerIds.has(a.player_id)) continue
     if (a.status === 'present') totalPresent++
     else if (a.status === 'absent') totalAbsent++
   }
-  const attendancePct = totalPresent + totalAbsent > 0
-    ? Math.round((totalPresent / (totalPresent + totalAbsent)) * 100)
-    : null
+  const attendancePct = guestPlayerError || totalPresent + totalAbsent === 0
+    ? null
+    : Math.round((totalPresent / (totalPresent + totalAbsent)) * 100)
   // ── To-do (open opstelling/analyse/trainingsplan-taken) ──
   const todoCandidates: FootballEvent[] = todoCandidateEvents ?? []
   const trainingDates: string[] = (trainingDateRows ?? []).map((r: { date: string }) => r.date)

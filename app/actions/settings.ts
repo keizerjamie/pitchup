@@ -186,8 +186,10 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
 
     // `injured` hoort erbij: een geblesseerde speler moet ook op een nieuw
     // gegenereerde training meteen op 'absent' komen, net als markInjured dat
-    // voor bestaande events doet (app/actions/players.ts:124-132).
-    const { data: players, error: playersError } = await supabase.from('players').select('id, injured').eq('active', true).eq('team_id', user.id)
+    // voor bestaande events doet (app/actions/players.ts:124-132). `type` idem
+    // voor gastspelers: die staan altijd afwezig. Het active-filter blijft
+    // staan — een gast is gewoon actief en krijgt dus wél een rij.
+    const { data: players, error: playersError } = await supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', user.id)
     // Hard falen, zoals bij de periodequery hierboven: stil doorgaan zou elke
     // gegenereerde training de standaardstatus geven terwijl de speler
     // geblesseerd of afgemeld is.
@@ -209,6 +211,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
           defaultStatus,
           injured: p.injured === true,
           periodId: periodByPlayer.get(p.id) ?? null,
+          isGuest: p.type === 'guest',
         }))
       })
       const { error: attendanceError } = await supabase.from('attendance').insert(attendanceRecords)

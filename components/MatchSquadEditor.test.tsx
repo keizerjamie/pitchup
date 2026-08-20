@@ -28,6 +28,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
     jersey_number: 9,
     active: true,
     injured: false,
+    type: 'regular',
     rating: 5,
     created_at: '2024-01-01T00:00:00Z',
     ...overrides,
@@ -322,5 +323,55 @@ describe('niet-aanwezige, al-geselecteerde speler', () => {
     const row = toggle.parentElement as HTMLElement
     expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
     expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
+  })
+})
+
+describe('Gast-label (besluit 24: altijd naast een eventueel statuslabel)', () => {
+  it('een aanwezige, actieve gast toont uitsluitend het Gast-label, geen statuslabel', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Gast Speler', type: 'guest', active: true })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: ['p1'],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Gast Speler` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(row).queryByText(`(${nl.players.inactiveLabel})`)).not.toBeInTheDocument()
+    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
+  })
+
+  it('een gast die ook niet-aanwezig is, toont BEIDE labels: Gast én niet-aanwezig', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Afwezige Gast', type: 'guest', active: true })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: [],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Afwezige Gast` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(row).getByText(`(${nl.matchSquad.notPresentLabel})`)).toBeInTheDocument()
+  })
+
+  it('een inactieve gast toont BEIDE labels: Gast én inactief', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Inactieve Gast', type: 'guest', active: false })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: [],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Inactieve Gast` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+  })
+
+  it('een reguliere speler toont geen Gast-label', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Reguliere Speler', type: 'regular', active: true })],
+      initialSelectedIds: ['p1'],
+      presentPlayerIds: ['p1'],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Reguliere Speler` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).queryByText(`(${nl.players.guestBadge})`)).not.toBeInTheDocument()
   })
 })

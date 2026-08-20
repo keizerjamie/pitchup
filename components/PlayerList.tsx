@@ -125,6 +125,16 @@ export default function PlayerList({ active, inactive }: Props) {
                 {t.players.injuredBadge}
               </span>
             )}
+            {player.type === 'guest' && (
+              <span
+                className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-1 flex-shrink-0"
+                style={{ background: 'rgba(245,158,11,0.14)', color: 'var(--chip-amber-fg)' }}
+                title={t.players.guestBadge}
+              >
+                <span className="ms text-[13px]" aria-hidden="true">person_add</span>
+                {t.players.guestBadge}
+              </span>
+            )}
           </span>
           <span className="text-[12px] font-semibold text-faint">
             {t.players.positions[player.position] ?? player.position}

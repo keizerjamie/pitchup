@@ -8,6 +8,7 @@ import { genericError } from '@/lib/errors'
 import { findCoveringPeriod, type AbsencePeriodRange } from '@/lib/absence-periods'
 import { isDateString } from '@/lib/season-dates'
 import { getDefaultAttendance } from '@/app/actions/settings'
+import { resolveAttendanceStatus } from '@/lib/attendance-rows'
 
 // Maximale lengte van een `.in()`-lijst, gelijk aan de batchgrootte van
 // generateSeasonTrainings (app/actions/settings.ts:174): een periode kan een
@@ -215,6 +216,23 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
 
     const defaultStatus = await getDefaultAttendance()
 
+    // Een gastspeler staat standaard afwezig: het intrekken van een periode mag
+    // hem niet alsnog op de teamstandaard zetten — alleen de trainer zet hem
+    // handmatig op 'present'. Zelfde regel als bij het aanmaken van een rij,
+    // hergebruikt uit lib/attendance-rows.ts. Hard falen bij een fout, zoals de
+    // queries hierboven: stil doorgaan zou de gast alsnog aanwezig melden.
+    const { data: player, error: playerError } = await supabase
+      .from('players')
+      .select('type')
+      .eq('id', playerId)
+      .eq('team_id', user.id)
+      .maybeSingle()
+    if (playerError) throw genericError('attendance.revokeAbsencePeriod.player', playerError)
+    const restoreStatus = resolveAttendanceStatus({
+      defaultStatus,
+      isGuest: player?.type === 'guest',
+    })
+
     const transferByPeriod = new Map<string, string[]>()
     const clearOnly: string[] = []
     const toDefault: string[] = []
@@ -272,7 +290,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
     for (const chunk of chunked(toDefault)) {
       const { error } = await supabase
         .from('attendance')
-        .update({ status: defaultStatus, absence_period_id: null })
+        .update({ status: restoreStatus, absence_period_id: null })
         .eq('team_id', user.id)
         .eq('absence_period_id', periodId)
         .in('event_id', chunk)

@@ -36,6 +36,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
     jersey_number: 9,
     active: true,
     injured: false,
+    type: 'regular',
     rating: 5,
     created_at: '2024-01-01T00:00:00Z',
     ...overrides,

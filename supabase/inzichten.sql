@@ -12,6 +12,12 @@
 -- team_id-parameter aan.
 -- ============================================================
 
+-- LET OP (gastspelers): alle zes functies filteren op p.type = 'regular' —
+-- een gastspeler telt nooit mee in de teamcijfers. Zowel `events` als
+-- `players` heeft een kolom `type`; de aliassen e/p houden dat uit elkaar. Een
+-- gemiste alias geeft geen fout maar een stil verkeerd filter. Migratie voor
+-- een bestaande installatie: gastspelers.sql.
+
 -- LET OP (venster): geen enkele functie hier kent "vandaag". De aanroeper
 -- (app/inzichten/page.tsx) bepaalt het venster via p_start/p_end en klemt dat
 -- voor de aanwezigheidsfuncties af op gisteren (verledenSeizoensVenster() in
@@ -31,9 +37,12 @@ as $$
     count(*) filter (where a.status = 'present')::int,
     count(*) filter (where a.status = 'absent')::int
   from attendance a
-  join events e on e.id = a.event_id
+  join events e  on e.id = a.event_id
+  join players p on p.id = a.player_id
   where a.team_id = auth.uid()
     and e.team_id = auth.uid()
+    and p.team_id = auth.uid()
+    and p.type = 'regular'
     and e.type <> 'meting'
     and e.date >= p_start
     and e.date <= p_end;
@@ -51,9 +60,12 @@ as $$
     count(*) filter (where a.status = 'present')::int,
     count(*) filter (where a.status = 'absent')::int
   from attendance a
-  join events e on e.id = a.event_id
+  join events e  on e.id = a.event_id
+  join players p on p.id = a.player_id
   where a.team_id = auth.uid()
     and e.team_id = auth.uid()
+    and p.team_id = auth.uid()
+    and p.type = 'regular'
     and e.type = 'training'
     and e.date >= p_start
     and e.date <= p_end
@@ -76,6 +88,7 @@ as $$
     and e.team_id = auth.uid()
     and p.team_id = auth.uid()
     and p.active = true
+    and p.type = 'regular'
     and e.type = 'match'
     and e.date >= p_start
     and e.date <= p_end
@@ -99,6 +112,7 @@ as $$
     and p.team_id = auth.uid()
     and p.id = p_player
     and p.active = true
+    and p.type = 'regular'
     and e.type = 'match'
     and e.date >= p_start
     and e.date <= p_end
@@ -108,7 +122,7 @@ $$;
 -- Gemiddelde wedstrijdrating per speler over het venster — voedt zowel de
 -- "top 5" als de "worst 5" ratinglijst. Bewust GEEN order by/limit in SQL:
 -- één aanroep levert alle spelers, topWorstRating() (lib/inzichten.ts) snijdt
--- er in JS beide lijstjes uit. Zelfde active-filter als
+-- er in JS beide lijstjes uit. Zelfde active- én type-filter als
 -- inzichten_rating_team_per_wedstrijd, zodat team- en spelerlijst nooit uit
 -- elkaar lopen.
 create or replace function public.inzichten_rating_per_speler(p_start date, p_end date)
@@ -126,6 +140,7 @@ as $$
     and e.team_id = auth.uid()
     and p.team_id = auth.uid()
     and p.active = true
+    and p.type = 'regular'
     and e.type = 'match'
     and e.date >= p_start
     and e.date <= p_end
@@ -139,9 +154,12 @@ $$;
 --
 -- BEWUST ANDERS dan inzichten_aanwezigheid: deze functie filtert WEL op
 -- players.active. De team-brede aanwezigheidskaart telt bewust álle
--- registraties mee (O3, consistent met het dashboard — zie
--- lib/inzichten.ts:112-115), maar dit is een per-speler "wie presteert"-lijst;
--- een speler die niet meer in de selectie zit hoort daar niet in te staan.
+-- registraties van actieve én inactieve spelers mee (O3, consistent met het
+-- dashboard — zie lib/inzichten.ts:112-115), maar dit is een per-speler "wie
+-- presteert"-lijst; een speler die niet meer in de selectie zit hoort daar
+-- niet in te staan. Die asymmetrie geldt ALLEEN voor `active`: het filter
+-- p.type = 'regular' zit in alle zes functies, dus een gastspeler telt nergens
+-- mee.
 --
 -- Een speler met uitsluitend status 'unknown' komt terug als 0/0. Die krijgt
 -- in JS percentage null en valt daar uit de top/worst — geen verzonnen 0%.
@@ -164,6 +182,7 @@ as $$
     and e.team_id = auth.uid()
     and p.team_id = auth.uid()
     and p.active = true
+    and p.type = 'regular'
     and e.type <> 'meting'
     and e.date >= p_start
     and e.date <= p_end

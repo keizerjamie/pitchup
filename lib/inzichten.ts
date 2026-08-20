@@ -149,6 +149,12 @@ type UitslagRij = Pick<DoelpuntItem, 'goals_for' | 'goals_against'>
 // players.active — consistent met het bestaande dashboard, dat ook niet
 // filtert. Alleen de ratinggrafieken kijken naar actieve spelers
 // (supabase/inzichten.sql). Verzin dit niet stilzwijgend anders.
+//
+// Die asymmetrie geldt ALLEEN voor `active`. Gastspelers (players.type =
+// 'guest') worden wél overal weggefilterd: alle zes RPC's in
+// supabase/inzichten.sql filteren op p.type = 'regular', en het dashboard doet
+// hetzelfde in JS (app/page.tsx). Een gast telt dus nergens mee in teller of
+// noemer.
 export function berekenAanwezigheidPercentage(aanwezig: number, afwezig: number): number | null {
   if (!Number.isFinite(aanwezig) || !Number.isFinite(afwezig)) return null
   if (aanwezig < 0 || afwezig < 0) return null

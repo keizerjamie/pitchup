@@ -113,10 +113,14 @@ export default async function InzichtenPage() {
       .order('date', { ascending: true })
       .order('id', { ascending: true })
       .limit(MAX_SEIZOEN_WEDSTRIJDEN),
+    // Gastspelers vallen buiten alle inzichten-RPC's (supabase/inzichten.sql),
+    // dus ook buiten de spelerskiezer: anders levert een gekozen gast een lege
+    // grafiek op.
     supabase.from('players')
       .select('id, name')
       .eq('team_id', user.id)
       .eq('active', true)
+      .eq('type', 'regular')
       .order('name', { ascending: true }),
   ])
 

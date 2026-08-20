@@ -382,6 +382,106 @@ describe('createEvent — blessure', () => {
 })
 
 // ────────────────────────────────────────────────
+// AC5 — een gastspeler (players.type = 'guest') komt op een NIEUW event altijd
+// op 'absent', ongeacht getDefaultAttendance (hier vastgezet op 'present').
+// ────────────────────────────────────────────────
+
+describe('createEvent — gastspeler', () => {
+  const GAST = 'p1'
+  const REGULIER = 'p2'
+  const PERIOD_1 = 'ap-1'
+
+  function metGast(
+    players: { id: string; injured?: boolean; type?: string }[],
+    periods: unknown[] = [],
+    extra: Record<string, TableResult> = {},
+  ) {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: 'e1', type: 'match' }, error: null },
+        players: { data: players, error: null },
+        attendance: { data: null, error: null },
+        absence_periods: { data: periods, error: null },
+        ...extra,
+      },
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
+  }
+
+  const STANDAARD = [
+    { id: GAST, injured: false, type: 'guest' },
+    { id: REGULIER, injured: false, type: 'regular' },
+  ]
+
+  it('zet de gast op absent en de reguliere speler op de teamstandaard (training)', async () => {
+    const m = metGast(STANDAARD)
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: GAST, status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: REGULIER, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+    ])
+  })
+
+  it('doet hetzelfde voor een wedstrijd', async () => {
+    const m = metGast(STANDAARD)
+    use(m)
+
+    await expect(createEvent(form(WEDSTRIJD))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)[0]).toMatchObject({ player_id: GAST, status: 'absent' })
+    expect(attendanceRows(m)[1]).toMatchObject({ player_id: REGULIER, status: 'present' })
+  })
+
+  it('blijft absent in combinatie met blessure en een dekkende periode (AC9)', async () => {
+    const m = metGast(
+      [{ id: GAST, injured: true, type: 'guest' }],
+      [{ id: PERIOD_1, player_id: GAST, from_date: '2026-09-01', to_date: '2026-09-30' }],
+    )
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)[0]).toEqual({
+      event_id: 'e1', player_id: GAST, status: 'absent', team_id: 'team-1',
+      injury_set: true, absence_period_id: PERIOD_1,
+    })
+  })
+
+  it('houdt het active-filter en de tenant-scope op de spelersquery', async () => {
+    // Een gast is gewoon actief: zonder dit filter zou hij nooit een rij
+    // krijgen, mét een verkeerde scope zou hij van een ander team kunnen komen.
+    const m = metGast(STANDAARD)
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(m.calls.select.find((s) => s.table === 'players')!.eqs).toEqual([
+      { col: 'active', val: true },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('houdt de sleutelset gelijk voor gast en reguliere speler', async () => {
+    const m = metGast(STANDAARD)
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    for (const row of attendanceRows(m)) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+      )
+    }
+  })
+})
+
+// ────────────────────────────────────────────────
 // updateGatherTime
 // ────────────────────────────────────────────────
 

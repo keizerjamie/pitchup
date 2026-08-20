@@ -65,8 +65,10 @@ export async function createEvent(formData: FormData) {
     const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] = await Promise.all([
       // `injured` hoort erbij: een geblesseerde speler moet ook op een NIEUW
       // event meteen op 'absent' komen, net als markInjured dat voor bestaande
-      // events doet (app/actions/players.ts:124-132).
-      supabase.from('players').select('id, injured').eq('active', true).eq('team_id', user.id),
+      // events doet (app/actions/players.ts:124-132). `type` idem voor
+      // gastspelers: die staan altijd afwezig. Het active-filter blijft staan —
+      // een gast is gewoon actief en krijgt dus wél een rij.
+      supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', user.id),
       getDefaultAttendance().catch(() => 'present' as const),
       // Lopende afmeldperiodes die déze datum dekken (grenzen inclusief):
       // from_date <= date <= to_date. Vaste sortering zodat de herkomst bij
@@ -101,6 +103,7 @@ export async function createEvent(formData: FormData) {
           defaultStatus,
           injured: p.injured === true,
           periodId: periodByPlayer.get(p.id) ?? null,
+          isGuest: p.type === 'guest',
         }))
       )
     }

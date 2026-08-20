@@ -148,7 +148,10 @@ function ratingRow(overrides: Row = {}): Row {
 }
 
 function playerRow(overrides: Row = {}): Row {
-  return { id: 'p1', team_id: TEAM, name: 'Piet Peters', active: true, ...overrides }
+  // `type` hoort erbij sinds gastspelers: de spelerskiezer en alle zes RPC's
+  // filteren op type = 'regular'. Zonder deze default valt elke fixture-speler
+  // uit de lijst.
+  return { id: 'p1', team_id: TEAM, name: 'Piet Peters', active: true, type: 'regular', ...overrides }
 }
 
 // ── Generieke Supabase-tabel-engine, zelfde precedent als
@@ -252,9 +255,16 @@ function inRange(date: string, start: string, end: string): boolean {
   return date >= start && date <= end
 }
 
+// Gastspelers (players.type = 'guest') tellen nooit mee in de teambrede
+// aanwezigheidscijfers (AC10/AC11) — zie supabase/inzichten.sql 3a/3b. Deze
+// twee functies keken vóór de gastspelers-feature helemaal niet naar
+// `db.players`; zonder deze players-lookup zou een verkeerd/ontbrekend
+// `p.type = 'regular'`-filter in de ECHTE SQL door deze mock-suite heen
+// glippen.
 function rpcAanwezigheid(db: Db, args: Row) {
   const { p_start, p_end } = args as { p_start: string; p_end: string }
   const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const players = new Map(db.players.map((p) => [p.id as string, p]))
   let aanwezig = 0
   let afwezig = 0
   for (const a of db.attendance) {
@@ -262,6 +272,8 @@ function rpcAanwezigheid(db: Db, args: Row) {
     const e = events.get(a.event_id as string)
     if (!e || e.team_id !== TEAM || e.type === 'meting') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
+    const p = players.get(a.player_id as string)
+    if (!p || p.team_id !== TEAM || p.type !== 'regular') continue
     if (a.status === 'present') aanwezig++
     else if (a.status === 'absent') afwezig++
   }
@@ -271,12 +283,15 @@ function rpcAanwezigheid(db: Db, args: Row) {
 function rpcMaandOpkomst(db: Db, args: Row) {
   const { p_start, p_end } = args as { p_start: string; p_end: string }
   const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const players = new Map(db.players.map((p) => [p.id as string, p]))
   const byMaand = new Map<string, { aanwezig: number; afwezig: number }>()
   for (const a of db.attendance) {
     if (a.team_id !== TEAM) continue
     const e = events.get(a.event_id as string)
     if (!e || e.team_id !== TEAM || e.type !== 'training') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
+    const p = players.get(a.player_id as string)
+    if (!p || p.team_id !== TEAM || p.type !== 'regular') continue
     const maand = (e.date as string).slice(0, 7)
     const cur = byMaand.get(maand) ?? { aanwezig: 0, afwezig: 0 }
     if (a.status === 'present') cur.aanwezig++
@@ -288,6 +303,9 @@ function rpcMaandOpkomst(db: Db, args: Row) {
     .map(([maand, v]) => ({ maand, ...v }))
 }
 
+// Deze vier functies joinden al op players (voor de active-check); het
+// gast-filter (AC12) breidt diezelfde `!p.active`-uitsluiting simpelweg uit
+// met `p.type !== 'regular'` — exact zoals supabase/inzichten.sql 3c-3f.
 function rpcTeamRating(db: Db, args: Row) {
   const { p_start, p_end } = args as { p_start: string; p_end: string }
   const events = new Map(db.events.map((e) => [e.id as string, e]))
@@ -299,7 +317,7 @@ function rpcTeamRating(db: Db, args: Row) {
     if (!e || e.team_id !== TEAM || e.type !== 'match') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
     const p = players.get(r.player_id as string)
-    if (!p || p.team_id !== TEAM || !p.active) continue
+    if (!p || p.team_id !== TEAM || !p.active || p.type !== 'regular') continue
     const arr = byEvent.get(e.id as string) ?? []
     arr.push(r.rating as number)
     byEvent.set(e.id as string, arr)
@@ -328,7 +346,7 @@ function rpcRatingSpeler(db: Db, args: Row) {
   const events = new Map(db.events.map((e) => [e.id as string, e]))
   const players = new Map(db.players.map((p) => [p.id as string, p]))
   const p = players.get(p_player)
-  if (!p || p.team_id !== TEAM || !p.active) return []
+  if (!p || p.team_id !== TEAM || !p.active || p.type !== 'regular') return []
   const rows: Row[] = []
   for (const r of db.match_ratings) {
     if (r.team_id !== TEAM || r.player_id !== p_player) continue
@@ -355,7 +373,7 @@ function rpcRatingPerSpeler(db: Db, args: Row) {
     if (!e || e.team_id !== TEAM || e.type !== 'match') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
     const p = players.get(r.player_id as string)
-    if (!p || p.team_id !== TEAM || !p.active) continue
+    if (!p || p.team_id !== TEAM || !p.active || p.type !== 'regular') continue
     const arr = byPlayer.get(p.id as string) ?? []
     arr.push(r.rating as number)
     byPlayer.set(p.id as string, arr)
@@ -385,7 +403,7 @@ function rpcAanwezigheidPerSpeler(db: Db, args: Row) {
     if (!e || e.team_id !== TEAM || e.type === 'meting') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
     const p = players.get(a.player_id as string)
-    if (!p || p.team_id !== TEAM || !p.active) continue
+    if (!p || p.team_id !== TEAM || !p.active || p.type !== 'regular') continue
     const cur = byPlayer.get(p.id as string) ?? { aanwezig: 0, afwezig: 0 }
     if (a.status === 'present') cur.aanwezig++
     else if (a.status === 'absent') cur.afwezig++
@@ -433,7 +451,16 @@ function makeSupabaseMock(opts: {
     events: opts.events ?? [],
     attendance: opts.attendance ?? [],
     match_ratings: opts.matchRatings ?? [],
-    players: opts.players ?? [],
+    // Default op [playerRow()] (id 'p1', type 'regular'): sinds de
+    // gastspelers-feature hebben rpcAanwezigheid/rpcMaandOpkomst ook een
+    // players-lookup nodig (zie hierboven). attendanceRow()/ratingRow()
+    // wijzen standaard naar player_id 'p1' — zonder deze default zou elke
+    // bestaande test die geen eigen `players` meegeeft stilzwijgend 0
+    // aanwezigen/afwezigen berekenen (de rij bestaat wel, maar de "speler"
+    // wordt niet gevonden en dus overgeslagen). Een test die tenant-isolatie
+    // of het gast-/active-filter zelf test, geeft gewoon een eigen
+    // `players`-array mee en overschrijft deze default.
+    players: opts.players ?? [playerRow()],
   }
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)
@@ -570,7 +597,15 @@ describe('volledig seizoen — alle 4 grafieken correct', () => {
         eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC', match_type: 'league', goals_for: 3, goals_against: 1 }),
         eventRow({ id: 'match-2', type: 'match', date: '2026-09-12', opponent: 'FC Oost', match_type: 'friendly', goals_for: 1, goals_against: 1 }),
       ],
-      players: [playerRow({ id: 'p1', name: 'Piet Peters', active: true })],
+      // p2 hoort er als REGULIERE speler bij: attendanceRow hieronder
+      // gebruikt player_id 'p2' voor de afwezige rij. Sinds rpcAanwezigheid
+      // een players-lookup doet (gastspelers-feature), telt een attendance-
+      // rij van een onbekende speler niet meer mee — zonder deze fixture
+      // zou de test stilzwijgend een andere (foutieve) uitkomst bewijzen.
+      players: [
+        playerRow({ id: 'p1', name: 'Piet Peters', active: true }),
+        playerRow({ id: 'p2', name: 'Jan Jansen', active: true }),
+      ],
       attendance: [
         attendanceRow({ event_id: 'training-1', status: 'present' }),
         attendanceRow({ event_id: 'training-1', player_id: 'p2', status: 'absent' }),
@@ -881,7 +916,13 @@ describe('basis-toegankelijkheid op paginaniveau', () => {
         eventRow({ id: 'training-1', type: 'training', date: '2026-09-10' }),
         eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC', match_type: 'league', goals_for: 3, goals_against: 1 }),
       ],
-      players: [playerRow({ id: PLAYER_ACTIVE })],
+      // p2 hoort er als REGULIERE speler bij (zie de toelichting bij de
+      // "volledig seizoen"-test) — anders telt de afwezige rij niet mee en
+      // klopt de verwachte 50% hieronder niet meer.
+      players: [
+        playerRow({ id: PLAYER_ACTIVE }),
+        playerRow({ id: 'p2', name: 'Jan Jansen', active: true }),
+      ],
       attendance: [
         attendanceRow({ event_id: 'training-1', status: 'present' }),
         attendanceRow({ event_id: 'training-1', player_id: 'p2', status: 'absent' }),
@@ -925,7 +966,11 @@ describe('basis-toegankelijkheid op paginaniveau', () => {
         eventRow({ id: 'training-1', type: 'training', date: '2026-09-10' }),
         eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC', match_type: 'league', goals_for: 3, goals_against: 1 }),
       ],
-      players: [playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Piet Peters' })],
+      // p2 hoort er als REGULIERE speler bij, zie de toelichting hierboven.
+      players: [
+        playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Piet Peters' }),
+        playerRow({ id: 'p2', name: 'Jan Jansen', active: true }),
+      ],
       attendance: [
         attendanceRow({ event_id: 'training-1', status: 'present' }),
         attendanceRow({ event_id: 'training-1', player_id: 'p2', status: 'absent' }),
@@ -1228,6 +1273,147 @@ describe('AC22/AC24 — teamgemiddelde sluit inactieve spelers uit', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
+// AC10/AC11/AC12 — gastspelers (players.type = 'guest') tellen nooit mee in
+// de teambrede statistieken. Toegevoegd door de test-verifier: dit blok
+// bewijst zowel dat de zes RPC-mock-functies hierboven het gast-filter
+// daadwerkelijk toepassen, als dat app/inzichten/page.tsx (spelerskiezer)
+// gasten weglaat (O3).
+// ═══════════════════════════════════════════════════════════════════════
+describe('AC10/AC11/AC12 — gastspelers uitgesloten van teambrede statistieken', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+  const training = eventRow({ id: 'training-1', type: 'training', date: '2026-09-10' })
+  const match = eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC' })
+  const PLAYER_GUEST = 'eeeeeeee-0000-0000-0000-000000000001'
+  const PLAYER_ACTIVE_2 = 'eeeeeeee-0000-0000-0000-000000000002'
+
+  function opkomstPerMaandCells(): string[] {
+    const tables = Array.from(document.querySelectorAll('table'))
+    const table = tables.find((tb) => tb.querySelector('caption')?.textContent?.includes('maanden')) as HTMLTableElement
+    return Array.from(table.querySelectorAll('td')).map((td) => td.textContent ?? '')
+  }
+
+  it('AC10: een gast met een aanwezigheidsrij in het venster verandert het teambrede opkomstpercentage niet', async () => {
+    // Bewust een NIET-100%-basis (1 aanwezig, 1 afwezig → 50%): zou de
+    // gast-rij toch meetellen (in teller óf noemer), dan verschuift dit
+    // percentage aantoonbaar — een 100%-basis zou een missend filter niet
+    // per se laten opvallen (een aanwezige gast extra blijft dan toevallig
+    // ook 100%).
+    const basis = {
+      settings,
+      events: [training],
+      players: [
+        playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Vaste Speler 1' }),
+        playerRow({ id: PLAYER_ACTIVE_2, active: true, name: 'Vaste Speler 2' }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 'training-1', player_id: PLAYER_ACTIVE, status: 'present' }),
+        attendanceRow({ event_id: 'training-1', player_id: PLAYER_ACTIVE_2, status: 'absent' }),
+      ],
+    }
+    const { unmount } = await renderInzichten(basis)
+    const zonderGast = aanwezigheidPercentage()
+    unmount()
+
+    await renderInzichten({
+      ...basis,
+      players: [
+        ...basis.players,
+        playerRow({ id: PLAYER_GUEST, type: 'guest', active: true, name: 'Gast Speler' }),
+      ],
+      attendance: [
+        ...basis.attendance,
+        // Zelfs aanwezig (dus in de teller ván een gewone telling) mag het
+        // percentage niet veranderen — de gast wordt volledig genegeerd, niet
+        // als 'absent' geteld.
+        attendanceRow({ event_id: 'training-1', player_id: PLAYER_GUEST, status: 'present' }),
+      ],
+    })
+    expect(zonderGast).toBe('50%')
+    expect(aanwezigheidPercentage()).toBe(zonderGast)
+  })
+
+  it('AC11: opkomst per maand blijft ongewijzigd als een gast in dezelfde maand meedoet', async () => {
+    const basis = {
+      settings,
+      events: [training],
+      players: [playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Vaste Speler' })],
+      attendance: [attendanceRow({ event_id: 'training-1', player_id: PLAYER_ACTIVE, status: 'present' })],
+    }
+    const { unmount } = await renderInzichten(basis)
+    const zonderGast = opkomstPerMaandCells()
+    unmount()
+
+    await renderInzichten({
+      ...basis,
+      players: [
+        ...basis.players,
+        playerRow({ id: PLAYER_GUEST, type: 'guest', active: true, name: 'Gast Speler' }),
+      ],
+      attendance: [
+        ...basis.attendance,
+        attendanceRow({ event_id: 'training-1', player_id: PLAYER_GUEST, status: 'absent' }),
+      ],
+    })
+    expect(opkomstPerMaandCells()).toEqual(zonderGast)
+  })
+
+  it('AC12: een gast met de hoogste rating in het venster verschijnt niet in top/worst spelerrating', async () => {
+    await renderInzichten({
+      settings,
+      events: [match],
+      players: [
+        playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Vaste Speler' }),
+        playerRow({ id: PLAYER_GUEST, type: 'guest', active: true, name: 'Gast Uitblinker' }),
+      ],
+      matchRatings: [
+        ratingRow({ event_id: 'match-1', player_id: PLAYER_ACTIVE, rating: 5 }),
+        // Hoogste rating van allemaal, maar een gast — mag nergens verschijnen,
+        // en mag het teamgemiddelde/top-5 niet omhoog trekken.
+        ratingRow({ event_id: 'match-1', player_id: PLAYER_GUEST, rating: 10 }),
+      ],
+    })
+    const card = topWorstCard(nl.insights.topWorstRatingsTitle)
+    expect(within(card).queryByText('Gast Uitblinker')).toBeNull()
+    expect(topWorstNames(card, nl.insights.bestLabel)).toEqual(['Vaste Speler'])
+  })
+
+  it('AC12: een gast met de hoogste aanwezigheid in het venster verschijnt niet in top/worst aanwezigheid per speler', async () => {
+    await renderInzichten({
+      settings,
+      events: [training],
+      players: [
+        playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Vaste Speler' }),
+        playerRow({ id: PLAYER_GUEST, type: 'guest', active: true, name: 'Gast Trouw' }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 'training-1', player_id: PLAYER_ACTIVE, status: 'absent' }),
+        // 100% aanwezig, maar een gast — mag nergens verschijnen.
+        attendanceRow({ event_id: 'training-1', player_id: PLAYER_GUEST, status: 'present' }),
+      ],
+    })
+    const card = topWorstCard(nl.insights.topWorstAanwezigheidTitle)
+    expect(within(card).queryByText('Gast Trouw')).toBeNull()
+    expect(topWorstNames(card, nl.insights.bestLabel)).toEqual(['Vaste Speler'])
+  })
+
+  it('AC12/O3: een gast staat niet als optie in de individuele-ratingselector (spelerskiezer)', async () => {
+    await renderInzichten({
+      settings,
+      events: [match],
+      players: [
+        playerRow({ id: PLAYER_ACTIVE, active: true, name: 'Vaste Speler' }),
+        playerRow({ id: PLAYER_GUEST, type: 'guest', active: true, name: 'Gast Speler' }),
+      ],
+      matchRatings: [ratingRow({ event_id: 'match-1', player_id: PLAYER_ACTIVE, rating: 8 })],
+    })
+    const select = screen.getByLabelText(nl.insights.spelerSelectLabel) as HTMLSelectElement
+    const optionLabels = Array.from(select.options).map((o) => o.textContent)
+    expect(optionLabels).toContain('Vaste Speler')
+    expect(optionLabels).not.toContain('Gast Speler')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
 // AC23 — per-speler-weergave, volledige keten: dropdown → echte server
 // action (app/actions/inzichten.ts) → echte RPC-aanroep → grafiek
 // ═══════════════════════════════════════════════════════════════════════
@@ -1340,7 +1526,10 @@ describe('AC29 — geen minimumdrempel: 1 datapunt wordt gewoon getoond', () => 
         eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC', goals_for: 2, goals_against: 0 }),
       ],
       players: [playerRow({ id: PLAYER_ACTIVE, active: true })],
-      attendance: [attendanceRow({ event_id: 'training-1', status: 'present' })],
+      // player_id moet matchen met de speler hierboven (PLAYER_ACTIVE, niet
+      // de standaard 'p1' van attendanceRow()) — sinds rpcAanwezigheid een
+      // players-lookup doet, telt een rij van een onbekende speler niet mee.
+      attendance: [attendanceRow({ event_id: 'training-1', player_id: PLAYER_ACTIVE, status: 'present' })],
       matchRatings: [ratingRow({ event_id: 'match-1', player_id: PLAYER_ACTIVE, rating: 8 })],
     })
 

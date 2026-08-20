@@ -17,6 +17,7 @@ import {
   type BulkRowFields,
 } from '@/lib/bulk-matches'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
+import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { parseMatchesFromCsv } from '@/lib/bulk-matches-csv'
 import { parseMatchesFromXlsx } from '@/lib/bulk-matches-xlsx'
 
@@ -262,7 +263,10 @@ async function createAttendanceFor(
     // app/actions/events.ts:63-66 en app/actions/settings.ts:166-175).
     const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] =
       await Promise.all([
-        supabase.from('players').select('id').eq('active', true).eq('team_id', userId),
+        // `type` hoort erbij: een gastspeler staat altijd afwezig. Het
+        // active-filter blijft staan — een gast is gewoon actief en krijgt dus
+        // wél een rij.
+        supabase.from('players').select('id, type').eq('active', true).eq('team_id', userId),
         getDefaultAttendance().catch(() => 'present' as const),
         // Tenant-grens expliciet, naast de RLS-policy. Vaste sortering zodat de
         // herkomst bij overlappende periodes deterministisch is, net als daar.
@@ -294,17 +298,19 @@ async function createAttendanceFor(
     const records = events.flatMap((event) => {
       const periodByPlayer = periodIdByPlayerForDate(periods ?? [], event.date)
       // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
-      // met afwijkende kolommen, dus absence_period_id gaat altijd mee.
-      return players.map((player: { id: string }) => {
-        const periodId = periodByPlayer.get(player.id) ?? null
-        return {
-          event_id: event.id,
-          player_id: player.id,
-          status: periodId ? 'absent' : defaultStatus,
-          team_id: userId,
-          absence_period_id: periodId,
-        }
-      })
+      // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
+      // `injured: false` houdt het gedrag exact gelijk aan de inline variant die
+      // hier stond: die kende geen blessure-tak. Gevolg is alleen dat
+      // injury_set nu expliciet op false gaat (= de DB-default).
+      return players.map((player: { id: string; type: string }) => buildAttendanceRow({
+        eventId: event.id,
+        playerId: player.id,
+        teamId: userId,
+        defaultStatus,
+        injured: false,
+        periodId: periodByPlayer.get(player.id) ?? null,
+        isGuest: player.type === 'guest',
+      }))
     })
 
     for (let i = 0; i < records.length; i += ATTENDANCE_BATCH) {

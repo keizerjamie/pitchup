@@ -43,6 +43,15 @@ export const POSITION_GROUPS: { label: string; positions: Position[] }[] = [
   { label: 'Aanvallers', positions: ['Linksbuiten', 'Rechtsbuiten', 'Spits'] },
 ]
 
+// Soort speler. 'guest' staat LOS van `active`: een gastspeler is gewoon een
+// actieve speler die standaard afwezig staat (lib/attendance-rows.ts) en die
+// nooit meetelt in de teambrede statistieken (supabase/inzichten.sql). Zelfde
+// patroon als `position`: DB-CHECK + const-array hier + migratiebestand in
+// supabase/ (gastspelers.sql).
+export type PlayerType = 'regular' | 'guest'
+
+export const PLAYER_TYPES: PlayerType[] = ['regular', 'guest']
+
 export interface Player {
   id: string
   name: string
@@ -51,6 +60,9 @@ export interface Player {
   jersey_number: number | null
   active: boolean
   injured: boolean
+  // Bewust VERPLICHT (geen `?`): elke fixture en elke aanroeper moet bewust
+  // kiezen, anders glipt een gast als reguliere speler door de statistieken.
+  type: PlayerType
   rating: number | null
   created_at: string
 }

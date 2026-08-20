@@ -577,6 +577,104 @@ describe('generateSeasonTrainings — blessure', () => {
 })
 
 // ────────────────────────────────────────────────
+// generateSeasonTrainings — gastspelers (AC6)
+// ────────────────────────────────────────────────
+// Een gastspeler staat op ELKE gegenereerde training op 'absent', ongeacht de
+// teaminstelling default_attendance (in deze suite 'present').
+
+describe('generateSeasonTrainings — gastspeler', () => {
+  function metGast(
+    events: { id: string; date: string }[],
+    players: { id: string; injured?: boolean; type?: string }[],
+    extra: Record<string, TableResult> = {},
+  ) {
+    return metSeizoen({
+      events: { data: events, error: null },
+      players: { data: players, error: null },
+      absence_periods: { data: [], error: null },
+      ...extra,
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
+  }
+
+  const TWEE_TRAININGEN = [{ id: 'e1', date: '2026-01-12' }, { id: 'e2', date: '2026-01-26' }]
+
+  it('zet de gast op elke gegenereerde training op absent, de reguliere speler op present', async () => {
+    const m = metGast(TWEE_TRAININGEN, [
+      { id: 'p1', injured: false, type: 'guest' },
+      { id: 'p2', injured: false, type: 'regular' },
+    ])
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    const rows = attendanceRows(m)
+    const gast = rows.filter((r) => r.player_id === 'p1')
+    expect(gast).toHaveLength(2)
+    for (const row of gast) {
+      expect(row.status).toBe('absent')
+      expect(row.injury_set).toBe(false)
+      expect(row.absence_period_id).toBeNull()
+    }
+
+    const regulier = rows.filter((r) => r.player_id === 'p2')
+    expect(regulier).toHaveLength(2)
+    for (const row of regulier) expect(row.status).toBe('present')
+  })
+
+  it('blijft absent in combinatie met blessure en een dekkende periode (AC9)', async () => {
+    const m = metGast(
+      [{ id: 'e1', date: '2026-01-12' }],
+      [{ id: 'p1', injured: true, type: 'guest' }],
+      { absence_periods: { data: [{ id: 'ap-1', player_id: 'p1', from_date: '2026-01-10', to_date: '2026-01-20' }], error: null } },
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    expect(attendanceRows(m)[0]).toEqual({
+      event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1',
+      injury_set: true, absence_period_id: 'ap-1',
+    })
+  })
+
+  it('houdt het active-filter en de tenant-scope op de spelersquery', async () => {
+    // Een gast is gewoon actief: zonder dit filter zou hij nooit een rij
+    // krijgen.
+    const m = metGast([{ id: 'e1', date: '2026-01-12' }], [{ id: 'p1', type: 'guest' }])
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    const playerSelects = m.calls.select.filter((s) => s.table === 'players')
+    expect(playerSelects).toHaveLength(1)
+    expect(playerSelects[0].filters).toEqual([
+      { op: 'eq', col: 'active', val: true },
+      { op: 'eq', col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('houdt de sleutelset gelijk voor gast en reguliere speler', async () => {
+    const m = metGast([{ id: 'e1', date: '2026-01-12' }], [
+      { id: 'p1', type: 'guest' },
+      { id: 'p2', type: 'regular' },
+    ])
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    for (const row of attendanceRows(m)) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+      )
+    }
+  })
+})
+
+// ────────────────────────────────────────────────
 // Tijdzones
 // ────────────────────────────────────────────────
 

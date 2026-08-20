@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS players (
   rating INT CHECK (rating BETWEEN 1 AND 10),
   active BOOLEAN DEFAULT true,
   injured BOOLEAN NOT NULL DEFAULT false,
+  -- Soort speler. 'guest' staat LOS van `active`: een gastspeler is gewoon een
+  -- actieve speler die standaard afwezig wordt gezet en die nooit meetelt in de
+  -- teambrede statistieken (zie inzichten.sql). Migratie voor een bestaande
+  -- installatie: gastspelers.sql.
+  type TEXT NOT NULL DEFAULT 'regular' CHECK (type IN ('regular', 'guest')),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 

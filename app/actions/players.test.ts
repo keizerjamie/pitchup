@@ -9,7 +9,7 @@ vi.mock('@/app/actions/settings', () => ({ getDefaultAttendance: vi.fn(async () 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
-import { markRecovered } from '@/app/actions/players'
+import { createPlayer, markRecovered, updatePlayer } from '@/app/actions/players'
 
 type TableResult = { data?: unknown; error?: unknown }
 
@@ -22,6 +22,7 @@ function makeSupabase(opts: {
   type Filter = { op: string; col: string; val: unknown }
   const calls = {
     select: [] as { table: string; filters: Filter[] }[],
+    insert: [] as { table: string; payload: unknown }[],
     update: [] as { table: string; payload: Record<string, unknown>; filters: Filter[] }[],
     upsert: [] as { table: string; payload: unknown }[],
   }
@@ -37,6 +38,7 @@ function makeSupabase(opts: {
     for (const op of ['eq', 'neq', 'gte', 'lte', 'in', 'is']) {
       c[op] = (col: string, val: unknown) => { filters.push({ op, col, val }); return c }
     }
+    c.insert = (payload: unknown) => { calls.insert.push({ table, payload }); return c }
     c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload, filters }); return c }
     c.upsert = (payload: unknown) => { calls.upsert.push({ table, payload }); return c }
     c.maybeSingle = () => Promise.resolve(result)
@@ -191,5 +193,186 @@ describe('markRecovered', () => {
     expect(logged()).toContain('42501')
     expect(logged()).not.toContain('permission denied')
     expect(revalidatePath).not.toHaveBeenCalled()
+  })
+})
+
+// ────────────────────────────────────────────────
+// markRecovered — gastspelers (O2)
+// ────────────────────────────────────────────────
+// Herstellen van een blessure zet toekomstige rijen terug naar de
+// teamstandaard. Voor een gastspeler is die standaard 'absent': hij komt alleen
+// op 'present' als de trainer hem daar handmatig op zet.
+
+describe('markRecovered — gastspeler', () => {
+  it('zet de rijen van een GAST terug naar absent in plaats van de teamstandaard', async () => {
+    const m = eigenTeam({ players: { data: { id: PLAYER_A, type: 'guest' }, error: null } })
+    use(m)
+
+    await markRecovered(PLAYER_A)
+
+    expect(updates(m)[0].payload).toEqual({ status: 'absent', injury_set: false })
+  })
+
+  it('zet de rijen van een REGULIERE speler wél terug naar de teamstandaard', async () => {
+    // Zelfde call, alleen een ander type: het verschil zit uitsluitend in de
+    // statusregel uit lib/attendance-rows.ts.
+    const m = eigenTeam({ players: { data: { id: PLAYER_A, type: 'regular' }, error: null } })
+    use(m)
+
+    await markRecovered(PLAYER_A)
+
+    expect(updates(m)[0].payload).toEqual({ status: 'present', injury_set: false })
+  })
+
+  it('haalt het type team-gescoped op', async () => {
+    const m = eigenTeam({ players: { data: { id: PLAYER_A, type: 'guest' }, error: null } })
+    use(m)
+
+    await markRecovered(PLAYER_A)
+
+    // Twee players-selects: assertOwnPlayer en de type-query. Beide dragen
+    // id + team_id.
+    const playerSelects = m.calls.select.filter((s) => s.table === 'players')
+    expect(playerSelects).toHaveLength(2)
+    for (const sel of playerSelects) {
+      expect(sel.filters).toEqual([
+        { op: 'eq', col: 'id', val: PLAYER_A },
+        { op: 'eq', col: 'team_id', val: 'team-1' },
+      ])
+    }
+  })
+
+  it('laat de blessurevlag-opschoning ongemoeid voor een gast (status blijft absent)', async () => {
+    const m = eigenTeam({ players: { data: { id: PLAYER_A, type: 'guest' }, error: null } })
+    use(m)
+
+    await markRecovered(PLAYER_A)
+
+    const clear = updates(m)[1]
+    expect(clear.payload).toEqual({ injury_set: false })
+    expect(clear.payload).not.toHaveProperty('status')
+  })
+})
+
+// ────────────────────────────────────────────────
+// createPlayer / updatePlayer — spelertype (AC1, AC4, AC17, AC21, AC22)
+// ────────────────────────────────────────────────
+
+function form(fields: Record<string, string>): FormData {
+  const fd = new FormData()
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v)
+  return fd
+}
+
+const BASIS = { name: 'Piet Peters', position: 'Spits' }
+
+function inserts(m: ReturnType<typeof makeSupabase>) {
+  return m.calls.insert.filter((i) => i.table === 'players')
+}
+
+describe('createPlayer — spelertype', () => {
+  it('slaat een gastspeler op als type guest, actief en team-gescoped (AC1)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await createPlayer(form({ ...BASIS, type: 'guest' }))
+
+    expect(inserts(m)).toHaveLength(1)
+    expect(inserts(m)[0].payload).toMatchObject({
+      name: 'Piet Peters',
+      position: 'Spits',
+      type: 'guest',
+      // Een gast is gewoon actief; type staat los van active.
+      active: true,
+      team_id: 'team-1',
+    })
+  })
+
+  it('valt terug op regular als het formulier geen type meestuurt', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await createPlayer(form(BASIS))
+
+    expect((inserts(m)[0].payload as Record<string, unknown>).type).toBe('regular')
+  })
+
+  it('behandelt een leeg type als regular', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await createPlayer(form({ ...BASIS, type: '' }))
+
+    expect((inserts(m)[0].payload as Record<string, unknown>).type).toBe('regular')
+  })
+
+  it('weigert een type buiten de whitelist en maakt niets aan (AC21)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createPlayer(form({ ...BASIS, type: 'vip' }))).rejects.toThrow('Ongeldig spelertype')
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('houdt position verplicht, ook voor een gast (AC4)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createPlayer(form({ name: 'Piet Peters', type: 'guest' })))
+      .rejects.toThrow('Ongeldige positie')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert zonder ingelogde gebruiker en raakt de database niet (AC22)', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+
+    await expect(createPlayer(form({ ...BASIS, type: 'guest' }))).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.insert).toHaveLength(0)
+    expect(m.calls.select).toHaveLength(0)
+  })
+})
+
+describe('updatePlayer — spelertype', () => {
+  it('schrijft een gewijzigd type weg, gescoped op id én team_id (AC17)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await updatePlayer(PLAYER_A, form({ ...BASIS, type: 'regular', active: 'true' }))
+
+    const update = m.calls.update.find((u) => u.table === 'players')!
+    expect(update.payload).toMatchObject({ type: 'regular', active: true })
+    expect(update.filters).toEqual([
+      { op: 'eq', col: 'id', val: PLAYER_A },
+      { op: 'eq', col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('kan een reguliere speler alsnog gast maken', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await updatePlayer(PLAYER_A, form({ ...BASIS, type: 'guest', active: 'true' }))
+
+    expect(m.calls.update.find((u) => u.table === 'players')!.payload).toMatchObject({ type: 'guest' })
+  })
+
+  it('weigert een ongeldig type en werkt niets bij (AC21)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(updatePlayer(PLAYER_A, form({ ...BASIS, type: 'vip' })))
+      .rejects.toThrow('Ongeldig spelertype')
+    expect(m.calls.update).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('weigert zonder ingelogde gebruiker (AC22)', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+
+    await expect(updatePlayer(PLAYER_A, form({ ...BASIS, type: 'guest' }))).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.update).toHaveLength(0)
   })
 })

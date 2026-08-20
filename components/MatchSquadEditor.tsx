@@ -179,9 +179,14 @@ export default function MatchSquadEditor({
                 style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
                 <span className="text-[14.5px] font-bold text-ink truncate">
                   {player.name}
-                  {/* Eén label tegelijk: inactief weegt zwaarder dan niet-aanwezig
-                      (zie page.tsx-comment) — een speler is nooit allebei tegelijk
-                      zichtbaar, dat zou verwarrend zijn. */}
+                  {player.type === 'guest' && (
+                    <span className="ml-2 text-[11px] font-semibold text-faint">({t.players.guestBadge})</span>
+                  )}
+                  {/* Eén statuslabel tegelijk: inactief weegt zwaarder dan
+                      niet-aanwezig (zie page.tsx-comment) — een speler toont
+                      nooit beide statuslabels tegelijk, dat zou verwarrend
+                      zijn. De gast-tag hierboven staat daarbuiten: die toont
+                      altijd, naast een eventueel statuslabel (besluit 24). */}
                   {!player.active ? (
                     <span className="ml-2 text-[11px] font-semibold text-faint">({t.players.inactiveLabel})</span>
                   ) : !presentIds.has(player.id) ? (

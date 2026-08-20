@@ -157,6 +157,7 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
     jersey_number: 9,
     active: true,
     injured: false,
+    type: 'regular',
     rating: 5,
     created_at: '2024-01-01T00:00:00Z',
     ...overrides,
@@ -1072,6 +1073,96 @@ describe('Story-AC20 — spelers die tussentijds inactief worden gemaakt terwijl
     // Niet-geselecteerde inactieve speler hoort niet in de (unie van actief +
     // aanwezig + al-geselecteerd) lijst te staan.
     expect(screen.queryByText('Weg Ermee')).not.toBeInTheDocument()
+  })
+})
+
+// ── Gastspelers (user story "Gastspelers", AC13/AC14/AC16 + edge case) ──
+// Toegevoegd door de test-verifier. `selectable` in app/events/[id]/squad/
+// page.tsx (regel 56) is bewust NIET aangepast voor gastspelers (zie de
+// technische brief §2.E) — de regel kijkt alleen naar selectedIds/active/
+// presentIds, nooit naar `type`. Deze tests bewijzen dat dat mechanisme
+// ECHT hetzelfde gedrag geeft voor een gast als voor een reguliere speler,
+// via de ECHTE pagina (niet enkel via de al bestaande component-tests in
+// components/MatchSquadEditor.test.tsx, die alleen het "(Gast)"-label
+// testen met kant-en-klare props, niet de selecteerbaarheids-berekening
+// zelf).
+describe('AC13/AC14 (gastspelers) — een aanwezige gast is selecteerbaar, een afwezige, niet eerder geselecteerde gast niet', () => {
+  it('AC13: een gast met attendance-status "present" verschijnt in de selecteerbare lijst, net als een aanwezige reguliere speler', async () => {
+    const players = [
+      playerRow({ id: 'p1', name: 'Aanwezige Gast', type: 'guest', active: true }),
+      playerRow({ id: 'p2', name: 'Aanwezige Reguliere Speler', type: 'regular', active: true }),
+    ]
+    await renderSquadPage({
+      events: [matchEventRow()],
+      players,
+      attendance: [
+        { id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' },
+        { id: 'a2', event_id: 'e1', player_id: 'p2', team_id: TEAM, status: 'present' },
+      ],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Aanwezige Gast` })
+    expect(toggle).not.toBeDisabled()
+    expect(screen.getByText('Aanwezige Reguliere Speler')).toBeInTheDocument()
+  })
+
+  it('AC14: een gast met attendance-status "absent" (de standaard, AC5-AC8) en niet in match_squad is NIET selecteerbaar — verschijnt niet in de lijst', async () => {
+    const players = [
+      playerRow({ id: 'p1', name: 'Afwezige Gast', type: 'guest', active: true }),
+    ]
+    await renderSquadPage({
+      events: [matchEventRow()],
+      players,
+      attendance: [
+        { id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'absent' },
+      ],
+    })
+    expect(screen.queryByText('Afwezige Gast')).not.toBeInTheDocument()
+  })
+
+  it('edge case (brief §5.6) — een gast die al in match_squad zit en daarna inactief wordt, blijft zichtbaar/geselecteerd mét zowel "(Gast)" als "(Inactief)"', async () => {
+    const players = [
+      playerRow({ id: 'p1', name: 'Ex-Actieve Gast', type: 'guest', active: false }),
+    ]
+    await renderSquadPage({
+      events: [matchEventRow()],
+      players,
+      squad: [{ id: 's1', event_id: 'e1', player_id: 'p1', team_id: TEAM }],
+      attendance: [],
+    })
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Ex-Actieve Gast` })
+    const row = toggle.parentElement as HTMLElement
+    expect(within(row).getByText('Ex-Actieve Gast')).toBeInTheDocument()
+    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+    expect(toggle).not.toBeDisabled()
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('AC16 (gastspelers) — "(Gast)" achter de naam in het printblok van de echte wedstrijdselectie-pagina', () => {
+  it('een geselecteerde gast krijgt de "(Gast)"-suffix in het exportblok; een geselecteerde reguliere speler niet', async () => {
+    const players = [
+      playerRow({ id: 'p1', name: 'Print Gast', type: 'guest', active: true }),
+      playerRow({ id: 'p2', name: 'Print Regulier', type: 'regular', active: true }),
+    ]
+    const { container } = await renderSquadPage({
+      events: [matchEventRow()],
+      players,
+      squad: [
+        { id: 's1', event_id: 'e1', player_id: 'p1', team_id: TEAM },
+        { id: 's2', event_id: 'e1', player_id: 'p2', team_id: TEAM },
+      ],
+      attendance: [],
+    })
+    // Het printblok (MatchSquadPrintList, dual-markup binnen MatchSquadEditor)
+    // toont uitsluitend de geselecteerde spelers als losse <li>-tekst
+    // "Naam" of "Naam (Gast)" — zie components/MatchSquadPrintList.tsx.
+    // Gescoped op het printblok: dezelfde namen staan ook in het interactieve
+    // scherm-blok (dual markup), dus een ongescoopte getByText zou op "Print
+    // Regulier" een "Found multiple elements"-fout geven.
+    const block = getPrintBlock(container)
+    expect(within(block).getByText(`Print Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(block).getByText('Print Regulier')).toBeInTheDocument()
   })
 })
 

@@ -31,6 +31,18 @@ export default async function NewPlayerPage() {
             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400" />
         </div>
 
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.players.playerType}</label>
+          <select
+            name="type"
+            defaultValue="regular"
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 bg-white"
+          >
+            <option value="regular">{t.players.typeRegular}</option>
+            <option value="guest">{t.players.typeGuest}</option>
+          </select>
+        </div>
+
         <PositionSelector />
 
         <div>

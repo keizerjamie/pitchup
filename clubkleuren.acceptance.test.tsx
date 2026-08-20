@@ -233,7 +233,7 @@ async function renderTrainingPlanPage(opts: {
 function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
     id: 'p1', name: 'Piet Peters', position: 'Spits', secondary_positions: [],
-    jersey_number: 9, active: true, injured: false, rating: 5,
+    jersey_number: 9, active: true, injured: false, type: 'regular', rating: 5,
     created_at: '2024-01-01T00:00:00Z',
     ...overrides,
   }

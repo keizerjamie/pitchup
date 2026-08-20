@@ -113,7 +113,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
         {present.length > 0 && (
           <ul>
             {present.map((p) => (
-              <li key={p.id}>{p.jersey_number ?? '#'} {p.name}</li>
+              <li key={p.id}>{p.jersey_number ?? '#'} {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
             ))}
           </ul>
         )}
@@ -124,7 +124,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
             </p>
             <ul>
               {absent.map((p) => (
-                <li key={p.id}>{p.jersey_number ?? '#'} {p.name}</li>
+                <li key={p.id}>{p.jersey_number ?? '#'} {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
               ))}
             </ul>
           </>

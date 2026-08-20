@@ -11,6 +11,7 @@ function makePlayer(over: Partial<Player> & { id: string }): Player {
     jersey_number: over.jersey_number ?? null,
     active: over.active ?? true,
     injured: over.injured ?? false,
+    type: over.type ?? 'regular',
     rating: over.rating ?? 5,
     created_at: over.created_at ?? '2024-01-01T00:00:00Z',
   }

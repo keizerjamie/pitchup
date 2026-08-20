@@ -2,11 +2,12 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { Position, POSITIONS, AttendanceStatus } from '@/lib/types'
+import { Position, POSITIONS, PlayerType, PLAYER_TYPES, AttendanceStatus } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { todayLocal } from '@/lib/utils'
 import { genericError } from '@/lib/errors'
 import { assertOwnPlayer } from '@/lib/authz'
+import { resolveAttendanceStatus } from '@/lib/attendance-rows'
 
 function validatePlayerInput(formData: FormData) {
   const name = (formData.get('name') as string | null)?.trim() ?? ''
@@ -30,7 +31,16 @@ function validatePlayerInput(formData: FormData) {
   const secondary_positions = (formData.getAll('secondary_positions') as Position[])
     .filter((p) => POSITIONS.includes(p))
 
-  return { name, position, jersey_number, rating, secondary_positions }
+  // Ontbrekend of leeg veld betekent "gewone speler": het formulier van vóór
+  // deze feature stuurt het veld niet mee. Een waarde buiten de whitelist is
+  // wél een fout — zelfde gesloten-lijst-aanpak als `position`, spiegelt de
+  // CHECK-constraint players_type_check.
+  const typeRaw = formData.get('type')
+  const type: PlayerType =
+    typeRaw === null || typeRaw === '' ? 'regular' : (typeRaw as PlayerType)
+  if (!PLAYER_TYPES.includes(type)) throw new Error('Ongeldig spelertype')
+
+  return { name, position, jersey_number, rating, secondary_positions, type }
 }
 
 export async function createPlayer(formData: FormData) {
@@ -38,7 +48,7 @@ export async function createPlayer(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  const { name, position, jersey_number, secondary_positions } = validatePlayerInput(formData)
+  const { name, position, jersey_number, secondary_positions, type } = validatePlayerInput(formData)
 
   const { error } = await supabase.from('players').insert({
     name,
@@ -47,6 +57,8 @@ export async function createPlayer(formData: FormData) {
     active: true,
     team_id: user.id,
     secondary_positions,
+    // Een gast is gewoon actief; `type` staat los van `active`.
+    type,
   })
 
   if (error) throw genericError('players.createPlayer', error)
@@ -58,12 +70,12 @@ export async function updatePlayer(id: string, formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  const { name, position, jersey_number, rating, secondary_positions } = validatePlayerInput(formData)
+  const { name, position, jersey_number, rating, secondary_positions, type } = validatePlayerInput(formData)
   const active = formData.get('active') === 'true'
 
   const { error } = await supabase
     .from('players')
-    .update({ name, position, jersey_number, active, rating, secondary_positions })
+    .update({ name, position, jersey_number, active, rating, secondary_positions, type })
     .eq('id', id)
     .eq('team_id', user.id)
 
@@ -171,6 +183,23 @@ export async function markRecovered(playerId: string): Promise<void> {
     const futureEventIds = events.map((e) => e.id)
     const defaultStatus = await getDefaultAttendance()
 
+    // Een gastspeler hoort ook na herstel afwezig te blijven: hij staat alleen
+    // op 'present' als de trainer hem daar handmatig op zet. Zelfde regel als
+    // bij het aanmaken van een rij, hergebruikt uit lib/attendance-rows.ts.
+    // Hard falen bij een fout: stil doorgaan zou de gast alsnog op de
+    // teamstandaard zetten.
+    const { data: player, error: playerTypeError } = await supabase
+      .from('players')
+      .select('type')
+      .eq('id', playerId)
+      .eq('team_id', user.id)
+      .maybeSingle()
+    if (playerTypeError) throw genericError('players.markRecovered.type', playerTypeError)
+    const restoreStatus = resolveAttendanceStatus({
+      defaultStatus,
+      isGuest: player?.type === 'guest',
+    })
+
     // a. Nog-afwezige, door-blessure-gezette TOEKOMSTIGE rijen terug naar default.
     //    Bewust future-only + status='absent': verleden-historie en handmatige
     //    afwezigheden blijven ongemoeid. Ook rijen die aan een lopende
@@ -179,7 +208,7 @@ export async function markRecovered(playerId: string): Promise<void> {
     //    heffen — die wordt via revokeAbsencePeriod ingetrokken.
     const { error: restoreError } = await supabase
       .from('attendance')
-      .update({ status: defaultStatus, injury_set: false })
+      .update({ status: restoreStatus, injury_set: false })
       .eq('team_id', user.id)
       .eq('player_id', playerId)
       .eq('injury_set', true)

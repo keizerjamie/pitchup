@@ -81,7 +81,7 @@ function eigenTeam(extra: Record<string, TableResult> = {}) {
   return makeSupabase({
     tables: {
       events: { data: [{ id: 'e1', date: '2026-09-12' }, { id: 'e2', date: '2026-09-19' }], error: null },
-      players: { data: [{ id: 'p1' }], error: null },
+      players: { data: [{ id: 'p1', type: 'regular' }], error: null },
       attendance: { data: null, error: null },
       absence_periods: { data: [], error: null },
       ...extra,
@@ -201,10 +201,10 @@ describe('createBulkMatches — opslaan', () => {
     const attendance = insertsOn(m, 'attendance')
     expect(attendance).toHaveLength(1)
     expect(attendance[0].payload).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
-      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
     ])
   })
 
@@ -384,7 +384,7 @@ describe('createBulkMatches — afmeldperiode', () => {
   // meegegeven periodes als antwoord op de absence_periods-query.
   function metPeriodes(periods: unknown[], extra: Record<string, TableResult> = {}) {
     return eigenTeam({
-      players: { data: [{ id: 'p1' }, { id: 'p2' }], error: null },
+      players: { data: [{ id: 'p1', type: 'regular' }, { id: 'p2', type: 'regular' }], error: null },
       absence_periods: { data: periods, error: null },
       ...extra,
     })
@@ -403,10 +403,10 @@ describe('createBulkMatches — afmeldperiode', () => {
     await createBulkMatches(TWEE_RIJEN)
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
-      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
     ])
   })
 
@@ -423,10 +423,10 @@ describe('createBulkMatches — afmeldperiode', () => {
     await createBulkMatches(TWEE_RIJEN)
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
-      { event_id: 'e2', player_id: 'p2', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_2 },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_2 },
     ])
   })
 
@@ -446,7 +446,10 @@ describe('createBulkMatches — afmeldperiode', () => {
 
   it('geeft elke rij dezelfde sleutels, ook zonder enige periode', async () => {
     // PostgREST weigert een bulk-insert waarin de objecten verschillende
-    // kolommen hebben; absence_period_id moet dus altijd mee.
+    // kolommen hebben; absence_period_id moet dus altijd mee. Sinds deze plek
+    // buildAttendanceRow gebruikt (i.p.v. een inline kopie) gaat injury_set
+    // altijd expliciet mee als false — gelijk aan de DB-default, dus geen
+    // gedragswijziging.
     const m = metPeriodes([])
     use(m)
 
@@ -454,7 +457,7 @@ describe('createBulkMatches — afmeldperiode', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
       )
       expect(row.status).toBe('present')
       expect(row.absence_period_id).toBeNull()
@@ -478,6 +481,77 @@ describe('createBulkMatches — afmeldperiode', () => {
     expect(logged()).not.toContain('permission denied')
     // De wedstrijden blijven staan, dus de agenda wordt wél ververst.
     expect(revalidatePath).toHaveBeenCalledWith('/events')
+  })
+})
+
+// ────────────────────────────────────────────────
+// createBulkMatches — gastspelers (AC7)
+// ────────────────────────────────────────────────
+
+describe('createBulkMatches — gastspelers', () => {
+  // p1 is gast, p2 regulier; twee wedstrijden in één batch.
+  function metGast(extra: Record<string, TableResult> = {}) {
+    return eigenTeam({
+      players: { data: [{ id: 'p1', type: 'guest' }, { id: 'p2', type: 'regular' }], error: null },
+      ...extra,
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return insertsOn(m, 'attendance')[0].payload as Record<string, unknown>[]
+  }
+
+  it('zet de gast op absent en de reguliere speler op de teamstandaard, over de hele batch', async () => {
+    const m = metGast()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+    ])
+  })
+
+  it('haalt `type` op zonder het active-filter of de tenant-scope los te laten', async () => {
+    const m = metGast()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    // Een gast is gewoon actief: het active-filter blijft staan, anders zou hij
+    // helemaal geen rij krijgen.
+    expect(m.calls.select.find((s) => s.table === 'players')!.eqs).toEqual([
+      { col: 'active', val: true },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('houdt de sleutelset gelijk voor gast en reguliere speler', async () => {
+    const m = metGast()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    for (const row of attendanceRows(m)) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+      )
+    }
+  })
+
+  it('meldt attendanceFailed bij een mislukte spelersquery, ook met een gast in het team', async () => {
+    // Gelijk gedrag als zonder gast: de wedstrijden staan al opgeslagen, dus
+    // signaleren in plaats van gooien.
+    const m = metGast({ players: { data: null, error: { code: '42501' } } })
+    use(m)
+
+    const result = await createBulkMatches(TWEE_RIJEN)
+
+    expect(result).toEqual({ created: 2, attendanceFailed: true })
+    expect(insertsOn(m, 'attendance')).toHaveLength(0)
   })
 })
 

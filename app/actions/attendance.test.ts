@@ -196,6 +196,28 @@ describe('updateAttendance', () => {
     await expect(updateAttendance('e1', PLAYER_A, 'present')).rejects.toThrow('Niet ingelogd')
     expect(revalidatePath).not.toHaveBeenCalled()
   })
+
+  // AC3 — een gastspeler handmatig op aanwezig zetten loopt exact dezelfde weg
+  // als bij een reguliere speler: gastschap zit alleen in de AANMAAKregel, niet
+  // hier. Deze test legt vast dat er geen type-afhankelijk pad ontstaat.
+  it('zet ook een gastspeler handmatig op present, team-gescoped en zonder extra pad', async () => {
+    const m = eigenTeam({ players: { data: { id: PLAYER_A, type: 'guest' }, error: null } })
+    use(m)
+
+    await updateAttendance('e1', PLAYER_A, 'present')
+
+    const upsert = m.calls.upsert.find((u) => u.table === 'attendance')!
+    expect(upsert.payload).toEqual({
+      event_id: 'e1',
+      player_id: PLAYER_A,
+      status: 'present',
+      team_id: 'team-1',
+    })
+    // Alleen de eigenaarschapscheck raakt players; geen extra type-query die de
+    // handmatige keuze zou kunnen overrulen.
+    expect(m.calls.select.filter((sel) => sel.table === 'players')).toHaveLength(1)
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+  })
 })
 
 describe('markAbsentForPeriod', () => {
@@ -409,11 +431,18 @@ describe('revokeAbsencePeriod', () => {
     others?: unknown[]
     periode?: unknown
     attendanceError?: unknown
+    // Het type van de speler achter de periode: bepaalt de status waarnaar de
+    // rijen worden teruggezet (een gast blijft afwezig).
+    player?: unknown
   } = {}) {
     return makeSupabase({
       tables: {
         attendance: { data: opts.rows ?? [], error: opts.attendanceError ?? null },
         events: { data: opts.events ?? [], error: null },
+        players: {
+          data: opts.player === undefined ? { id: PLAYER_A, type: 'regular' } : opts.player,
+          error: null,
+        },
       },
       queues: {
         absence_periods: [
@@ -709,6 +738,91 @@ describe('revokeAbsencePeriod', () => {
 
     await expect(revokeAbsencePeriod(PERIOD_1)).rejects.toThrow('Niet ingelogd')
     expect(revalidatePath).not.toHaveBeenCalled()
+  })
+})
+
+// O2 — een gastspeler blijft afwezig, ook nadat zijn afmeldperiode is
+// ingetrokken. Dezelfde regel als bij het aanmaken van een rij
+// (lib/attendance-rows.ts), hier hergebruikt.
+describe('revokeAbsencePeriod — gastspeler', () => {
+  const PERIODE_RIJ = {
+    id: PERIOD_1,
+    player_id: PLAYER_A,
+    from_date: '2026-08-01',
+    to_date: '2026-08-31',
+  }
+
+  function intrekkenVoor(playerType: string) {
+    return makeSupabase({
+      tables: {
+        attendance: {
+          data: [
+            { event_id: 'e1', status: 'absent', injury_set: false },
+            { event_id: 'e2', status: 'absent', injury_set: false },
+          ],
+          error: null,
+        },
+        events: {
+          data: [
+            { id: 'e1', date: '2026-08-05', type: 'match' },
+            { id: 'e2', date: '2026-08-06', type: 'training' },
+          ],
+          error: null,
+        },
+        players: { data: { id: PLAYER_A, type: playerType }, error: null },
+      },
+      queues: {
+        absence_periods: [
+          { data: PERIODE_RIJ, error: null },
+          { data: [], error: null },
+          { data: null, error: null },
+        ],
+      },
+    })
+  }
+
+  it('laat de rijen van een GAST op absent staan en wist alleen de herkomst', async () => {
+    const m = intrekkenVoor('guest')
+    use(m)
+
+    await revokeAbsencePeriod(PERIOD_1)
+
+    expect(m.calls.update.find((u) => u.table === 'attendance')!.payload)
+      .toEqual({ status: 'absent', absence_period_id: null })
+  })
+
+  it('zet de rijen van een REGULIERE speler wél terug naar de teamstandaard', async () => {
+    const m = intrekkenVoor('regular')
+    use(m)
+
+    await revokeAbsencePeriod(PERIOD_1)
+
+    expect(m.calls.update.find((u) => u.table === 'attendance')!.payload)
+      .toEqual({ status: 'present', absence_period_id: null })
+  })
+
+  it('haalt het spelertype team-gescoped op', async () => {
+    const m = intrekkenVoor('guest')
+    use(m)
+
+    await revokeAbsencePeriod(PERIOD_1)
+
+    const playerSelect = m.calls.select.find((s) => s.table === 'players')!
+    expect(playerSelect.eqs).toEqual([
+      { col: 'id', val: PLAYER_A },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('houdt de update begrensd tot precies deze periode, ook voor een gast', async () => {
+    const m = intrekkenVoor('guest')
+    use(m)
+
+    const update = (await revokeAbsencePeriod(PERIOD_1), m.calls.update.find((u) => u.table === 'attendance')!)
+    expect(update.eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'absence_period_id', val: PERIOD_1 },
+    ])
   })
 })
 

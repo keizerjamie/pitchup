@@ -137,6 +137,10 @@ export default async function EventDetailPage({ params }: Props) {
       defaultStatus: 'unknown',
       injured: p.injured === true,
       periodId: periodByPlayer.get(p.id) ?? null,
+      // Een gastspeler staat altijd afwezig; de backfill moet exact dezelfde
+      // regel toepassen als de drie aanmaakplekken, anders geeft déze pagina
+      // hem alsnog 'unknown'. `type` komt uit de select('*') hierboven.
+      isGuest: p.type === 'guest',
     }))
 
     // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
