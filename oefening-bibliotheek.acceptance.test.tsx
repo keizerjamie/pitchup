@@ -414,13 +414,35 @@ describe('AC10 — dubbele oefeningnamen binnen hetzelfde team toegestaan', () =
 // ────────────────────────────────────────────────
 describe('AC14 — bibliotheek-oefening niet gebonden aan één training (0/1/N koppelingen)', () => {
   it('countOefeningKoppelingen geeft 0 terug wanneer de oefening nergens gekoppeld is', async () => {
-    use(makeSupabase({ tables: { training_oefeningen: { count: 0 } } }))
+    use(makeSupabase({ tables: { training_oefeningen: { data: [], error: null } } }))
     await expect(countOefeningKoppelingen('o1')).resolves.toBe(0)
   })
 
-  it('countOefeningKoppelingen geeft het exacte aantal training-koppelingen terug', async () => {
-    use(makeSupabase({ tables: { training_oefeningen: { count: 4 } } }))
+  it('countOefeningKoppelingen geeft het exacte aantal UNIEKE trainingen terug', async () => {
+    use(makeSupabase({
+      tables: {
+        training_oefeningen: {
+          data: [{ event_id: 'e1' }, { event_id: 'e2' }, { event_id: 'e3' }, { event_id: 'e4' }],
+          error: null,
+        },
+      },
+    }))
     await expect(countOefeningKoppelingen('o1')).resolves.toBe(4)
+  })
+
+  // dezelfde-oefening-meerdere-keren: twee koppelingen van dezelfde oefening
+  // in ÉÉN training (supabase/oefening-meerdere-keren.sql) tellen als 1
+  // training, niet als 2 koppelingsrijen.
+  it('telt twee koppelingen van dezelfde oefening in dezelfde training als 1 training', async () => {
+    use(makeSupabase({
+      tables: {
+        training_oefeningen: {
+          data: [{ event_id: 'e1' }, { event_id: 'e1' }],
+          error: null,
+        },
+      },
+    }))
+    await expect(countOefeningKoppelingen('o1')).resolves.toBe(1)
   })
 })
 

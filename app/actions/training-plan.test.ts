@@ -125,7 +125,65 @@ describe('addOefeningToTraining', () => {
     await expect(addOefeningToTraining('e1', 'vreemd')).rejects.toThrow('Oefening niet gevonden')
   })
 
-  it('handelt een UNIQUE-conflict idempotent af (geen error)', async () => {
+  it('gooit "Event niet gevonden" bij een event van een ander team', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: null },
+        oefeningen: { data: { id: 'o1' } },
+      },
+    })
+    use(m)
+    await expect(addOefeningToTraining('vreemd', 'o1')).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('voegt dezelfde oefening een tweede keer toe als een NIEUWE rij onderaan', async () => {
+    // Eerste keer: nog niets in de training → volgorde 0.
+    const eerste = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1' } },
+        training_oefeningen: { data: null, error: null },
+      },
+    })
+    use(eerste)
+    await addOefeningToTraining('e1', 'o1')
+    expect(eerste.calls.insert.filter((i) => i.table === 'training_oefeningen')).toHaveLength(1)
+    expect(eerste.calls.insert[0].payload.volgorde).toBe(0)
+
+    // Tweede keer dezelfde oefening: geen no-op, maar een insert met max + 1.
+    const tweede = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1' } },
+        training_oefeningen: { data: { volgorde: 0 }, error: null },
+      },
+    })
+    use(tweede)
+    await addOefeningToTraining('e1', 'o1')
+    const insert = tweede.calls.insert.find((i) => i.table === 'training_oefeningen')!
+    expect(insert.payload.volgorde).toBe(1)
+    expect(insert.payload.oefening_id).toBe('o1')
+    expect(insert.payload.team_id).toBe('team-1')
+  })
+
+  it('leest de hoogste volgorde tenant-gescoped op event_id + team_id', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1' } },
+        training_oefeningen: { data: { volgorde: 2 }, error: null },
+      },
+    })
+    use(m)
+    await addOefeningToTraining('e1', 'o1')
+    const volgordeSelect = m.calls.select.find((sel) => sel.table === 'training_oefeningen')!
+    expect(volgordeSelect.eqs).toContainEqual({ col: 'event_id', val: 'e1' })
+    expect(volgordeSelect.eqs).toContainEqual({ col: 'team_id', val: 'team-1' })
+  })
+
+  it('gooit de generieke fout bij een insert-fout (geen stille no-op meer)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const m = makeSupabase({
       tables: {
         events: { data: { id: 'e1' } },
@@ -134,7 +192,15 @@ describe('addOefeningToTraining', () => {
       },
     })
     use(m)
-    await expect(addOefeningToTraining('e1', 'o1')).resolves.toBeUndefined()
+    await expect(addOefeningToTraining('e1', 'o1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    consoleError.mockRestore()
+  })
+
+  it('gooit "Niet ingelogd" zonder user', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+    await expect(addOefeningToTraining('e1', 'o1')).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.insert).toHaveLength(0)
   })
 })
 

@@ -86,17 +86,20 @@ export async function deleteOefening(id: string): Promise<void> {
   }
 }
 
-// Hoeveel trainingen gebruiken deze oefening (voor "verwijderen?"-waarschuwing).
+// Hoeveel UNIEKE trainingen gebruiken deze oefening (voor de
+// "verwijderen?"-waarschuwing). Bewust géén rijtelling: dezelfde oefening mag
+// meerdere keren als aparte koppeling in één training zitten
+// (supabase/oefening-meerdere-keren.sql), en dan is dat nog steeds één training.
 export async function countOefeningKoppelingen(id: string): Promise<number> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  const { count } = await supabase
+  const { data } = await supabase
     .from('training_oefeningen')
-    .select('id', { count: 'exact', head: true })
+    .select('event_id')
     .eq('oefening_id', id)
     .eq('team_id', user.id)
 
-  return count ?? 0
+  return new Set((data ?? []).map((k) => k.event_id)).size
 }

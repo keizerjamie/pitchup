@@ -29,8 +29,11 @@ CREATE TABLE IF NOT EXISTS training_oefeningen (
   volgorde SMALLINT NOT NULL DEFAULT 0,
   stap_override SMALLINT,
   genest_in UUID REFERENCES training_oefeningen(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE (event_id, oefening_id)
+  created_at TIMESTAMPTZ DEFAULT now()
+  -- BEWUST GEEN UNIQUE (event_id, oefening_id): dezelfde bibliotheek-oefening
+  -- mag meerdere keren als aparte koppelingsrij aan één training hangen (eigen
+  -- spelerindeling, stap_override en volgorde per rij). Bestaande installaties:
+  -- draai supabase/oefening-meerdere-keren.sql.
 );
 CREATE INDEX IF NOT EXISTS idx_training_oefeningen_event ON training_oefeningen(event_id, volgorde);
 CREATE INDEX IF NOT EXISTS idx_training_oefeningen_oefening ON training_oefeningen(oefening_id);

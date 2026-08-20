@@ -10,6 +10,7 @@ import {
   createOefening,
   updateOefening,
   deleteOefening,
+  countOefeningKoppelingen,
 } from '@/app/actions/oefening-library'
 
 type TableResult = { data?: unknown; error?: unknown; count?: number }
@@ -394,5 +395,37 @@ describe('generieke foutafhandeling (geen ruwe databasemelding)', () => {
 
     expect(logged()).toContain('oefeningLibrary.deleteOefening')
     expect(logged()).not.toContain('already exists')
+  })
+})
+
+describe('countOefeningKoppelingen (telt trainingen, niet koppelingsrijen)', () => {
+  it('geeft 0 terug wanneer de oefening nergens gekoppeld is', async () => {
+    use(makeSupabase({ tables: { training_oefeningen: { data: [], error: null } } }))
+    await expect(countOefeningKoppelingen('o1')).resolves.toBe(0)
+  })
+
+  it('telt elke training één keer, ook bij meerdere koppelingen in dezelfde training', async () => {
+    use(makeSupabase({
+      tables: {
+        training_oefeningen: {
+          data: [{ event_id: 'e1' }, { event_id: 'e1' }, { event_id: 'e2' }],
+          error: null,
+        },
+      },
+    }))
+    await expect(countOefeningKoppelingen('o1')).resolves.toBe(2)
+  })
+
+  it('scoopt de telling op de oefening én op het eigen team', async () => {
+    const m = makeSupabase({ tables: { training_oefeningen: { data: [{ event_id: 'e1' }], error: null } } })
+    use(m)
+    await countOefeningKoppelingen('o1')
+    expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'oefening_id', val: 'o1' })
+    expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'team_id', val: 'team-1' })
+  })
+
+  it('gooit "Niet ingelogd" zonder sessie', async () => {
+    use(makeSupabase({ user: null }))
+    await expect(countOefeningKoppelingen('o1')).rejects.toThrow('Niet ingelogd')
   })
 })

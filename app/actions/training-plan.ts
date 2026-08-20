@@ -163,7 +163,9 @@ async function nextVolgordeForEvent(
   return (last?.volgorde ?? -1) + 1
 }
 
-// Bestaande bibliotheek-oefening aan een training koppelen.
+// Bestaande bibliotheek-oefening aan een training koppelen. Dezelfde oefening mag
+// meerdere keren aan dezelfde training hangen: elke aanroep maakt een nieuwe,
+// onafhankelijke koppelingsrij onderaan het plan.
 export async function addOefeningToTraining(eventId: string, oefeningId: string): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -183,14 +185,7 @@ export async function addOefeningToTraining(eventId: string, oefeningId: string)
     volgorde,
   })
 
-  if (error) {
-    // UNIQUE(event_id, oefening_id): oefening zit al in deze training → idempotent negeren.
-    if (error.code === '23505') {
-      revalidatePath(`/events/${eventId}/training-plan`)
-      return
-    }
-    throw genericError('trainingPlan.addOefeningToTraining', error)
-  }
+  if (error) throw genericError('trainingPlan.addOefeningToTraining', error)
 
   revalidatePath(`/events/${eventId}/training-plan`)
 }

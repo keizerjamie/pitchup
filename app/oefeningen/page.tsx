@@ -10,7 +10,7 @@ export default async function OefeningenPage() {
 
   const [{ data: oefeningenData }, { data: koppelingenData }] = await Promise.all([
     supabase.from('oefeningen').select('*').eq('team_id', user.id).order('created_at', { ascending: false }),
-    supabase.from('training_oefeningen').select('oefening_id').eq('team_id', user.id),
+    supabase.from('training_oefeningen').select('oefening_id, event_id').eq('team_id', user.id),
   ])
 
   // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie}.
@@ -20,14 +20,19 @@ export default async function OefeningenPage() {
     teams: normalizeOefeningTeams(o.teams),
   }))
 
-  const usageCounts = new Map<string, number>()
+  // Tellen op UNIEKE trainingen, niet op koppelingsrijen: dezelfde oefening mag
+  // meerdere keren in één training zitten (supabase/oefening-meerdere-keren.sql),
+  // en de verwijder-waarschuwing spreekt over "n training(en)".
+  const usageEvents = new Map<string, Set<string>>()
   for (const row of koppelingenData ?? []) {
-    usageCounts.set(row.oefening_id, (usageCounts.get(row.oefening_id) ?? 0) + 1)
+    const events = usageEvents.get(row.oefening_id) ?? new Set<string>()
+    events.add(row.event_id)
+    usageEvents.set(row.oefening_id, events)
   }
 
   const withUsage: OefeningWithUsage[] = oefeningen.map((o) => ({
     ...o,
-    koppelingCount: usageCounts.get(o.id) ?? 0,
+    koppelingCount: usageEvents.get(o.id)?.size ?? 0,
   }))
 
   return (
