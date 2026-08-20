@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { saveLineup } from '@/app/actions/attendance'
 import { Player, LineupPosition, FORMATIONS, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
+import { emptyPlayerForm, isGeldigeRating, type PlayerForm } from '@/lib/lineup-form'
 
 const POSITION_LABEL_MAP: Record<string, string> = {
   KP: 'Keeper', LV: 'Linksachter', MV: 'Centrale verdediger', RV: 'Rechtsachter',
@@ -50,10 +51,35 @@ interface Props {
   presentPlayerIds?: string[]
   initialFormation?: string
   initialPositions?: LineupPosition[]
+  // Verplicht: enige bron voor ranking én auto-opstellen (zie rankScore
+  // hieronder). Key = player.id; elke speler in `players` heeft een entry.
+  playerForm: Record<string, PlayerForm>
 }
 
-export default function LineupBuilder({ eventId, players, presentPlayerIds, initialFormation = '4-3-3', initialPositions }: Props) {
+export default function LineupBuilder({ eventId, players, presentPlayerIds, initialFormation = '4-3-3', initialPositions, playerForm }: Props) {
   const t = useDict()
+
+  // Eén gedeelde kwaliteitsfunctie voor ranking én auto-opstellen, zodat de
+  // popup en de auto-opstelling gegarandeerd dezelfde score gebruiken.
+  function formOf(p: Player): PlayerForm {
+    return playerForm[p.id] ?? emptyPlayerForm(p.rating)
+  }
+  // `fit` is optioneel: de aanroeper mag een al berekende `getFitScore`
+  // meegeven om dubbel rekenwerk te vermijden (zie autoFillLineup). Zonder
+  // argument berekent rankScore hem zelf (zie de popup-ranking). Er blijft zo
+  // precies één formule, ongeacht welke kant hem aanroept.
+  function rankScore(p: Player, pos: string, fit: number = getFitScore(p, pos)): number {
+    return fit * formOf(p).quality
+  }
+
+  // Bewuste afwijking van components/inzichten/TopWorstRatings.tsx:5-7 (die
+  // kiest expliciet voor puntnotatie): het acceptatiecriterium schrijft hier
+  // komma-notatie voor ("7,4"), dus deze popup gebruikt bewust wél de locale
+  // notatie. Eén keer aangemaakt (niet per rij).
+  const qualityFormatter = useMemo(
+    () => new Intl.NumberFormat(t.browserLocale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+    [t.browserLocale],
+  )
   const [formation, setFormation] = useState(FORMATIONS[initialFormation] ? initialFormation : '4-3-3')
   const [positions, setPositions] = useState<LineupPosition[]>(() => {
     if (initialPositions && initialPositions.length > 0) return initialPositions
@@ -84,9 +110,6 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
     const presentIds = new Set(presentPlayerIds ?? players.map((p) => p.id))
     const pool = players.filter((p) => presentIds.has(p.id))
     const formationSlots = FORMATIONS[formation].positions
-    const DEFAULT_RATING = 5
-
-    const getFit = getFitScore
 
     const used = new Set<string>()
     const filled = new Map<number, string>()
@@ -98,9 +121,9 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
         const preferredPos = POSITION_LABEL_MAP[formationSlots[si].position_label] ?? ''
         for (const player of pool) {
           if (used.has(player.id)) continue
-          const fit = getFit(player, preferredPos)
+          const fit = getFitScore(player, preferredPos)
           if (fit <= 0) continue
-          const score = (player.rating ?? DEFAULT_RATING) * fit
+          const score = rankScore(player, preferredPos, fit)
           if (score > bestScore) { bestScore = score; bestPlayerId = player.id; bestSlotIdx = si }
         }
       }
@@ -236,7 +259,7 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
             const currentPlayer = slotPos.player_id ? players.find((p) => p.id === slotPos.player_id) : null
 
             const ranked = availablePlayers
-              .map((p) => ({ player: p, score: getFitScore(p, preferredPos) * (p.rating ?? 5) }))
+              .map((p) => ({ player: p, score: rankScore(p, preferredPos) }))
               .sort((a, b) => b.score - a.score)
             const recommended = ranked.find((x) => x.score > 0)?.player ?? null
             const others = ranked.filter((x) => x.player.id !== recommended?.id).map((x) => x.player)
@@ -272,7 +295,26 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
               overflow: 'hidden',
             }
 
-            const row = (p: Player, accent?: boolean) => (
+            const trendArrow: Record<PlayerForm['trend'], string> = {
+              up: '↑', flat: '→', down: '↓', none: '',
+            }
+
+            const row = (p: Player, accent?: boolean) => {
+              const form = formOf(p)
+              // Alleen "geen cijfer" als er noch een geldige handmatige
+              // beoordeling (players.rating, 1..10) noch enige beoordeelde
+              // wedstrijd is — de ANKER_FALLBACK van 5 is dan een
+              // rekenfallback, geen coachoordeel, en zou hier data verzinnen.
+              // Zelfde predicaat als de berekening (lib/lineup-form.ts), zodat
+              // een rating buiten 1..10 hier nooit als "5,0" verschijnt.
+              // Intern blijft de ranking gewoon met die 5 rekenen (via
+              // rankScore/formOf).
+              const hasQuality = isGeldigeRating(p.rating) || form.count > 0
+              const arrow = trendArrow[form.trend]
+              // "positie · cijfer pijl (aantal)" — bij ontbrekend cijfer valt
+              // alleen dat deel weg, " · (aantal)" blijft staan.
+              const formSuffix = ` · ${hasQuality ? `${qualityFormatter.format(form.quality)}${arrow ? ` ${arrow}` : ''} ` : ''}(${form.count})`
+              return (
               <button
                 key={p.id}
                 onClick={() => assignPlayer(p.id)}
@@ -297,12 +339,13 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
                     {p.name.split(' ')[0]}
                   </div>
                   <div style={{ fontSize: 10, color: '#9ca3af' }}>
-                    {POSITION_ABBREVIATIONS[p.position] ?? p.position}{p.rating ? ` · ${p.rating}` : ''}
+                    {POSITION_ABBREVIATIONS[p.position] ?? p.position}{formSuffix}
                   </div>
                 </span>
                 {accent && <span style={{ fontSize: 12, color: '#d97706', flexShrink: 0 }}>★</span>}
               </button>
-            )
+              )
+            }
 
             return (
               <div style={popupStyle}>

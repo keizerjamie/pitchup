@@ -4,6 +4,10 @@ import { createClient } from '@/lib/supabase/server'
 import { Player } from '@/lib/types'
 import LineupBuilder from '@/components/LineupBuilder'
 import { getDict } from '@/lib/i18n'
+import { logError } from '@/lib/errors'
+import { isDateString } from '@/lib/season-dates'
+import { buildPlayerForms, FORM_MATCH_HORIZON } from '@/lib/lineup-form'
+import type { FormMatchRow, FormRatingRow } from '@/lib/lineup-form'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -27,15 +31,89 @@ export default async function LineupPage({ params }: Props) {
     (attendance ?? []).filter((a) => a.status === 'present').map((a) => a.player_id)
   )
 
-  const { data: allPlayers } = await supabase
-    .from('players')
-    .select('*')
-    .eq('team_id', user.id)
-    .eq('active', true)
-    .order('jersey_number', { ascending: true, nullsFirst: false })
-    .order('name')
+  // Signalering, GEEN gedragswijziging: `events.date` is DATE NOT NULL
+  // (supabase/schema.sql), dus een niet-parseerbare peildatum hoort niet te
+  // bestaan. Gebeurt het toch, dan spant buildPlayerForms geen venster op (de
+  // `geldigeCutoff`-tak in lib/lineup-form.ts) en valt iedereen terug op X = 0
+  // — correct, maar anders volstrekt spoorloos. Daarom hier één keer een
+  // logregel met dezelfde helper en hetzelfde label als de faaltakken
+  // hieronder. Bewust een statische code en NOOIT de waarde zelf: logError
+  // logt alleen een veilige code (errorCode/SAFE_CODE_RE in lib/errors.ts),
+  // precedent requestPasswordReset in app/actions/auth.ts. Dezelfde helper als
+  // de module gebruikt (isDateString in lib/season-dates.ts), zodat er maar
+  // één definitie van "geldige datum" is.
+  //
+  // Verwijzingen naar een benoemd symbool (functie/constante) staan hier
+  // bewust ZONDER regelnummer: een naam schuift niet op als er elders in het
+  // doelbestand een regel bijkomt, en is met grep in één keer te vinden. Deze
+  // verwijzing wees eerder wél op regels en verouderde meteen toen er tien
+  // regels commentaar boven de functie kwamen.
+  if (!isDateString(event.date)) logError('lineup-form', { code: 'invalid_event_date' })
+
+  // Ronde 2 — parallel: de spelers én het vormvenster. Pas hier is `event.date`
+  // gegarandeerd bekend (de guard hierboven is de poort).
+  const [{ data: allPlayers }, { data: formMatchRows, error: formMatchError }] = await Promise.all([
+    // Bewust GEEN filter op players.type: gastspelers doen bij het opstellen
+    // mee. Dat is een keuze, geen vergissing — de inzichten-RPC's sluiten
+    // gasten juist wél uit (supabase/inzichten.sql:15-19), omdat die de
+    // teamcijfers berekenen.
+    supabase
+      .from('players')
+      .select('*')
+      .eq('team_id', user.id)
+      .eq('active', true)
+      .order('jersey_number', { ascending: true, nullsFirst: false })
+      .order('name'),
+    // Vormvenster: de laatste wedstrijden vóór dit event. Bewust GEEN filter op
+    // match_type — friendly/league/cup tellen allemaal mee, net als in de
+    // vorm-strook op het dashboard (app/page.tsx:60-68), waarvan ook de
+    // tie-break (date → created_at → id, alles desc) letterlijk is overgenomen.
+    // Cutoff is `event.date`, niet de klok: twee kale DATE-waarden uit dezelfde
+    // database vergelijken als 'YYYY-MM-DD'-string is tijdzone-onafhankelijk.
+    supabase
+      .from('events')
+      .select('id, date, created_at')
+      .eq('team_id', user.id)
+      .eq('type', 'match')
+      .lt('date', event.date)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+      .limit(FORM_MATCH_HORIZON),
+  ])
 
   const players: Player[] = allPlayers ?? []
+
+  // Faaltak: nooit de ruwe PostgREST-fout loggen of tonen (lib/errors.ts:27-30).
+  // Bij een fout gaan we verder met een lege rijenset; elke speler valt dan
+  // terug op X = 0 — precies het gedrag van vóór deze feature.
+  if (formMatchError) logError('lineup-form', formMatchError)
+  const formMatches: FormMatchRow[] = formMatchError ? [] : (formMatchRows ?? [])
+  const formMatchIds = formMatches.map((m) => m.id)
+
+  // Ronde 3 — beoordelingen, afhankelijk van ronde 2. Nooit een open select op
+  // match_ratings: de in()-lijst is per constructie hooguit FORM_MATCH_HORIZON
+  // team-eigen event-ids vóór de peildatum. Zonder eerdere wedstrijden slaan we
+  // de rondtrip helemaal over (zelfde vorm als app/page.tsx:90-92).
+  const { data: formRatingRows, error: formRatingError } = formMatchIds.length > 0
+    ? await supabase
+        .from('match_ratings')
+        .select('event_id, player_id, rating')
+        .eq('team_id', user.id)
+        .in('event_id', formMatchIds)
+    : { data: [] as FormRatingRow[], error: null }
+
+  if (formRatingError) logError('lineup-form', formRatingError)
+  const formRatings: FormRatingRow[] = formRatingError ? [] : (formRatingRows ?? [])
+
+  // Elke actieve speler krijgt een entry; wie geen beoordeelde wedstrijd heeft,
+  // krijgt zijn kale rating-anker (emptyPlayerForm).
+  const playerForm = buildPlayerForms({
+    players: players.map((p) => ({ id: p.id, rating: p.rating })),
+    matches: formMatches,
+    ratings: formRatings,
+    before: event.date,
+  })
 
   const sortedPlayers = [
     ...players.filter((p) => presentPlayerIds.has(p.id)),
@@ -109,6 +187,7 @@ export default async function LineupPage({ params }: Props) {
             eventId={id}
             players={sortedPlayers}
             presentPlayerIds={[...presentPlayerIds]}
+            playerForm={playerForm}
             initialFormation={lineup?.formation}
             initialPositions={lineup?.positions}
           />
