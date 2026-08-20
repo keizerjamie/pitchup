@@ -48,12 +48,14 @@ export async function createPlayer(formData: FormData) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  const { name, position, jersey_number, secondary_positions, type } = validatePlayerInput(formData)
+  const { name, position, jersey_number, rating, secondary_positions, type } = validatePlayerInput(formData)
 
   const { error } = await supabase.from('players').insert({
     name,
     position,
     jersey_number,
+    // Beoordeling kan al bij het aanmaken mee; leeg blijft null.
+    rating,
     active: true,
     team_id: user.id,
     secondary_positions,

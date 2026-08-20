@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createPlayer } from '@/app/actions/players'
 import PositionSelector from '@/components/PositionSelector'
+import RatingSelector from '@/components/RatingSelector'
 import { getDict } from '@/lib/i18n'
 
 export default async function NewPlayerPage() {
@@ -52,6 +53,8 @@ export default async function NewPlayerPage() {
           <input name="jersey_number" type="number" min="1" max="99" placeholder="10"
             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400" />
         </div>
+
+        <RatingSelector />
 
         <button type="submit" className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-95 transition-all">
           {t.players.add}

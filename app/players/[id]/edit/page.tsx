@@ -4,6 +4,7 @@ import { updatePlayer, deletePlayer } from '@/app/actions/players'
 import BackButton from '@/components/BackButton'
 import DeleteButton from '@/components/DeleteButton'
 import PositionSelector from '@/components/PositionSelector'
+import RatingSelector from '@/components/RatingSelector'
 import { getDict } from '@/lib/i18n'
 
 interface Props {
@@ -74,27 +75,7 @@ export default async function EditPlayerPage({ params }: Props) {
             className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400" />
         </div>
 
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            {t.players.rating} <span className="text-gray-400 font-normal">({t.players.optional})</span>
-          </label>
-          <div className="flex gap-1.5 flex-wrap">
-            {[1,2,3,4,5,6,7,8,9,10].map((n) => (
-              <label key={n} className="cursor-pointer">
-                <input type="radio" name="rating" value={n} defaultChecked={player.rating === n} className="sr-only peer" />
-                <span className="flex items-center justify-center w-9 h-9 rounded-xl border-2 text-sm font-bold border-gray-200 text-gray-400 peer-checked:bg-accent peer-checked:border-accent peer-checked:text-white transition-all">
-                  {n}
-                </span>
-              </label>
-            ))}
-            <label className="cursor-pointer">
-              <input type="radio" name="rating" value="" defaultChecked={!player.rating} className="sr-only peer" />
-              <span className="flex items-center justify-center w-9 h-9 rounded-xl border-2 text-xs font-bold border-gray-200 text-gray-300 peer-checked:bg-gray-100 peer-checked:border-gray-300 peer-checked:text-gray-500 transition-all">
-                —
-              </span>
-            </label>
-          </div>
-        </div>
+        <RatingSelector defaultRating={player.rating} />
 
         <div className="flex items-center gap-3">
           <input id="active" name="active" type="checkbox" value="true" defaultChecked={player.active} className="w-5 h-5 rounded accent-green-600" />

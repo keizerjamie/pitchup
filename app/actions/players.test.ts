@@ -334,6 +334,44 @@ describe('createPlayer — spelertype', () => {
   })
 })
 
+describe('createPlayer — beoordeling', () => {
+  it('slaat een beoordeling op die al bij het aanmaken is ingevuld', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await createPlayer(form({ ...BASIS, rating: '7' }))
+
+    expect(inserts(m)[0].payload).toMatchObject({ rating: 7, team_id: 'team-1' })
+  })
+
+  it('slaat null op als er geen beoordeling is gekozen', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await createPlayer(form({ ...BASIS, rating: '' }))
+
+    expect((inserts(m)[0].payload as Record<string, unknown>).rating).toBeNull()
+  })
+
+  it('slaat null op als het formulier het veld niet meestuurt', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await createPlayer(form(BASIS))
+
+    expect((inserts(m)[0].payload as Record<string, unknown>).rating).toBeNull()
+  })
+
+  it('weigert een beoordeling buiten 1..10 en maakt niets aan', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createPlayer(form({ ...BASIS, rating: '11' })))
+      .rejects.toThrow('Beoordeling moet tussen 1 en 10 liggen')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+})
+
 describe('updatePlayer — spelertype', () => {
   it('schrijft een gewijzigd type weg, gescoped op id én team_id (AC17)', async () => {
     const m = eigenTeam()
