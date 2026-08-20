@@ -1429,3 +1429,38 @@ bestanden verschenen halverwege in `git status`. Weer per bestand gestaged (49 s
 beide commits samen gepusht — de push vanuit deze sessie meldde dus "Everything up-to-date".
 Controleer bij een gedeelde working tree altijd `git log origin/main` in plaats van af te gaan op
 de uitvoer van je eigen push.
+
+## Feature: Beoordeling direct bij het aanmaken van een speler (2026-08-20, commit `32d14a8`)
+Het rating-veld (1..10 of leeg) stond alleen op `/players/[id]/edit`, dus een beoordeling kon pas
+ná het opslaan worden toegevoegd. Nu staat hetzelfde veld ook op `/players/new`.
+
+### Het was half af, niet nieuw
+`validatePlayerInput` in `app/actions/players.ts` las en valideerde `rating` **al** (grens 1..10,
+leeg → `null`) — het werd alleen door `createPlayer` niet uit de destructuring gehaald en dus niet
+mee-geïnsert; `updatePlayer` deed dat wel. De kolom `players.rating` bestond al. **Geen migratie,
+geen nieuwe i18n-keys** (`players.rating` en `players.optional` staan al in alle vijf de talen).
+Les voor volgende keer: bij "dit kan alleen op het bewerkscherm"-vragen eerst kijken of de
+validatie al bestaat — de fix zat hier in één destructuring-regel.
+
+### Gedeeld component in plaats van kopie
+De radio-markup is uit de edit-pagina gelicht naar `components/RatingSelector.tsx` (client
+component met `useDict()`, zelfde patroon als `PositionSelector`) en wordt nu door beide
+formulieren gebruikt. De lege optie stuurt bewust `value=""` mee — dat is precies wat
+`validatePlayerInput` als "geen beoordeling" leest, dus de knop hoeft geen eigen logica.
+`defaultRating` bepaalt welke knop voorgeselecteerd is; zonder waarde staat "—" aan.
+
+### Bewust niet gedaan
+- Feature-factory-keten niet gedraaid: geen nieuwe businessregel, alleen een bestaand gevalideerd
+  veld op een tweede plek tonen en wegschrijven.
+- De spelerformulieren blijven niet-gethemed (`text-gray-*`) — zelfde afweging als bij gastspelers.
+- Niet visueel in de browser bekeken: de pagina zit achter de login en Claude voert geen
+  wachtwoorden in. In plaats daarvan geverifieerd met `components/RatingSelector.test.tsx`
+  (11 radio's, juiste voorselectie, veldnaam `rating`), 4 nieuwe `createPlayer`-tests in
+  `app/actions/players.test.ts`, en een volledige `npm run build` waarin `/players/new` compileert.
+
+### Gedeelde working tree, opnieuw
+Bij het committen stonden er vreemde wijzigingen in de tree (`app/actions/auth.ts`,
+`lib/rate-limit.ts` + tests, nieuw `supabase/rate-limit.sql`) van ander, mogelijk onaf werk.
+Per bestand gestaged (6 stuks, geen `git add -A`); dat rate-limit-werk staat nog ongecommit.
+Geverifieerd dat de gecommitte bestanden niets uit `rate-limit`/`actions/auth` importeren, dus de
+groene testrun gold ook voor de commit-inhoud los van dat werk.
