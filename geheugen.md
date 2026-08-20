@@ -1464,3 +1464,102 @@ Bij het committen stonden er vreemde wijzigingen in de tree (`app/actions/auth.t
 Per bestand gestaged (6 stuks, geen `git add -A`); dat rate-limit-werk staat nog ongecommit.
 Geverifieerd dat de gecommitte bestanden niets uit `rate-limit`/`actions/auth` importeren, dus de
 groene testrun gold ook voor de commit-inhoud los van dat werk.
+
+## Feature: Vorm-gebaseerde spelersaanbeveling in de opstellingsbouwer (2026-08-20, commit `4b7296f`)
+Gebouwd via de feature-factory-keten, met goedkeuringspauzes na story en brief.
+
+### Waarom
+De "Aanbevolen"-logica in de opstellingsbouwer hing volledig aan één statische parameter
+(`players.rating`). De handmatige beoordeling is nu het **startpunt/anker**; de werkelijke
+vorm over de laatste beoordeelde wedstrijden bepaalt in toenemende mate de kwaliteit.
+
+### De formule (`lib/lineup-form.ts` — pure module, geen Supabase-import, geen klok)
+```
+w_i    = 6 - i                        // 5, 4, 3, 2, 1 — recentste zwaarst
+vorm   = Σ(w_i · r_i) / Σ(w_i)
+anker  = players.rating geldig 1..10 ? players.rating : ANKER_FALLBACK (5)
+vormGewicht = (X / VORM_VENSTER) · VORM_MAX_GEWICHT      // (X/5) · 0,7
+quality     = anker · (1 - vormGewicht) + vorm · vormGewicht
+```
+`quality` wordt **bewust niet afgerond** — alleen de weergave rondt af, anders kan
+afronding een rangorde omdraaien. Constanten: `VORM_VENSTER=5`, `VORM_MAX_GEWICHT=0.7`,
+`ANKER_FALLBACK=5`, `TREND_DREMPEL=0.5`, `FORM_MATCH_HORIZON=25`.
+
+### Vastgelegde businessregels
+- **Meetellend** = er bestaat een `match_ratings`-rij voor die speler bij die wedstrijd.
+  `attendance` en `match_squad` spelen géén rol. Een ongeldige rating (`null`, `NaN`, 0,
+  11, string) telt als *niet beoordeeld*: de wedstrijd valt uit het venster en het venster
+  schuift door naar een oudere wedstrijd — nooit als 0.
+- **Peildatum** = `events.date` van het op te stellen event, **niet** `todayLocal()`. Er
+  wordt dus geen klok gelezen: twee kale `DATE`-strings worden vergeleken, wat
+  tijdzone-onafhankelijk is. Het bekende serverklok-gat van `todayLocal()` is hiermee
+  bewust *niet* uitgebreid. Tie-break bij gelijke datum: `date desc` → `created_at desc`
+  (nullsFirst:false) → `id desc`, hetzelfde precedent als de dashboard-vormstrip.
+- **Trendpijl**: `recent = (r1+r2)/2` vs. `ouder = gemiddelde(r3..rX)`, beide **ongewogen**
+  (de recentheidsweging zit al in `quality`; anders meet de pijl deels hetzelfde als het
+  cijfer). Drempel 0,5 **inclusief** = flat. Reden: ratings zijn hele getallen, dus bij X=3
+  is het kleinst mogelijke verschil niet-nul exact 0,5 — zonder drempel flikkert de pijl op
+  één afwijkend cijfer. Bij X < 3 géén pijl.
+- **Gastspelers doen mee** in de opstellingsbouwer-vorm. Bewuste afwijking van alle zes
+  `inzichten`-RPC's, die `p.type = 'regular'` afdwingen — de lineup-pagina toont gasten al
+  en je kunt ze opstellen. Staat als commentaar bij de players-query.
+- Alle wedstrijdtypes (friendly/league/cup) tellen mee.
+- Speler **zonder** geldige `players.rating` **én** `count === 0` → géén cijfer tonen
+  (`"CM · (0)"`). De 5 is een rekenfallback, geen coachoordeel; die als "5,0" tonen zou
+  data verzinnen. Intern rekent de ranking wél met 5.
+
+### Architectuurkeuze: géén RPC
+Bewust twee gewone queries + pure berekening in TypeScript, i.p.v. een Postgres-functie
+met window-functie. Reden: de hele feature ís één formule met tien randgevallen, en er is
+geen SQL-testharnas in dit project (`inzichten.acceptance.test.tsx` bouwt de SQL in JS ná
+en bewijst dus niets over de echte functie). Rijvolume is hard begrensd (~25 events × ~20
+spelers). Prijs: `FORM_MATCH_HORIZON = 25` is nodig als ophaalgrens — een speler die in de
+laatste 25 teamwedstrijden minder dan 5 keer beoordeeld is, krijgt een lagere X. Dat
+degradeert netjes (meer anker, minder vorm) en levert nooit een fout cijfer.
+
+### Opgeruimd bij deze gelegenheid
+De scoreformule stond op **twee** plekken los van elkaar in `LineupBuilder.tsx` (popup-
+ranking en `autoFillLineup`, met elk een eigen fallback-constante). Nu één gedeelde
+`rankScore(p, pos, fit?)`. `DEFAULT_RATING` en de alias `getFit` zijn vervallen.
+`isGeldigeRating` wordt geëxporteerd uit `lib/lineup-form.ts` zodat de weergavelaag exact
+dezelfde regel gebruikt als de berekening — één definitie, twee gebruikers.
+
+### Bewust NIET meegefixt
+De popup rankt over álle onbezette spelers (ook afwezigen), terwijl `autoFillLineup` alleen
+aanwezigen gebruikt. Dat verschil bestond al en blijft; de eis ging over de *formule*,
+niet over de pool.
+
+### Bekend en geaccepteerd
+De opstellingspopup toont `7,4` (locale-notatie), terwijl
+`components/inzichten/TopWorstRatings.tsx` bewust puntnotatie (`7.4`) gebruikt.
+Voorgeschreven verschil, in de code toegelicht.
+
+### Gotcha: NUL-byte in broncode (commit `42e224e`)
+`lib/lineup-form.ts` bevatte aanvankelijk een **letterlijke NUL-byte** (U+0000) als
+sleutelscheider in `ratingSleutel`. Gevolg: `file` classificeerde het bestand als `data` en
+een gewone `grep` gaf **exit 1 zonder treffers** — het bestand was onzichtbaar voor elke
+repo-brede zoekactie, zonder foutmelding, rode check of lint-klacht. Opgelost met de
+escape-notatie (backslash-u-0000) in de bron (runtime-string bit voor bit identiek). NUL blijft de
+juiste scheider: hij kan nooit in een UUID voorkomen, waar een spatie wél kan botsen.
+**Regel hieruit: nooit een kale controlteken-byte in de bron, altijd de escape-notatie.**
+Repo-breed geborgd door `bronbestanden-controletekens.test.ts` (scant `lib/`, `app/`,
+`components/`, `scripts/`, `messages/`, `supabase/` en de root op C0-tekens + DEL;
+tab/newline/CR zijn toegestaan; scant op bytes, dus geen vals alarm op meerbyte-tekens;
+zondert zichzelf niet uit en faalt als de walker nul bestanden oplevert).
+
+### Bestanden
+- `lib/lineup-form.ts` + `lib/lineup-form.test.ts` (nieuw) — formule, venster, trend.
+- `app/events/[id]/lineup/page.tsx` — twee team-gescopete queries erbij (vorm-venster-events
+  vóór `event.date`, daarna hun `match_ratings` via `in()`; overgeslagen bij nul eerdere
+  wedstrijden), players-query parallel getrokken, faaltak via `logError('lineup-form', …)`
+  met een statische `{ code }` in plaats van de ruwe waarde.
+- `components/LineupBuilder.tsx` + `components/LineupBuilder.test.tsx` (nieuw) — verplichte
+  prop `playerForm: Record<string, PlayerForm>` (key = `player.id`), gedeelde `rankScore`,
+  subregel `positie · cijfer pijl (aantal)`.
+- `opstelling-vorm.acceptance.test.tsx` (nieuw) — 22 tests op de echte pagina.
+- **Géén** migratie, dependency, tabel, index of i18n-key. `match_ratings` bevatte alles.
+
+### Tenant-isolatie (vier lagen, alle vier getest)
+RLS → expliciete `.eq('team_id', user.id)` op beide nieuwe queries → de `in()`-lijst komt
+zelf uit een team-gescopete query → `buildPlayerForms()` negeert elke rating-rij waarvan
+`player_id` niet in `players` of `event_id` niet in `matches` zit.
