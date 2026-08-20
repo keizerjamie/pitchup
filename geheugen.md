@@ -24,7 +24,7 @@ Gebouwd via de feature-factory-keten (researcher → story → PM → backend �
 
 ### Datamodel
 - **`oefeningen`** = herbruikbare **bibliotheektabel** (los van een training), analoog aan `players`. Kolommen o.a.: `naam`, `beschrijving`, `categorie`, `duur_min`, `breedte_m`/`lengte_m`, `orientatie`, `veldzone`, `teams JSONB` (lijst `{grootte, formatie|null}`, max 6), `aantal_neutralen SMALLINT` (0..30), `diagram JSONB` (nullable; NULL = geen opgeslagen tekening → auto-genereren).
-- **`training_oefeningen`** = koppeltabel training↔oefening (analoog aan `attendance`): `event_id`, `oefening_id`, `UNIQUE(event_id, oefening_id)`, plus de **training-specifieke** velden `volgorde`, `stap_override`, `genest_in` (self-FK). Deze horen bij de koppeling, niet bij de bibliotheek-oefening (anders lekt een wijziging door naar andere trainingen).
+- **`training_oefeningen`** = koppeltabel training↔oefening (analoog aan `attendance`): `event_id`, `oefening_id` (**sinds 2026-08-20 bewust géén UNIQUE meer** — dezelfde oefening mag meerdere keren in één training, zie feature onderaan), plus de **training-specifieke** velden `volgorde`, `stap_override`, `genest_in` (self-FK). Deze horen bij de koppeling, niet bij de bibliotheek-oefening (anders lekt een wijziging door naar andere trainingen).
 - **Live gekoppeld:** een wijziging aan een bibliotheek-oefening werkt overal door (geen snapshot). `updateOefening` revalideert `/oefeningen` én elke gekoppelde training-plan-pagina.
 - **Periodisering** (`lib/periodization.ts`) telt via een join over `training_oefeningen → oefeningen(categorie)`; `hasMeting`/`cycleWeeks` bepalen of een categorie meetelt in de stap-berekening. Dit was het grootste migratierisico — semantiek is bewust identiek gehouden.
 
@@ -39,11 +39,12 @@ Gebouwd via de feature-factory-keten (researcher → story → PM → backend �
 - UI: `DiagramEditor` (unified Pointer Events + `touch-action:none`, tools select/speler/pion/bal/doeltje/lijn/verwijder, kleur-/variant-keuze via segmented controls, "Opnieuw genereren" met bevestiging), read-only `DiagramView` (kaart + trainingsschema, fallback op per-team `FormationField` als `diagram==null`), gedeeld `PitchBackground` + `DiagramElements`. Coördinatenstelsel = SVG viewBox `0 0 100 140`.
 - **Markers zijn vrij bewerkbaar**: toevoegen (speler-tool met kleurkeuze), verslepen, verwijderen. Teams+formaties zijn alleen het startpunt voor (opnieuw) genereren. Opslaan zonder team is mogelijk.
 
-### Migraties (draaien in Supabase SQL Editor; alle vier zijn door de eigenaar uitgevoerd)
+### Migraties (draaien in Supabase SQL Editor; alle vijf zijn door de eigenaar uitgevoerd)
 - `supabase/oefening-bibliotheek.sql` — bibliotheektabel + koppeltabel + backfill.
 - `supabase/oefening-diagram.sql` — `diagram JSONB` kolom.
 - `supabase/oefening-categorieen.sql` — categorie-CHECK verruimd met warming_up/positiespel/pass_trap.
 - `supabase/oefening-spelerindeling.sql` — `spelerindeling JSONB` kolom op `training_oefeningen` (zie feature hieronder).
+- `supabase/oefening-meerdere-keren.sql` — haalt `UNIQUE(event_id, oefening_id)` van `training_oefeningen` af (zie feature onderaan).
 
 ### Aandachtspunten / bewust geaccepteerd
 - **Update 2026-08-04:** dit patroon (`throw new Error(error.message)`) is codebase-breed opgeschoond tijdens de security-audit — zie "Security-audit" onderaan. Nieuwe server actions gebruiken `genericError()`/`logError()` uit `lib/errors.ts`, niet meer de rauwe `error.message`.
@@ -1169,3 +1170,262 @@ daarna werd aangemaakt terwijl de speler nog geblesseerd was, kreeg gewoon de st
   dit bij een volgende sessie langs `buildAttendanceRow` — let op dat die code bewust niet hard
   faalt maar een `attendanceFailed`-signaal teruggeeft, dus de aanpak wijkt iets af van de andere
   drie plekken.
+
+## Feature: Parallelle oefeningen + spelersverdeling over de groep (2026-08-14, commit `f287ecc`)
+Trainer kan in het trainingsplan twee of meer oefeningen als **parallelle groep** combineren
+(naast elkaar getoond i.p.v. onder elkaar) en de aanwezige spelers exact over die groep
+verdelen, met harde controle op dubbele indeling. Gebouwd via de volledige feature-factory-keten
+(researcher → story → PM → backend → frontend → test-verifier → validator), met één feedback-lus
+na de eerste validatieronde.
+
+### Datamodel
+- **`training_oefeningen.parallel_groep_id: UUID | null`** — groepssleutel, **bewust geen FK**
+  (self-FK naar een "leider"-koppeling zou bij `ON DELETE SET NULL` de hele groep laten instorten
+  zodra dat ene lid wordt losgekoppeld). `NULL` = gewone sequentiële koppeling.
+- **`training_oefeningen.parallel_spelers: JSONB` (`string[]`, default `'[]'`)** — platte lijst
+  `player_id`'s toegewezen aan DEZE oefening binnen de groep. **Volledig los van
+  `spelerindeling`** (de teamindeling BINNEN één oefening, zie de feature hierboven) — toewijzen
+  aan een parallelle oefening zet een speler bewust NIET automatisch in een team van die oefening.
+  Twee losse indelingssystemen die elkaar nooit raken.
+- Groepsleden delen dezelfde `volgorde` (sortering binnen de groep: `created_at, id`). Een groep
+  met **minder dan 2 leden** wordt overal in de leeslaag als niet-parallel behandeld — dekt zowel
+  bewust loshalen als een "weeskind" na het hard verwijderen van een bibliotheek-oefening
+  (`deleteOefening` ruimt de groep zelf niet op, `ON DELETE CASCADE` laat een half-lege groep
+  achter; de defensieve leeslaag vangt dat af, niet de delete-actie zelf).
+- Migratie: `supabase/parallelle-oefeningen.sql` (2 kolommen, 2 CHECK-constraints, 1 index) — door
+  de eigenaar zelf in de Supabase SQL Editor gedraaid vóór de deploy.
+- **Velden zijn bewust optioneel getypeerd** (`parallel_groep_id?`, `parallel_spelers?` in
+  `TrainingOefening`), niet verplicht — verplicht maken brak typecheck in 6 bestaande
+  testfixtures buiten scope. Alle leespaden lezen defensief (`?? null`/`?? []`), zelfde patroon
+  als `EMPTY_INDELING`. Zie ook de CLAUDE.md-suggestie hieronder.
+
+### API (`app/actions/training-plan.ts`)
+`vormParallelGroep`, `voegToeAanParallelGroep`, `haalUitParallelGroep`, `saveParallelIndeling`,
+`verplaatsParallelSpeler` (atomair, zie gotcha hieronder) + blok-bewuste `reorderKoppelingen`/
+`removeOefeningFromTraining` (signaturen ongewijzigd). Elke actie: `assertOwnEvent` vooraf, elke
+select/update `.eq('team_id', user.id)` + `.eq('event_id', eventId)`. Pure lib `lib/parallel-groep.ts`
+(géén `'use server'`, mag dus wel types exporteren): `blokkenVanKoppelingen`, `blokLabel`
+(`"3"`/`"3a"/"3b"`, sub-letters `aa/ab/...` boven 26), `benodigdAantal` (→ `null` bij ontbrekende/
+ongeldige teamgrootte = geen tekort/overschot-indicatie), `groepStatus`.
+
+### Gotcha die pas in de validatieronde naar boven kwam: gedeeltelijk falen bij een lid→lid-sleep
+Een speler verplaatsen tussen twee groepsleden ging eerst via **twee losse** `saveParallelIndeling`-
+calls (bron leeghalen, dan doel aanvullen). Slaagde de eerste en faalde de tweede, dan verdween de
+speler zonder foutmelding — de geslaagde eerste call triggerde al `revalidatePath`, wat de
+rollback-state van de tweede, mislukte call overschreef. **Fix: één atomaire server action**
+(`verplaatsParallelSpeler`) die beide updates in dezelfde server-aanroep doet en bij een falende
+tweede update de eerste zelf compenseert (bron teruggezet) vóór de fout wordt teruggegeven. **Les
+voor het vervolg:** een write die uit de client-kant als twee sequentiële server-calls wordt
+gemodelleerd, kan bij gedeeltelijk falen een tussentoestand blootleggen die de rollback niet meer
+kan zien zodra de eerste call al `revalidatePath` deed — voer zulke "verplaats van A naar B"-writes
+voortaan in één server-actie uit met interne compensatie, niet als twee losse client-round-trips.
+
+### Overige validator-bevindingen (opgelost)
+- `removeOefeningFromTraining` miste aanvankelijk `assertOwnEvent` + event-scoping (had alleen
+  `id + team_id`) — de andere vier acties deden dit wel. Gefixed; patroon nu consistent.
+- Geaccepteerd als klein/niet-blokkerend: enige duplicatie tussen `saveParallelIndeling` en
+  `verplaatsParallelSpeler` (andere queryvorm, verdedigbaar), een verouderd stukje commentaar in
+  `TrainingPlanEditor.tsx` dat "overal optimistisch" claimt terwijl alleen het ontkoppelen dat is
+  (`vormParallelGroep`/`voegToeAanParallelGroep` updaten pas ná een geslaagde `await` — bewust,
+  want de groep-id wordt server-side gegenereerd, een optimistische variant zou een verzonnen id
+  moeten tonen).
+
+### Frontend
+- `components/ParallelGroepEditor.tsx` — **eigen** pointer-drag-implementatie, bewust NIET
+  gedeeld met `components/TeamIndelingEditor.tsx` via een hook (expliciete scope-keuze: dat
+  bestaande component is bewezen in productie en draagt een sleepstate-in-ref-gotcha die vitest
+  niet vangt, zie de feature hierboven — meemigreren was een onnodig regressierisico in deze
+  ronde). Tijdelijke duplicatie is dus bewust, geen vergeten opruimtaak zonder reden.
+- `TrainingPlanEditor.tsx` rendert via `blokkenVanKoppelingen` i.p.v. een platte map over
+  koppelingen; badges via `blokLabel`. Print: groepswrapper `print:break-inside-avoid`, het
+  print-only verdelingsblok toont **alleen namen**, geen tekort/overschot (bewuste keuze — het
+  bestaande printbudget van ~6 oefeningen per 2 A4, zie de print-feature hierboven, liet geen
+  ruimte voor extra tekst per groepslid).
+- Onbeperkt aantal parallelle oefeningen per groep (geen limiet van 2) — expliciete
+  scope-verruiming tijdens de story-fase t.o.v. de oorspronkelijke featurevraag.
+
+### Migratie & CLAUDE.md-suggestie uit deze sessie
+- Migratie **niet automatisch uitgevoerd** door een agent — `.sql`-bestand alleen opgeleverd, de
+  eigenaar heeft hem zelf gedraaid vóór de push.
+- Suggestie van de backend-engineer, nog niet in CLAUDE.md opgenomen: een regel die vastlegt dat
+  élke server action die een parent-id (`eventId` e.d.) ontvangt met een `assertOwn*`-check moet
+  beginnen én élke query moet scopen op `id + parent-id + team_id` — precies het gat dat bij
+  `removeOefeningFromTraining` optrad. Ook: multi-row-writes die niet in één DB-statement kunnen,
+  horen in één server-aanroep met compensatie te gebeuren, nooit als twee client-round-trips die
+  een halve staat kunnen achterlaten (zie de gotcha hierboven).
+
+### Samenwerking met parallelle sessie
+Bij het committen stonden er ook ongecommitte wijzigingen aan `app/actions/auth.ts`,
+`lib/rate-limit.ts` (+tests) en een nieuw `supabase/rate-limit.sql` in de working tree — niet
+door deze feature aangeraakt. Zelfde patroon als eerder in dit bestand beschreven: expliciet per
+bestand gestaged (geen `git add -A`), die andere workstream bewust ongemoeid gelaten voor wie hem
+later zelf afmaakt.
+
+## Feature: Dezelfde oefening meerdere keren in één training (2026-08-20, commit `1190a49`)
+Gebouwd via de feature-factory-keten, met goedkeuringspauzes na story en brief.
+
+### Probleem
+Een oefening kon maar één keer aan een training gekoppeld worden. De blokkade zat in de
+**database**, niet in de UI: `UNIQUE (event_id, oefening_id)` op `training_oefeningen`.
+`addOefeningToTraining` ving de resulterende `23505` op en behandelde die bewust als
+idempotente no-op — een tweede toevoeging verdween dus **zonder enige melding**.
+
+### Gekozen mechaniek (expliciet door de eigenaar bevestigd)
+**Twee losse koppelingsrijen**, dus twee aparte kaarten, elk met eigen `spelerindeling`,
+`stap_override`, `volgorde` en parallelle groep. Bewust NIET gekozen: de bestaande
+parallelle-oefeningen-feature hergebruiken, of een "aantal/herhaling"-veld op één kaart
+(dan is geen aparte spelerindeling per uitvoering mogelijk). Use case: groep opsplitsen
+en dezelfde variant twee keer laten uitvoeren.
+
+### Wijzigingen
+- **Migratie** `supabase/oefening-meerdere-keren.sql`: dropt de constraint. De naam wordt
+  in `pg_constraint` **opgezocht** in plaats van gegokt — hij is inline in `CREATE TABLE`
+  gedeclareerd en heeft dus een door Postgres gegenereerde naam. Daardoor idempotent
+  (`IF naam IS NOT NULL`) en werkt hij op beide installatiepaden. Geen datamigratie; RLS
+  en de drie indexen ongemoeid.
+- `supabase/training-plan.sql` en `supabase/oefening-bibliotheek.sql` gespiegeld voor
+  verse installaties. **`schema.sql` en `rls.sql` bevatten `training_oefeningen` niet** —
+  `schema.sql:5-6` delegeert expliciet naar deze twee bestanden. De gebruikelijke
+  schema.sql-spiegelplicht geldt hier dus níét.
+- `app/actions/training-plan.ts`: de dode `23505`-tak vervangen door het standaard
+  `genericError()`-patroon. Signatuur, autorisatie en tenant-scoping ongewijzigd.
+- `app/actions/oefening-library.ts` + `app/oefeningen/page.tsx`: teller telt nu **unieke
+  `event_id`'s** in plaats van rijen (zie gotcha hieronder).
+- **Frontend: nul wijzigingen.** De plan-editor was al klaar — `key={k.id}` (koppeling-id,
+  niet oefening-id) en `unlinkConfirm`/`stapOverrideErrors`/`parallelErrors` allemaal
+  gesleuteld op `k.id`; `blokLabel` nummert op blokpositie. `removeOefeningFromTraining`,
+  `saveSpelerindeling` en de parallelle-groep-acties werkten al op `koppelingId`.
+
+### Gotcha's / bewust geaccepteerd
+- **Een teller die in de UI "trainingen" heet, moet unieke ids tellen, nooit rijen.**
+  Zolang de UNIQUE bestond waren "aantal koppelingsrijen" en "aantal trainingen"
+  identiek; daarna niet meer. Zonder fix meldde de verwijder-bevestiging
+  ("Deze oefening zit in {n} training(en). Toch verwijderen?") twee kaarten in één
+  training als twéé trainingen — een onjuist getal op een destructieve dialoog.
+- **Deploy-volgorde is dwingend: eerst de migratie, dan pushen.** De idempotentie-tak is
+  weg, dus code-eerst laat een tweede toevoeging als zichtbare fout stuklopen in plaats
+  van stil te falen.
+- **Niet terug te draaien** zodra er duplicaten in de data staan — de UNIQUE kan dan niet
+  meer teruggezet worden zonder rijen te verwijderen.
+- Geen client-side dubbelklik-bescherming (bewuste keuze): twee snelle klikken leveren
+  twee kaarten op, die je gewoon weer verwijdert. Geen nummering ("1 van 2") op identieke
+  kaarten.
+- **Open puntje:** bij twee identieke kaarten staan er twee opties met exact dezelfde
+  tekst in de "Genest in"- en "Parallel aan"-dropdowns (`TrainingPlanEditor.tsx:450,782`).
+  Functioneel correct (de `value` is het unieke koppeling-id), cosmetisch verwarrend.
+- `countOefeningKoppelingen` heeft momenteel **geen productie-aanroeper**; de getoonde
+  teller komt uit `app/oefeningen/page.tsx`. De correctie is er voor toekomstige
+  aanroepers.
+- `lib/periodization.ts` blijft ongewijzigd correct: telt events via een `Set` en houdt
+  één regel per categorie per training aan, dus twee identieke kaarten tellen als één.
+
+### Tests
+`dezelfde-oefening-meerdere-keren.acceptance.test.tsx` (28 tests, AC1–AC12 + edge cases:
+3x/4x, parallelle groepen, print, `ruimEenzameGroepOp`, tenant-isolatie).
+**Niet dekbaar met de mock-Supabase:** "0 rijen verwijderd bij een vreemd koppeling-id" —
+de mock matcht niet op eq-filters. Wél bewezen is dat de delete gescoped is op
+`id` + `event_id` + `team_id`. Let bij tests op de bekende `getByText`-valkuil: twee
+identieke kaarten zetten dezelfde oefeningnaam tot vier keer in de DOM (scherm + print),
+gebruik `getAllByText`/`within`.
+
+## Feature: Gastspelers (2026-08-20, commit `5e7914c`)
+Trainer kan een **gastspeler** aanmaken via hetzelfde spelerformulier als een reguliere speler.
+Herkenbaar aan een "Gast"-tag, standaard afwezig op trainingen én wedstrijden, wel oproepbaar
+zodra je hem handmatig op aanwezig zet, en nooit meegeteld in teambrede cijfers. Gebouwd via de
+volledige feature-factory-keten, met één vervolgfix na de validatieronde.
+
+### Datamodel
+- **`players.type TEXT NOT NULL DEFAULT 'regular'`** + CHECK `type IN ('regular','guest')`.
+  Bewust een **los veld naast `active`** — een gast is gewoon `active = true` en blijft dus
+  zichtbaar en selecteerbaar. `active` behoudt exact zijn oude betekenis.
+- **Geen kolom op `attendance`, geen snapshot, geen historie-migratie.** Statistieken filteren op
+  het **huidige** `players.type`. Bewust geaccepteerd gevolg: maak je een bestaande speler alsnog
+  gast, dan verdwijnt zijn hele historie uit de teamcijfers (en omgekeerd). Het alternatief
+  (per aanwezigheidsrij vastleggen wat iemand tóén was) is verworpen: veel meer werk en cijfers
+  die niemand kan navertellen.
+- `position` blijft ook voor gasten verplicht — geen uitzondering op de bestaande CHECK.
+- `type` is **verplicht** getypeerd op `Player` (`lib/types.ts`), niet optioneel. Dat dwingt elke
+  fixture te kiezen; kostte een `type`-regel in ~15 bestaande testbestanden, maar voorkomt dat een
+  nieuwe consument het veld stilzwijgend vergeet. (Bij parallelle oefeningen is destijds bewust
+  het omgekeerde gekozen — zie die feature hierboven; deze keer viel de afweging andersom uit
+  omdat het veld betekenisdragend is voor filters, niet alleen voor weergave.)
+- Migratie: `supabase/gastspelers.sql` (kolom + CHECK + de zes vervangen RPC's), idempotent en
+  transactioneel, door de eigenaar zelf in de SQL Editor gedraaid vóór de push.
+
+### De "standaard afwezig"-regel staat op één plek
+`lib/attendance-rows.ts` heeft nu een geëxporteerde `resolveAttendanceStatus()`:
+`isGuest → 'absent'`, dan `periodId`, dan `injured`, anders `defaultStatus`. `isGuest` staat
+bewust **vóór** blessure en afmeldperiode, zodat elke combinatie hetzelfde oplevert.
+Drie aanroepers delen die functie: `buildAttendanceRow`, `markRecovered` (players.ts) en
+`revokeAbsencePeriod` (attendance.ts) — die laatste twee omdat ze anders een gast na herstel
+alsnog op de teamdefault zetten zonder dat iemand hem handmatig aanzette.
+
+**`isGuest` is verplicht in `AttendanceRowInput`, zonder default.** Dat is de hele reden dat de
+vier aanmaakplekken niet uit elkaar konden lopen: de typecheck dwong elke aanroeper te kiezen.
+Bij een volgend veld met dezelfde eigenschap: doe dit weer zo.
+
+### Gotcha: de inline kopie in events-bulk was er nog steeds
+`app/actions/events-bulk.ts` dupliceerde de statuslogica inline (de vorige sessie had dit al als
+opruimtaak genoteerd, zie de blessure-feature hierboven). Nu vervangen door een echte
+`buildAttendanceRow`-aanroep met `injured: false` — gedrag identiek, alleen `injury_set` nu
+expliciet `false` (= DB-default). **Het onderliggende gat bestaat nog:** bulk aangemaakte
+wedstrijden zetten een geblesseerde speler niet automatisch op afwezig. Bewust niet meegenomen
+(buiten story-scope), maar het is nu wél een one-liner geworden — aparte story waard.
+
+### Inzichten: zes RPC's, twee kregen een nieuwe join
+Alle zes functies in `supabase/inzichten.sql` filteren `p.type = 'regular'`.
+`inzichten_aanwezigheid` en `inzichten_training_opkomst_per_maand` joinden **helemaal niet** op
+`players` — die join is nieuw, mét expliciet `p.team_id = auth.uid()`.
+**Scherpste reviewpunt van deze feature:** zowel `events` als `players` heeft een kolom `type`.
+Een verwisselde alias geeft **geen foutmelding maar een stil verkeerd filter**. Per functie
+nagelopen door de validator; houd dat vol bij elke volgende wijziging in dit bestand.
+De bestaande `p.active`-asymmetrie (wél in de vier rating-/per-speler-functies, niet in de twee
+opkomstfuncties) is intact gelaten; het commentaar in `lib/inzichten.ts` legt nu uit dat die
+asymmetrie alléén voor `active` geldt en niet voor `type`.
+
+### Fail-safe boven fail-silent (les uit de validatieronde)
+Het dashboard (`app/page.tsx`) haalt de gast-ids in een **aparte** query op — bewust apart, want
+de bestaande `playerRows`-query is `active`-gefilterd en de opkomsttelling kijkt juist naar álle
+attendance-rijen. Eerste versie negeerde de `error` van die query: bij een fout bleef de
+exclusielijst leeg en telden gasten stilzwijgend tóch mee. Nu: `logError('dashboard.guestPlayers')`
+en `attendancePct = null`, dus de tegel toont `—` in plaats van een verkeerd getal.
+**Bredere les:** een lege fallback (`?? []`) is veilig voor een lijst, maar gevaarlijk voor een
+**exclusielijst** — daar verandert "leeg" de betekenis van de berekening. Elke query waarvan het
+resultaat een filter of berekening voedt, hoort zijn `error` te controleren en fail-safe te falen.
+Kandidaat voor CLAUDE.md; nog niet opgenomen.
+
+### Testles: een testsuite die de SQL nabootst, moet mee veranderen
+`inzichten.acceptance.test.tsx` herimplementeert de zes RPC's in TypeScript. Beide bouwers
+hadden alleen de typecheck-blokkerende fixture aangevuld, niet de mock-logica zelf — de suite zou
+dus groen zijn gebleven ook zónder het gast-filter in de echte SQL. De test-verifier heeft dat
+gecorrigeerd en met een **mutatietest** bevestigd dat 4 van de 5 nieuwe tests zonder de fix
+daadwerkelijk rood worden. Doe die mutatiecheck standaard bij tests tegen een nagebootste engine.
+
+### UI-keuzes
+- "Gast"-tag wordt **altijd** getoond, náást een eventuele status-badge ("Geblesseerd"/"Inactief").
+  De "één label tegelijk"-conventie in `MatchSquadEditor` geldt alleen tussen *statuslabels*
+  onderling; de gast-tag staat daarbuiten.
+- Geen gedeelde `GuestBadge`-component: de vier plekken gebruiken drie bestaande idiomen (chip met
+  icoon, label tussen haakjes, kale printtekst). Bij een vijfde plek die keuze herzien.
+- `(Gast)` op print/PDF staat **alleen** in het `hidden print:block`-blok, niet in de schermmarkup
+  — anders struikelt `getByText` over dubbele tekst (bekende dual-markup-valkuil in dit project).
+- Icoon `person_add` gekozen omdat het al elders in `PlayerList.tsx` gebruikt wordt en dus zeker in
+  de gesubsette icoonfont zit.
+- Selectie/opstelling hoefden **geen** codewijziging: `selectedIds.has || (active && present)` doet
+  al precies het goede voor een gast.
+
+### Bewust buiten scope gebleven
+- `statsFor()` (aanwezig/afwezig per eventkaart), `squadSize` en `injuredCount` op het dashboard
+  tellen gasten nog gewoon mee. Alleen de opkomsttegel is gelijkgetrokken met `/inzichten`.
+- Geen limiet op het aantal gasten, geen aparte "degradeer gast"-flow — de bestaande verwijder- en
+  inactief-knoppen volstaan.
+- De niet-gethemede spelerformulieren (`text-gray-*` i.p.v. `text-ink`/`bg-surface`) zijn níét
+  herstijld; het nieuwe type-`<select>` volgt bewust het bestaande patroon van die bestanden.
+
+### Samenwerking met parallelle sessie (opnieuw)
+Tijdens deze sessie werd in dezelfde working tree ook aan "oefening meerdere keren" gewerkt; die
+bestanden verschenen halverwege in `git status`. Weer per bestand gestaged (49 stuks, geen
+`git add -A`). De andere sessie heeft vervolgens haar eigen commit `1190a49` bovenop gezet en
+beide commits samen gepusht — de push vanuit deze sessie meldde dus "Everything up-to-date".
+Controleer bij een gedeelde working tree altijd `git log origin/main` in plaats van af te gaan op
+de uitvoer van je eigen push.
