@@ -74,6 +74,10 @@ export default function MatchSquadPrintList({
   const gather = formatTime(gatherTime)
   const kickoff = formatTime(kickoffTime)
 
+  // Aantal rijen per kolom bij twee kolommen. Minimaal 1: `repeat(0, auto)` is
+  // ongeldige CSS, en een lege selectie (0 spelers) is een bestaand geval.
+  const squadColumnRows = Math.max(1, Math.ceil(sorted.length / 2))
+
   return (
     <div className="hidden print:block bg-stone-50 text-gray-900" style={{ '--club-primary': primaryColor, '--club-secondary': secondaryColor } as React.CSSProperties}>
       {/* Kop: logo (alleen als aanwezig, geen placeholder) + teamnaam links, titel rechts */}
@@ -148,10 +152,24 @@ export default function MatchSquadPrintList({
         <p className="text-xs font-bold uppercase tracking-wide text-gray-500">{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
       </div>
 
-      {/* Twee kolommen puur via CSS (`columns-2`) — de onderliggende <ul>/<li>
-          -structuur (precies één <ul>, volgorde bepaald door
-          sortSquadForExport) blijft ongewijzigd. */}
-      <ul className="mt-2 columns-2 gap-x-6">
+      {/* Twee kolommen via CSS grid, bewust NIET via `columns-2` (multi-column):
+          WebKit — en dus iOS Safari, waar de eigenaar zijn PDF maakt — valt bij
+          het printen van een multi-column container regelmatig terug op één
+          kolom. Grid overleeft paged media wél.
+
+          `gridAutoFlow: column` + een expliciet aantal rijen geeft exact
+          dezelfde VERTICALE vulvolgorde als multicol had: eerste helft in de
+          linkerkolom, tweede helft rechts. Met de standaard rij-flow zou de
+          lijst links-rechts-links gaan lopen en zou de volgorde uit
+          sortSquadForExport (keepers eerst) anders lezen.
+
+          De structuur blijft ongemoeid: precies één <ul> met uitsluitend
+          <li>-children — dat wordt getoetst in AC4
+          (wedstrijdselectie.acceptance.test.tsx). */}
+      <ul
+        className="mt-2 grid grid-cols-2 gap-x-6"
+        style={{ gridTemplateRows: `repeat(${squadColumnRows}, auto)`, gridAutoFlow: 'column' }}
+      >
         {sorted.map((p) => (
           // Bewust ALLEEN de naam: geen gast-aanduiding. Deze lijst gaat naar de
           // spelers zelf, en wie gastspeler is hoort daar niet in te staan. Het

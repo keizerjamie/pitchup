@@ -42,6 +42,45 @@ function renderPrintList(players: Player[]) {
   )
 }
 
+// De tweekoloms-opmaak leunt bewust op CSS grid en niet op `columns-2`: WebKit
+// (iOS Safari) valt bij multi-column in print terug op één kolom. jsdom rekent
+// geen layout uit, dus dit toetst wat er wél hard vast te leggen is — dat de
+// grid-opmaak aanwezig is, met kolom-flow en het juiste aantal rijen.
+describe('Tweekoloms-opmaak van de selectielijst', () => {
+  it('gebruikt grid met kolom-flow, niet multi-column', () => {
+    const { container } = renderPrintList([
+      makePlayer({ id: 'p1', name: 'Speler Een' }),
+      makePlayer({ id: 'p2', name: 'Speler Twee' }),
+      makePlayer({ id: 'p3', name: 'Speler Drie' }),
+      makePlayer({ id: 'p4', name: 'Speler Vier' }),
+    ])
+    const ul = container.querySelector('ul') as HTMLElement
+    expect(ul.className).toContain('grid')
+    expect(ul.className).toContain('grid-cols-2')
+    expect(ul.className).not.toContain('columns-2')
+    expect(ul.style.gridAutoFlow).toBe('column')
+    // 4 spelers → 2 rijen per kolom.
+    expect(ul.style.gridTemplateRows).toBe('repeat(2, auto)')
+  })
+
+  it('rondt een oneven aantal spelers naar boven af, zodat de linkerkolom de langste is', () => {
+    const { container } = renderPrintList([
+      makePlayer({ id: 'p1', name: 'Speler Een' }),
+      makePlayer({ id: 'p2', name: 'Speler Twee' }),
+      makePlayer({ id: 'p3', name: 'Speler Drie' }),
+    ])
+    const ul = container.querySelector('ul') as HTMLElement
+    // 3 spelers → 2 rijen: twee links, één rechts.
+    expect(ul.style.gridTemplateRows).toBe('repeat(2, auto)')
+  })
+
+  it('valt bij een lege selectie terug op 1 rij, want repeat(0, auto) is ongeldige CSS', () => {
+    const { container } = renderPrintList([])
+    const ul = container.querySelector('ul') as HTMLElement
+    expect(ul.style.gridTemplateRows).toBe('repeat(1, auto)')
+  })
+})
+
 // De selectie-PDF gaat naar de spelers zelf; wie gastspeler is hoort daar niet
 // in te staan. Deze twee tests bewaken dat de lijst voor een gast en voor een
 // reguliere speler exact dezelfde vorm heeft: alleen de naam.
