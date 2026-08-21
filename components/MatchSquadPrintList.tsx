@@ -153,7 +153,11 @@ export default function MatchSquadPrintList({
           sortSquadForExport) blijft ongewijzigd. */}
       <ul className="mt-2 columns-2 gap-x-6">
         {sorted.map((p) => (
-          <li key={p.id} className="break-inside-avoid border-b border-gray-200 py-1 text-sm font-extrabold">{p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
+          // Bewust ALLEEN de naam: geen gast-aanduiding. Deze lijst gaat naar de
+          // spelers zelf, en wie gastspeler is hoort daar niet in te staan. Het
+          // onderscheid blijft wel zichtbaar in de app (PlayerList,
+          // MatchSquadEditor) en in de trainingsplan-print (AttendanceSummary).
+          <li key={p.id} className="break-inside-avoid border-b border-gray-200 py-1 text-sm font-extrabold">{p.name}</li>
         ))}
       </ul>
 

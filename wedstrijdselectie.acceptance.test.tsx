@@ -1139,10 +1139,12 @@ describe('AC13/AC14 (gastspelers) — een aanwezige gast is selecteerbaar, een a
   })
 })
 
-describe('AC16 (gastspelers) — "(Gast)" achter de naam in het printblok van de echte wedstrijdselectie-pagina', () => {
-  it('een geselecteerde gast krijgt de "(Gast)"-suffix in het exportblok; een geselecteerde reguliere speler niet', async () => {
+describe('AC16 (gastspelers) — GEEN "(Gast)"-aanduiding in het printblok van de echte wedstrijdselectie-pagina', () => {
+  it('een geselecteerde gast staat met alleen zijn naam in het exportblok, net als een reguliere speler', async () => {
     const players = [
-      playerRow({ id: 'p1', name: 'Print Gast', type: 'guest', active: true }),
+      // Naam bewust zonder het woord "Gast", zodat de slot-assertie het hele
+      // printblok streng kan afzoeken op het badge-woord.
+      playerRow({ id: 'p1', name: 'Print Invaller', type: 'guest', active: true }),
       playerRow({ id: 'p2', name: 'Print Regulier', type: 'regular', active: true }),
     ]
     const { container } = await renderSquadPage({
@@ -1155,14 +1157,15 @@ describe('AC16 (gastspelers) — "(Gast)" achter de naam in het printblok van de
       attendance: [],
     })
     // Het printblok (MatchSquadPrintList, dual-markup binnen MatchSquadEditor)
-    // toont uitsluitend de geselecteerde spelers als losse <li>-tekst
-    // "Naam" of "Naam (Gast)" — zie components/MatchSquadPrintList.tsx.
-    // Gescoped op het printblok: dezelfde namen staan ook in het interactieve
-    // scherm-blok (dual markup), dus een ongescoopte getByText zou op "Print
-    // Regulier" een "Found multiple elements"-fout geven.
+    // toont uitsluitend de geselecteerde spelers als losse <li>-tekst "Naam" —
+    // zonder gast-aanduiding, want deze PDF gaat naar de spelers zelf (zie
+    // components/MatchSquadPrintList.tsx). Gescoped op het printblok: dezelfde
+    // namen staan ook in het interactieve scherm-blok (dual markup), dus een
+    // ongescoopte getByText zou een "Found multiple elements"-fout geven.
     const block = getPrintBlock(container)
-    expect(within(block).getByText(`Print Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(block).getByText('Print Invaller')).toBeInTheDocument()
     expect(within(block).getByText('Print Regulier')).toBeInTheDocument()
+    expect(block.textContent).not.toContain(nl.players.guestBadge)
   })
 })
 

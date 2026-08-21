@@ -42,13 +42,20 @@ function renderPrintList(players: Player[]) {
   )
 }
 
-describe('Gast-suffix op de wedstrijdselectie-PDF', () => {
-  it('toont "(Gast)" achter de naam van een gastspeler in de selectielijst', () => {
+// De selectie-PDF gaat naar de spelers zelf; wie gastspeler is hoort daar niet
+// in te staan. Deze twee tests bewaken dat de lijst voor een gast en voor een
+// reguliere speler exact dezelfde vorm heeft: alleen de naam.
+describe('Geen gast-aanduiding op de wedstrijdselectie-PDF', () => {
+  // De naam bevat bewust nergens het woord "Gast", zodat de tweede assertie de
+  // HELE PDF streng kan afzoeken op het badge-woord zonder vals-positief op de
+  // spelersnaam zelf.
+  it('toont bij een gastspeler uitsluitend de naam, zonder "(Gast)"-suffix', () => {
     const { container } = renderPrintList([
-      makePlayer({ id: 'p1', name: 'Gast Speler', type: 'guest' }),
+      makePlayer({ id: 'p1', name: 'Sam Invaller', type: 'guest' }),
     ])
     const li = container.querySelector('li')
-    expect(li?.textContent).toBe(`Gast Speler (${nl.players.guestBadge})`)
+    expect(li?.textContent).toBe('Sam Invaller')
+    expect(container.textContent).not.toContain(nl.players.guestBadge)
   })
 
   it('toont geen suffix bij een reguliere speler', () => {
