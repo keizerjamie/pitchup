@@ -1563,3 +1563,42 @@ zondert zichzelf niet uit en faalt als de walker nul bestanden oplevert).
 RLS → expliciete `.eq('team_id', user.id)` op beide nieuwe queries → de `in()`-lijst komt
 zelf uit een team-gescopete query → `buildPlayerForms()` negeert elke rating-rij waarvan
 `player_id` niet in `players` of `event_id` niet in `matches` zit.
+
+## Gast-aanduiding uit de wedstrijdselectie-PDF (2026-08-21, commit `3299cc8`)
+De selectie-PDF gaat naar de spelers zelf, en de eigenaar vond het onnet om daarin te
+communiceren wie gastspeler is. In `components/MatchSquadPrintList.tsx` toont elke `<li>`
+daarom nog uitsluitend `{p.name}`; de `p.type === 'guest'`-suffix met `t.players.guestBadge`
+is weg.
+
+Scope was expliciet bevestigd: **alleen** deze PDF. Ongemoeid gebleven, en dat is bewust —
+het onderscheid moet zichtbaar blijven waar het voor de trainer bedoeld is:
+- `PlayerList.tsx` — de "Gast"-chip op `/players`.
+- `MatchSquadEditor.tsx` — het interactieve blok. Dat draagt `print:hidden`, dus het
+  komt sowieso nooit in de PDF; die dual-markup-scheiding deed hier het werk.
+- `AttendanceSummary.tsx` — het `hidden print:block`-aanwezigheidsblok in de
+  trainingsplan-print. Dat is het trainerskladblok (toont ook afwezigen), geen spelersstuk.
+
+Dit corrigeert het derde punt onder "UI-keuzes" in de gastspelers-sectie hierboven: `(Gast)`
+op print staat nu nog maar op één plek, de trainingsplan-print.
+
+### Testles: een geschrapte regel verdient dekking, geen verwijderde test
+De twee tests die de suffix bewaakten zijn **omgedraaid**, niet weggegooid —
+`MatchSquadPrintList.test.tsx` (`describe`: "Geen gast-aanduiding…") en AC16 in
+`wedstrijdselectie.acceptance.test.tsx`. Beide gast-testspelers zijn hernoemd (`Gast Speler`
+→ `Sam Invaller`, `Print Gast` → `Print Invaller`) zodat een `not.toContain(nl.players.
+guestBadge)` over de héle PDF-tekst kan lopen zonder vals-positief op de spelersnaam zelf.
+Eerste poging faalde precies daarop.
+
+### Gedeelde working tree — nu voor de derde keer raak
+Bij de push zat er ongerelateerd rate-limit-werk in de working tree. Er is bewust per bestand
+gestaged (drie stuks), maar de andere sessie had haar eigen commit `ddd1074` er intussen
+bovenop gezet, dus `git push` bracht **beide** commits live. Zie ook de identieke notitie in de
+gastspelers-sectie. Les blijft: per bestand stagen beschermt je commit, niet je push —
+controleer vóór het pushen `git log origin/main..main`, niet alleen `git status`.
+
+### Openstaand na deze push: rate-limit-migratie
+`supabase/rate-limit.sql` staat sinds `ddd1074` live in de repo, maar de migratie moet
+handmatig in de Supabase SQL Editor gedraaid worden. `lib/rate-limit.ts` is **fail-open**:
+ontbreekt de RPC, dan logt hij en geeft `NOT_BLOCKED` terug. Inloggen blijft dus werken, maar
+rate-limiting staat stil uit tot de migratie gedraaid is — geen storing, wel een open deur
+voor brute-force. Verifieer met `select * from rate_limit_check('test:demo');`.
