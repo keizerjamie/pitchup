@@ -1602,3 +1602,35 @@ handmatig in de Supabase SQL Editor gedraaid worden. `lib/rate-limit.ts` is **fa
 ontbreekt de RPC, dan logt hij en geeft `NOT_BLOCKED` terug. Inloggen blijft dus werken, maar
 rate-limiting staat stil uit tot de migratie gedraaid is — geen storing, wel een open deur
 voor brute-force. Verifieer met `select * from rate_limit_check('test:demo');`.
+
+### Vervolg: PDF viel op iOS terug naar één kolom (2026-08-21, commit `ad3dd28`)
+De spelerslijst stond op `columns-2` (CSS multi-column). Op desktop-Chrome zag dat er goed
+uit, maar op iOS Safari — waar de eigenaar zijn PDF daadwerkelijk maakt — kwamen alle namen
+onder elkaar te staan. **WebKit valt bij het printen van een multi-column container regelmatig
+terug op één kolom.** Dit was al langer zo (sinds `c296d02`), los van de gast-wijziging
+hierboven; het viel pas op toen er specifiek naar de PDF werd gekeken.
+
+Nu: `grid grid-cols-2` met `gridAutoFlow: 'column'` en `gridTemplateRows:
+repeat(Math.ceil(n/2), auto)`. De `grid-auto-flow: column` is essentieel — zonder die regel
+vult grid links-rechts-links en leest de volgorde uit `sortSquadForExport` (keepers eerst)
+anders dan bedoeld. Met de expliciete rijen is het gedrag identiek aan wat multicol
+beloofde: eerste helft links, tweede helft rechts. Lege selectie valt terug op `repeat(1,
+auto)`, want `repeat(0, auto)` is ongeldige CSS.
+
+Randvoorwaarde die de oplossingsruimte bepaalde: AC4 eist **precies één `<ul>`** met
+uitsluitend `<li>`-children (`wedstrijdselectie.acceptance.test.tsx`). Twee lijsten naast
+elkaar of wrapper-divs per kolom waren dus uitgesloten — de layout moest op de `<ul>` zelf.
+
+**Vuistregel voor deze codebase: gebruik in print/PDF-markup geen `columns-*`.** Grid of
+flex, altijd. Geldt ook voor `AttendanceSummary` en toekomstige print-blokken.
+
+Niet visueel geverifieerd door de assistent: de preview-browser is Chromium en reproduceert
+de WebKit-bug niet, dus de fix is onderbouwd met CSS-gedrag + drie tests op de opmaak
+(grid aanwezig, `columns-2` afwezig, juiste rij-telling incl. oneven en leeg). De eigenaar
+controleert op zijn telefoon.
+
+### Les: pre-push-check tegen meeliftende commits
+Bij `3299cc8` werd per bestand gestaged, maar een parallelle sessie had `ddd1074` er intussen
+bovenop gezet en `git push` bracht beide live (zie de sectie hierboven). Bij `ad3dd28` is
+daarom vóór het pushen `git log --oneline origin/main..main` gedraaid — die toonde precies één
+commit. Doe dat standaard; `git status` alleen is niet genoeg.
