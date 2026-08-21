@@ -20,7 +20,6 @@ import {
   SIGN_UP_POLICY,
   SIGN_UP_IP_POLICY,
   PASSWORD_RESET_POLICY,
-  resetRateLimits,
 } from '@/lib/rate-limit'
 import { signIn, signUp, requestPasswordReset, updatePassword, deleteAccount } from '@/app/actions/auth'
 
@@ -117,6 +116,69 @@ function makeAdmin() {
   return { admin: { auth: { admin: { deleteUser } } }, deleteUser }
 }
 
+// Namaak van de service-role-RPC's uit supabase/rate-limit.sql
+// (rate_limit_record_attempt/_check/_clear), zodat signIn/signUp/
+// requestPasswordReset hier getest kunnen worden zonder een echte Postgres-
+// verbinding. Elke test krijgt via beforeEach een verse, lege teller — het
+// equivalent van de oude resetRateLimits().
+function makeRateLimitAdmin() {
+  type Entry = { count: number; windowStart: number; blockedUntil: number | null }
+  const entries = new Map<string, Entry>()
+
+  function record(key: string, windowMs: number, limit: number, blockMs: number) {
+    const now = Date.now()
+    const existing = entries.get(key) ?? null
+    const stale = !existing
+      || now - existing.windowStart >= windowMs
+      || (existing.blockedUntil !== null && existing.blockedUntil <= now)
+
+    if (!stale && existing!.blockedUntil !== null && existing!.blockedUntil > now) {
+      return { blocked: true, retry_after_ms: existing!.blockedUntil - now }
+    }
+
+    const entry: Entry = stale
+      ? { count: 1, windowStart: now, blockedUntil: null }
+      : { count: existing!.count + 1, windowStart: existing!.windowStart, blockedUntil: null }
+
+    if (entry.count >= limit) entry.blockedUntil = now + blockMs
+    entries.set(key, entry)
+
+    return entry.blockedUntil !== null && entry.blockedUntil > now
+      ? { blocked: true, retry_after_ms: entry.blockedUntil - now }
+      : { blocked: false, retry_after_ms: 0 }
+  }
+
+  function check(key: string) {
+    const now = Date.now()
+    const entry = entries.get(key)
+    if (!entry || entry.blockedUntil === null || entry.blockedUntil <= now) {
+      return { blocked: false, retry_after_ms: 0 }
+    }
+    return { blocked: true, retry_after_ms: entry.blockedUntil - now }
+  }
+
+  return {
+    rpc: (fn: string, args?: Record<string, unknown>) => {
+      let result: { blocked: boolean; retry_after_ms: number } | null = null
+      if (fn === 'rate_limit_record_attempt') {
+        result = record(
+          args!.p_key as string,
+          args!.p_window_ms as number,
+          args!.p_limit as number,
+          args!.p_block_ms as number,
+        )
+      } else if (fn === 'rate_limit_check') {
+        result = check(args!.p_key as string)
+      } else if (fn === 'rate_limit_clear') {
+        entries.delete(args!.p_key as string)
+      }
+      const promise = Promise.resolve({ data: result, error: null })
+      ;(promise as unknown as { single: () => Promise<unknown> }).single = () => promise
+      return promise
+    },
+  }
+}
+
 function form(fields: Record<string, string>): FormData {
   const fd = new FormData()
   for (const [k, v] of Object.entries(fields)) fd.set(k, v)
@@ -129,7 +191,13 @@ let consoleError: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   vi.clearAllMocks()
-  resetRateLimits()
+  // Default: rate-limiting werkt (backed door een verse, lege in-memory
+  // namaak-teller). Tests voor deleteAccount overschrijven dit zelf met
+  // makeAdmin() of null — deleteAccount roept geen rate-limit-functies aan,
+  // dus dat overschrijven raakt deze default niet.
+  vi.mocked(createAdminClient).mockReturnValue(
+    makeRateLimitAdmin() as unknown as ReturnType<typeof createAdminClient>,
+  )
   consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   useHeaders()
   vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://pitchup.example')

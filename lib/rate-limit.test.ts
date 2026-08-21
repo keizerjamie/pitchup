@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: vi.fn() }))
+
+import { createAdminClient } from '@/lib/supabase/admin'
 import {
   PASSWORD_RESET_POLICY,
   SIGN_IN_IP_POLICY,
@@ -11,11 +15,93 @@ import {
   ipRateLimitKey,
   rateLimitKey,
   recordAttempt,
-  resetRateLimits,
 } from '@/lib/rate-limit'
 
+// ────────────────────────────────────────────────
+// In-memory namaak van rate_limit_record_attempt/_check/_clear
+// (supabase/rate-limit.sql), zodat recordAttempt/checkRateLimit/clearRateLimit
+// hier getest kunnen worden zonder een echte Postgres-verbinding. Spiegelt
+// exact de semantiek van de SQL-functies — niet de oude in-memory Map die
+// vóór deze migratie in lib/rate-limit.ts zelf stond.
+// ────────────────────────────────────────────────
+
+type FakeEntry = { count: number; windowStart: number; blockedUntil: number | null }
+
+function makeFakeStore() {
+  const entries = new Map<string, FakeEntry>()
+  let now = 0
+
+  function setNow(ms: number) { now = ms }
+
+  function recordAttemptFake(key: string, windowMs: number, limit: number, blockMs: number) {
+    const existing = entries.get(key) ?? null
+
+    const stale = !existing
+      || now - existing.windowStart >= windowMs
+      || (existing.blockedUntil !== null && existing.blockedUntil <= now)
+
+    if (!stale && existing!.blockedUntil !== null && existing!.blockedUntil > now) {
+      return { blocked: true, retry_after_ms: existing!.blockedUntil - now }
+    }
+
+    const entry: FakeEntry = stale
+      ? { count: 1, windowStart: now, blockedUntil: null }
+      : { count: existing!.count + 1, windowStart: existing!.windowStart, blockedUntil: null }
+
+    if (entry.count >= limit) entry.blockedUntil = now + blockMs
+    entries.set(key, entry)
+
+    return entry.blockedUntil !== null && entry.blockedUntil > now
+      ? { blocked: true, retry_after_ms: entry.blockedUntil - now }
+      : { blocked: false, retry_after_ms: 0 }
+  }
+
+  function checkFake(key: string) {
+    const entry = entries.get(key)
+    if (!entry || entry.blockedUntil === null || entry.blockedUntil <= now) {
+      return { blocked: false, retry_after_ms: 0 }
+    }
+    return { blocked: true, retry_after_ms: entry.blockedUntil - now }
+  }
+
+  function clearFake(key: string) {
+    entries.delete(key)
+  }
+
+  return { entries, setNow, recordAttemptFake, checkFake, clearFake }
+}
+
+function useFakeAdmin(store: ReturnType<typeof makeFakeStore>) {
+  const admin = {
+    rpc: (fn: string, args?: Record<string, unknown>) => {
+      let result: { blocked: boolean; retry_after_ms: number } | null = null
+      if (fn === 'rate_limit_record_attempt') {
+        result = store.recordAttemptFake(
+          args!.p_key as string,
+          args!.p_window_ms as number,
+          args!.p_limit as number,
+          args!.p_block_ms as number,
+        )
+      } else if (fn === 'rate_limit_check') {
+        result = store.checkFake(args!.p_key as string)
+      } else if (fn === 'rate_limit_clear') {
+        store.clearFake(args!.p_key as string)
+        result = null
+      }
+      const promise = Promise.resolve({ data: result, error: null })
+      ;(promise as unknown as { single: () => Promise<unknown> }).single = () => promise
+      return promise
+    },
+  }
+  vi.mocked(createAdminClient).mockReturnValue(admin as unknown as ReturnType<typeof createAdminClient>)
+  return admin
+}
+
+let store: ReturnType<typeof makeFakeStore>
+
 beforeEach(() => {
-  resetRateLimits()
+  store = makeFakeStore()
+  useFakeAdmin(store)
 })
 
 afterEach(() => {
@@ -55,14 +141,15 @@ describe('ipRateLimitKey', () => {
       .not.toBe(rateLimitKey('signin', 'bob', 'x@example.com:1.2.3.4'))
   })
 
-  it('houdt de IP-teller los van de e-mail+IP-teller', () => {
+  it('houdt de IP-teller los van de e-mail+IP-teller', async () => {
+    store.setNow(T0)
     const emailKey = rateLimitKey('signin', 'bob@example.com', '1.2.3.4')
     const ipKey = ipRateLimitKey('signin', '1.2.3.4')
 
-    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) recordAttempt(emailKey, SIGN_IN_POLICY, T0)
+    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) await recordAttempt(emailKey, SIGN_IN_POLICY)
 
-    expect(checkRateLimit(emailKey, T0).blocked).toBe(true)
-    expect(checkRateLimit(ipKey, T0).blocked).toBe(false)
+    expect((await checkRateLimit(emailKey)).blocked).toBe(true)
+    expect((await checkRateLimit(ipKey)).blocked).toBe(false)
   })
 })
 
@@ -82,75 +169,95 @@ describe('policies', () => {
 describe('recordAttempt / checkRateLimit', () => {
   const key = 'signin:bob@example.com:1.2.3.4'
 
-  it('gaat op slot bij de `limit`-ste poging binnen het venster', () => {
+  it('gaat op slot bij de `limit`-ste poging binnen het venster', async () => {
+    store.setNow(T0)
     for (let i = 0; i < SIGN_IN_POLICY.limit - 1; i++) {
-      expect(recordAttempt(key, SIGN_IN_POLICY, T0).blocked).toBe(false)
-      expect(checkRateLimit(key, T0).blocked).toBe(false)
+      expect((await recordAttempt(key, SIGN_IN_POLICY)).blocked).toBe(false)
+      expect((await checkRateLimit(key)).blocked).toBe(false)
     }
 
-    const laatste = recordAttempt(key, SIGN_IN_POLICY, T0)
+    const laatste = await recordAttempt(key, SIGN_IN_POLICY)
     expect(laatste.blocked).toBe(true)
     expect(laatste.retryAfterMs).toBe(SIGN_IN_POLICY.blockMs)
-    expect(checkRateLimit(key, T0).blocked).toBe(true)
+    expect((await checkRateLimit(key)).blocked).toBe(true)
   })
 
-  it('houdt de blokkade vast tot de lockout voorbij is', () => {
-    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) recordAttempt(key, SIGN_IN_POLICY, T0)
+  it('houdt de blokkade vast tot de lockout voorbij is', async () => {
+    store.setNow(T0)
+    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) await recordAttempt(key, SIGN_IN_POLICY)
 
-    expect(checkRateLimit(key, T0 + 60_000).blocked).toBe(true)
-    expect(checkRateLimit(key, T0 + 60_000).retryAfterMs).toBe(SIGN_IN_POLICY.blockMs - 60_000)
-    expect(checkRateLimit(key, T0 + SIGN_IN_POLICY.blockMs).blocked).toBe(false)
+    store.setNow(T0 + 60_000)
+    expect((await checkRateLimit(key)).blocked).toBe(true)
+    expect((await checkRateLimit(key)).retryAfterMs).toBe(SIGN_IN_POLICY.blockMs - 60_000)
+
+    store.setNow(T0 + SIGN_IN_POLICY.blockMs)
+    expect((await checkRateLimit(key)).blocked).toBe(false)
   })
 
-  it('begint na een uitgezeten blokkade met een schone teller', () => {
-    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) recordAttempt(key, SIGN_IN_POLICY, T0)
+  it('begint na een uitgezeten blokkade met een schone teller', async () => {
+    store.setNow(T0)
+    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) await recordAttempt(key, SIGN_IN_POLICY)
 
-    const after = T0 + SIGN_IN_POLICY.blockMs + 1
-    expect(recordAttempt(key, SIGN_IN_POLICY, after).blocked).toBe(false)
-    expect(checkRateLimit(key, after).blocked).toBe(false)
+    store.setNow(T0 + SIGN_IN_POLICY.blockMs + 1)
+    expect((await recordAttempt(key, SIGN_IN_POLICY)).blocked).toBe(false)
+    expect((await checkRateLimit(key)).blocked).toBe(false)
   })
 
-  it('vergeet pogingen die buiten het venster vallen', () => {
-    for (let i = 0; i < SIGN_IN_POLICY.limit - 1; i++) recordAttempt(key, SIGN_IN_POLICY, T0)
+  it('vergeet pogingen die buiten het venster vallen', async () => {
+    store.setNow(T0)
+    for (let i = 0; i < SIGN_IN_POLICY.limit - 1; i++) await recordAttempt(key, SIGN_IN_POLICY)
 
-    const later = T0 + SIGN_IN_POLICY.windowMs
-    expect(recordAttempt(key, SIGN_IN_POLICY, later).blocked).toBe(false)
-    expect(checkRateLimit(key, later).blocked).toBe(false)
+    store.setNow(T0 + SIGN_IN_POLICY.windowMs)
+    expect((await recordAttempt(key, SIGN_IN_POLICY)).blocked).toBe(false)
+    expect((await checkRateLimit(key)).blocked).toBe(false)
   })
 
-  it('telt per sleutel, niet globaal', () => {
+  it('telt per sleutel, niet globaal', async () => {
+    store.setNow(T0)
     const other = 'signin:eve@example.com:1.2.3.4'
-    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) recordAttempt(key, SIGN_IN_POLICY, T0)
+    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) await recordAttempt(key, SIGN_IN_POLICY)
 
-    expect(checkRateLimit(key, T0).blocked).toBe(true)
-    expect(checkRateLimit(other, T0).blocked).toBe(false)
+    expect((await checkRateLimit(key)).blocked).toBe(true)
+    expect((await checkRateLimit(other)).blocked).toBe(false)
   })
 
-  it('kent een strengere policy voor wachtwoord-herstel', () => {
+  it('kent een strengere policy voor wachtwoord-herstel', async () => {
+    store.setNow(T0)
     const resetKey = 'password-reset:bob@example.com:1.2.3.4'
     for (let i = 0; i < PASSWORD_RESET_POLICY.limit - 1; i++) {
-      expect(recordAttempt(resetKey, PASSWORD_RESET_POLICY, T0).blocked).toBe(false)
+      expect((await recordAttempt(resetKey, PASSWORD_RESET_POLICY)).blocked).toBe(false)
     }
-    expect(recordAttempt(resetKey, PASSWORD_RESET_POLICY, T0).blocked).toBe(true)
+    expect((await recordAttempt(resetKey, PASSWORD_RESET_POLICY)).blocked).toBe(true)
     expect(PASSWORD_RESET_POLICY.limit).toBeLessThan(SIGN_IN_POLICY.limit)
   })
 
-  it('geeft geen status voor een onbekende sleutel', () => {
-    expect(checkRateLimit('nooit-gebruikt', T0)).toEqual({ blocked: false, retryAfterMs: 0 })
+  it('geeft geen status voor een onbekende sleutel', async () => {
+    store.setNow(T0)
+    expect(await checkRateLimit('nooit-gebruikt')).toEqual({ blocked: false, retryAfterMs: 0 })
+  })
+})
+
+describe('checkRateLimit / recordAttempt zonder service-role-key', () => {
+  it('faalt open (blocked=false) in plaats van te crashen of alles te blokkeren', async () => {
+    vi.mocked(createAdminClient).mockReturnValue(null)
+    expect(await checkRateLimit('signin:bob@example.com:1.2.3.4')).toEqual({ blocked: false, retryAfterMs: 0 })
+    expect(await recordAttempt('signin:bob@example.com:1.2.3.4', SIGN_IN_POLICY))
+      .toEqual({ blocked: false, retryAfterMs: 0 })
   })
 })
 
 describe('clearRateLimit', () => {
-  it('wist de teller (bijv. na een geslaagde inlog)', () => {
+  it('wist de teller (bijv. na een geslaagde inlog)', async () => {
+    store.setNow(T0)
     const key = 'signin:bob@example.com:1.2.3.4'
-    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) recordAttempt(key, SIGN_IN_POLICY, T0)
-    expect(checkRateLimit(key, T0).blocked).toBe(true)
+    for (let i = 0; i < SIGN_IN_POLICY.limit; i++) await recordAttempt(key, SIGN_IN_POLICY)
+    expect((await checkRateLimit(key)).blocked).toBe(true)
 
-    clearRateLimit(key)
+    await clearRateLimit(key)
 
-    expect(checkRateLimit(key, T0).blocked).toBe(false)
+    expect((await checkRateLimit(key)).blocked).toBe(false)
     for (let i = 0; i < SIGN_IN_POLICY.limit - 1; i++) {
-      expect(recordAttempt(key, SIGN_IN_POLICY, T0).blocked).toBe(false)
+      expect((await recordAttempt(key, SIGN_IN_POLICY)).blocked).toBe(false)
     }
   })
 })

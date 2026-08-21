@@ -1,15 +1,20 @@
-// Eenvoudige app-side throttling voor auth-endpoints (inloggen, wachtwoord
-// vergeten). Bewust in-memory en zonder extra dependency: het doel is het
-// afremmen van geautomatiseerd raden vanaf één bron, niet een gedistribueerde
-// rate-limiter.
+// App-side throttling voor auth-endpoints (inloggen, registreren, wachtwoord
+// vergeten). De teller staat in de database (supabase/rate-limit.sql,
+// rate_limit_entries) en wordt atomisch bijgewerkt via RPC's — bewust niet
+// in-memory: Vercel draait meerdere lambda's, en een teller per instantie zou
+// een aanvaller die pogingen spreidt effectief meer pogingen geven dan de
+// policy toestaat.
 //
-// Let op de grenzen hiervan:
-// - De teller leeft per server-instantie. Op Vercel draaien meerdere lambdas,
-//   dus een aanvaller die over instanties heen spreidt krijgt effectief meer
-//   pogingen. Dit staat LOS van de rate-limits in het Supabase-dashboard; die
-//   blijven de tweede verdedigingslinie en moeten daar apart gecontroleerd
-//   worden.
-// - Bij een herstart is de teller leeg.
+// Dit staat LOS van de rate-limits in het Supabase-dashboard; die blijven de
+// tweede verdedigingslinie en moeten daar apart gecontroleerd worden.
+//
+// Faalt de databaseverbinding (geen service-role-key geconfigureerd, netwerk-
+// storing), dan faalt dit bewust open (blocked=false) in plaats van elke
+// login te weigeren: een uitval van de rate-limiter mag legitieme gebruikers
+// niet buitensluiten. De fout wordt wel gelogd.
+
+import { createAdminClient } from '@/lib/supabase/admin'
+import { logError } from '@/lib/errors'
 
 export type RateLimitPolicy = {
   // Aantal pogingen binnen `windowMs` waarna de sleutel op slot gaat.
@@ -64,32 +69,17 @@ export const PASSWORD_RESET_POLICY: RateLimitPolicy = {
   blockMs: 60 * MINUTE,
 }
 
-type Entry = {
-  count: number
-  windowStart: number
-  blockedUntil: number
-}
-
-const entries = new Map<string, Entry>()
-
-// Bovengrens tegen ongelimiteerde geheugengroei bij een aanval met steeds
-// nieuwe sleutels. Bij overschrijding wordt eerst opgeruimd, en als dat niet
-// genoeg oplevert de oudste helft weggegooid.
-const MAX_ENTRIES = 10_000
-
-// Langste telvenster van alle policies; een teller mag pas opgeruimd worden als
-// hij voor élke policy verlopen is.
-const LONGEST_WINDOW_MS = Math.max(
-  SIGN_IN_POLICY.windowMs,
-  SIGN_IN_IP_POLICY.windowMs,
-  SIGN_UP_POLICY.windowMs,
-  SIGN_UP_IP_POLICY.windowMs,
-  PASSWORD_RESET_POLICY.windowMs,
-)
-
 export type RateLimitState = {
   blocked: boolean
   retryAfterMs: number
+}
+
+const NOT_BLOCKED: RateLimitState = { blocked: false, retryAfterMs: 0 }
+
+type RpcRow = { blocked: boolean; retry_after_ms: number | string }
+
+function toState(row: RpcRow): RateLimitState {
+  return { blocked: row.blocked, retryAfterMs: Number(row.retry_after_ms) }
 }
 
 // Sleutel per actie + e-mail + IP. E-mail wordt genormaliseerd zodat
@@ -109,77 +99,63 @@ export function ipRateLimitKey(scope: string, ip: string): string {
 }
 
 // Leest de huidige status zonder de teller te wijzigen.
-export function checkRateLimit(key: string, now: number = Date.now()): RateLimitState {
-  const entry = entries.get(key)
-  if (!entry) return { blocked: false, retryAfterMs: 0 }
-
-  if (entry.blockedUntil > now) {
-    return { blocked: true, retryAfterMs: entry.blockedUntil - now }
+export async function checkRateLimit(key: string): Promise<RateLimitState> {
+  const admin = createAdminClient()
+  if (!admin) {
+    logError('rateLimit.checkRateLimit', { code: 'service_role_key_missing' })
+    return NOT_BLOCKED
   }
-  return { blocked: false, retryAfterMs: 0 }
+
+  const { data, error } = await admin.rpc('rate_limit_check', { p_key: key }).single()
+  if (error || !data) {
+    logError('rateLimit.checkRateLimit', error ?? { code: 'no_data' })
+    return NOT_BLOCKED
+  }
+  // De Supabase-client is ongetypeerd (lib/supabase/admin.ts), vandaar de
+  // expliciete annotatie op het RPC-resultaat — zelfde patroon als
+  // app/actions/inzichten.ts.
+  return toState(data as RpcRow)
 }
 
 // Telt één poging mee en geeft de status ná die poging terug. Callers roepen
 // eerst checkRateLimit aan (mag ik nog?) en daarna recordAttempt (dit was er
 // één): zodra de `limit`-ste poging binnen het venster geteld is, gaat de
-// sleutel `blockMs` op slot.
-export function recordAttempt(
-  key: string,
-  policy: RateLimitPolicy,
-  now: number = Date.now(),
-): RateLimitState {
-  sweep(now)
-
-  const existing = entries.get(key)
-
-  // Nieuw venster wanneer er nog geen teller is, het venster verlopen is, of een
-  // eerdere blokkade is uitgezeten.
-  const stale = !existing
-    || now - existing.windowStart >= policy.windowMs
-    || (existing.blockedUntil > 0 && existing.blockedUntil <= now)
-
-  if (!stale && existing.blockedUntil > now) {
-    return { blocked: true, retryAfterMs: existing.blockedUntil - now }
+// sleutel `blockMs` op slot. De telling zelf gebeurt atomisch in de database
+// (supabase/rate-limit.sql, rate_limit_record_attempt) zodat gelijktijdige
+// pogingen op dezelfde sleutel — ook vanuit verschillende serverless-
+// instanties — elkaar niet kunnen overschrijven.
+export async function recordAttempt(key: string, policy: RateLimitPolicy): Promise<RateLimitState> {
+  const admin = createAdminClient()
+  if (!admin) {
+    logError('rateLimit.recordAttempt', { code: 'service_role_key_missing' })
+    return NOT_BLOCKED
   }
 
-  const entry: Entry = stale ? { count: 0, windowStart: now, blockedUntil: 0 } : existing
-  entry.count += 1
-  if (entry.count >= policy.limit) entry.blockedUntil = now + policy.blockMs
-  entries.set(key, entry)
-
-  return entry.blockedUntil > now
-    ? { blocked: true, retryAfterMs: entry.blockedUntil - now }
-    : { blocked: false, retryAfterMs: 0 }
+  const { data, error } = await admin
+    .rpc('rate_limit_record_attempt', {
+      p_key: key,
+      p_window_ms: policy.windowMs,
+      p_limit: policy.limit,
+      p_block_ms: policy.blockMs,
+    })
+    .single()
+  if (error || !data) {
+    logError('rateLimit.recordAttempt', error ?? { code: 'no_data' })
+    return NOT_BLOCKED
+  }
+  return toState(data as RpcRow)
 }
 
 // Wist de teller, bijvoorbeeld na een geslaagde inlog.
-export function clearRateLimit(key: string): void {
-  entries.delete(key)
-}
-
-// Alleen voor tests: begin met een lege teller.
-export function resetRateLimits(): void {
-  entries.clear()
-}
-
-// Verwijdert verlopen tellers; alleen aangeroepen bij schrijven.
-function sweep(now: number): void {
-  if (entries.size < MAX_ENTRIES) return
-
-  for (const [key, entry] of entries) {
-    const expired = entry.blockedUntil <= now && now - entry.windowStart >= LONGEST_WINDOW_MS
-    if (expired) entries.delete(key)
+export async function clearRateLimit(key: string): Promise<void> {
+  const admin = createAdminClient()
+  if (!admin) {
+    logError('rateLimit.clearRateLimit', { code: 'service_role_key_missing' })
+    return
   }
 
-  // Nog steeds vol: gooi de oudste helft weg (Map bewaart invoegvolgorde).
-  if (entries.size >= MAX_ENTRIES) {
-    const toDrop = Math.ceil(entries.size / 2)
-    let dropped = 0
-    for (const key of entries.keys()) {
-      entries.delete(key)
-      if (++dropped >= toDrop) break
-    }
-  }
+  const { error } = await admin.rpc('rate_limit_clear', { p_key: key })
+  if (error) logError('rateLimit.clearRateLimit', error)
 }
 
 // IP van de aanvrager uit de proxy-headers. Alleen een plausibel IP-adres wordt

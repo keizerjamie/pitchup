@@ -41,8 +41,7 @@ export async function signIn(_prevState: { error: string } | null, formData: For
   const key = rateLimitKey('signin', email, ip)
   const ipKey = ipRateLimitKey('signin', ip)
 
-  const limited = checkRateLimit(key)
-  const ipLimited = checkRateLimit(ipKey)
+  const [limited, ipLimited] = await Promise.all([checkRateLimit(key), checkRateLimit(ipKey)])
   if (limited.blocked || ipLimited.blocked) {
     const retryAfterMs = Math.max(limited.retryAfterMs, ipLimited.retryAfterMs)
     return { error: `Te veel inlogpogingen. Probeer het over ${minutes(retryAfterMs)} minuten opnieuw.` }
@@ -51,14 +50,13 @@ export async function signIn(_prevState: { error: string } | null, formData: For
   const { error } = await supabase.auth.signInWithPassword({ email, password })
 
   if (error) {
-    recordAttempt(key, SIGN_IN_POLICY)
-    recordAttempt(ipKey, SIGN_IN_IP_POLICY)
+    await Promise.all([recordAttempt(key, SIGN_IN_POLICY), recordAttempt(ipKey, SIGN_IN_IP_POLICY)])
     return { error: 'E-mailadres of wachtwoord klopt niet' }
   }
 
   // Alleen de e-mail+IP-teller wordt gewist. De IP-teller blijft staan: anders
   // kan een aanvaller met één eigen geldig account de spray-teller resetten.
-  clearRateLimit(key)
+  await clearRateLimit(key)
   revalidatePath('/', 'layout')
   redirect('/')
 }
@@ -83,14 +81,12 @@ export async function signUp(_prevState: { error: string } | null, formData: For
   const key = rateLimitKey('signup', email, ip)
   const ipKey = ipRateLimitKey('signup', ip)
 
-  const limited = checkRateLimit(key)
-  const ipLimited = checkRateLimit(ipKey)
+  const [limited, ipLimited] = await Promise.all([checkRateLimit(key), checkRateLimit(ipKey)])
   if (limited.blocked || ipLimited.blocked) {
     const retryAfterMs = Math.max(limited.retryAfterMs, ipLimited.retryAfterMs)
     return { error: `Te veel registratiepogingen. Probeer het over ${minutes(retryAfterMs)} minuten opnieuw.` }
   }
-  recordAttempt(key, SIGN_UP_POLICY)
-  recordAttempt(ipKey, SIGN_UP_IP_POLICY)
+  await Promise.all([recordAttempt(key, SIGN_UP_POLICY), recordAttempt(ipKey, SIGN_UP_IP_POLICY)])
 
   const { data, error } = await supabase.auth.signUp({ email, password })
 
@@ -136,8 +132,8 @@ export async function requestPasswordReset(_prevState: { sent: boolean } | null,
 
     if (!siteUrl) {
       logError('auth.requestPasswordReset', { code: 'site_url_missing' })
-    } else if (!checkRateLimit(key).blocked) {
-      recordAttempt(key, PASSWORD_RESET_POLICY)
+    } else if (!(await checkRateLimit(key)).blocked) {
+      await recordAttempt(key, PASSWORD_RESET_POLICY)
       // Deliberately ignore the result: the response must not reveal whether
       // the address exists (user enumeration).
       await supabase.auth.resetPasswordForEmail(email, {
