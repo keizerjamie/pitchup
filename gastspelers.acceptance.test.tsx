@@ -662,3 +662,101 @@ describe('opkomsttegel is fail-safe als de gast-query faalt', () => {
     expect(logged).not.toContain(GUEST_QUERY_ERROR.details)
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════
+// Gastspelers gemarkeerd in de balk van de dashboardtegel "Actieve spelers"
+// ═══════════════════════════════════════════════════════════════════════
+// Groen = fitte vaste spelers, oranje = fitte gasten, rood = ALLE
+// geblesseerden. Een blessure weegt dus zwaarder dan het gast-zijn (bewuste
+// keuze van de eigenaar): een geblesseerde gast telt rood, niet oranje, zodat
+// de rode balk exact "alle geblesseerden" blijft betekenen zoals voorheen.
+// jsdom normaliseert een inline hex-kleur naar rgb(), dus die vorm staat hier.
+const SEGMENT_GREEN = 'rgb(22, 163, 74)' // #16a34a
+const SEGMENT_AMBER = 'rgb(245, 158, 11)' // #f59e0b
+const SEGMENT_RED = 'rgb(239, 68, 68)' // #ef4444
+
+function activePlayersCard(): HTMLElement {
+  const label = screen.getByText(nl.home.statActivePlayers)
+  return label.closest('.surface-card') as HTMLElement
+}
+
+// De balksegmenten in DOM-volgorde, als [kleur, breedte]-paren.
+function segments(): [string, string][] {
+  const bar = activePlayersCard().querySelector('.flex.overflow-hidden') as HTMLElement
+  return Array.from(bar.children).map((el) => {
+    const s = (el as HTMLElement).style
+    return [s.background || s.backgroundColor, s.width]
+  })
+}
+
+function activePlayersSubtitle(): string {
+  const card = activePlayersCard()
+  return (card.querySelector('span.text-\\[11\\.5px\\]') as HTMLElement).textContent ?? ''
+}
+
+describe('dashboardtegel "Actieve spelers" — gastspelers krijgen een eigen kleur in de balk', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // 3 fitte reguliere + 1 geblesseerde reguliere + 1 fitte gast + 1
+  // geblesseerde gast = 6 actieve spelers.
+  const gemengd: Row[] = [
+    makePlayer({ id: 'r1', team_id: TEAM, name: 'Reg 1', type: 'regular', injured: false }),
+    makePlayer({ id: 'r2', team_id: TEAM, name: 'Reg 2', type: 'regular', injured: false }),
+    makePlayer({ id: 'r3', team_id: TEAM, name: 'Reg 3', type: 'regular', injured: false }),
+    makePlayer({ id: 'r4', team_id: TEAM, name: 'Reg 4', type: 'regular', injured: true }),
+    makePlayer({ id: 'g1', team_id: TEAM, name: 'Gast 1', type: 'guest', injured: false }),
+    makePlayer({ id: 'g2', team_id: TEAM, name: 'Gast 2', type: 'guest', injured: true }),
+  ]
+
+  it('toont drie segmenten: groen fitte vaste spelers, oranje fitte gasten, rood alle geblesseerden', async () => {
+    await renderDashboard({ players: gemengd })
+
+    const [groen, oranje, rood] = segments()
+    expect(segments()).toHaveLength(3)
+    // 3/6 groen, 1/6 oranje, 2/6 rood.
+    expect(groen[0]).toBe(SEGMENT_GREEN)
+    expect(groen[1]).toBe('50%')
+    expect(oranje[0]).toBe(SEGMENT_AMBER)
+    expect(Number.parseFloat(oranje[1])).toBeCloseTo(16.667, 2)
+    expect(rood[0]).toBe(SEGMENT_RED)
+    expect(Number.parseFloat(rood[1])).toBeCloseTo(33.333, 2)
+  })
+
+  it('noemt de gasten apart in het bijschrift, met de geblesseerde gast onder Geblesseerd', async () => {
+    await renderDashboard({ players: gemengd })
+
+    expect(activePlayersSubtitle()).toBe(
+      `3 ${nl.home.fit} · 1 ${nl.home.guest} · 2 ${nl.home.injured} (33%)`,
+    )
+  })
+
+  it('zonder gasten blijft de balk twee segmenten en verdwijnt het gast-deel uit het bijschrift', async () => {
+    await renderDashboard({
+      players: [
+        makePlayer({ id: 'r1', team_id: TEAM, name: 'Reg 1', type: 'regular', injured: false }),
+        makePlayer({ id: 'r2', team_id: TEAM, name: 'Reg 2', type: 'regular', injured: true }),
+      ],
+    })
+
+    expect(segments().map((s) => s[0])).toEqual([SEGMENT_GREEN, SEGMENT_RED])
+    expect(activePlayersSubtitle()).toBe(`1 ${nl.home.fit} · 1 ${nl.home.injured} (50%)`)
+  })
+
+  it('een inactieve gast telt niet mee — de balk gaat alleen over de actieve selectie', async () => {
+    await renderDashboard({
+      players: [
+        makePlayer({ id: 'r1', team_id: TEAM, name: 'Reg 1', type: 'regular', injured: false }),
+        makePlayer({ id: 'g1', team_id: TEAM, name: 'Gast 1', type: 'guest', injured: false, active: false }),
+      ],
+    })
+
+    expect(segments().map((s) => s[0])).toEqual([SEGMENT_GREEN])
+    expect(activePlayersSubtitle()).toBe(`1 ${nl.home.fit} · 0 ${nl.home.injured} (0%)`)
+  })
+})

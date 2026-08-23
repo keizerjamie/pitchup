@@ -47,6 +47,7 @@ export const en: Dict = {
     statActivePlayers: 'Active players',
     fit: 'Fit',
     injured: 'Injured',
+    guest: 'Guest',
     statForm: 'Form',
     formEmpty: 'No matches played yet',
     formLabel: 'Recent form',

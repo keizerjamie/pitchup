@@ -1634,3 +1634,32 @@ Bij `3299cc8` werd per bestand gestaged, maar een parallelle sessie had `ddd1074
 bovenop gezet en `git push` bracht beide live (zie de sectie hierboven). Bij `ad3dd28` is
 daarom vóór het pushen `git log --oneline origin/main..main` gedraaid — die toonde precies één
 commit. Doe dat standaard; `git status` alleen is niet genoeg.
+
+## Gastspelers gemarkeerd in de dashboardbalk "Actieve spelers" (2026-08-23)
+
+De balk in de StatCard "Actieve spelers" (`app/page.tsx`) had twee segmenten (groen fit /
+rood geblesseerd) en heeft er nu drie: **groen = fitte vaste spelers, oranje `#f59e0b` =
+fitte gasten, rood = ALLE geblesseerden**.
+
+**Beslissing van de eigenaar:** de segmenten moeten elkaar uitsluiten, en bij een
+geblesseerde gast **wint de blessure** (rood). Zo blijft de rode balk exact "alle
+geblesseerden" betekenen, precies zoals vóór deze wijziging. Oranje is dus letterlijk
+"fitte gasten", niet "alle gasten". Let op: hiermee betekent het label **Fit** in het
+bijschrift nu "fitte vaste spelers" — dat getal daalt zodra er gasten zijn.
+
+- Segmentvolgorde is bewust groen → oranje → rood: beschikbaar links, niet-beschikbaar
+  rechts.
+- De drie kleuren zijn vaste hex-waarden, constant over licht/donker — dat was al zo voor
+  groen/rood in deze balk en voor de opkomstbalk erboven. (Uitzondering op de
+  thema-variabelen-regel geldt alleen voor deze grafiek-segmenten.)
+- `type` is toegevoegd aan de players-select die de tegel al voedde. De **aparte**
+  gast-query verderop in `app/page.tsx` (voor de opkomsttegel) is bewust ongemoeid: die
+  heeft geen `active`-filter en dient een ander doel.
+- i18n: nieuwe sleutel `home.guest` in alle vijf `messages/*.ts`, tekst gelijk aan de
+  bestaande `players.guestBadge`.
+- Tests: vier acceptatietests onderaan `gastspelers.acceptance.test.tsx`, tegen de échte
+  dashboardpagina (segmenten + breedtes, bijschrift, geval zonder gasten, inactieve gast
+  telt niet mee).
+
+**Testdetail om te onthouden:** jsdom normaliseert een inline hex-kleur naar `rgb(...)`.
+Assert dus op `rgb(22, 163, 74)` en niet op `#16a34a`.

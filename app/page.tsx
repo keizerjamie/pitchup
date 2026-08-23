@@ -47,7 +47,7 @@ export default async function DashboardPage() {
     { data: guestPlayerRows, error: guestPlayerError },
   ] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
-    supabase.from('players').select('id, name, position, jersey_number, injured').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
+    supabase.from('players').select('id, name, position, jersey_number, injured, type').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
     supabase.from('settings').select('value').eq('team_id', user.id).eq('key', 'team_name').maybeSingle(),
     // Kandidaat-events voor de To-do: alles binnen het venster, ongeacht status
     // (zichtbaarheid wordt verderop bepaald door isTaskVisible).
@@ -80,8 +80,13 @@ export default async function DashboardPage() {
   const players = playerRows ?? []
   const squadSize = players.length
   const totalActive = players.length
+  // Drie elkaar uitsluitende groepen voor de balk in de tegel "Actieve spelers":
+  // een blessure weegt zwaarder dan het gast-zijn, dus een geblesseerde gast
+  // telt rood mee (rood = ALLE geblesseerden, zoals voorheen). Oranje is dus
+  // "fitte gasten", groen "fitte vaste spelers".
   const injuredCount = players.filter((p) => p.injured).length
-  const fitCount = totalActive - injuredCount
+  const guestCount = players.filter((p) => !p.injured && p.type === 'guest').length
+  const fitCount = totalActive - injuredCount - guestCount
   const injuredPct = totalActive > 0 ? Math.round((injuredCount / totalActive) * 100) : 0
   const recentForm: FormStripItem[] =
     (recentMatchRows ?? []).map((m) => ({ id: m.id, result: matchResult(m) }))
@@ -325,16 +330,24 @@ export default async function DashboardPage() {
         </StatCard>
         <StatCard label={t.home.statActivePlayers} icon="groups" value={totalActive}>
           <div className="flex flex-col gap-2">
+            {/* Segmentvolgorde = beschikbaar (groen fit, oranje gast) links,
+                niet-beschikbaar (rood) rechts. De hexkleuren zijn bewust
+                constant over beide thema's, net als de opkomstbalk hierboven. */}
             <div className="h-[7px] rounded-full overflow-hidden flex" style={{ background: 'var(--track)' }}>
               {totalActive > 0 && fitCount > 0 && (
                 <div style={{ width: `${(fitCount / totalActive) * 100}%`, background: '#16a34a' }} />
+              )}
+              {totalActive > 0 && guestCount > 0 && (
+                <div style={{ width: `${(guestCount / totalActive) * 100}%`, background: '#f59e0b' }} />
               )}
               {totalActive > 0 && injuredCount > 0 && (
                 <div style={{ width: `${(injuredCount / totalActive) * 100}%`, background: '#ef4444' }} />
               )}
             </div>
             <span className="text-[11.5px] font-semibold text-faint">
-              {fitCount} {t.home.fit} · {injuredCount} {t.home.injured} ({injuredPct}%)
+              {fitCount} {t.home.fit}
+              {guestCount > 0 && ` · ${guestCount} ${t.home.guest}`}
+              {` · ${injuredCount} ${t.home.injured} (${injuredPct}%)`}
             </span>
           </div>
         </StatCard>

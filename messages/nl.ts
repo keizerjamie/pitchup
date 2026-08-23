@@ -45,6 +45,7 @@ export const nl = {
     statActivePlayers: 'Actieve spelers',
     fit: 'Fit',
     injured: 'Geblesseerd',
+    guest: 'Gast',
     statForm: 'Vorm',
     formEmpty: 'Nog geen wedstrijden gespeeld',
     formLabel: 'Recente vorm',
