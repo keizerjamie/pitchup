@@ -6,7 +6,15 @@
   --color-brand-dark: #092c28;
   --color-brand-mid: #1a6b63;
   --color-brand-light: #e6f4f2;
+  /* Vaste teal. Bewust NIET donkerder gemaakt: hij wordt alleen nog gebruikt
+     als TEKST/rand op de altijd-donkere auth-gradient (app/login, /register,
+     /forgot-password, /reset-password), waar hij 4.84:1 haalt op #0d3d38 en
+     5.87:1 op #0a2e2a. Op een licht oppervlak haalt hij maar 2.49:1 — gebruik
+     daar --color-brand-accent, die met het thema meebeweegt. */
   --color-accent: #14b8a6;
+  /* Donkere variant van dezelfde teal, uitsluitend als ACHTERGROND onder witte
+     tekst (4.52:1). --color-accent zelf haalt daar maar 2.49:1. */
+  --color-accent-strong: #0e8578;
   --color-accent-green: #4ade80;
 
   /* Redesign semantic tokens. Values point at runtime CSS variables (below)
@@ -24,17 +32,41 @@
   /* Theme-aware green pop for accent icons/links (distinct from the fixed
      legacy --color-accent teal still used by older pages). */
   --color-brand-accent: var(--brand-accent);
+  /* Status- en event-kleuren als Tailwind-utility (bg-danger, text-warning-text,
+     bg-event-match, …). Bestonden alleen als runtime-variabele of helemaal
+     niet, waardoor componenten terugvielen op kale Tailwind-kleuren. */
+  --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
+  --color-danger: var(--danger);
+  --color-event-match: var(--event-match);
+  --color-event-training: var(--event-training);
 }
 
 /* Light theme values. --primary stays constant across themes because it is a
    button background that pairs with white text; accents that must brighten on
-   dark use --brand-accent instead. */
+   dark use --brand-accent instead.
+
+   CONTRAST-EIS (2026-08-23): elke kleur hieronder die als knop-achtergrond
+   onder witte tekst dient (--primary, --warning, --brand-btn, --danger,
+   --event-*) haalt minimaal 4.5:1 met wit. Elke kleur die als TEKST dient
+   (--faint, --muted, --brand-accent, --warning-text, --chip-*-fg) haalt
+   minimaal 4.5:1 op zijn slechtste achtergrond.
+
+   Let op welke achtergrond dat is — hier is bij het doorvoeren eerst de
+   verkeerde gekozen. Voor donkere tekst is de DONKERSTE achtergrond het
+   slechtste geval, dus --bg (#e5ede9), niet --surface (#ffffff): --faint haalde
+   op wit 4.51 maar op --bg maar 3.79. In het dark-blok is het net omgekeerd —
+   daar is de LICHTSTE achtergrond het slechtste geval, dus --surface (#0d3d38).
+
+   Wijzig hier geen hex zonder die ratio na te rekenen; de waarden van vóór deze
+   datum zaten op 2.49–3.58:1. Voor grafiek-objecten geldt 3:1 in plaats van
+   4.5:1 — die gebruiken bewust --brand-accent, zie .chart-stroke-primary. */
 :root {
   --ink: #0a2e2a;
-  --primary: #16a34a;
+  --primary: #12883e;
   --primary-strong: #14655c;
   --muted: #3f615b;
-  --faint: #8aa39d;
+  --faint: #576f6a;
   --surface: #ffffff;
   --surface-sunken: #f6faf8;
   --border-soft: #e0ebe7;
@@ -42,14 +74,48 @@
   --bg-glow: #f0f6f3;
   --track: #eaf2ee;
   --brand-btn: #0d3d38;
-  --brand-accent: #16a34a;
+  --brand-accent: #107b38;
   /* Oranje accent voor "nog te doen"-acties (bv. analyse nog niet ingevuld).
      Constant over beide thema's — het is een knop-achtergrond met witte tekst,
-     net als --primary. */
-  --warning: #ea580c;
+     net als --primary. Was #ea580c: dat haalde met wit maar 3.56:1. */
+  --warning: #c04809;
+  /* Dezelfde oranje als TEKST/icoon op een oppervlak. Moet wél met het thema
+     mee: --warning zelf haalt op de donkere --surface maar 2.4:1. */
+  --warning-text: #b94509;
+  /* Rood voor destructieve acties als knop-achtergrond onder witte tekst
+     (6.47:1). Vervangt de losse bg-red-500 (3.76:1) / bg-red-700 die door de
+     app verspreid stonden. */
+  --danger: #b91c1c;
+  /* Wedstrijd vs. training. Stonden eerder als kale Tailwind bg-blue-600 /
+     bg-green-600 in app/events/new en app/events/bulk — buiten elk token, dus
+     ook buiten dark mode. Beide dragen witte tekst: 5.17:1 en 4.55:1. */
+  --event-match: #2563eb;
+  --event-training: #12883e;
   --chip-green-fg: #14655c;
   --chip-red-fg: #b91c1c;
   --chip-amber-fg: #b45309;
+}
+
+/* Z-index-ladder voor alles wat op paginaniveau zweeft. Vóór 2026-08-23 stonden
+   hier acht losse getallen zonder onderlinge logica (40, 50, 290, 300, 399,
+   401, 402, 500). De volgorde hieronder is exact de volgorde die die getallen
+   al hadden — alleen navolgbaar gemaakt, geen gedrag gewijzigd.
+
+   De FAB staat bewust BOVEN scrim en sheet: hij verandert in zijn eigen
+   sluitknop zodra het menu open is (zie GlobalFab.tsx). Een modal dekt alles,
+   ook de FAB.
+
+   Let op: dit geldt alleen voor page-level chrome. z-index BINNEN een component
+   (de spelerpionnen in LineupBuilder, een sleepbaar kaartje in
+   TeamIndelingEditor) hoort bij zijn eigen stacking context en blijft een lokaal
+   getal — die zijn hier bewust niet in opgenomen. */
+:root {
+  --z-chrome: 40;
+  --z-nav: 50;
+  --z-scrim: 60;
+  --z-sheet: 70;
+  --z-fab: 80;
+  --z-modal: 90;
 }
 
 /* Dark theme — flips every runtime token above. Set on <html> by the
@@ -57,17 +123,23 @@
 :root[data-theme='dark'] {
   --ink: #eaf4f1;
   --muted: #9fc2bb;
-  --faint: #6f938c;
+  --faint: #8aa8a2;
+  /* --primary-strong ONTBRAK hier. Hij bleef daardoor op de lichte #14655c
+     staan, die op --surface maar 1.75:1 haalt — de instellingen-iconen
+     (text-primary-strong in app/settings/page.tsx) waren in dark mode
+     praktisch onzichtbaar. */
+  --primary-strong: #7fd8cd;
+  --warning-text: #fb923c;
   --surface: #0d3d38;
   --surface-sunken: #0a2e2a;
   --border-soft: rgba(255, 255, 255, 0.08);
   --bg: #06231f;
   --bg-glow: #0a332c;
   --track: rgba(255, 255, 255, 0.10);
-  --brand-btn: #16a34a;
+  --brand-btn: #12883e;
   --brand-accent: #4ade80;
   --chip-green-fg: #4ade80;
-  --chip-red-fg: #f87171;
+  --chip-red-fg: #fb8a8a;
   --chip-amber-fg: #fbbf24;
 }
 
@@ -78,8 +150,14 @@
    prioriteit dan een CSS-klasse, dus deze klassen overschrijven recharts'
    eigen defaults zonder inline stroke/fill-props nodig te hebben. Nooit een
    hex-kleur of getComputedStyle() gebruiken op deze elementen. */
-.chart-stroke-primary { stroke: var(--primary); }
-.chart-fill-primary { fill: var(--primary); }
+/* Bewust --brand-accent en NIET --primary: --primary is een knop-achtergrond
+   die met witte tekst 4.5:1 moet halen en daarom donker is (#12883e). Diezelfde
+   donkere groen haalt op het donkere oppervlak (--surface #0d3d38) maar 2.65:1
+   en zakt daarmee onder de 3:1 die voor grafiek-objecten geldt. --brand-accent
+   is precies de token die daarvoor bestaat: #107b38 op licht (4.5:1 op --bg),
+   #4ade80 op donker (6.92:1 op --surface). */
+.chart-stroke-primary { stroke: var(--brand-accent); }
+.chart-fill-primary { fill: var(--brand-accent); }
 .chart-fill-green { fill: var(--chip-green-fg); }
 .chart-fill-red { fill: var(--chip-red-fg); }
 .chart-fill-amber { fill: var(--chip-amber-fg); }
@@ -308,6 +386,25 @@ body::after {
     animation-duration: 0s !important;
     animation-delay: 0s !important;
   }
+
+  /* Dekte eerder alleen view-transitions. De rest van de app — .animate-fade-up,
+     .stagger, elke Tailwind-transition en elke active:scale — liep gewoon door.
+
+     Bewust `0.01ms` en niet `none`: animaties met `both` fill-mode (zie
+     .animate-fade-up / .animate-scale-in hieronder) beginnen op opacity 0.
+     Met `animation: none` valt die fill weg en zou het element zichtbaar
+     blijven, maar met een 0.01ms-duur springt hij netjes naar de EINDstaat.
+     Dat is het verschil tussen "geen animatie" en "element blijft onzichtbaar". */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ─────────────────────────────────────────────────
@@ -342,7 +439,7 @@ body::after {
 /* ─────────────────────────────────────────────────
    Print — trainingsplan afdrukken
    Dit blok staat bewust ONDERAAN het bestand: het moet ná
-   :root[data-theme='dark'] (regel 57-72 hierboven) staan om bij gelijke
+   het :root[data-theme='dark']-blok hierboven staan om bij gelijke
    selector-specificiteit te winnen wanneer dark mode actief is.
 ───────────────────────────────────────────────── */
 @media print {
@@ -355,18 +452,23 @@ body::after {
   html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
   /* Dark mode mag nooit op wit papier belanden. Zelfde waarden als het
-     licht-thema (globals.css:32-53). De selector herhaalt [data-theme='dark']
+     licht-thema in het :root-blok. De selector herhaalt [data-theme='dark']
      om dezelfde specificiteit te halen; dit blok staat later in het bestand
      en wint daarmee. VERPLAATSEN BREEKT AC13 STILZWIJGEND. */
   :root, :root[data-theme='dark'] {
-    --ink: #0a2e2a; --muted: #3f615b; --faint: #8aa39d;
+    --ink: #0a2e2a; --muted: #3f615b; --faint: #576f6a;
     --surface: #ffffff; --surface-sunken: #f6faf8; --border-soft: #e0ebe7;
     --bg: #ffffff; --bg-glow: #ffffff; --track: #eaf2ee;
-    --brand-btn: #0d3d38; --brand-accent: #16a34a;
+    --brand-btn: #0d3d38; --brand-accent: #107b38;
     --chip-green-fg: #14655c; --chip-red-fg: #b91c1c; --chip-amber-fg: #b45309;
+    /* --primary-strong en --warning-text worden sinds 2026-08-23 wél door het
+       dark-blok overschreven, dus moeten ze hier terug naar hun lichte waarde.
+       Zonder deze twee regels drukt dark mode #7fd8cd/#fb923c op wit papier. */
+    --primary-strong: #14655c; --warning-text: #b94509;
   }
 
-  /* Pagina-achtergrond en decoratieve blobs (globals.css:98-103, 151-172)
+  /* Pagina-achtergrond (`body`) en decoratieve blobs (`body::before` /
+     `body::after`)
      zijn position:fixed — met print-color-adjust:exact zouden ze op ELKE
      pagina meedrukken. */
   body { background: #ffffff !important; }
@@ -434,7 +536,7 @@ body::after {
     margin-right: 4mm !important;
   }
 
-  /* `.glass-card` (globals.css:181-187) staat ongelaagd CSS, terwijl
+  /* `.glass-card` staat ongelaagd CSS, terwijl
      `@import "tailwindcss"` alle utilities in `@layer utilities` zet —
      ongelaagde CSS wint altijd van gelaagde CSS, ongeacht bronvolgorde. De
      `print:bg-transparent print:shadow-none print:border-0`-utilities op
@@ -448,8 +550,8 @@ body::after {
      hierboven) de kaartrand + schaduw van `.glass-card` zichtbaar als een
      grijze halo rond de 42mm-kolom.
 
-     Let op dezelfde valkuil bij `.ms` (:126-140) en `.surface-card`
-     (:143-148) — ook ongelaagd, nu nergens door print geraakt, maar bij een
+     Let op dezelfde valkuil bij `.ms` en `.surface-card` — ook ongelaagd,
+     nu nergens door print geraakt, maar bij een
      toekomstige print:-utility op een element met die klasse verliest die
      utility net zo. */
   .print-attendance-col {

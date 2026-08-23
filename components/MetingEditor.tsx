@@ -58,21 +58,21 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
       </div>
 
       {/* Step inputs */}
-      <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-50">
+      <div className="bg-surface rounded-2xl border border-[var(--border-soft)] divide-y divide-[var(--border-soft)]">
         {METING_CATEGORIES.map((cat) => {
           const stepKey = `${cat.key}_stap`
           const currentStep = steps[stepKey] ?? 1
           return (
             <div key={cat.key} className="p-4 flex items-center gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-gray-900 text-sm">{cat.label}</div>
-                <div className="text-xs text-gray-400 mt-0.5">max {cat.maxStap} stappen</div>
+                <div className="font-semibold text-ink text-sm">{cat.label}</div>
+                <div className="text-xs text-faint mt-0.5">max {cat.maxStap} stappen</div>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleStepChange(stepKey, String(Math.max(1, currentStep - 1)))}
-                  className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:scale-90 transition-all flex items-center justify-center text-gray-600 font-bold text-lg"
+                  className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
                 >
                   −
                 </button>
@@ -83,13 +83,13 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
                     max={cat.maxStap}
                     value={currentStep}
                     onChange={e => handleStepChange(stepKey, e.target.value)}
-                    className="w-full text-center px-2 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 font-semibold text-gray-900"
+                    className="w-full text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 font-semibold text-ink"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => handleStepChange(stepKey, String(Math.min(cat.maxStap, currentStep + 1)))}
-                  className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:scale-90 transition-all flex items-center justify-center text-gray-600 font-bold text-lg"
+                  className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
                 >
                   +
                 </button>
@@ -108,14 +108,14 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
       </div>
 
       {/* Notes */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-4">
-        <label className="block text-sm font-semibold text-gray-700 mb-2">{t.event.notes}</label>
+      <div className="bg-surface rounded-2xl border border-[var(--border-soft)] p-4">
+        <label className="block text-sm font-semibold text-muted mb-2">{t.event.notes}</label>
         <textarea
           rows={3}
           value={notes}
           onChange={e => setNotes(e.target.value)}
           placeholder={t.event.notesMeetingPlaceholder}
-          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 text-gray-900 placeholder-gray-400 resize-none text-sm"
+          className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 text-ink placeholder-faint resize-none text-sm"
         />
       </div>
 
@@ -124,9 +124,9 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
         type="button"
         onClick={handleSave}
         disabled={isPending}
-        className={`w-full py-3.5 rounded-xl font-semibold transition-all active:scale-95 text-sm ${
+        className={`w-full py-3.5 rounded-xl font-semibold transition active:scale-95 text-sm ${
           saved
-            ? 'bg-green-600 text-white'
+            ? 'bg-primary text-white'
             : 'bg-purple-600 hover:bg-purple-700 text-white'
         } ${isPending ? 'opacity-60' : ''}`}
       >

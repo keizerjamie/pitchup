@@ -66,7 +66,7 @@ export default function AppShell({
 
       {/* ── Mobile header ── */}
       <div
-        className="anchor-mobile-header md:hidden fixed top-0 left-0 right-0 z-40 bg-surface"
+        className="anchor-mobile-header md:hidden fixed top-0 left-0 right-0 z-[var(--z-chrome)] bg-surface"
         style={{
           paddingTop: 'env(safe-area-inset-top)',
           borderBottom: '1px solid var(--border-soft)',
@@ -108,7 +108,7 @@ export default function AppShell({
           nav (z-50) en de FAB (z-402); pointer-events uit zodat taps doorgaan. */}
       <div
         aria-hidden="true"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 pointer-events-none"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-[var(--z-chrome)] pointer-events-none"
         style={{
           height: 'calc(env(safe-area-inset-bottom, 0px) + 112px)',
           background: 'linear-gradient(to top, var(--bg) 0%, var(--bg) 64%, transparent 100%)',

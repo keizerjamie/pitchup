@@ -144,30 +144,30 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
   return (
     <div className="space-y-5">
       {/* Period selector */}
-      <div className="rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="bg-gray-50 px-4 pt-4 pb-3 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-800 text-sm">{t.players.periodTitle}</h3>
-          <p className="text-xs text-gray-400 mt-0.5">{t.players.periodHint}</p>
+      <div className="rounded-2xl border border-[var(--border-soft)] overflow-hidden">
+        <div className="bg-surface-sunken px-4 pt-4 pb-3 border-b border-[var(--border-soft)]">
+          <h3 className="font-semibold text-ink text-sm">{t.players.periodTitle}</h3>
+          <p className="text-xs text-faint mt-0.5">{t.players.periodHint}</p>
         </div>
-        <div className="px-4 py-4 space-y-3 bg-white">
+        <div className="px-4 py-4 space-y-3 bg-surface">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="text-xs font-medium text-gray-500 mb-1.5 block">{t.players.periodFrom}</label>
+              <label className="text-xs font-medium text-muted mb-1.5 block">{t.players.periodFrom}</label>
               <input
                 type="date"
                 value={fromDate}
                 onChange={(e) => { setFromDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
+                className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
               />
             </div>
             <div className="flex-1">
-              <label className="text-xs font-medium text-gray-500 mb-1.5 block">{t.players.periodTo}</label>
+              <label className="text-xs font-medium text-muted mb-1.5 block">{t.players.periodTo}</label>
               <input
                 type="date"
                 value={toDate}
                 min={fromDate}
                 onChange={(e) => { setToDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
-                className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
+                className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
               />
             </div>
           </div>
@@ -175,13 +175,13 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
           <button
             onClick={handlePeriodAbsence}
             disabled={!fromDate || !toDate || fromDate > toDate || isPeriodPending}
-            className="w-full py-2.5 rounded-xl bg-red-500 text-white font-semibold text-sm disabled:opacity-40 active:scale-[0.98] transition-all hover:bg-red-600"
+            className="w-full py-2.5 rounded-xl bg-danger text-white font-semibold text-sm disabled:opacity-40 active:scale-[0.98] transition hover:bg-danger/90"
           >
             {isPeriodPending ? '…' : t.players.periodButton}
           </button>
 
           {periodResult !== null && !isPeriodPending && (
-            <p className={`text-sm font-medium text-center ${periodResult === 0 ? 'text-gray-400' : 'text-green-600'}`}>
+            <p className={`text-sm font-medium text-center ${periodResult === 0 ? 'text-faint' : 'text-green-600'}`}>
               {periodResult === 0
                 ? t.players.periodNone
                 : `${periodResult} ${t.players.periodSuccess}`}
@@ -195,28 +195,28 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
       </div>
 
       {/* Period list */}
-      <div className="rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="bg-gray-50 px-4 pt-4 pb-3 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-800 text-sm">{t.players.periodListTitle}</h3>
+      <div className="rounded-2xl border border-[var(--border-soft)] overflow-hidden">
+        <div className="bg-surface-sunken px-4 pt-4 pb-3 border-b border-[var(--border-soft)]">
+          <h3 className="font-semibold text-ink text-sm">{t.players.periodListTitle}</h3>
         </div>
-        <div className="px-4 py-4 bg-white space-y-3">
+        <div className="px-4 py-4 bg-surface space-y-3">
           {revokeError && !isRevokePending && (
             <div className="bg-red-100 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{revokeError}</div>
           )}
           {periods.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center">{t.players.periodListEmpty}</p>
+            <p className="text-sm text-faint text-center">{t.players.periodListEmpty}</p>
           ) : (
             <div className="space-y-2">
               {periods.map((period) => {
                 const rangeLabel = `${formatDate(period.from_date, t.browserLocale)} – ${formatDate(period.to_date, t.browserLocale)}`
                 return (
                   <div key={period.id} className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-gray-700">{rangeLabel}</span>
+                    <span className="text-sm text-muted">{rangeLabel}</span>
                     <button
                       onClick={() => handleRevoke(period.id)}
                       disabled={isRevokePending}
                       aria-label={t.players.periodRevokeAria.replace('{range}', rangeLabel)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-red-100 hover:text-red-700 transition-all disabled:opacity-40"
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-muted bg-surface-sunken hover:bg-red-100 hover:text-red-700 transition disabled:opacity-40"
                     >
                       {t.players.periodRevoke}
                     </button>
@@ -238,7 +238,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
       {/* Per-event list */}
       {weeks.map((week) => (
         <div key={week.label}>
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          <p className="text-xs font-semibold text-faint uppercase tracking-wide mb-2">
             {t.players.weekOf} {week.label}
           </p>
           <div className="space-y-2">
@@ -249,7 +249,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
 
               return (
                 <div key={event.id}
-                  className={`bg-white rounded-xl border-2 p-4 flex items-center gap-4 transition-all ${isAbsent ? 'border-red-200 bg-red-50' : 'border-gray-100'}`}>
+                  className={`bg-surface rounded-xl border-2 p-4 flex items-center gap-4 transition ${isAbsent ? 'border-red-200 bg-red-50' : 'border-[var(--border-soft)]'}`}>
                   <div className={`flex-shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center ${isMatch ? 'bg-blue-50' : 'bg-brand-light'}`}>
                     <span className={`text-xs font-medium leading-none ${isMatch ? 'text-blue-500' : 'text-brand'}`}>
                       {new Date(event.date + 'T00:00:00').toLocaleDateString(t.browserLocale, { month: 'short' })}
@@ -260,10 +260,10 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-gray-900 text-sm">
+                    <div className="font-semibold text-ink text-sm">
                       {isMatch && event.opponent ? `vs ${event.opponent}` : t.calendar.trainingLabel}
                     </div>
-                    <div className="text-xs text-gray-400 flex items-center gap-2 mt-0.5">
+                    <div className="text-xs text-faint flex items-center gap-2 mt-0.5">
                       {event.time && <span>{formatTime(event.time)}</span>}
                       {isMatch && event.match_type && (
                         <span>{t.event.matchTypes[event.match_type as keyof typeof t.event.matchTypes]}</span>
@@ -275,20 +275,20 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                     <button
                       onClick={() => !isPresent && setStatus(event.id, 'present')}
                       disabled={isPeriodPending || isRevokePending}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 ${
                         isPresent
-                          ? 'bg-green-500 text-white'
-                          : 'bg-gray-100 text-gray-400 hover:bg-green-100 hover:text-green-700'
+                          ? 'bg-primary text-white'
+                          : 'bg-surface-sunken text-faint hover:bg-green-100 hover:text-green-700'
                       }`}>
                       {t.players.present}
                     </button>
                     <button
                       onClick={() => !isAbsent && setStatus(event.id, 'absent')}
                       disabled={isPeriodPending || isRevokePending}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-40 ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 ${
                         isAbsent
-                          ? 'bg-red-500 text-white'
-                          : 'bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-700'
+                          ? 'bg-danger text-white'
+                          : 'bg-surface-sunken text-faint hover:bg-red-100 hover:text-red-700'
                       }`}>
                       {t.players.absent}
                     </button>
@@ -301,7 +301,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
       ))}
 
       {events.length === 0 && (
-        <div className="text-center py-8 text-gray-400 text-sm">
+        <div className="text-center py-8 text-faint text-sm">
           {t.players.noUpcomingEvents}
         </div>
       )}

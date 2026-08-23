@@ -1663,3 +1663,86 @@ bijschrift nu "fitte vaste spelers" — dat getal daalt zodra er gasten zijn.
 
 **Testdetail om te onthouden:** jsdom normaliseert een inline hex-kleur naar `rgb(...)`.
 Assert dus op `rgb(22, 163, 74)` en niet op `#16a34a`.
+
+## Toegankelijkheids- en dark-mode-sanering (2026-08-23)
+
+Brede visuele sanering over 41 bestanden, los van een feature. Aanleiding: een audit van
+alle 21 routes op visuele bugs.
+
+### De kernregel die hieruit volgt
+
+**Elke kleur is óf een achtergrond onder witte tekst, óf tekst op een oppervlak — nooit
+allebei.** Die twee eisen trekken tegengesteld: een achtergrond moet donker genoeg zijn
+voor wit erop, tekst moet licht genoeg zijn voor de donkere `--surface`. Vier tokens
+vervulden allebei de rollen en faalden daardoor in één van de twee. Vandaar de splitsing:
+
+| Rol: achtergrond + witte tekst | Rol: tekst/icoon op oppervlak |
+|---|---|
+| `--primary`, `--warning`, `--danger`, `--brand-btn`, `--event-*`, `--color-accent-strong` | `--ink`, `--muted`, `--faint`, `--brand-accent`, `--warning-text`, `--primary-strong`, `--chip-*-fg` |
+
+`--color-accent` (#14b8a6) is bewust NIET gewijzigd: die staat alleen nog als tekst/rand
+op de altijd-donkere auth-gradient, waar hij 4.84–5.87:1 haalt. Op een licht oppervlak
+haalt hij 2.49:1 — gebruik daar `--brand-accent`.
+
+### Valkuil bij het narekenen (hier eerst fout gegaan)
+
+Voor **donkere tekst** is de **donkerste** achtergrond het slechtste geval — dus `--bg`
+(#e5ede9), niet `--surface` (#ffffff). `--faint` was eerst op wit afgesteld (4.51) en
+zakte op `--bg` naar 3.79. In het dark-blok is het omgekeerd: daar is de **lichtste**
+achtergrond (`--surface`, #0d3d38) het slechtste geval. De volledige eis staat in het
+commentaar boven `:root` in `app/globals.css`.
+
+### Gevonden bugs die niemand had gemeld
+
+- **`--primary-strong` ontbrak in het dark-blok.** Bleef op de lichte #14655c staan →
+  1.75:1 op `--surface`; de instellingen-iconen waren in dark mode praktisch onzichtbaar.
+  Sindsdien #7fd8cd (7.24:1). **Let op:** een token dat je aan het dark-blok toevoegt,
+  moet je ook aan het `@media print`-blok toevoegen, anders drukt dark mode die
+  dark-waarde op wit papier.
+- **Sticky-balk onder de mobiele header.** `app/players/[id]/absence` had `sticky top-16`
+  (64px) terwijl de header `h-14` + `env(safe-area-inset-top)` is. Op een toestel met
+  notch schoof de balk eronder. Nu `top-[calc(env(safe-area-inset-top)_+_3.5rem)]`.
+- **`transition-all` animeert óók layout-properties.** Bij de omzetting naar `transition`
+  (62×) verloor de voortgangsbalk in `app/periodisering` zijn width-animatie, want
+  Tailwinds `transition` dekt `width` niet. Die staat nu expliciet op
+  `transition-[width]`. Controleer dit bij elke `transition` op een element met een
+  dynamische `width`/`height`.
+
+### Verificatiemethode die werkte (herbruikbaar)
+
+Een contrast-audit in de draaiende browser die elk tekstelement langsloopt, de effectieve
+achtergrond opzoekt door de DOM omhoog te lopen tot een ondoorzichtige laag, en de ratio
+tegen de WCAG-eis legt (4.5:1, of 3:1 bij ≥24px of ≥18.66px bold). Die ving de
+`--faint`-fout die uit statisch narekenen niet kwam. Eindstand: 0 fouten in beide
+thema's. **Schakel bij zo'n audit het thema met een reflow ertussen** — direct na
+`setAttribute('data-theme', …)` meten geeft nog de oude waarden en dus vals alarm.
+
+### Overige wijzigingen
+
+- **Z-index-ladder** `--z-chrome/nav/scrim/sheet/fab/modal` in `globals.css`; verving acht
+  losse getallen (40…500). Elke bestaande verhouding is bewaard, inclusief FAB boven zijn
+  eigen scrim (hij is zijn eigen sluitknop). Lokale z-index binnen een component
+  (LineupBuilder, TeamIndelingEditor) is bewust géén onderdeel van de ladder.
+- **`prefers-reduced-motion`** dekte alleen view-transitions; nu app-breed. Bewust
+  `0.01ms` en niet `none`: animaties met `both` fill-mode beginnen op opacity 0 en zouden
+  bij `none` onzichtbaar blijven.
+- `active:scale-95` → `active:scale-[0.98]` op 19 `w-full`-knoppen; 5% krimp op een knop
+  van ~340px is te veel.
+
+### Bewust NIET gedaan
+
+**~60 getinte statuspanelen** (`bg-red-50 border-red-200 text-red-700` en de amber/green/
+orange-varianten) in 26 bestanden. Die halen AA gewoon (±5.4:1, licht vlak met donkere
+tekst) en blijven leesbaar in dark mode — ze ogen alleen als lichte vlakken op een donkere
+pagina. Consistentiekwestie, geen bug. Ook ongemoeid: `MatchSquadPrintList`/
+`MatchFormCards` (print, wit papier is correct), de speler-pionnen in `LineupBuilder`/
+`FormationField` (wit op groen veld), en `POSITION_COLORS` in `lib/types.ts`.
+
+### Supabase Auth-storing tijdens deze sessie (geen codeprobleem)
+
+`/rest/v1/*` en de rate-limit-RPC's antwoordden in ~300ms, maar **álles onder
+`/auth/v1/*`** — inclusief een kale health-check — gaf geen antwoord binnen 15s. Omdat
+`proxy.ts` bij elk verzoek `supabase.auth.getUser()` aanroept, duurde elke pageload
+30s–3min, ook op Vercel. Herkenningspunt: een inlog die "blijft renderen" plus
+`POST /login 200 in 3.5min` in de dev-log. Ligt bij Supabase, niet in de codebase —
+project herstarten en status.supabase.com checken.

@@ -119,7 +119,7 @@ export default function TeamLogoSection({ initialLogoUrl }: Props) {
           type="button"
           onClick={handleUpload}
           disabled={isPending || !selectedFile}
-          className="py-2.5 px-4 rounded-xl font-bold text-white text-[13px] active:scale-95 transition-all disabled:opacity-60"
+          className="py-2.5 px-4 rounded-xl font-bold text-white text-[13px] active:scale-95 transition disabled:opacity-60"
           style={{ background: 'var(--primary)' }}
         >
           {isPending ? t.settings.logoUploading : logoUrl ? t.settings.logoReplace : t.settings.logoUpload}
@@ -129,7 +129,7 @@ export default function TeamLogoSection({ initialLogoUrl }: Props) {
             type="button"
             onClick={handleDelete}
             disabled={isPending}
-            className="py-2.5 px-4 rounded-xl font-semibold text-[13px] active:scale-95 transition-all disabled:opacity-60"
+            className="py-2.5 px-4 rounded-xl font-semibold text-[13px] active:scale-95 transition disabled:opacity-60"
             style={{ color: '#ef4444', border: '1px solid color-mix(in srgb, #ef4444 30%, transparent)', background: 'color-mix(in srgb, #ef4444 6%, transparent)' }}
           >
             {t.settings.logoRemove}

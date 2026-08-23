@@ -29,19 +29,19 @@ export default function LoginPage() {
           <div>
             <label className="block text-white/70 text-sm font-medium mb-1.5">{t.auth.email}</label>
             <input name="email" type="email" required autoComplete="email"
-              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.emailPlaceholder} />
           </div>
 
           <div>
             <label className="block text-white/70 text-sm font-medium mb-1.5">{t.auth.password}</label>
             <input name="password" type="password" required autoComplete="current-password"
-              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/30 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.passwordPlaceholder} />
           </div>
 
           <button type="submit" disabled={pending}
-            className="w-full py-3 rounded-xl bg-accent text-white font-semibold hover:bg-accent/90 active:scale-95 transition-all disabled:opacity-60 mt-2">
+            className="w-full py-3 rounded-xl bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition disabled:opacity-60 mt-2">
             {pending ? t.auth.loggingIn : t.auth.login}
           </button>
 

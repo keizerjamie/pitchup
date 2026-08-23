@@ -104,7 +104,7 @@ export default function GlobalFab() {
       <div
         onClick={closeMenu}
         style={{
-          position: 'fixed', inset: 0, zIndex: 399,
+          position: 'fixed', inset: 0, zIndex: 'var(--z-scrim)',
           background: 'rgba(0,0,0,0.30)',
           backdropFilter: visible ? 'blur(16px)' : 'blur(0px)',
           WebkitBackdropFilter: visible ? 'blur(16px)' : 'blur(0px)',
@@ -121,7 +121,7 @@ export default function GlobalFab() {
           position: 'fixed',
           bottom: 'calc(env(safe-area-inset-bottom, 0px) + 156px)',
           right: 16,
-          zIndex: 401,
+          zIndex: 'var(--z-sheet)',
           minWidth: 238,
           background: 'rgba(248,248,252,0.78)',
           backdropFilter: 'blur(40px) saturate(180%) brightness(1.06)',
@@ -209,7 +209,7 @@ export default function GlobalFab() {
         style={{
           right: 16,
           bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)',
-          zIndex: 402,
+          zIndex: 'var(--z-fab)',
           background: 'linear-gradient(160deg, #14655c 0%, #0d3d38 100%)',
           boxShadow: '0 4px 16px rgba(13,61,56,0.35), 0 1px 0 rgba(255,255,255,0.18) inset',
           color: 'white',

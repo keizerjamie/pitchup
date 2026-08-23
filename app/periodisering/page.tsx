@@ -118,7 +118,7 @@ export default async function PeriodizationPage() {
                         <span className="text-xs font-semibold text-faint">{t.periodization.step} {step ?? '–'}/{cat.maxStap}</span>
                       </div>
                       <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--track)' }}>
-                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: BAR_COLORS[cat.key] ?? '#0d3d38' }} />
+                        <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${pct}%`, background: BAR_COLORS[cat.key] ?? '#0d3d38' }} />
                       </div>
                       <p className="text-xs mt-1 text-faint">
                         {last

@@ -117,14 +117,14 @@ export default async function TrainingPlanPage({ params }: Props) {
     >
 
       <div className="flex items-center gap-3 print:border-b-2 print:pb-[1mm] print-club-border">
-        <BackButton fallback={`/events/${id}`} className="print:hidden text-gray-400 hover:text-gray-600 flex-shrink-0">
+        <BackButton fallback={`/events/${id}`} className="print:hidden text-faint hover:text-ink flex-shrink-0">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
         <div className="min-w-0 flex-1 print:flex print:items-baseline print:gap-2">
-          <h1 className="text-xl font-bold text-gray-900 print:text-sm print-club-primary">{t.event.trainingPlan}</h1>
-          <p className="text-sm text-gray-500 print:text-xs print-club-secondary">{formatDateLong(event.date, t.browserLocale)}</p>
+          <h1 className="text-xl font-bold text-ink print:text-sm print-club-primary">{t.event.trainingPlan}</h1>
+          <p className="text-sm text-muted print:text-xs print-club-secondary">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
         <PrintButton />
       </div>

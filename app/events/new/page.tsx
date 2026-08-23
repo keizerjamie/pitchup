@@ -41,12 +41,12 @@ function NewEventForm() {
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
       <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/events" className="text-gray-400 hover:text-gray-600">
+        <BackButton fallback="/events" className="text-faint hover:text-ink">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
-        <h1 className="text-2xl font-bold text-gray-900">{t.event.newTitle}</h1>
+        <h1 className="text-2xl font-bold text-ink">{t.event.newTitle}</h1>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
@@ -55,56 +55,56 @@ function NewEventForm() {
             {error}
           </div>
         )}
-        <div className="bg-white rounded-2xl p-2 border border-gray-100 flex gap-1.5">
+        <div className="bg-surface rounded-2xl p-2 border border-[var(--border-soft)] flex gap-1.5">
           <button type="button" onClick={() => setType('training')}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${type === 'training' ? 'bg-green-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition ${type === 'training' ? 'bg-event-training text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
             {t.event.training}
           </button>
           <button type="button" onClick={() => setType('match')}
-            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all ${type === 'match' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition ${type === 'match' ? 'bg-event-match text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
             {t.event.match}
           </button>
         </div>
 
         <input type="hidden" name="type" value={type} />
 
-        <div className="bg-white rounded-2xl p-6 border border-gray-100 space-y-5">
+        <div className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.event.date}</label>
+              <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.date}</label>
               <input name="date" type="date" required defaultValue={todayLocal()}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900" />
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.event.time}</label>
+              <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.time}</label>
               <input name="time" type="time"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900" />
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink" />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-              {t.event.location} <span className="text-gray-400 font-normal">({t.event.optional})</span>
+            <label className="block text-sm font-semibold text-muted mb-1.5">
+              {t.event.location} <span className="text-faint font-normal">({t.event.optional})</span>
             </label>
             <input name="location" type="text" placeholder="Sportpark de Meent"
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400" />
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder-faint" />
           </div>
 
           {type === 'match' && (
             <>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.event.opponent}</label>
+                <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.opponent}</label>
                 <input name="opponent" type="text" required placeholder="FC Voorbeeld"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-gray-900 placeholder-gray-400" />
+                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-event-match focus:ring-2 focus:ring-event-match/30 text-ink placeholder-faint" />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">{t.event.matchType}</label>
+                <label className="block text-sm font-semibold text-muted mb-2">{t.event.matchType}</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['friendly', 'league', 'cup'] as const).map((val) => (
                     <label key={val} className="cursor-pointer">
                       <input type="radio" name="match_type" value={val} className="sr-only peer" defaultChecked={val === 'league'} />
-                      <div className="peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600 border-2 border-gray-200 rounded-xl p-2 text-center text-xs font-semibold text-gray-600 hover:border-blue-300 transition-colors">
+                      <div className="peer-checked:bg-event-match peer-checked:text-white peer-checked:border-event-match border-2 border-[var(--border-soft)] rounded-xl p-2 text-center text-xs font-semibold text-muted hover:border-event-match/50 transition-colors">
                         {t.event.matchTypes[val]}
                       </div>
                     </label>
@@ -113,12 +113,12 @@ function NewEventForm() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">{t.event.homeAway}</label>
+                <label className="block text-sm font-semibold text-muted mb-2">{t.event.homeAway}</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['home', 'away'] as const).map((val) => (
                     <label key={val} className="cursor-pointer">
                       <input type="radio" name="home_away" value={val} className="sr-only peer" defaultChecked={val === 'home'} />
-                      <div className="peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600 border-2 border-gray-200 rounded-xl p-3 text-center text-sm font-semibold text-gray-600 hover:border-blue-300 transition-colors">
+                      <div className="peer-checked:bg-event-match peer-checked:text-white peer-checked:border-event-match border-2 border-[var(--border-soft)] rounded-xl p-3 text-center text-sm font-semibold text-muted hover:border-event-match/50 transition-colors">
                         {val === 'home' ? t.event.home : t.event.away}
                       </div>
                     </label>
@@ -127,28 +127,28 @@ function NewEventForm() {
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-                  {t.event.gatherTime} <span className="text-gray-400 font-normal">({t.event.optional})</span>
+                <label className="block text-sm font-semibold text-muted mb-1.5">
+                  {t.event.gatherTime} <span className="text-faint font-normal">({t.event.optional})</span>
                 </label>
                 <input name="gather_time" type="time"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-gray-900" />
+                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-event-match focus:ring-2 focus:ring-event-match/30 text-ink" />
               </div>
             </>
           )}
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-              {t.event.notes} <span className="text-gray-400 font-normal">({t.event.optional})</span>
+            <label className="block text-sm font-semibold text-muted mb-1.5">
+              {t.event.notes} <span className="text-faint font-normal">({t.event.optional})</span>
             </label>
             <textarea name="notes" rows={3}
               placeholder={notesPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400 resize-none" />
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder-faint resize-none" />
           </div>
         </div>
 
         <button type="submit" disabled={isLoading}
-          className={`w-full py-3 rounded-xl font-semibold text-white transition-all active:scale-95 ${
-            type === 'match' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'
+          className={`w-full py-3 rounded-xl font-semibold text-white transition active:scale-95 ${
+            type === 'match' ? 'bg-event-match hover:bg-event-match/90' : 'bg-event-training hover:bg-event-training/90'
           } ${isLoading ? 'opacity-60' : ''}`}>
           {submitLabel}
         </button>
@@ -159,7 +159,7 @@ function NewEventForm() {
 
 export default function NewEventPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-gray-400">...</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-faint">...</div>}>
       <NewEventForm />
     </Suspense>
   )

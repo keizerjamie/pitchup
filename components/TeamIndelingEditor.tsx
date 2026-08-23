@@ -305,7 +305,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
             type="button"
             onClick={handleAutoAssign}
             disabled={isPending}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white active:scale-95 transition disabled:opacity-50 disabled:active:scale-100"
             style={{ background: 'var(--color-accent)' }}
           >
             {t.teamIndeling.autoAssign}
@@ -357,7 +357,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                   <button
                     type="button"
                     onClick={() => assignToTeam(selectedPlayerId, i)}
-                    className="text-[11px] font-semibold text-orange-600 hover:text-orange-700 flex-shrink-0"
+                    className="text-[11px] font-semibold text-warning-text hover:text-orange-700 flex-shrink-0"
                   >
                     {t.teamIndeling.moveTo.replace('{team}', teamLabel)}
                   </button>
@@ -461,7 +461,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
                     selectedPlayerId === p.id
                       ? 'bg-orange-100 text-orange-700 border border-orange-300'
-                      : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-orange-300'
+                      : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
                   } ${draggingThis ? 'ring-2 ring-orange-400 shadow-lg' : ''}`}
                 >
                   <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>

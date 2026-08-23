@@ -130,7 +130,7 @@ function ColorRow({
           type="button"
           onClick={handleSave}
           disabled={isPending}
-          className="py-2 px-3.5 rounded-xl font-bold text-white text-[12.5px] active:scale-95 transition-all disabled:opacity-60"
+          className="py-2 px-3.5 rounded-xl font-bold text-white text-[12.5px] active:scale-95 transition disabled:opacity-60"
           style={{ background: 'var(--primary)' }}
         >
           {isPending ? t.settings.clubColorSaving : t.settings.clubColorSave}
@@ -140,7 +140,7 @@ function ColorRow({
             type="button"
             onClick={handleReset}
             disabled={isPending}
-            className="py-2 px-3.5 rounded-xl font-semibold text-[12.5px] active:scale-95 transition-all disabled:opacity-60"
+            className="py-2 px-3.5 rounded-xl font-semibold text-[12.5px] active:scale-95 transition disabled:opacity-60"
             style={{ color: 'var(--muted)', border: '1px solid var(--border-soft)', background: 'var(--surface-sunken)' }}
           >
             {t.settings.clubColorReset}

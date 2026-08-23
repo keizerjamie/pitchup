@@ -11,8 +11,8 @@ interface Props {
 }
 
 function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) {
-  const chip = tone === 'present' ? 'bg-teal-50 text-teal-800' : 'bg-gray-100 text-gray-500'
-  const badge = tone === 'present' ? 'bg-teal-600 text-white' : 'bg-gray-200 text-gray-500'
+  const chip = tone === 'present' ? 'bg-primary-strong/10 text-primary-strong' : 'bg-surface-sunken text-muted'
+  const badge = tone === 'present' ? 'bg-primary text-white' : 'bg-[var(--track)] text-muted'
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-lg pl-1 pr-2.5 py-1 text-sm font-medium ${chip}`}>
       <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${badge}`}>
@@ -43,23 +43,23 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
     // (zie app/events/[id]/training-plan/page.tsx en app/print-preview).
     <div className={`print:break-inside-avoid glass-card rounded-2xl overflow-hidden print:rounded-none ${className}`}>
       <div className="print:hidden">
-        <div className="px-5 py-4 border-b border-white/50 flex items-center justify-between gap-2">
-          <h2 className="font-semibold text-gray-800">{t.event.attendance}</h2>
-          <span className="text-sm font-semibold text-teal-700 flex-shrink-0">
+        <div className="px-5 py-4 border-b border-[var(--border-soft)] flex items-center justify-between gap-2">
+          <h2 className="font-semibold text-ink">{t.event.attendance}</h2>
+          <span className="text-sm font-semibold text-primary-strong flex-shrink-0">
             {present.length}/{present.length + absent.length}
           </span>
         </div>
 
         <div className="px-5 py-4 space-y-3.5">
           {present.length === 0 ? (
-            <p className="text-sm text-gray-400">{t.event.unknownStat}</p>
+            <p className="text-sm text-faint">{t.event.unknownStat}</p>
           ) : (
             POSITION_GROUPS.map((group) => {
               const gp = present.filter((p) => group.positions.includes(p.position))
               if (gp.length === 0) return null
               return (
                 <div key={group.label}>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                  <p className="text-xs font-semibold text-faint uppercase tracking-wide mb-1.5">
                     {t.players.groups[group.label] ?? group.label}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
@@ -71,8 +71,8 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
           )}
 
           {absent.length > 0 && (
-            <div className="pt-3 border-t border-gray-100">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+            <div className="pt-3 border-t border-[var(--border-soft)]">
+              <p className="text-xs font-semibold text-faint uppercase tracking-wide mb-1.5">
                 {t.event.absentStat} ({absent.length})
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -85,7 +85,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
         <Link
           href={`/events/${eventId}`}
           transitionTypes={['nav-back']}
-          className="flex items-center justify-between px-5 py-3 border-t border-gray-100 text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
+          className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-soft)] text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
         >
           {t.event.editAttendance}
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

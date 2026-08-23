@@ -81,12 +81,12 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
         <div>
           <label className="block text-sm font-semibold text-muted mb-1.5">{t.schedule.seasonStart}</label>
           <input name="season_start" type="date" value={seasonStart} onChange={(e) => setSeasonStart(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink text-sm" />
         </div>
         <div>
           <label className="block text-sm font-semibold text-muted mb-1.5">{t.schedule.seasonEnd}</label>
           <input name="season_end" type="date" value={seasonEnd} onChange={(e) => setSeasonEnd(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink text-sm" />
         </div>
       </div>
 
@@ -95,7 +95,7 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
         <div className="flex gap-2">
           {DAYS.map((day) => (
             <button key={day.value} type="button" onClick={() => toggleDay(day.value)}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${selectedDays.includes(day.value) ? 'bg-brand text-white border-brand' : 'bg-surface text-faint border-[var(--border-soft)] hover:border-accent'}`}>
+              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition ${selectedDays.includes(day.value) ? 'bg-brand text-white border-brand' : 'bg-surface text-faint border-[var(--border-soft)] hover:border-brand-accent'}`}>
               {day.label}
             </button>
           ))}
@@ -109,14 +109,14 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
             {t.schedule.time} <span className="text-faint font-normal">({t.schedule.optional})</span>
           </label>
           <input name="training_time" type="time" defaultValue={initialTime}
-            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink text-sm" />
         </div>
         <div>
           <label className="block text-sm font-semibold text-muted mb-1.5">
             {t.schedule.location} <span className="text-faint font-normal">({t.schedule.optional})</span>
           </label>
           <input name="training_location" type="text" defaultValue={initialLocation} placeholder="Sportpark de Meent"
-            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder:text-faint text-sm" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink placeholder:text-faint text-sm" />
         </div>
       </div>
 
@@ -132,18 +132,18 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
       )}
 
       <button type="submit" disabled={isSaving}
-        className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-95 transition-all disabled:opacity-60">
+        className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-[0.98] transition disabled:opacity-60">
         {saved ? t.schedule.saved : isSaving ? t.schedule.saving : t.schedule.saveSchedule}
       </button>
 
       {trainingCount > 0 && (
         <div className="space-y-2">
           <button type="button" onClick={handleGenerate} disabled={isGenerating}
-            className="w-full py-3 rounded-xl font-semibold border-2 border-brand text-brand hover:bg-brand-light active:scale-95 transition-all disabled:opacity-60">
+            className="w-full py-3 rounded-xl font-semibold border-2 border-brand text-brand hover:bg-brand-light active:scale-[0.98] transition disabled:opacity-60">
             {isGenerating ? t.schedule.busy : `${t.schedule.generate} ${trainingCount} ${t.schedule.trainingsWord}`}
           </button>
           <button type="button" onClick={handleRegenerate} disabled={isGenerating}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 active:scale-95 transition-all disabled:opacity-60">
+            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 active:scale-[0.98] transition disabled:opacity-60">
             {isGenerating ? t.schedule.busy : t.schedule.regenerate}
           </button>
         </div>

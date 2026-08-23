@@ -158,7 +158,7 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className="block text-[13px] font-bold text-muted">{t.lineup.formation}</label>
-          <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition-all" style={{ background: 'var(--color-accent)' }}>
+          <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition" style={{ background: 'var(--color-accent)' }}>
             <span className="ms text-[17px]">bolt</span>
             {t.lineup.autoLineup}
           </button>
@@ -231,11 +231,11 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
               <button
                 key={i}
                 onClick={() => setSelectedSlot(isSelected ? null : i)}
-                className={`absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 transition-all duration-150 ${isSelected ? 'scale-110' : ''}`}
+                className={`absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 transition duration-150 ${isSelected ? 'scale-110' : ''}`}
                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, zIndex: 10 }}
               >
                 <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-150 ${
+                  className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition duration-150 ${
                     isSelected
                       ? 'bg-amber-400 text-amber-950 shadow-[0_0_0_3px_rgba(251,191,36,0.5),0_2px_8px_rgba(0,0,0,0.4)]'
                       : hasPlayer
@@ -421,7 +421,7 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
       )}
 
       <button onClick={handleSave} disabled={isPending}
-        className="w-full py-3 rounded-xl font-bold text-white transition-all active:scale-95"
+        className="w-full py-3 rounded-xl font-bold text-white transition active:scale-[0.98]"
         style={{ background: saved ? '#22c55e' : isPending ? 'var(--faint)' : 'var(--primary)' }}>
         {saved ? t.lineup.saved : isPending ? t.lineup.saving : t.lineup.save}
       </button>

@@ -17,10 +17,10 @@ export default function LanguageSwitcher() {
         <form key={locale} action={setLocale.bind(null, locale) as unknown as (formData: FormData) => void}>
           <button
             type="submit"
-            className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-sm font-semibold transition ${
               locale === current
-                ? 'bg-accent/10 border-accent text-accent'
-                : 'bg-surface border-[var(--border-soft)] text-muted hover:border-accent/50'
+                ? 'bg-brand-accent/10 border-brand-accent text-brand-accent'
+                : 'bg-surface border-[var(--border-soft)] text-muted hover:border-brand-accent/50'
             }`}
           >
             <span>{FLAGS[locale]}</span>

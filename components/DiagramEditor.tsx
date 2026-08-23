@@ -210,14 +210,14 @@ export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone,
   }
 
   function toolButtonClass(active: boolean) {
-    return `px-3 py-2 rounded-xl text-xs font-semibold border-2 transition-all whitespace-nowrap ${
-      active ? 'bg-orange-500 text-white border-orange-500' : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+    return `px-3 py-2 rounded-xl text-xs font-semibold border-2 transition whitespace-nowrap ${
+      active ? 'bg-warning text-white border-orange-500' : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
     }`
   }
 
   function segButtonClass(active: boolean) {
-    return `px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all whitespace-nowrap ${
-      active ? 'bg-orange-500 text-white border-orange-500' : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+    return `px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition whitespace-nowrap ${
+      active ? 'bg-warning text-white border-orange-500' : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
     }`
   }
 
@@ -299,7 +299,7 @@ export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone,
             type="button"
             onClick={finishLine}
             disabled={draftPunten.length < 2}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-warning hover:bg-warning/90 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {t.oefeningen.lijnKlaar}
           </button>
@@ -395,13 +395,13 @@ export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone,
       {/* Opnieuw genereren — inline bevestiging (patroon OefeningLibrary) */}
       <div>
         {!regenerateConfirm ? (
-          <button type="button" onClick={() => setRegenerateConfirm(true)} className="text-xs font-semibold text-orange-600 hover:text-orange-700 transition-colors">
+          <button type="button" onClick={() => setRegenerateConfirm(true)} className="text-xs font-semibold text-warning-text hover:text-orange-700 transition-colors">
             {t.oefeningen.regenerate}
           </button>
         ) : (
-          <div className="flex items-center gap-2 flex-wrap rounded-xl border border-orange-200 bg-orange-50 p-2.5">
+          <div className="flex items-center gap-2 flex-wrap rounded-xl border border-warning/30 bg-orange-50 p-2.5">
             <span className="text-xs text-orange-800">{t.oefeningen.regenerateConfirm}</span>
-            <button type="button" onClick={handleRegenerate} className="text-xs font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-lg px-3 py-1.5 transition-colors">
+            <button type="button" onClick={handleRegenerate} className="text-xs font-semibold text-white bg-warning hover:bg-warning/90 rounded-lg px-3 py-1.5 transition-colors">
               {t.oefeningen.regenerateConfirmButton}
             </button>
             <button type="button" onClick={() => setRegenerateConfirm(false)} className="text-xs font-semibold text-muted hover:text-ink rounded-lg px-3 py-1.5 transition-colors">

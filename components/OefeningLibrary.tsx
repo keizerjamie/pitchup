@@ -78,12 +78,12 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t.oefeningen.searchPlaceholder}
-            className="px-3 py-2 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink placeholder:text-faint w-[150px] sm:w-[220px] min-w-0"
+            className="px-3 py-2 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink placeholder:text-faint w-[150px] sm:w-[220px] min-w-0"
           />
           <button
             type="button"
             onClick={() => setEditing('new')}
-            className="text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-xl px-4 py-2 transition-colors active:scale-95 flex-shrink-0"
+            className="text-sm font-semibold text-white bg-warning hover:bg-warning/90 rounded-xl px-4 py-2 transition-colors active:scale-95 flex-shrink-0"
           >
             {t.oefeningen.addNew}
           </button>
@@ -189,7 +189,7 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                       type="button"
                       onClick={() => handleDelete(o.id)}
                       disabled={isPending}
-                      className="text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+                      className="text-xs font-semibold text-white bg-red-600 hover:bg-danger rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
                     >
                       {t.oefeningen.deleteButton}
                     </button>

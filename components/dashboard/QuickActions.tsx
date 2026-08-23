@@ -23,7 +23,7 @@ export default function QuickActions({ t }: { t: Dict }) {
           <Link
             key={a.href}
             href={a.href}
-            className="flex flex-col items-center gap-2 py-3 px-1 rounded-[13px] bg-surface-sunken transition-colors hover:bg-white"
+            className="flex flex-col items-center gap-2 py-3 px-1 rounded-[13px] bg-surface-sunken transition-colors hover:bg-surface"
             style={{ border: '1px solid var(--border-soft)' }}
           >
             <span className="ms text-[23px] text-brand-accent">{a.icon}</span>

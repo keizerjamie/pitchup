@@ -91,7 +91,7 @@ export default function NulmetingManager({ history }: Props) {
       <button
         type="button"
         onClick={openNew}
-        className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-95 transition-all"
+        className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-[0.98] transition"
       >
         {hasHistory ? t.periodization.newNulmeting : t.periodization.startCta}
       </button>
@@ -140,7 +140,7 @@ export default function NulmetingManager({ history }: Props) {
 
       {/* Editor sheet */}
       {sheetOpen && (
-        <div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSheetOpen(false)} />
           <div className="relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
             <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl">
@@ -172,7 +172,7 @@ export default function NulmetingManager({ history }: Props) {
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink"
+                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink"
                 />
               </div>
 
@@ -190,7 +190,7 @@ export default function NulmetingManager({ history }: Props) {
                         <button
                           type="button"
                           onClick={() => changeStep(stepKey, -1, cat.maxStap)}
-                          className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-90 transition-all flex items-center justify-center text-muted font-bold text-lg"
+                          className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
                         >
                           −
                         </button>
@@ -200,12 +200,12 @@ export default function NulmetingManager({ history }: Props) {
                           max={cat.maxStap}
                           value={current}
                           onChange={(e) => setStepValue(stepKey, e.target.value, cat.maxStap)}
-                          className="w-14 text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light font-semibold text-ink"
+                          className="w-14 text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 font-semibold text-ink"
                         />
                         <button
                           type="button"
                           onClick={() => changeStep(stepKey, 1, cat.maxStap)}
-                          className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-90 transition-all flex items-center justify-center text-muted font-bold text-lg"
+                          className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
                         >
                           +
                         </button>
@@ -222,7 +222,7 @@ export default function NulmetingManager({ history }: Props) {
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder={t.event.notesMeetingPlaceholder}
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder:text-faint resize-none text-sm"
+                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink placeholder:text-faint resize-none text-sm"
                 />
               </div>
             </div>
@@ -231,7 +231,7 @@ export default function NulmetingManager({ history }: Props) {
               <button
                 type="button"
                 onClick={() => setSheetOpen(false)}
-                className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition-all active:scale-95"
+                className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition active:scale-95"
               >
                 {t.trainingPlan.cancel}
               </button>
@@ -239,7 +239,7 @@ export default function NulmetingManager({ history }: Props) {
                 type="button"
                 onClick={handleSave}
                 disabled={isPending}
-                className="flex-1 py-3 rounded-xl bg-brand hover:bg-brand-dark text-white font-semibold transition-all active:scale-95 disabled:opacity-50"
+                className="flex-1 py-3 rounded-xl bg-brand hover:bg-brand-dark text-white font-semibold transition active:scale-95 disabled:opacity-50"
               >
                 {isPending ? t.periodization.saving : t.periodization.save}
               </button>

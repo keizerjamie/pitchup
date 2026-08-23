@@ -35,27 +35,27 @@ export default async function EditPlayerPage({ params }: Props) {
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
       <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/players" className="text-gray-400 hover:text-gray-600">
+        <BackButton fallback="/players" className="text-faint hover:text-ink">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
-        <h1 className="text-2xl font-bold text-gray-900">{player.name}</h1>
+        <h1 className="text-2xl font-bold text-ink">{player.name}</h1>
       </div>
 
-      <form action={handleUpdate} className="bg-white rounded-2xl p-6 border border-gray-100 space-y-5">
+      <form action={handleUpdate} className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.players.name}</label>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.players.name}</label>
           <input name="name" type="text" required defaultValue={player.name}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink" />
         </div>
 
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">{t.players.playerType}</label>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.players.playerType}</label>
           <select
             name="type"
             defaultValue={player.type ?? 'regular'}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 bg-white"
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink bg-surface"
           >
             <option value="regular">{t.players.typeRegular}</option>
             <option value="guest">{t.players.typeGuest}</option>
@@ -68,21 +68,21 @@ export default async function EditPlayerPage({ params }: Props) {
         />
 
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">
-            {t.players.jerseyNumber} <span className="text-gray-400 font-normal">({t.players.optional})</span>
+          <label className="block text-sm font-semibold text-muted mb-1.5">
+            {t.players.jerseyNumber} <span className="text-faint font-normal">({t.players.optional})</span>
           </label>
           <input name="jersey_number" type="number" min="1" max="99" defaultValue={player.jersey_number ?? ''} placeholder="10"
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400" />
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder-faint" />
         </div>
 
         <RatingSelector defaultRating={player.rating} />
 
         <div className="flex items-center gap-3">
           <input id="active" name="active" type="checkbox" value="true" defaultChecked={player.active} className="w-5 h-5 rounded accent-green-600" />
-          <label htmlFor="active" className="text-sm font-semibold text-gray-700">{t.players.activeInSquad}</label>
+          <label htmlFor="active" className="text-sm font-semibold text-muted">{t.players.activeInSquad}</label>
         </div>
 
-        <button type="submit" className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-95 transition-all">
+        <button type="submit" className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-[0.98] transition">
           {t.players.save}
         </button>
       </form>

@@ -42,31 +42,36 @@ export default async function PlayerAbsencePage({ params }: Props) {
 
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-5">
-      <div className="sticky top-16 md:top-0 z-10 -mx-4 px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center gap-3">
-        <BackButton fallback="/players" className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+      {/* De sticky-offset moet exact de hoogte van de mobiele header uit
+          AppShell zijn: die is h-14 (3.5rem) PLUS env(safe-area-inset-top).
+          Met het eerdere vaste `top-16` (64px) schoof deze balk op een toestel
+          met notch onder de header door. Blijft dit ooit niet meer kloppen,
+          check dan `anchor-mobile-header` in AppShell.tsx. */}
+      <div className="sticky top-[calc(env(safe-area-inset-top)_+_3.5rem)] md:top-0 z-10 -mx-4 px-4 py-3 bg-[var(--bg)] border-b border-[var(--border-soft)] flex items-center gap-3">
+        <BackButton fallback="/players" className="text-faint hover:text-muted flex-shrink-0">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </BackButton>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-gray-900 truncate">{player.name}</h1>
+          <h1 className="text-xl font-bold text-ink truncate">{player.name}</h1>
           <div className="flex items-center gap-2 mt-0.5">
             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${POSITION_COLORS[player.position as keyof typeof POSITION_COLORS]}`}>
               {t.players.positions[player.position] ?? player.position}
             </span>
             {player.jersey_number && (
-              <span className="text-xs text-gray-400">#{player.jersey_number}</span>
+              <span className="text-xs text-faint">#{player.jersey_number}</span>
             )}
           </div>
         </div>
-        <Link href={`/players/${id}/edit`} className="text-xs text-gray-400 hover:text-gray-600 px-3 py-1.5 rounded-lg border border-gray-200">
+        <Link href={`/players/${id}/edit`} className="text-xs text-muted hover:text-ink px-3 py-1.5 rounded-lg border border-[var(--border-soft)]">
           {t.players.editLabel}
         </Link>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 p-5">
-        <h2 className="font-semibold text-gray-800 mb-1">{t.players.attendanceTitle}</h2>
-        <p className="text-sm text-gray-500 mb-4">{t.players.attendanceHint}</p>
+      <div className="surface-card p-5">
+        <h2 className="font-semibold text-ink mb-1">{t.players.attendanceTitle}</h2>
+        <p className="text-sm text-muted mb-4">{t.players.attendanceHint}</p>
         <PlayerAbsenceList
           playerId={id}
           events={eventsWithStatus}

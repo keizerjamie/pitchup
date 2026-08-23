@@ -311,19 +311,19 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           value={doelstelling}
           onChange={e => handleDoelstellingChange(e.target.value)}
           placeholder={t.trainingPlan.objectivePlaceholder}
-          className="print:hidden w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink placeholder:text-faint resize-none text-sm"
+          className="print:hidden w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink placeholder:text-faint resize-none text-sm"
         />
         <p data-testid="doelstelling-print" className="hidden print:block whitespace-pre-wrap print:text-[9px] print:leading-snug text-ink">{doelstelling}</p>
       </div>
 
       {/* Cycle-week suggestion */}
       {suggestion && suggestion.items.length > 0 && (
-        <div className="print:hidden bg-surface rounded-r-2xl border border-orange-200 border-l-[3px] border-l-orange-500 p-4">
+        <div className="print:hidden bg-surface rounded-r-2xl border border-warning/30 border-l-[3px] border-l-orange-500 p-4">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
               {t.periodization.suggestTitle}
             </p>
-            <span className="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+            <span className="text-xs font-medium text-warning-text bg-orange-50 px-2 py-0.5 rounded-full">
               {t.periodization.cycleWeek.replace('{n}', String(suggestion.week))}
             </span>
           </div>
@@ -339,7 +339,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                 <button
                   type="button"
                   onClick={() => openSuggestedPicker(item.key as OefeningCategorie)}
-                  className="text-xs font-semibold text-orange-600 border border-orange-200 hover:border-orange-400 hover:bg-orange-50 rounded-lg px-3 py-1.5 transition-colors active:scale-95 flex-shrink-0"
+                  className="text-xs font-semibold text-warning-text border border-warning/30 hover:border-orange-400 hover:bg-warning/10 rounded-lg px-3 py-1.5 transition-colors active:scale-95 flex-shrink-0"
                 >
                   + {t.periodization.suggestAdd}
                 </button>
@@ -388,7 +388,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           <button
             type="button"
             onClick={openPicker}
-            className="print:hidden text-sm font-semibold text-orange-600 hover:text-orange-700 active:scale-95 transition-all"
+            className="print:hidden text-sm font-semibold text-warning-text hover:text-orange-700 active:scale-95 transition"
           >
             {t.trainingPlan.addExercise}
           </button>
@@ -611,7 +611,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                               value={overrideClamped ?? ''}
                               placeholder={t.trainingPlan.stepAuto}
                               onChange={(e) => handleStepOverrideChange(k.id, e.target.value, o.categorie)}
-                              className="w-20 px-2 py-1 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink"
+                              className="w-20 px-2 py-1 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink"
                             />
                           </div>
                           {stapOverrideErrors[k.id] && (
@@ -766,7 +766,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             value={k.stap_override ?? ''}
                             placeholder={t.trainingPlan.stepAuto}
                             onChange={(e) => handleStepOverrideChange(k.id, e.target.value, o.categorie)}
-                            className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink"
+                            className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink"
                           />
                         </div>
                       )}
@@ -775,7 +775,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         <select
                           value={k.genest_in ?? ''}
                           onChange={(e) => handleGenestInChange(k.id, e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface"
+                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
                         >
                           <option value="">{t.trainingPlan.nestedNoneOption}</option>
                           {koppelingen.filter((other) => other.id !== k.id).map((other) => (
@@ -789,7 +789,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           value={currentGroupId ? `groep:${currentGroupId}` : ''}
                           disabled={parallelDisabled}
                           onChange={(e) => handleParallelChange(k.id, e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface disabled:opacity-50"
+                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface disabled:opacity-50"
                         >
                           <option value="">{t.trainingPlan.parallelNoneOption}</option>
                           {parallelOptions.map((opt) => (
@@ -826,7 +826,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         <button
           type="button"
           onClick={openPicker}
-          className="print:hidden mt-3 w-full py-3 rounded-xl border-2 border-dashed border-orange-200 text-orange-500 hover:border-orange-300 hover:bg-orange-50 font-semibold text-sm transition-all active:scale-95"
+          className="print:hidden mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
         >
           {t.trainingPlan.addExercise}
         </button>

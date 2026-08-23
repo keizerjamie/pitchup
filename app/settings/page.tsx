@@ -97,7 +97,7 @@ export default async function SettingsPage() {
                   <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-green-600" />
                   <div>
                     <div className="font-bold text-ink flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
+                      <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">✓</span>
                       {t.settings.everyonePresent}
                     </div>
                     <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
@@ -115,7 +115,7 @@ export default async function SettingsPage() {
                 </label>
               </div>
             </SectionCard>
-            <button type="submit" className="w-full py-3 rounded-xl font-bold text-white active:scale-95 transition-all" style={{ background: 'var(--primary)' }}>
+            <button type="submit" className="w-full py-3 rounded-xl font-bold text-white active:scale-[0.98] transition" style={{ background: 'var(--primary)' }}>
               {t.settings.save}
             </button>
           </form>
@@ -156,7 +156,7 @@ export default async function SettingsPage() {
 
           {/* Danger zone */}
           <form action={signOut}>
-            <button type="submit" className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm active:scale-95 transition-all"
+            <button type="submit" className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm active:scale-[0.98] transition"
               style={{ color: '#ef4444', border: '1px solid color-mix(in srgb, #ef4444 30%, transparent)', background: 'color-mix(in srgb, #ef4444 6%, transparent)' }}>
               <span className="ms text-[19px]">logout</span>
               {t.settings.logout}

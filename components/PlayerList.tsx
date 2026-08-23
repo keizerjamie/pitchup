@@ -248,7 +248,7 @@ export default function PlayerList({ active, inactive }: Props) {
       {selected && (
         <>
           <div
-            className="fixed inset-0 z-[290]"
+            className="fixed inset-0 z-[var(--z-scrim)]"
             onClick={closeSheet}
             style={{
               background: 'rgba(0,0,0,0.28)',
@@ -259,7 +259,7 @@ export default function PlayerList({ active, inactive }: Props) {
             }}
           />
           <div
-            className="fixed left-0 right-0 z-[300] px-4 max-w-md mx-auto"
+            className="fixed left-0 right-0 z-[var(--z-sheet)] px-4 max-w-md mx-auto"
             style={{
               bottom: 'max(env(safe-area-inset-bottom), 16px)',
               transform: reduceMotion ? 'none' : sheetVisible ? 'translateY(0)' : 'translateY(110%)',

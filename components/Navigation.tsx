@@ -39,7 +39,7 @@ export default function Navigation() {
 
   return (
     <div
-      className="anchor-bottom-nav fixed bottom-0 left-0 right-0 z-50 md:hidden px-3"
+      className="anchor-bottom-nav fixed bottom-0 left-0 right-0 z-[var(--z-nav)] md:hidden px-3"
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 10px)' }}
     >
       <div

@@ -227,7 +227,7 @@ function CalendarPill({ event, t }: { event: FootballEvent; t: Dict }) {
   return (
     <Link
       href={`/events/${event.id}`}
-      className="block rounded-md px-1.5 py-1 text-[11px] font-semibold leading-tight truncate text-ink hover:brightness-95 transition-all"
+      className="block rounded-md px-1.5 py-1 text-[11px] font-semibold leading-tight truncate text-ink hover:brightness-95 transition"
       style={{ background: `color-mix(in srgb, ${color} 18%, transparent)` }}
     >
       {event.time && <span className="tabular-nums mr-1" style={{ color }}>{formatTime(event.time)}</span>}

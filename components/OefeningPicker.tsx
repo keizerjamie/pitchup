@@ -58,7 +58,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
   }
 
   return (
-    <div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto flex flex-col">
         <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl z-10">
@@ -81,7 +81,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
             value={filters.query}
             onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
             placeholder={t.oefeningen.pickerSearchPlaceholder}
-            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink placeholder:text-faint"
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink placeholder:text-faint"
           />
 
           <div className="space-y-3">
@@ -96,7 +96,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                   onChange={(e) =>
                     setFilters((f) => ({ ...f, categorie: e.target.value ? (e.target.value as OefeningCategorie) : null }))
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface"
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
                 >
                   <option value="">{t.oefeningen.filterAll}</option>
                   {OEFENING_CATEGORIES.map((cat) => (
@@ -114,7 +114,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                   onChange={(e) =>
                     setFilters((f) => ({ ...f, veldzone: e.target.value ? (e.target.value as Veldzone) : null }))
                   }
-                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface"
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
                 >
                   <option value="">{t.oefeningen.filterAll}</option>
                   {VALID_VELDZONES.map((zone) => (
@@ -140,7 +140,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                       setFilters((f) => ({ ...f, aantalMin: e.target.value === '' ? null : Number(e.target.value) }))
                     }
                     placeholder={t.oefeningen.filterMinPlaceholder}
-                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
                   />
                 </div>
                 <div>
@@ -156,7 +156,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                       setFilters((f) => ({ ...f, aantalMax: e.target.value === '' ? null : Number(e.target.value) }))
                     }
                     placeholder={t.oefeningen.filterMaxPlaceholder}
-                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
                   />
                 </div>
               </div>
@@ -178,7 +178,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                       setFilters((f) => ({ ...f, duurMin: e.target.value === '' ? null : Number(e.target.value) }))
                     }
                     placeholder={t.oefeningen.filterMinPlaceholder}
-                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
                   />
                 </div>
                 <div>
@@ -194,7 +194,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                       setFilters((f) => ({ ...f, duurMax: e.target.value === '' ? null : Number(e.target.value) }))
                     }
                     placeholder={t.oefeningen.filterMaxPlaceholder}
-                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                    className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
                   />
                 </div>
               </div>
@@ -204,7 +204,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
           <button
             type="button"
             onClick={() => setShowCreate(true)}
-            className="w-full py-3 rounded-xl border-2 border-dashed border-orange-200 text-orange-500 hover:border-orange-300 hover:bg-orange-50 font-semibold text-sm transition-all active:scale-95"
+            className="w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
           >
             {t.oefeningen.pickerCreateNew}
           </button>
@@ -221,7 +221,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                   type="button"
                   disabled={isPending}
                   onClick={() => handlePick(o.id)}
-                  className="w-full text-left bg-surface rounded-xl border border-[var(--border-soft)] hover:border-orange-300 hover:bg-orange-50 p-3 transition-colors disabled:opacity-50"
+                  className="w-full text-left bg-surface rounded-xl border border-[var(--border-soft)] hover:border-warning/50 hover:bg-warning/10 p-3 transition-colors disabled:opacity-50"
                 >
                   <div className="font-semibold text-ink">{o.naam}</div>
                   <div className="flex flex-wrap items-center gap-1.5 mt-1">

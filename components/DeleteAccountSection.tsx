@@ -41,7 +41,7 @@ export default function DeleteAccountSection() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-4 px-4 py-2.5 rounded-xl text-sm font-semibold text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition-all"
+            className="mt-4 px-4 py-2.5 rounded-xl text-sm font-semibold text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition"
           >
             {t.settings.deleteAccountButton}
           </button>
@@ -66,7 +66,7 @@ export default function DeleteAccountSection() {
               <button
                 type="button"
                 onClick={() => { setOpen(false); setConfirm(''); setError(null) }}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-muted border border-[var(--border-soft)] hover:text-ink active:scale-95 transition-all"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-muted border border-[var(--border-soft)] hover:text-ink active:scale-95 transition"
               >
                 {t.trainingPlan.cancel}
               </button>
@@ -74,7 +74,7 @@ export default function DeleteAccountSection() {
                 type="button"
                 onClick={handleDelete}
                 disabled={!armed || isPending}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-danger active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isPending ? t.settings.deleting : t.settings.deleteConfirmFinal}
               </button>

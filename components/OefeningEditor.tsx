@@ -176,7 +176,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   const isEdit = !!initial
 
   return (
-    <div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
         <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl z-10">
@@ -206,7 +206,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
               value={naam}
               onChange={(e) => setNaam(e.target.value)}
               placeholder={t.trainingPlan.exerciseNamePlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint"
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
             />
           </div>
 
@@ -217,7 +217,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
               id="oefening-categorie"
               value={categorie}
               onChange={(e) => handleCategorieChange(e.target.value as OefeningCategorie)}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-ink bg-surface"
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink bg-surface"
             >
               {ALL_CATS.map((cat) => (
                 <option key={cat.key} value={cat.key}>{catLabel(cat.key)}</option>
@@ -233,7 +233,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
               value={beschrijving ?? ''}
               onChange={(e) => setBeschrijving(e.target.value)}
               placeholder={t.trainingPlan.exerciseDescriptionPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint resize-none text-sm"
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint resize-none text-sm"
             />
           </div>
 
@@ -246,7 +246,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                 value={duurMin ?? ''}
                 onChange={(e) => setDuurMin(e.target.value ? parseInt(e.target.value) : null)}
                 placeholder="15"
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint"
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
               />
             </div>
             <div>
@@ -260,7 +260,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                   const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(30, raw)) : 0
                   setAantalNeutralen(clamped)
                 }}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink"
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink"
               />
             </div>
           </div>
@@ -274,14 +274,14 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                 value={breedteM ?? ''}
                 onChange={(e) => setBreedteM(e.target.value ? parseFloat(e.target.value) : null)}
                 placeholder={t.trainingPlan.fieldWidth}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
               />
               <input
                 type="number" min={0} max={200} step={0.5}
                 value={lengteM ?? ''}
                 onChange={(e) => setLengteM(e.target.value ? parseFloat(e.target.value) : null)}
                 placeholder={t.trainingPlan.fieldLength}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 bg-surface text-ink placeholder:text-faint text-sm"
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
               />
             </div>
           </div>
@@ -295,10 +295,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                   key={zone}
                   type="button"
                   onClick={() => setVeldzone(veldzone === zone ? null : zone)}
-                  className={`py-2 px-3 rounded-xl text-sm font-semibold border-2 transition-all ${
+                  className={`py-2 px-3 rounded-xl text-sm font-semibold border-2 transition ${
                     veldzone === zone
-                      ? 'bg-orange-500 text-white border-orange-500'
-                      : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                      ? 'bg-warning text-white border-orange-500'
+                      : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                   }`}
                 >
                   {t.trainingPlan.fieldZones[zone]}
@@ -311,10 +311,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                   key={zone}
                   type="button"
                   onClick={() => setVeldzone(veldzone === zone ? null : zone)}
-                  className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition-all ${
+                  className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition ${
                     veldzone === zone
-                      ? 'bg-orange-500 text-white border-orange-500'
-                      : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                      ? 'bg-warning text-white border-orange-500'
+                      : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                   }`}
                 >
                   {t.trainingPlan.fieldZones[zone]}
@@ -331,7 +331,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                 type="button"
                 onClick={addTeam}
                 disabled={teams.length >= MAX_TEAMS}
-                className="text-xs font-semibold text-orange-600 hover:text-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="text-xs font-semibold text-warning-text hover:text-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {t.oefeningen.addTeam}
               </button>
@@ -360,7 +360,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                           id={`team-size-${i}`}
                           value={team.grootte ?? ''}
                           onChange={(e) => handleTeamSizeChange(i, e.target.value ? Number(e.target.value) : null)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 text-sm text-ink bg-surface"
+                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
                         >
                           <option value="">{t.oefeningen.noTeamSize}</option>
                           {TEAM_SIZES.map((n) => (
@@ -390,10 +390,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                             type="button"
                             aria-pressed={team.keeperInGrootte}
                             onClick={() => setTeamKeeper(i, true)}
-                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
                               team.keeperInGrootte
-                                ? 'bg-orange-500 text-white border-orange-500'
-                                : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                                ? 'bg-warning text-white border-orange-500'
+                                : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                             }`}
                           >
                             {t.oefeningen.keeperIncluded}
@@ -402,10 +402,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                             type="button"
                             aria-pressed={!team.keeperInGrootte}
                             onClick={() => setTeamKeeper(i, false)}
-                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
                               !team.keeperInGrootte
-                                ? 'bg-orange-500 text-white border-orange-500'
-                                : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                                ? 'bg-warning text-white border-orange-500'
+                                : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                             }`}
                           >
                             {t.oefeningen.keeperExcluded}
@@ -427,10 +427,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                                   type="button"
                                   aria-pressed={selected}
                                   onClick={() => selectTeamFormatie(i, f.key)}
-                                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition-all ${
+                                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
                                     selected
-                                      ? 'bg-orange-500 text-white border-orange-500'
-                                      : 'border-[var(--border-soft)] text-muted hover:border-orange-300'
+                                      ? 'bg-warning text-white border-orange-500'
+                                      : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                                   }`}
                                 >
                                   {f.label}
@@ -466,7 +466,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
             <button
               type="button"
               onClick={() => setShowDiagramEditor((v) => !v)}
-              className="text-sm font-semibold text-orange-600 hover:text-orange-700 transition-colors"
+              className="text-sm font-semibold text-warning-text hover:text-orange-700 transition-colors"
             >
               {showDiagramEditor ? `▾ ${t.oefeningen.diagramToggle}` : `▸ ${t.oefeningen.diagramToggle}`}
             </button>
@@ -489,7 +489,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
           <button
             type="button"
             onClick={onCancel}
-            className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition-all active:scale-95"
+            className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition active:scale-95"
           >
             {t.trainingPlan.cancel}
           </button>
@@ -497,7 +497,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
             type="button"
             onClick={handleSubmit}
             disabled={isPending || !naam.trim()}
-            className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold transition-all active:scale-95 disabled:opacity-50"
+            className="flex-1 py-3 rounded-xl bg-warning hover:bg-warning/90 text-white font-semibold transition active:scale-95 disabled:opacity-50"
           >
             {isPending ? t.trainingPlan.saving : t.trainingPlan.save}
           </button>

@@ -96,7 +96,7 @@ export default function BulkMatchInput({ onParsed }: Props) {
   const canProcess = !isPending && (file !== null || text.trim() !== '')
 
   return (
-    <div className="bg-white rounded-2xl p-6 border border-gray-100 space-y-5">
+    <div className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
           {error}
@@ -104,7 +104,7 @@ export default function BulkMatchInput({ onParsed }: Props) {
       )}
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1.5" htmlFor="bulk-paste">
+        <label className="block text-sm font-semibold text-muted mb-1.5" htmlFor="bulk-paste">
           {t.event.bulk.pasteLabel}
         </label>
         <textarea
@@ -114,12 +114,12 @@ export default function BulkMatchInput({ onParsed }: Props) {
           onChange={(e) => { setText(e.target.value); setError(null) }}
           placeholder={t.event.bulk.pastePlaceholder}
           disabled={isPending}
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-gray-900 placeholder-gray-400 resize-none font-mono text-sm"
+          className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink placeholder-faint resize-none font-mono text-sm"
         />
       </div>
 
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1.5" htmlFor="bulk-file">
+        <label className="block text-sm font-semibold text-muted mb-1.5" htmlFor="bulk-file">
           {t.event.bulk.fileLabel}
         </label>
         <input
@@ -129,16 +129,16 @@ export default function BulkMatchInput({ onParsed }: Props) {
           accept=".csv,.xlsx"
           onChange={handleFileChange}
           disabled={isPending}
-          className="text-[13px] text-gray-600"
+          className="text-[13px] text-muted"
         />
         {textIgnored && (
           <p className="text-[13px] text-amber-700 mt-1.5">{t.event.bulk.fileOverridesText}</p>
         )}
       </div>
 
-      <div className="text-xs text-gray-500 space-y-2">
+      <div className="text-xs text-muted space-y-2">
         <p>{t.event.bulk.formatHint}</p>
-        <a href="/voorbeeld-wedstrijden.csv" download className="inline-block text-accent font-semibold hover:underline">
+        <a href="/voorbeeld-wedstrijden.csv" download className="inline-block text-brand-accent font-semibold hover:underline">
           {t.event.bulk.downloadExample}
         </a>
       </div>
@@ -147,7 +147,7 @@ export default function BulkMatchInput({ onParsed }: Props) {
         type="button"
         onClick={handleProcess}
         disabled={!canProcess}
-        className="w-full py-3 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-60"
+        className="w-full py-3 rounded-xl font-semibold text-white bg-event-match hover:bg-event-match/90 transition active:scale-[0.98] disabled:opacity-60"
       >
         {isPending ? t.event.bulk.processing : t.event.bulk.process}
       </button>

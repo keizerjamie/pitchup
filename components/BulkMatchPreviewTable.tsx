@@ -62,25 +62,25 @@ export default function BulkMatchPreviewTable({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-bold text-gray-900">{b.previewTitle}</h2>
+      <h2 className="text-lg font-bold text-ink">{b.previewTitle}</h2>
 
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
+      <div className="bg-surface rounded-2xl border border-[var(--border-soft)] overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
-            <tr className="border-b border-gray-100">
+            <tr className="border-b border-[var(--border-soft)]">
               {columns.map((field) => (
-                <th key={field} className="text-left font-semibold text-gray-600 px-2 py-2 whitespace-nowrap">
+                <th key={field} className="text-left font-semibold text-muted px-2 py-2 whitespace-nowrap">
                   {b.columnHeaders[field]}
                 </th>
               ))}
-              <th className="text-left font-semibold text-gray-600 px-2 py-2 whitespace-nowrap">{b.duplicateColumn}</th>
+              <th className="text-left font-semibold text-muted px-2 py-2 whitespace-nowrap">{b.duplicateColumn}</th>
               <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <Fragment key={row.id}>
-                <tr className="border-b border-gray-50 align-top">
+                <tr className="border-b border-[var(--border-soft)] align-top">
                   {columns.map((field) => (
                     <td key={field} className="px-2 py-2">
                       <RowField
@@ -105,14 +105,14 @@ export default function BulkMatchPreviewTable({
                       type="button"
                       onClick={() => removeRow(row.id)}
                       aria-label={b.remove}
-                      className="text-gray-400 hover:text-red-600 transition-colors"
+                      className="text-faint hover:text-red-600 transition-colors"
                     >
                       ×
                     </button>
                   </td>
                 </tr>
                 {row.uncertain.length > 0 && row.sourceLine && (
-                  <tr className="border-b border-gray-50">
+                  <tr className="border-b border-[var(--border-soft)]">
                     <td colSpan={columns.length + 2} className="px-2 pb-2 text-[12px] text-amber-700 bg-amber-50/50">
                       {b.uncertain}: “{row.sourceLine}”
                     </td>
@@ -125,7 +125,7 @@ export default function BulkMatchPreviewTable({
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between text-sm text-gray-600">
+        <div className="flex items-center justify-between text-sm text-muted">
           <span>{b.rowCount.replace('{count}', String(rows.length))}</span>
           <span className={blockingReason.tooMany ? 'text-red-600 font-semibold' : ''}>
             {b.limitCount.replace('{count}', String(rows.length)).replace('{max}', String(blockingReason.max))}
@@ -148,7 +148,7 @@ export default function BulkMatchPreviewTable({
           type="button"
           onClick={onSave}
           disabled={saving || blockingReason.blocked}
-          className="w-full py-3 rounded-xl font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-60"
+          className="w-full py-3 rounded-xl font-semibold text-white bg-event-match hover:bg-event-match/90 transition active:scale-[0.98] disabled:opacity-60"
         >
           {saving ? b.saving : b.save}
         </button>
@@ -181,9 +181,9 @@ function RowField({ row, field, error, errorText, onChange, t }: RowFieldProps) 
     ? 'border-red-300 focus:border-red-500 focus:ring-red-100'
     : uncertain
     ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100'
-    : 'border-gray-200 focus:border-accent focus:ring-brand-light'
+    : 'border-[var(--border-soft)] focus:border-brand-accent focus:ring-brand-accent/30'
 
-  const baseInputClass = `w-full px-2 py-1.5 rounded-lg border ${borderClass} focus:outline-none focus:ring-2 text-gray-900 text-sm`
+  const baseInputClass = `w-full px-2 py-1.5 rounded-lg border ${borderClass} focus:outline-none focus:ring-2 text-ink text-sm`
 
   let control: React.ReactNode
 

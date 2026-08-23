@@ -317,7 +317,7 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
                     <button
                       type="button"
                       onClick={() => assignToMember(selectedPlayerId, lid.id)}
-                      className="text-[11px] font-semibold text-orange-600 hover:text-orange-700 flex-shrink-0"
+                      className="text-[11px] font-semibold text-warning-text hover:text-orange-700 flex-shrink-0"
                     >
                       {t.parallelGroep.moveTo.replace('{target}', memberLabel)}
                     </button>
@@ -426,7 +426,7 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
                       selectedPlayerId === p.id
                         ? 'bg-orange-100 text-orange-700 border border-orange-300'
-                        : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-orange-300'
+                        : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
                     } ${draggingThis ? 'ring-2 ring-orange-400 shadow-lg' : ''}`}
                   >
                     <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
