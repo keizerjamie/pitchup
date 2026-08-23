@@ -1772,3 +1772,112 @@ Ook ongemoeid: `POSITION_COLORS` in `lib/types.ts` (buiten UI-scope, en niet stu
 30s–3min, ook op Vercel. Herkenningspunt: een inlog die "blijft renderen" plus
 `POST /login 200 in 3.5min` in de dev-log. Ligt bij Supabase, niet in de codebase —
 project herstarten en status.supabase.com checken.
+
+## Designsprint: poster-PDF, inzichten-conclusielaag, seizoensrapport (2026-08-23, commit `a17ecc7`)
+Aanleiding: "de PDF's zien er amateuristisch uit, de inzichtenpagina moet mooier én
+nuttiger". Diagnose was in beide gevallen dezelfde: de cijfers klopten, maar er was nooit
+een keuze gemaakt over wát het belangrijkste is — alles stond op gelijke sterkte.
+
+### Wedstrijdselectie-PDF: van document naar poster
+- **`@page squad { margin: 0 }` + `page: squad`** op het printblok haalt de paginamarge weg
+  voor uitsluitend die ene pagina; de algemene `@page`-regel (12mm) blijft gelden voor het
+  trainingsplan. **Dit is de enige wijziging die "document" in "poster" verandert** — zonder
+  is een kleurvlak tot aan de papierrand fysiek onmogelijk.
+- **Terugval is bewust ingebouwd**: named pages worden door Chromium ondersteund maar niet
+  door elke WebKit-versie. Waar `page:` genegeerd wordt blijft 12mm staan en rendert exact
+  hetzelfde ontwerp binnen een witte rand. Daarom gebruikt het blok **nergens een negatieve
+  marge** om "buiten de marge te breken" — dat zou in de terugval stukgaan.
+  **Nog niet op iOS Safari getest.**
+- **`min-height: 100vh`** en géén vaste mm-waarde: `100vh` past zich aan of de named page nu
+  wel (297mm) of niet (273mm) is toegepast. Een vaste waarde levert in precies één van die
+  twee gevallen een lege tweede pagina op.
+- **Rugnummers via `::before` + `content: attr(data-jersey)`**, niet als tekstnode. Harde
+  eis: Story-AC9 legt vast dat `li.textContent` EXACT de spelersnaam is (die garantie bestaat
+  om aanvoerder-/gastlabels buiten de lijst te houden). Zelfde middel als de "·" in de footer.
+  Leeg `jersey_number` → leeg attribuut, kader houdt zijn breedte zodat namen uitgelijnd
+  blijven; **een verzonnen volgnummer zou op een teamsheet als echt rugnummer lezen**.
+
+### Inzichten: conclusielaag bovenop de bestaande grafieken
+- **KPI-strook + "wat valt op"** zijn de laag die ontbrak. Alle cijfers komen uit rijen die de
+  pagina toch al ophaalde — **geen enkele extra query of RPC**.
+- **`OPKOMST_DOEL = 85`** als constante in `lib/inzichten.ts`, niet als teaminstelling: dat zou
+  een kolom + scherm + migratie vragen. Onderbouwing: jeugdteams ontwikkelen aantoonbaar
+  sneller boven 85% trainingsopkomst. Eén stippellijn maakt van een percentage een oordeel.
+- **Signalen zijn regelgebaseerd, niet AI**: `bepaalSignalen()` levert een i18n-sléutel plus
+  waarden, zodat `lib/` taalonafhankelijk blijft; `lib/signaal-tekst.ts` maakt er tekst van en
+  wordt gedeeld door scherm én rapport. Vaste prioriteit (zorg → let-op → compliment), max 3,
+  blok verdwijnt bij nul.
+- **Periodefilter via searchParams**, niet via client-state: een andere periode betekent andere
+  RPC-parameters, dus de server moet toch rekenen. Gewone `<Link>`'s → deelbare URL, werkt
+  zonder JS. **De server action krijgt een TOKEN ('4w'/'8w'/'seizoen'), nooit datums** — de
+  bestaande veiligheidseigenschap ("nooit een datumbereik van de client aannemen",
+  `getSpelerRatingReeks`) blijft daarmee intact.
+- **Top/worst hernoemd** naar "Uitblinkers"/"Aandachtspunten"; kaarttitels werden neutraal
+  ("Ratings per speler"). **De titels mogen nooit gelijk zijn aan bestLabel/worstLabel**: de
+  acceptatietest scopet met `getByText` binnen de kaart en krijgt anders twee treffers.
+
+### Seizoensrapport: bewust een document, geen poster
+Nieuw print-only blok op /inzichten. Houdt de gewone 12mm-marge en gebruikt de clubkleur als
+accent in plaats van als vlak — de wedstrijdselectie wordt opgehangen, dit wordt gelezen. Twee
+verschillende doelen, twee verschillende vormen; dat is geen inconsistentie. Geen recharts:
+maandbalken zijn divs met een hoogte in mm (paged media + SVG-chartlibrary is onnodig grillig).
+
+### Valkuilen die alleen uit een échte print/app bleken
+- **Staafhoogtes moeten in een vlak staan dat NIETS anders bevat.** Stonden staaf, waarde en
+  maandnaam in dezelfde kolom, dan is `height: 71%` een percentage van (staaf + twee
+  tekstregels) en tekenen alle maanden vrijwel even hoog — én de normlijn op `bottom: 85%`
+  komt boven de grafiek uit. Nu twee rijen met identieke flex-geometrie.
+- **`max-width` op de balkkolommen is geen cosmetiek**: met `flex: 1` en één datamaand rekt die
+  ene staaf tot de volle paginabreedte en leest hij als een gekleurd blok. Een team dat
+  halverwege begint of naar 4 weken kijkt heeft precies dat geval.
+- **`--surface` als tekstkleur op gekleurde badges, niet wit.** Statuskleur-tokens draaien in
+  dark mode om naar hun lichte variant (`--chip-red-fg` → `#fca5a5`); witte tekst daarop haalt
+  geen enkele contrastverhouding. `--surface` beweegt precies andersom mee.
+- **Verificatiemethode die werkte**: component renderen via een wegwerp-vitest-bestand naar
+  HTML, samen met `npx @tailwindcss/cli -i app/globals.css -o …`, dan `page.pdf()` in
+  Playwright en de PDF via `sips -s format png` bekijken. Alle drie de bugs hierboven kwamen
+  hieruit; geen enkele test ving ze.
+
+### Testcontract: twee dingen die veranderden
+- **`data-print-only` + `configure({ defaultIgnore })`.** De pagina rendert nu twee versies van
+  dezelfde inhoud (scherm + print), dus een kale `screen.getByText('Aanwezigheid per speler')`
+  geeft twee treffers. `inzichten.acceptance.test.tsx` zet in `beforeEach` een `defaultIgnore`
+  die het printblok overslaat. **Let op de tweede selector** (`[data-print-only] *`): RTL's
+  `ignore` filtert alleen knopen die de selector zélf matchen, niet automatisch hun kinderen.
+- **AC8/AC21/AC25 kregen een ander scenario.** Ze draaiden op `renderInzichten({ settings })` —
+  een seizoen zonder één registratie. Precies dat scenario toont sinds deze ronde de
+  pagina-brede lege staat, dus daar viel de per-kaart lege staat niet meer te bewijzen. Het
+  criterium is ongewijzigd; er is één losstaande wedstrijd toegevoegd zodat de kaarten renderen.
+
+### Bug die de test ving, niet de mens
+De conditie voor "nog geen enkele registratie" checkte `aanwezigheidData === null`. Maar
+**`inzichten_aanwezigheid` levert ALTIJD precies één rij, ook zonder data (dan 0/0)** — die
+waarde is dus vrijwel nooit null. De hele conditie was stilzwijgend onbereikbaar. Leegheid zit
+in `percentage === null`, niet in `=== null`.
+
+### CSP-nonce op het theme-script (`app/layout.tsx`)
+`proxy.ts` genereerde de nonce al en zette hem als `x-nonce` op de REQUEST-headers; Next gebruikt
+die automatisch voor zijn éigen inline scripts, maar een zelfgeschreven `<script>` moet hem
+expliciet meekrijgen. Zonder nonce blijft het script gewoon in de HTML staan en wordt het alleen
+niet uitgevoerd: geen crash, geen foutmelding, alleen een violation in de console en een
+themaflits bij elke load. **Elk nieuw inline script heeft dit nodig.** `?? undefined`, niet
+`?? ''` — een leeg nonce-attribuut is zelf een mismatch. Nieuw: `app/layout.test.tsx`.
+
+### Bewust NIET gedaan
+- **Klikbare spelersnamen vanuit de inzichtenlijsten.** Stond op de roadmap als "door naar het
+  spelerprofiel", maar **die pagina bestaat niet**: tikken op een speler opent een actiesheet
+  (bewerken/afmelden/blessure). Linken naar het bewerkformulier is de verkeerde bestemming en
+  een profielpagina is een eigen feature.
+- **85% instelbaar per team** — vraagt een datamodel-wijziging, niet gevraagd.
+
+### Dev-omgeving: twee dingen die tijd kostten
+- **Next 16 weigert een tweede `next dev` voor dezelfde projectmap**, ongeacht poort. Een
+  poortconflict oplossen met `autoPort` is dus niet genoeg als er al een server op die map
+  draait; `.claude/launch.json` had bovendien helemaal geen `autoPort`.
+- **Een lang draaiende dev-server kan een verouderde module in geheugen houden** terwijl de
+  chunk op schijf wél vers is. Symptoom hier: `t.insights` met 56 sleutels (het originele blok)
+  terwijl `messages_nl_ts_*.js` de nieuwe sleutels bevatte en 1 seconde na de edit was
+  hercompileerd. `touch` helpt niet (Turbopack hasht inhoud) en een echte inhoudswijziging ook
+  niet. **Alleen `rm -rf .next` + herstart.** Diagnose die het uitwees: een tijdelijke
+  `console.log(Object.keys(t.insights).length)` in de server component — niet blijven staren
+  naar de bundel op schijf.
