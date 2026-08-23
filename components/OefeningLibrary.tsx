@@ -147,7 +147,7 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                     }}
                     aria-label={t.oefeningen.deleteAria}
                     disabled={isPending}
-                    className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-faint hover:text-red-500 transition-colors disabled:opacity-50"
+                    className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors disabled:opacity-50"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -179,17 +179,17 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
               {/* AC21: deleteConfirm wordt alleen gezet bij koppelingCount >= 1
                   (zie de delete-knop hierboven) — N=0 verwijdert direct. */}
               {deleteConfirm === o.id && (
-                <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 space-y-2">
-                  <p className="text-sm text-red-700">
+                <div className="mt-3 rounded-xl border border-panel-red-edge bg-panel-red p-3 space-y-2">
+                  <p className="text-sm text-panel-red-ink">
                     {t.oefeningen.deleteConfirmUsage.replace('{n}', String(o.koppelingCount))}
                   </p>
-                  {deleteError && <p className="text-xs text-red-600">{deleteError}</p>}
+                  {deleteError && <p className="text-xs text-panel-red-ink">{deleteError}</p>}
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => handleDelete(o.id)}
                       disabled={isPending}
-                      className="text-xs font-semibold text-white bg-red-600 hover:bg-danger rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+                      className="text-xs font-semibold text-white bg-danger hover:bg-danger rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
                     >
                       {t.oefeningen.deleteButton}
                     </button>

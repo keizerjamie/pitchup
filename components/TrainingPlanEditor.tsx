@@ -303,7 +303,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         <label className="block text-sm font-semibold text-muted mb-2 flex items-center justify-between print:text-[7px] print:mb-[0.5mm] print:uppercase print:tracking-wide print:text-faint">
           {t.trainingPlan.objective}
           {doelstellingSaved && (
-            <span className="print:hidden text-xs text-green-600 font-normal">{t.trainingPlan.saved}</span>
+            <span className="print:hidden text-xs text-panel-green-ink font-normal">{t.trainingPlan.saved}</span>
           )}
         </label>
         <textarea
@@ -320,10 +320,10 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
       {suggestion && suggestion.items.length > 0 && (
         <div className="print:hidden bg-surface rounded-r-2xl border border-warning/30 border-l-[3px] border-l-orange-500 p-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide">
+            <p className="text-xs font-semibold text-panel-orange-ink uppercase tracking-wide">
               {t.periodization.suggestTitle}
             </p>
-            <span className="text-xs font-medium text-warning-text bg-orange-50 px-2 py-0.5 rounded-full">
+            <span className="text-xs font-medium text-warning-text bg-panel-orange px-2 py-0.5 rounded-full">
               {t.periodization.cycleWeek.replace('{n}', String(suggestion.week))}
             </span>
           </div>
@@ -339,7 +339,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                 <button
                   type="button"
                   onClick={() => openSuggestedPicker(item.key as OefeningCategorie)}
-                  className="text-xs font-semibold text-warning-text border border-warning/30 hover:border-orange-400 hover:bg-warning/10 rounded-lg px-3 py-1.5 transition-colors active:scale-95 flex-shrink-0"
+                  className="text-xs font-semibold text-warning-text border border-warning/30 hover:border-warning hover:bg-warning/10 rounded-lg px-3 py-1.5 transition-colors active:scale-95 flex-shrink-0"
                 >
                   + {t.periodization.suggestAdd}
                 </button>
@@ -367,11 +367,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           </div>
         </div>
       ) : (
-        <div className="print:hidden bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-3">
-          <p className="text-sm text-amber-800 flex-1">{t.trainingPlan.nulmetingNeeded}</p>
+        <div className="print:hidden bg-panel-amber border border-panel-amber-edge rounded-xl p-3 flex items-center gap-3">
+          <p className="text-sm text-panel-amber-ink flex-1">{t.trainingPlan.nulmetingNeeded}</p>
           <Link
             href="/periodisering"
-            className="text-xs font-semibold text-amber-900 border border-amber-300 hover:bg-amber-100 rounded-lg px-3 py-1.5 transition-colors flex-shrink-0"
+            className="text-xs font-semibold text-panel-amber-ink border border-panel-amber-edge hover:bg-panel-amber rounded-lg px-3 py-1.5 transition-colors flex-shrink-0"
           >
             {t.trainingPlan.nulmetingLink}
           </Link>
@@ -388,7 +388,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           <button
             type="button"
             onClick={openPicker}
-            className="print:hidden text-sm font-semibold text-warning-text hover:text-orange-700 active:scale-95 transition"
+            className="print:hidden text-sm font-semibold text-warning-text hover:text-panel-orange-ink active:scale-95 transition"
           >
             {t.trainingPlan.addExercise}
           </button>
@@ -615,7 +615,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             />
                           </div>
                           {stapOverrideErrors[k.id] && (
-                            <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+                            <p className="text-xs text-panel-red-ink bg-panel-red border border-panel-red-edge rounded-lg px-2 py-1">
                               {stapOverrideErrors[k.id]}
                             </p>
                           )}
@@ -729,7 +729,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         <div className="flex gap-1">
                           <button type="button" onClick={() => handleUnlink(k.id)}
                             disabled={isPending}
-                            className="text-xs font-semibold text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors">
+                            className="text-xs font-semibold text-panel-red-ink px-2 py-1 rounded-lg hover:bg-panel-red transition-colors">
                             {t.trainingPlan.confirmYes}
                           </button>
                           <button type="button" onClick={() => setUnlinkConfirm(null)}
@@ -742,7 +742,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           type="button"
                           onClick={() => setUnlinkConfirm(k.id)}
                           aria-label={t.trainingPlan.unlink}
-                          className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-faint hover:text-red-500 transition-colors"
+                          className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -797,7 +797,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           ))}
                         </select>
                         {parallelErrors[k.id] && (
-                          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1 mt-1">
+                          <p className="text-xs text-panel-red-ink bg-panel-red border border-panel-red-edge rounded-lg px-2 py-1 mt-1">
                             {parallelErrors[k.id]}
                           </p>
                         )}

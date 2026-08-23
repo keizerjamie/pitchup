@@ -192,7 +192,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
 
         <div className="p-5 space-y-4">
           {error && (
-            <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+            <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
               {error}
             </div>
           )}
@@ -297,7 +297,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                   onClick={() => setVeldzone(veldzone === zone ? null : zone)}
                   className={`py-2 px-3 rounded-xl text-sm font-semibold border-2 transition ${
                     veldzone === zone
-                      ? 'bg-warning text-white border-orange-500'
+                      ? 'bg-warning text-white border-warning'
                       : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                   }`}
                 >
@@ -313,7 +313,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                   onClick={() => setVeldzone(veldzone === zone ? null : zone)}
                   className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition ${
                     veldzone === zone
-                      ? 'bg-warning text-white border-orange-500'
+                      ? 'bg-warning text-white border-warning'
                       : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                   }`}
                 >
@@ -331,7 +331,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                 type="button"
                 onClick={addTeam}
                 disabled={teams.length >= MAX_TEAMS}
-                className="text-xs font-semibold text-warning-text hover:text-orange-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="text-xs font-semibold text-warning-text hover:text-panel-orange-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {t.oefeningen.addTeam}
               </button>
@@ -372,7 +372,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                         type="button"
                         onClick={() => removeTeam(i)}
                         aria-label={t.oefeningen.removeTeamAria}
-                        className="flex-shrink-0 w-9 h-9 rounded-lg hover:bg-red-50 flex items-center justify-center text-faint hover:text-red-500 transition-colors"
+                        className="flex-shrink-0 w-9 h-9 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -392,7 +392,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                             onClick={() => setTeamKeeper(i, true)}
                             className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
                               team.keeperInGrootte
-                                ? 'bg-warning text-white border-orange-500'
+                                ? 'bg-warning text-white border-warning'
                                 : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                             }`}
                           >
@@ -404,7 +404,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                             onClick={() => setTeamKeeper(i, false)}
                             className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
                               !team.keeperInGrootte
-                                ? 'bg-warning text-white border-orange-500'
+                                ? 'bg-warning text-white border-warning'
                                 : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                             }`}
                           >
@@ -429,7 +429,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                                   onClick={() => selectTeamFormatie(i, f.key)}
                                   className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
                                     selected
-                                      ? 'bg-warning text-white border-orange-500'
+                                      ? 'bg-warning text-white border-warning'
                                       : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
                                   }`}
                                 >
@@ -466,7 +466,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
             <button
               type="button"
               onClick={() => setShowDiagramEditor((v) => !v)}
-              className="text-sm font-semibold text-warning-text hover:text-orange-700 transition-colors"
+              className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
             >
               {showDiagramEditor ? `▾ ${t.oefeningen.diagramToggle}` : `▸ ${t.oefeningen.diagramToggle}`}
             </button>

@@ -72,7 +72,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
 
         <div className="p-5 space-y-4">
           {error && (
-            <div className="rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+            <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
               {error}
             </div>
           )}

@@ -1729,14 +1729,40 @@ thema's. **Schakel bij zo'n audit het thema met een reflow ertussen** — direct
 - `active:scale-95` → `active:scale-[0.98]` op 19 `w-full`-knoppen; 5% krimp op een knop
   van ~340px is te veel.
 
+### Statuspanelen (zelfde sessie, tweede ronde)
+
+De ~60 getinte statuspanelen — `bg-red-50 border-red-200 text-red-700` en de amber/green/
+orange/blue/purple-varianten, 185 klassen in 20 bestanden — zijn alsnog omgezet naar
+tokens. Ze haalden AA al, maar het waren vaste lichte vlakken die in dark mode oplichtten.
+
+**Zes families, elk een drietal:** `bg-panel-<kleur>` / `border-panel-<kleur>-edge` /
+`text-panel-<kleur>-ink`, voor red, amber, green, orange, blue en purple. Plus
+`bg-panel-purple-solid` voor de enige paarse knop (MetingEditor).
+
+Twee keuzes die het verschil maakten:
+- **Licht is bit voor bit ongewijzigd.** De lichte tokenwaarden zijn exact de Tailwind-
+  hexen die er stonden (#fef2f2 = red-50, enz.), want die haalden al 4.8–6.6:1. Alleen
+  het dark-blok is nieuw. Dat scheelde een hoop risico bij 185 vervangingen.
+- **In dark is het paneelvlak een rgba-tint van zijn eigen tekstkleur op 10%,** geen vaste
+  hex. Zo klopt hetzelfde token over `--surface` én `--surface-sunken`. **Verhoog die 10%
+  niet zonder narekenen:** bij 14% zakt rood van 4.56 naar 4.29.
+
+Gemeten in de draaiende browser over alle zes families: licht 4.75–6.59, dark 4.56–5.96.
+
+Bij deze gelegenheid ook de laatste losse kleuren opgeruimd: de `focus:ring-*-100`-ringen
+(op elk oppervlak nagenoeg onzichtbaar) naar `focus:ring-panel-*-ink/30`, de oranje
+selectieranden in de oefening-editors naar `--warning`, en `bg-red-600` naar `--danger`.
+
 ### Bewust NIET gedaan
 
-**~60 getinte statuspanelen** (`bg-red-50 border-red-200 text-red-700` en de amber/green/
-orange-varianten) in 26 bestanden. Die halen AA gewoon (±5.4:1, licht vlak met donkere
-tekst) en blijven leesbaar in dark mode — ze ogen alleen als lichte vlakken op een donkere
-pagina. Consistentiekwestie, geen bug. Ook ongemoeid: `MatchSquadPrintList`/
-`MatchFormCards` (print, wit papier is correct), de speler-pionnen in `LineupBuilder`/
-`FormationField` (wit op groen veld), en `POSITION_COLORS` in `lib/types.ts`.
+Er staan nu nog precies drie kale Tailwind-kleuren in de app, alle drie met reden:
+- **`bg-red-500/20 border-red-400 text-red-200`** op login/register/reset-password — het
+  foutvak op de altijd-donkere auth-gradient, daar juist correct.
+- **`bg-amber-400 text-amber-950`** in `LineupBuilder` — de geselecteerde speler-pion op
+  het groene veld, zelfde categorie als de witte pionnen.
+- **`MatchSquadPrintList`/`MatchFormCards`** — print, wit papier is correct.
+
+Ook ongemoeid: `POSITION_COLORS` in `lib/types.ts` (buiten UI-scope, en niet stuk).
 
 ### Supabase Auth-storing tijdens deze sessie (geen codeprobleem)
 

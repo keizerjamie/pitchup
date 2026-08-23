@@ -29,9 +29,9 @@ export default function DeleteAccountSection() {
   }
 
   return (
-    <div className="rounded-2xl border border-red-200 bg-red-50/50 overflow-hidden">
-      <div className="px-5 py-4 border-b border-red-100">
-        <h2 className="font-semibold text-red-800">{t.settings.dangerZone}</h2>
+    <div className="rounded-2xl border border-panel-red-edge bg-panel-red/50 overflow-hidden">
+      <div className="px-5 py-4 border-b border-panel-red-edge">
+        <h2 className="font-semibold text-panel-red-ink">{t.settings.dangerZone}</h2>
       </div>
       <div className="px-5 py-4">
         <h3 className="font-semibold text-ink text-sm">{t.settings.deleteAccountTitle}</h3>
@@ -41,7 +41,7 @@ export default function DeleteAccountSection() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-4 px-4 py-2.5 rounded-xl text-sm font-semibold text-red-600 border border-red-200 hover:bg-red-50 active:scale-95 transition"
+            className="mt-4 px-4 py-2.5 rounded-xl text-sm font-semibold text-panel-red-ink border border-panel-red-edge hover:bg-panel-red active:scale-95 transition"
           >
             {t.settings.deleteAccountButton}
           </button>
@@ -57,10 +57,10 @@ export default function DeleteAccountSection() {
               autoComplete="off"
               autoCapitalize="characters"
               placeholder={word}
-              className="w-full px-4 py-3 rounded-xl border border-red-200 focus:outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100 text-ink placeholder:text-faint"
+              className="w-full px-4 py-3 rounded-xl border border-panel-red-edge focus:outline-none focus:border-panel-red-ink focus:ring-2 focus:ring-panel-red-ink/30 text-ink placeholder:text-faint"
             />
             {error && (
-              <div className="bg-red-100 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">{error}</div>
+              <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-3 py-2 rounded-lg">{error}</div>
             )}
             <div className="flex gap-2">
               <button
@@ -74,7 +74,7 @@ export default function DeleteAccountSection() {
                 type="button"
                 onClick={handleDelete}
                 disabled={!armed || isPending}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-danger active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-danger hover:bg-danger active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isPending ? t.settings.deleting : t.settings.deleteConfirmFinal}
               </button>

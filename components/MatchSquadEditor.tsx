@@ -159,7 +159,7 @@ export default function MatchSquadEditor({
         )}
 
         {saveError && (
-          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+          <p className="text-xs text-panel-red-ink bg-panel-red border border-panel-red-edge rounded-lg px-2 py-1">
             {saveError}
           </p>
         )}

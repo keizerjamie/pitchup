@@ -95,7 +95,7 @@ export default function BulkMatchPreviewTable({
                   ))}
                   <td className="px-2 py-2">
                     {duplicateIds.has(row.id) && (
-                      <span className="inline-block text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap">
+                      <span className="inline-block text-[11px] font-semibold text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-full px-2 py-0.5 whitespace-nowrap">
                         {b.duplicate}
                       </span>
                     )}
@@ -105,7 +105,7 @@ export default function BulkMatchPreviewTable({
                       type="button"
                       onClick={() => removeRow(row.id)}
                       aria-label={b.remove}
-                      className="text-faint hover:text-red-600 transition-colors"
+                      className="text-faint hover:text-panel-red-ink transition-colors"
                     >
                       ×
                     </button>
@@ -113,7 +113,7 @@ export default function BulkMatchPreviewTable({
                 </tr>
                 {row.uncertain.length > 0 && row.sourceLine && (
                   <tr className="border-b border-[var(--border-soft)]">
-                    <td colSpan={columns.length + 2} className="px-2 pb-2 text-[12px] text-amber-700 bg-amber-50/50">
+                    <td colSpan={columns.length + 2} className="px-2 pb-2 text-[12px] text-panel-amber-ink bg-panel-amber/50">
                       {b.uncertain}: “{row.sourceLine}”
                     </td>
                   </tr>
@@ -127,19 +127,19 @@ export default function BulkMatchPreviewTable({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between text-sm text-muted">
           <span>{b.rowCount.replace('{count}', String(rows.length))}</span>
-          <span className={blockingReason.tooMany ? 'text-red-600 font-semibold' : ''}>
+          <span className={blockingReason.tooMany ? 'text-panel-red-ink font-semibold' : ''}>
             {b.limitCount.replace('{count}', String(rows.length)).replace('{max}', String(blockingReason.max))}
           </span>
         </div>
 
         {duplicateCheckFailed && (
-          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-3 py-2">
             {b.errorDuplicateCheck}
           </p>
         )}
 
         {blockingMessages.length > 0 && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl space-y-1">
+          <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl space-y-1">
             {blockingMessages.map((message, i) => <p key={i}>{message}</p>)}
           </div>
         )}
@@ -178,9 +178,9 @@ function RowField({ row, field, error, errorText, onChange, t }: RowFieldProps) 
   const showAsRawText = error?.code === 'invalid' && value.trim() !== ''
 
   const borderClass = errorText
-    ? 'border-red-300 focus:border-red-500 focus:ring-red-100'
+    ? 'border-panel-red-edge focus:border-panel-red-ink focus:ring-panel-red-ink/30'
     : uncertain
-    ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-100'
+    ? 'border-panel-amber-edge focus:border-panel-amber-ink focus:ring-panel-amber-ink/30'
     : 'border-[var(--border-soft)] focus:border-brand-accent focus:ring-brand-accent/30'
 
   const baseInputClass = `w-full px-2 py-1.5 rounded-lg border ${borderClass} focus:outline-none focus:ring-2 text-ink text-sm`
@@ -265,7 +265,7 @@ function RowField({ row, field, error, errorText, onChange, t }: RowFieldProps) 
   return (
     <div className="flex flex-col gap-1">
       {control}
-      {errorText && <span className="text-[11px] text-red-600">{errorText}</span>}
+      {errorText && <span className="text-[11px] text-panel-red-ink">{errorText}</span>}
     </div>
   )
 }

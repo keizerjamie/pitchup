@@ -98,7 +98,7 @@ export default function BulkMatchInput({ onParsed }: Props) {
   return (
     <div className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
+        <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl">
           {error}
         </div>
       )}
@@ -132,7 +132,7 @@ export default function BulkMatchInput({ onParsed }: Props) {
           className="text-[13px] text-muted"
         />
         {textIgnored && (
-          <p className="text-[13px] text-amber-700 mt-1.5">{t.event.bulk.fileOverridesText}</p>
+          <p className="text-[13px] text-panel-amber-ink mt-1.5">{t.event.bulk.fileOverridesText}</p>
         )}
       </div>
 

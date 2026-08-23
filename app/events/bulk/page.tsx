@@ -72,18 +72,18 @@ export default function BulkMatchesPage() {
       </div>
 
       {saveError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl mb-5">
+        <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl mb-5">
           {saveError}
         </div>
       )}
 
       {phase === 'opgeslagen' && (
         <div className="space-y-3 mb-5">
-          <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded-xl">
+          <div className="bg-panel-green border border-panel-green-edge text-panel-green-ink text-sm px-4 py-3 rounded-xl">
             {t.event.bulk.savedCount.replace('{count}', String(savedCount))}
           </div>
           {attendanceFailed && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm px-4 py-3 rounded-xl">
+            <div className="bg-panel-amber border border-panel-amber-edge text-panel-amber-ink text-sm px-4 py-3 rounded-xl">
               {t.event.bulk.attendanceWarning}
             </div>
           )}

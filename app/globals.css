@@ -40,6 +40,27 @@
   --color-danger: var(--danger);
   --color-event-match: var(--event-match);
   --color-event-training: var(--event-training);
+  /* Statuspanelen. Gebruik als drietal: `bg-panel-red border-panel-red-edge
+     text-panel-red-ink`. */
+  --color-panel-red: var(--panel-red-bg);
+  --color-panel-red-edge: var(--panel-red-border);
+  --color-panel-red-ink: var(--panel-red-fg);
+  --color-panel-amber: var(--panel-amber-bg);
+  --color-panel-amber-edge: var(--panel-amber-border);
+  --color-panel-amber-ink: var(--panel-amber-fg);
+  --color-panel-green: var(--panel-green-bg);
+  --color-panel-green-edge: var(--panel-green-border);
+  --color-panel-green-ink: var(--panel-green-fg);
+  --color-panel-orange: var(--panel-orange-bg);
+  --color-panel-orange-edge: var(--panel-orange-border);
+  --color-panel-orange-ink: var(--panel-orange-fg);
+  --color-panel-blue: var(--panel-blue-bg);
+  --color-panel-blue-edge: var(--panel-blue-border);
+  --color-panel-blue-ink: var(--panel-blue-fg);
+  --color-panel-purple: var(--panel-purple-bg);
+  --color-panel-purple-edge: var(--panel-purple-border);
+  --color-panel-purple-ink: var(--panel-purple-fg);
+  --color-panel-purple-solid: var(--panel-purple-solid);
 }
 
 /* Light theme values. --primary stays constant across themes because it is a
@@ -94,6 +115,25 @@
   --chip-green-fg: #14655c;
   --chip-red-fg: #b91c1c;
   --chip-amber-fg: #b45309;
+
+  /* Statuspanelen (foutmelding, waarschuwing, bevestiging). Stonden eerder als
+     kale Tailwind-drietallen — `bg-red-50 border-red-200 text-red-700` en
+     varianten — op ~60 plekken in 26 bestanden. Die haalden AA prima, maar het
+     zijn VASTE lichte vlakken: in dark mode bleven ze wit oplichten op een
+     donkere pagina.
+
+     De LICHTE waarden hieronder zijn exact die Tailwind-kleuren, zodat het
+     lichte thema bit voor bit hetzelfde blijft. Alleen het dark-blok is nieuw.
+     Elke -ink haalt minimaal 4.5:1 op zijn eigen -bg in beide thema's. */
+  --panel-red-bg: #fef2f2;    --panel-red-border: #fecaca;    --panel-red-fg: var(--chip-red-fg);
+  --panel-amber-bg: #fffbeb;  --panel-amber-border: #fde68a;  --panel-amber-fg: var(--chip-amber-fg);
+  --panel-green-bg: #f0fdf4;  --panel-green-border: #bbf7d0;  --panel-green-fg: var(--chip-green-fg);
+  --panel-orange-bg: #fff7ed; --panel-orange-border: #fed7aa; --panel-orange-fg: var(--warning-text);
+  --panel-blue-bg: #eff6ff;   --panel-blue-border: #bfdbfe;   --panel-blue-fg: #2563eb;
+  --panel-purple-bg: #faf5ff; --panel-purple-border: #e9d5ff; --panel-purple-fg: #7e22ce;
+  /* Paars als KNOP-achtergrond onder witte tekst (6.98:1). Constant over beide
+     thema's, net als --primary en --warning. */
+  --panel-purple-solid: #7e22ce;
 }
 
 /* Z-index-ladder voor alles wat op paginaniveau zweeft. Vóór 2026-08-23 stonden
@@ -141,6 +181,19 @@
   --chip-green-fg: #4ade80;
   --chip-red-fg: #fb8a8a;
   --chip-amber-fg: #fbbf24;
+
+  /* Paneelvlakken als transparante tint van hun eigen tekstkleur, zodat ze over
+     --surface én --surface-sunken kloppen zonder aparte waarden. 10% geeft een
+     herkenbaar gekleurd vlak dat de tekst nog op 4.56–5.96:1 houdt; bij 14%
+     zakt rood al naar 4.29. Verhoog dit percentage dus niet zonder narekenen. */
+  --panel-red-bg: rgba(251, 138, 138, 0.10);    --panel-red-border: rgba(251, 138, 138, 0.28);
+  --panel-amber-bg: rgba(251, 191, 36, 0.10);   --panel-amber-border: rgba(251, 191, 36, 0.28);
+  --panel-green-bg: rgba(74, 222, 128, 0.10);   --panel-green-border: rgba(74, 222, 128, 0.28);
+  --panel-orange-bg: rgba(251, 146, 60, 0.10);  --panel-orange-border: rgba(251, 146, 60, 0.28);
+  --panel-blue-bg: rgba(147, 180, 251, 0.10);   --panel-blue-border: rgba(147, 180, 251, 0.28);
+  --panel-blue-fg: #93b4fb;
+  --panel-purple-bg: rgba(196, 165, 245, 0.10); --panel-purple-border: rgba(196, 165, 245, 0.28);
+  --panel-purple-fg: #c4a5f5;
 }
 
 /* Grafiekkleuren voor recharts (components/inzichten/*) — als CSS-klassen in
@@ -465,6 +518,14 @@ body::after {
        dark-blok overschreven, dus moeten ze hier terug naar hun lichte waarde.
        Zonder deze twee regels drukt dark mode #7fd8cd/#fb923c op wit papier. */
     --primary-strong: #14655c; --warning-text: #b94509;
+    /* Idem voor de statuspanelen: in dark zijn dat transparante tinten die op
+       wit papier vrijwel onzichtbaar worden. Terug naar de lichte hexen. */
+    --panel-red-bg: #fef2f2;    --panel-red-border: #fecaca;
+    --panel-amber-bg: #fffbeb;  --panel-amber-border: #fde68a;
+    --panel-green-bg: #f0fdf4;  --panel-green-border: #bbf7d0;
+    --panel-orange-bg: #fff7ed; --panel-orange-border: #fed7aa;
+    --panel-blue-bg: #eff6ff;   --panel-blue-border: #bfdbfe;   --panel-blue-fg: #2563eb;
+    --panel-purple-bg: #faf5ff; --panel-purple-border: #e9d5ff; --panel-purple-fg: #7e22ce;
   }
 
   /* Pagina-achtergrond (`body`) en decoratieve blobs (`body::before` /

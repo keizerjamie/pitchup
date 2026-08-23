@@ -143,20 +143,20 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
             {isGenerating ? t.schedule.busy : `${t.schedule.generate} ${trainingCount} ${t.schedule.trainingsWord}`}
           </button>
           <button type="button" onClick={handleRegenerate} disabled={isGenerating}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 active:scale-[0.98] transition disabled:opacity-60">
+            className="w-full py-2.5 rounded-xl text-sm font-semibold border border-panel-red-edge text-panel-red-ink hover:bg-panel-red active:scale-[0.98] transition disabled:opacity-60">
             {isGenerating ? t.schedule.busy : t.schedule.regenerate}
           </button>
         </div>
       )}
 
       {result && (
-        <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700 font-medium">
+        <div className="bg-panel-green border border-panel-green-edge rounded-xl px-4 py-3 text-sm text-panel-green-ink font-medium">
           ✓ {result.created} {t.schedule.created}
           {result.skipped > 0 && ` · ${result.skipped} ${t.schedule.skipped}`}
         </div>
       )}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{error}</div>
+        <div className="bg-panel-red border border-panel-red-edge rounded-xl px-4 py-3 text-sm text-panel-red-ink">{error}</div>
       )}
     </form>
   )

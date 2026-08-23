@@ -281,7 +281,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
     return (
       <div className="mt-3 pt-3 border-t border-[var(--border-soft)] space-y-2 print:hidden">
         {droppedPlayerCount > 0 && (
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+          <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
             {t.teamIndeling.teamsRemovedWarning.replace('{n}', String(droppedPlayerCount))}
           </p>
         )}
@@ -315,13 +315,13 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
         <p className="text-[11px] text-faint">{t.teamIndeling.dragHint}</p>
 
         {droppedPlayerCount > 0 && (
-          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+          <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
             {t.teamIndeling.teamsRemovedWarning.replace('{n}', String(droppedPlayerCount))}
           </p>
         )}
 
         {saveError && (
-          <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+          <p className="text-xs text-panel-red-ink bg-panel-red border border-panel-red-edge rounded-lg px-2 py-1">
             {saveError}
           </p>
         )}
@@ -348,7 +348,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
               data-testid={`teamindeling-team-${i}`}
               aria-label={t.teamIndeling.teamDropZoneLabel.replace('{team}', teamLabel)}
               className={`flex-1 min-w-[160px] rounded-xl border p-3 transition-colors ${
-                isHovered ? 'border-orange-400 bg-orange-50/60' : 'border-[var(--border-soft)] bg-surface-sunken'
+                isHovered ? 'border-warning bg-panel-orange/60' : 'border-[var(--border-soft)] bg-surface-sunken'
               }`}
             >
               <div className="flex items-center justify-between gap-2 mb-2">
@@ -357,7 +357,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                   <button
                     type="button"
                     onClick={() => assignToTeam(selectedPlayerId, i)}
-                    className="text-[11px] font-semibold text-warning-text hover:text-orange-700 flex-shrink-0"
+                    className="text-[11px] font-semibold text-warning-text hover:text-panel-orange-ink flex-shrink-0"
                   >
                     {t.teamIndeling.moveTo.replace('{team}', teamLabel)}
                   </button>
@@ -365,7 +365,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
               </div>
 
               {sizeMismatch && (
-                <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-2">
+                <p className="text-[11px] text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1 mb-2">
                   {t.teamIndeling.sizeWarning.replace('{n}', String(team.grootte))}
                 </p>
               )}
@@ -382,9 +382,9 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                       key={id}
                       className={`inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-full text-xs font-semibold transition-shadow ${
                         unknown || absent
-                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                          ? 'bg-panel-amber text-panel-amber-ink border border-panel-amber-edge'
                           : 'bg-surface text-muted border border-[var(--border-soft)]'
-                      } ${draggingThis ? 'ring-2 ring-orange-400 shadow-lg' : ''}`}
+                      } ${draggingThis ? 'ring-2 ring-warning shadow-lg' : ''}`}
                       style={
                         draggingThis
                           ? {
@@ -409,13 +409,13 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                         {displayName}
                       </button>
                       {absent && (
-                        <span className="text-[10px] font-semibold text-amber-700">{t.teamIndeling.absentWarning}</span>
+                        <span className="text-[10px] font-semibold text-panel-amber-ink">{t.teamIndeling.absentWarning}</span>
                       )}
                       <button
                         type="button"
                         onClick={() => removeFromTeams(id)}
                         aria-label={`${t.teamIndeling.remove}: ${displayName}`}
-                        className="w-4 h-4 flex items-center justify-center text-faint hover:text-red-500 flex-shrink-0"
+                        className="w-4 h-4 flex items-center justify-center text-faint hover:text-panel-red-ink flex-shrink-0"
                       >
                         ×
                       </button>
@@ -433,7 +433,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
         data-testid="teamindeling-pool"
         aria-label={t.teamIndeling.poolDropZoneLabel}
         className={`rounded-xl border-2 p-2 transition-colors ${
-          hoverZone === 'pool' ? 'border-orange-400 bg-orange-50/60' : 'border-transparent'
+          hoverZone === 'pool' ? 'border-warning bg-panel-orange/60' : 'border-transparent'
         }`}
       >
         <h4 className="text-xs font-semibold text-muted mb-1.5">{t.teamIndeling.poolLabel}</h4>
@@ -460,9 +460,9 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                   }}
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
                     selectedPlayerId === p.id
-                      ? 'bg-orange-100 text-orange-700 border border-orange-300'
+                      ? 'bg-panel-orange text-panel-orange-ink border border-panel-orange-edge'
                       : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
-                  } ${draggingThis ? 'ring-2 ring-orange-400 shadow-lg' : ''}`}
+                  } ${draggingThis ? 'ring-2 ring-warning shadow-lg' : ''}`}
                 >
                   <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
                   {p.name.split(' ')[0]}

@@ -52,9 +52,9 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
   return (
     <div className="space-y-5">
       {/* Header card */}
-      <div className="bg-purple-50 border border-purple-200 rounded-2xl p-5">
-        <h2 className="font-bold text-purple-900 text-lg mb-1">{t.periodization.title}</h2>
-        <p className="text-sm text-purple-700">{t.periodization.hint}</p>
+      <div className="bg-panel-purple border border-panel-purple-edge rounded-2xl p-5">
+        <h2 className="font-bold text-panel-purple-ink text-lg mb-1">{t.periodization.title}</h2>
+        <p className="text-sm text-panel-purple-ink">{t.periodization.hint}</p>
       </div>
 
       {/* Step inputs */}
@@ -83,7 +83,7 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
                     max={cat.maxStap}
                     value={currentStep}
                     onChange={e => handleStepChange(stepKey, e.target.value)}
-                    className="w-full text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 font-semibold text-ink"
+                    className="w-full text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-panel-purple-ink focus:ring-2 focus:ring-panel-purple-ink/30 font-semibold text-ink"
                   />
                 </div>
                 <button
@@ -103,8 +103,8 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
       </div>
 
       {/* Steigerungs note */}
-      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-        <p className="text-xs text-emerald-700">{t.periodization.steigerungsNote}</p>
+      <div className="bg-panel-green border border-panel-green-edge rounded-xl p-3">
+        <p className="text-xs text-panel-green-ink">{t.periodization.steigerungsNote}</p>
       </div>
 
       {/* Notes */}
@@ -115,7 +115,7 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
           value={notes}
           onChange={e => setNotes(e.target.value)}
           placeholder={t.event.notesMeetingPlaceholder}
-          className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 text-ink placeholder-faint resize-none text-sm"
+          className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-panel-purple-ink focus:ring-2 focus:ring-panel-purple-ink/30 text-ink placeholder-faint resize-none text-sm"
         />
       </div>
 
@@ -127,7 +127,7 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
         className={`w-full py-3.5 rounded-xl font-semibold transition active:scale-95 text-sm ${
           saved
             ? 'bg-primary text-white'
-            : 'bg-purple-600 hover:bg-purple-700 text-white'
+            : 'bg-panel-purple-solid hover:bg-panel-purple-solid/90 text-white'
         } ${isPending ? 'opacity-60' : ''}`}
       >
         {saved ? t.periodization.saved : isPending ? t.periodization.saving : t.periodization.save}
