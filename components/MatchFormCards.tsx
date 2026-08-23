@@ -74,16 +74,16 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
       <div className="flex items-end justify-between gap-2">
         <p className="font-pdf-display text-sm font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{t.matchSquad.formHeading}</p>
         {items.length > 0 && (
-          <p className="text-xs font-bold uppercase tracking-wide text-gray-500">{summaryText}</p>
+          <p className="text-[11px] font-black uppercase tracking-[0.14em]" style={{ color: 'var(--club-secondary, #009966)' }}>{summaryText}</p>
         )}
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
         {items.map((item) => {
           const score = orderedScore(item)
           return (
-          <div key={item.id} className="min-w-[104px] flex-1 basis-[104px] rounded-md border border-gray-300 p-3">
+          <div key={item.id} className="print-form-card min-w-[104px] flex-1 basis-[104px] p-3">
             <span
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-base font-black"
+              className="font-pdf-display inline-flex h-10 w-10 items-center justify-center rounded-lg text-lg font-black"
               style={{
                 background: FORM_STYLE[item.result].bg,
                 color: FORM_STYLE[item.result].fg,
@@ -97,15 +97,15 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
                 MatchFormCards.test.tsx toetst hierop via container.textContent. */}
             <span className="sr-only">{label[item.result]}</span>
             {item.result !== 'unknown' && score !== null && (
-              <p className="mt-1 text-sm font-black text-gray-900">{score.first}–{score.second}</p>
+              <p className="font-pdf-display mt-2 text-base font-black">{score.first}–{score.second}</p>
             )}
             {/* Geen "vs "-prefix meer hier (wel elders in het print-blok, bij
                 de hoofd-matchup) — het ontwerp toont in deze kaartjes alleen
                 de kale tegenstandernaam. */}
             {item.opponent && (
-              <p className="truncate text-xs font-extrabold uppercase text-gray-900">{item.opponent}</p>
+              <p className="truncate text-[11px] font-extrabold uppercase tracking-wide">{item.opponent}</p>
             )}
-            <p className="text-[10px] uppercase text-gray-500">{formatDateShort(item.date, t.browserLocale)}</p>
+            <p className="print-form-date text-[10px] font-bold uppercase tracking-wide">{formatDateShort(item.date, t.browserLocale)}</p>
           </div>
           )
         })}

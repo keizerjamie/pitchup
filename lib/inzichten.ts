@@ -346,3 +346,319 @@ export function verledenSeizoensVenster(
   const end = gisteren < venster.end ? gisteren : venster.end
   return { start: venster.start, end }
 }
+
+// ── Samenvattingscijfers en signalen (bovenste laag van /inzichten) ───
+//
+// Alles hieronder rekent op rijen die de pagina tóch al ophaalt: er komt geen
+// enkele extra query of RPC bij. De pagina toonde die rijen alleen nog nergens
+// als conclusie — een percentage zonder vergelijking of norm laat de trainer
+// zelf alle interpretatie doen.
+
+// Streefwaarde voor trainingsopkomst. Onderzoek naar jeugdopleidingen wijst
+// 85% aan als de grens waarboven teams merkbaar sneller ontwikkelen; daaronder
+// verwatert de opbouw tussen trainingen.
+//
+// BEWUST EEN VASTE CONSTANTE, geen teaminstelling: een instelbare drempel
+// vraagt een kolom, een instellingenscherm en een migratie, en dat is een
+// datamodel-wijziging die hier niet gevraagd is. Wordt dit ooit per team
+// instelbaar, dan blijft deze waarde de standaard.
+export const OPKOMST_DOEL = 85
+
+// Onder dit percentage aanwezigheid noemt het signalenblok een speler
+// expliciet "meer dan de helft gemist". Bewust ruim onder OPKOMST_DOEL: dit
+// gaat niet over een team dat iets achterloopt maar over individuele spelers
+// die structureel wegblijven.
+export const SPELER_ZORGDREMPEL = 50
+
+// Hoeveel signalen het blok maximaal toont. Meer dan drie leest als een lijst
+// in plaats van als een conclusie.
+export const MAX_SIGNALEN = 3
+
+// Aantal recente wedstrijden waarover de ratingtrend wordt vergeleken: het
+// gemiddelde van de laatste N tegen dat van de N daarvóór.
+export const RATING_TREND_VENSTER = 5
+
+// Vanaf welk verschil een ratingtrend het vermelden waard is. Onder deze
+// waarde is het ruis: één wedstrijd met twee invallers verschuift het
+// gemiddelde al met een tiende.
+export const RATING_TREND_DREMPEL = 0.3
+
+export interface MaandTrend {
+  maand: string // 'YYYY-MM'
+  percentage: number
+  // null = er is geen eerdere maand met een percentage om mee te vergelijken.
+  vorigePercentage: number | null
+  delta: number | null
+}
+
+// De meest recente maand mét percentage, plus het verschil met de maand
+// daarvóór die óók een percentage heeft. Maanden zonder data (percentage null)
+// worden overgeslagen in plaats van als 0% meegeteld — zelfde regel als overal
+// elders in dit bestand.
+//
+// null als er geen enkele maand met een percentage is.
+export function laatsteMaandTrend(maanden: MaandOpkomst[]): MaandTrend | null {
+  const metCijfer = maanden.filter(
+    (m): m is MaandOpkomst & { percentage: number } => m.percentage !== null,
+  )
+  if (metCijfer.length === 0) return null
+  const laatste = metCijfer[metCijfer.length - 1]
+  const vorige = metCijfer.length > 1 ? metCijfer[metCijfer.length - 2] : null
+  return {
+    maand: laatste.maand,
+    percentage: laatste.percentage,
+    vorigePercentage: vorige ? vorige.percentage : null,
+    delta: vorige ? laatste.percentage - vorige.percentage : null,
+  }
+}
+
+export interface RatingTrend {
+  gemiddelde: number
+  aantal: number
+  // null = te weinig wedstrijden om twee vensters te vergelijken.
+  delta: number | null
+}
+
+// Teamgemiddelde over alle beoordeelde wedstrijden, plus de trend: het
+// gemiddelde van de laatste `venster` wedstrijden min dat van de `venster`
+// daarvóór. Zonder twee volle vensters is er geen eerlijke vergelijking en
+// blijft delta null — een trend op basis van één wedstrijd tegen vier is geen
+// trend.
+//
+// `rows` komt oplopend op datum uit de RPC; de invoer wordt niet gemuteerd.
+export function teamRatingTrend(
+  rows: TeamRatingRij[],
+  venster: number = RATING_TREND_VENSTER,
+): RatingTrend | null {
+  if (rows.length === 0) return null
+  const gemiddelde = rows.reduce((som, r) => som + r.gemiddelde, 0) / rows.length
+
+  const breedte = Math.max(1, Math.trunc(venster))
+  let delta: number | null = null
+  if (rows.length >= breedte * 2) {
+    const recent = rows.slice(-breedte)
+    const daarvoor = rows.slice(-breedte * 2, -breedte)
+    const gem = (deel: TeamRatingRij[]) => deel.reduce((som, r) => som + r.gemiddelde, 0) / deel.length
+    delta = gem(recent) - gem(daarvoor)
+  }
+  return { gemiddelde, aantal: rows.length, delta }
+}
+
+export interface Doelsaldo {
+  voor: number
+  tegen: number
+  saldo: number
+  wedstrijden: number
+}
+
+// Doelpunten voor/tegen over de wedstrijden die een volledige uitslag hebben.
+// Wedstrijden waarvan één van beide kanten leeg is tellen nergens mee: een
+// half ingevulde uitslag zou het saldo stilzwijgend scheeftrekken.
+export function doelsaldo(items: DoelpuntItem[]): Doelsaldo {
+  let voor = 0
+  let tegen = 0
+  let wedstrijden = 0
+  for (const item of items) {
+    if (item.goals_for === null || item.goals_against === null) continue
+    voor += item.goals_for
+    tegen += item.goals_against
+    wedstrijden++
+  }
+  return { voor, tegen, saldo: voor - tegen, wedstrijden }
+}
+
+// Toon van een signaal. Bepaalt uitsluitend de kleur/het icoon in de UI, niet
+// de volgorde — die staat hieronder vast.
+export type SignaalToon = 'goed' | 'letop' | 'zorg'
+
+export interface Signaal {
+  // Stabiele sleutel, bruikbaar als React-key en in tests.
+  id: string
+  toon: SignaalToon
+  // Naam van de i18n-sleutel binnen `t.insights`. Het signaal draagt bewust
+  // geen kant-en-klare zin: dit bestand is taalonafhankelijk, net als de rest
+  // van lib/. De component vult de tekst in.
+  tekstSleutel: string
+  // Waarden voor de {placeholders} in die tekst.
+  waarden: Record<string, string | number>
+}
+
+export interface SignaalInvoer {
+  maanden: MaandOpkomst[]
+  aanwezigheidPerSpeler: AanwezigheidPerSpelerRij[]
+  teamRating: TeamRatingRij[]
+  doelpunten: DoelpuntItem[]
+}
+
+// Bouwt de "wat valt op"-signalen op uit dezelfde rijen die de grafieken al
+// gebruiken. Puur regelgebaseerd — geen model, geen externe aanroep, geheel
+// deterministisch, en daarmee gewoon te testen.
+//
+// VOLGORDE IS DE PRIORITEIT: problemen eerst (zorg, dan let-op), complimenten
+// als laatste. Bij meer dan MAX_SIGNALEN treffers vallen de laatste af, dus
+// een zorgsignaal verdringt altijd een compliment en nooit andersom. Bij nul
+// treffers geeft dit een lege lijst terug en hoort de aanroeper het hele blok
+// weg te laten in plaats van "geen bijzonderheden" te tonen — dat laatste is
+// een regel tekst die niets toevoegt.
+export function bepaalSignalen(invoer: SignaalInvoer): Signaal[] {
+  const zorg: Signaal[] = []
+  const letop: Signaal[] = []
+  const goed: Signaal[] = []
+
+  // 1. Spelers die structureel wegblijven. Staat vooraan omdat dit het enige
+  //    signaal is dat over individuele spelers gaat en dus direct tot een
+  //    gesprek leidt.
+  const wegblijvers = invoer.aanwezigheidPerSpeler.filter((rij) => {
+    const percentage = berekenAanwezigheidPercentage(rij.aanwezig, rij.afwezig)
+    return percentage !== null && percentage < SPELER_ZORGDREMPEL
+  })
+  if (wegblijvers.length > 0) {
+    zorg.push({
+      id: 'spelers-onder-drempel',
+      toon: 'zorg',
+      tekstSleutel: wegblijvers.length === 1 ? 'signaalSpelerWegblijver' : 'signaalSpelersWegblijvers',
+      waarden: { aantal: wegblijvers.length, drempel: SPELER_ZORGDREMPEL, naam: wegblijvers[0].naam },
+    })
+  }
+
+  // 2. Trainingsopkomst tegen de norm. Onder de norm is een let-op; erboven
+  //    een compliment (dat pas getoond wordt als er ruimte over is).
+  const trend = laatsteMaandTrend(invoer.maanden)
+  if (trend) {
+    if (trend.percentage < OPKOMST_DOEL) {
+      letop.push({
+        id: 'opkomst-onder-doel',
+        toon: 'letop',
+        tekstSleutel: trend.delta !== null && trend.delta < 0 ? 'signaalOpkomstOnderDoelDaling' : 'signaalOpkomstOnderDoel',
+        waarden: {
+          doel: OPKOMST_DOEL,
+          percentage: trend.percentage,
+          maand: trend.maand,
+          daling: trend.delta !== null ? Math.abs(trend.delta) : 0,
+        },
+      })
+    } else {
+      goed.push({
+        id: 'opkomst-boven-doel',
+        toon: 'goed',
+        tekstSleutel: 'signaalOpkomstBovenDoel',
+        waarden: { doel: OPKOMST_DOEL, percentage: trend.percentage, maand: trend.maand },
+      })
+    }
+  }
+
+  // 3. Ratingtrend, alleen bij een verschil dat boven de ruisdrempel uitkomt.
+  const rating = teamRatingTrend(invoer.teamRating)
+  if (rating && rating.delta !== null && Math.abs(rating.delta) >= RATING_TREND_DREMPEL) {
+    const verschil = Math.round(Math.abs(rating.delta) * 10) / 10
+    if (rating.delta > 0) {
+      goed.push({
+        id: 'rating-stijging',
+        toon: 'goed',
+        tekstSleutel: 'signaalRatingStijging',
+        waarden: { verschil, venster: RATING_TREND_VENSTER },
+      })
+    } else {
+      letop.push({
+        id: 'rating-daling',
+        toon: 'letop',
+        tekstSleutel: 'signaalRatingDaling',
+        waarden: { verschil, venster: RATING_TREND_VENSTER },
+      })
+    }
+  }
+
+  // 4. Doelsaldo. Alleen vermeldenswaard als er genoeg wedstrijden zijn om er
+  //    iets over te zeggen — bij twee wedstrijden zegt een saldo niets.
+  const saldo = doelsaldo(invoer.doelpunten)
+  if (saldo.wedstrijden >= RATING_TREND_VENSTER) {
+    if (saldo.saldo < 0) {
+      letop.push({
+        id: 'doelsaldo-negatief',
+        toon: 'letop',
+        tekstSleutel: 'signaalDoelsaldoNegatief',
+        waarden: { voor: saldo.voor, tegen: saldo.tegen, wedstrijden: saldo.wedstrijden },
+      })
+    } else if (saldo.saldo > 0) {
+      goed.push({
+        id: 'doelsaldo-positief',
+        toon: 'goed',
+        tekstSleutel: 'signaalDoelsaldoPositief',
+        waarden: { saldo: saldo.saldo, voor: saldo.voor, tegen: saldo.tegen, wedstrijden: saldo.wedstrijden },
+      })
+    }
+  }
+
+  return [...zorg, ...letop, ...goed].slice(0, MAX_SIGNALEN)
+}
+
+// Leesbaar maandlabel uit 'YYYY-MM'. Stond eerder als lokale functie in
+// components/inzichten/OpkomstPerMaandChart.tsx; verhuisd hierheen zodat de
+// KPI-strook en het signalenblok exact dezelfde notatie tonen als de grafiek —
+// twee schrijfwijzen van dezelfde maand op één pagina leest als twee
+// verschillende maanden.
+//
+// Zelfde tijdzone-veilige aanpak als lib/season-dates.ts: 'YYYY-MM' gaat via
+// Date.UTC naar een leesbaar maandlabel. timeZone:'UTC' is VERPLICHT bij het
+// formatteren, anders kan de browser-tijdzone van de bezoeker de getoonde
+// maand laten verschuiven (bv. eind/begin van de maand rond middernacht UTC).
+export function maandLabel(maand: string, locale: string): string {
+  const [jaar, maandNr] = maand.split('-').map(Number)
+  const ms = Date.UTC(jaar, maandNr - 1, 1)
+  const label = new Date(ms).toLocaleDateString(locale, { month: 'short', year: 'numeric', timeZone: 'UTC' })
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+// ── Periodefilter ────────────────────────────────────────────────────
+//
+// De pagina keek altijd naar het hele seizoen. "Hoe ging het de laatste vier
+// weken" was daarmee onbeantwoordbaar, terwijl dat precies de vraag is die
+// een trainer op dinsdagavond stelt.
+
+export const PERIODES = ['4w', '8w', 'seizoen'] as const
+export type Periode = (typeof PERIODES)[number]
+
+// Standaardperiode. Ook de terugval bij een onbekende of ontbrekende waarde:
+// het hele seizoen is de ruimste, minst verrassende lens, en een tikfout in
+// de URL hoort nooit stilzwijgend een smaller (en dus misleidend leger)
+// venster op te leveren.
+export const PERIODE_STANDAARD: Periode = 'seizoen'
+
+// Aantal dagen dat elke periode terugkijkt. 'seizoen' staat er bewust niet in:
+// die knipt niets af.
+const PERIODE_DAGEN: Record<Exclude<Periode, 'seizoen'>, number> = {
+  '4w': 28,
+  '8w': 56,
+}
+
+export function isPeriode(waarde: unknown): waarde is Periode {
+  return typeof waarde === 'string' && (PERIODES as readonly string[]).includes(waarde)
+}
+
+// Knipt het seizoensvenster af op de gekozen periode. De einddatum blijft die
+// van het seizoen — het afknippen op "niet later dan gisteren" gebeurt
+// verderop in verledenSeizoensVenster(), precies zoals voorheen.
+//
+// De startdatum wordt nooit vroeger dan de seizoensstart: "laatste 8 weken"
+// mag niet buiten het seizoen om data ophalen die er niet bij hoort.
+//
+// Ligt het hele seizoen in het verleden, dan levert een korte periode een
+// venster op waarin niets valt. Dat is geen fout maar het juiste antwoord:
+// er is in de laatste vier weken inderdaad niets gebeurd.
+export function periodeVenster(
+  venster: Seizoensvenster,
+  periode: Periode,
+  vandaag: string = todayLocal(),
+): Seizoensvenster {
+  if (periode === 'seizoen') return { start: venster.start, end: venster.end }
+
+  const grens = addDays(vandaag, -(PERIODE_DAGEN[periode] - 1))
+  // Onbruikbare klokwaarde: liever het volledige seizoen tonen dan
+  // 'NaN-NaN-NaN' naar de database sturen. Zelfde voorzorg als
+  // verledenSeizoensVenster().
+  if (!isDateString(grens)) return { start: venster.start, end: venster.end }
+
+  // 'YYYY-MM-DD' heeft een vaste breedte, dus alfabetisch = chronologisch.
+  const start = grens > venster.start ? grens : venster.start
+  return { start, end: venster.end }
+}

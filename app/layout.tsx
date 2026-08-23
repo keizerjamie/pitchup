@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { headers } from 'next/headers'
 import { Space_Grotesk, Manrope, Archivo_Black } from 'next/font/google'
 import './globals.css'
 import AppShell from '@/components/AppShell'
@@ -42,7 +43,19 @@ export const viewport: Viewport = {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [t, supabase] = await Promise.all([getDict(), createClient()])
+  const [t, supabase, headerList] = await Promise.all([getDict(), createClient(), headers()])
+
+  // Nonce voor het theme-script hieronder. proxy.ts genereert per request een
+  // nonce, zet die in de CSP én als `x-nonce` op de REQUEST-headers; Next
+  // gebruikt hem daarmee automatisch voor zijn eigen inline scripts, maar een
+  // zelfgeschreven <script> moet hem expliciet meekrijgen. Zonder dit blokkeert
+  // de browser het script stil (alleen een CSP-violation in de console) en
+  // flikkert de app bij elke navigatie kort in het verkeerde thema.
+  //
+  // `?? undefined` en niet `?? ''`: een leeg nonce-attribuut is zelf al een
+  // CSP-mismatch. Ontbreekt de header (een pad buiten de proxy-matcher), dan
+  // staat er ook geen CSP op die response en is het attribuut overbodig.
+  const nonce = headerList.get('x-nonce') ?? undefined
 
   // Team + user context for the sidebar chrome (read-only, tenant-scoped).
   // Null on auth pages where there is no session — AppShell hides chrome there.
@@ -67,6 +80,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* Apply the saved/system theme before first paint to avoid a flash.
             Rendered into <head> so it runs before the body renders. */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "(function(){try{var s=localStorage.getItem('theme');var pref=s||'system';var t=(pref!=='system')?pref:((window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light');var e=document.documentElement;e.setAttribute('data-theme',t);e.setAttribute('data-theme-pref',pref);}catch(e){}})();",

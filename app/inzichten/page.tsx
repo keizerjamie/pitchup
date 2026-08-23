@@ -14,6 +14,14 @@ import {
   telVorm,
   topWorstRating,
   topWorstAanwezigheid,
+  laatsteMaandTrend,
+  teamRatingTrend,
+  doelsaldo,
+  bepaalSignalen,
+  periodeVenster,
+  isPeriode,
+  PERIODE_STANDAARD,
+  type Periode,
   MAX_SEIZOEN_WEDSTRIJDEN,
   type AanwezigheidRij,
   type MaandOpkomstRij,
@@ -31,14 +39,78 @@ import DoelpuntenChart from '@/components/inzichten/DoelpuntenChart'
 import VormChart from '@/components/inzichten/VormChart'
 import TopWorstRatings from '@/components/inzichten/TopWorstRatings'
 import TopWorstAanwezigheid from '@/components/inzichten/TopWorstAanwezigheid'
+import KpiStrip from '@/components/inzichten/KpiStrip'
+import SignalenBlok from '@/components/inzichten/SignalenBlok'
+import PeriodeFilter from '@/components/inzichten/PeriodeFilter'
+import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
+import PrintButton from '@/components/PrintButton'
+import { resolveClubColors } from '@/lib/club-colors'
 
-export default async function InzichtenPage() {
+// Pagina-brede lege staat. Twee gevallen delen deze schil: "geen seizoen
+// ingesteld" en "seizoen ingesteld, maar nog geen enkel cijfer". Beide zijn
+// een lege PAGINA, geen lege kaart — zeven kaarten die elk apart "nog geen
+// data" melden herhaalt zeven keer dezelfde boodschap en oogt als een kapotte
+// pagina in plaats van als een verse start.
+//
+// Zelfde visuele taal als de bestaande pagina-brede lege staten elders
+// (bv. app/periodisering/page.tsx).
+function LegeStaat({
+  icoon,
+  titel,
+  hint,
+  actieHref,
+  actieLabel,
+}: {
+  icoon: string
+  titel: string
+  hint: string
+  actieHref: string
+  actieLabel: string
+}) {
+  return (
+    <div className="max-w-lg surface-card p-10 text-center flex flex-col items-center gap-3">
+      <span className="ms text-[40px] text-faint">{icoon}</span>
+      <p className="text-ink font-bold">{titel}</p>
+      <p className="text-faint text-sm">{hint}</p>
+      <Link
+        href={actieHref}
+        className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white"
+        style={{ background: 'var(--brand-btn)' }}
+      >
+        {actieLabel}
+      </Link>
+    </div>
+  )
+}
+
+export default async function InzichtenPage({
+  searchParams,
+}: {
+  // Optioneel én als Promise: Next levert dit als Promise aan, maar de
+  // acceptatietests roepen deze functie rechtstreeks aan zonder props
+  // (inzichten.acceptance.test.tsx). Zonder `?` zou elke bestaande test
+  // klappen op het uitpakken hieronder.
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+} = {}) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
+  const params = searchParams ? await searchParams : {}
+  // Onbekende of ontbrekende waarde valt terug op het hele seizoen — een
+  // tikfout in de URL mag nooit stilzwijgend een smaller venster opleveren.
+  const periode: Periode = isPeriode(params.periode) ? params.periode : PERIODE_STANDAARD
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   const settings = await getAllSettings()
-  const venster = seizoensVenster(settings)
+  // Huisstijl voor het print-rapport. Geen extra query: getAllSettings() is
+  // hierboven al opgehaald voor het seizoensvenster.
+  const teamName = settings['team_name']?.trim() || null
+  const teamLogoUrl = settings['team_logo_url'] || null
+  const clubColors = resolveClubColors(settings)
+  const seizoen = seizoensVenster(settings)
+  // Vanaf hier is `venster` het GEKOZEN venster: het seizoen, of de laatste
+  // 4/8 weken daarbinnen. Alle RPC's en queries hieronder gebruiken dit —
+  // niet het volledige seizoen.
+  const venster = seizoen ? periodeVenster(seizoen, periode) : null
 
   // Geen (geldig) seizoen ingesteld: ÉÉN pagina-brede lege staat, en geen
   // enkele RPC/query wordt uitgevoerd (O-vraag uit de technische brief).
@@ -49,18 +121,13 @@ export default async function InzichtenPage() {
           <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
           <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
         </div>
-        <div className="max-w-lg surface-card p-10 text-center flex flex-col items-center gap-3">
-          <span className="ms text-[40px] text-faint">calendar_month</span>
-          <p className="text-ink font-bold">{t.insights.noSeason}</p>
-          <p className="text-faint text-sm">{t.insights.noSeasonHint}</p>
-          <Link
-            href="/settings"
-            className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white"
-            style={{ background: 'var(--brand-btn)' }}
-          >
-            {t.insights.goToSettings}
-          </Link>
-        </div>
+        <LegeStaat
+          icoon="calendar_month"
+          titel={t.insights.noSeason}
+          hint={t.insights.noSeasonHint}
+          actieHref="/settings"
+          actieLabel={t.insights.goToSettings}
+        />
       </div>
     )
   }
@@ -147,9 +214,14 @@ export default async function InzichtenPage() {
   const ratingTopWorst = topWorstRating(
     unwrap<RatingPerSpelerRij>('inzichten.ratingPerSpeler', ratingPerSpelerResult),
   )
-  const aanwezigheidTopWorst = topWorstAanwezigheid(
-    unwrap<AanwezigheidPerSpelerRij>('inzichten.aanwezigheidPerSpeler', aanwezigheidPerSpelerResult),
+  // Eén keer uitpakken: deze rijen voeden zowel de top/worst-lijstjes als het
+  // signalenblok. Twee keer unwrap() zou de foutmelding bij een RPC-fout ook
+  // twee keer loggen.
+  const aanwezigheidPerSpeler = unwrap<AanwezigheidPerSpelerRij>(
+    'inzichten.aanwezigheidPerSpeler',
+    aanwezigheidPerSpelerResult,
   )
+  const aanwezigheidTopWorst = topWorstAanwezigheid(aanwezigheidPerSpeler)
 
   const vormRows = unwrap<{ id: string; goals_for: number | null; goals_against: number | null }>(
     'inzichten.vorm',
@@ -170,24 +242,141 @@ export default async function InzichtenPage() {
       }
     : null
 
+  // Conclusie-laag. Alles hieronder rekent op de rijen die hierboven al zijn
+  // opgehaald — geen extra query, geen extra RPC.
+  const opkomstTrend = laatsteMaandTrend(maandOpkomst)
+  const ratingTrend = teamRatingTrend(teamRating)
+  const saldo = doelsaldo(doelpunten)
+  const signalen = bepaalSignalen({
+    maanden: maandOpkomst,
+    aanwezigheidPerSpeler,
+    teamRating,
+    doelpunten,
+  })
+
+  // Seizoen staat ingesteld, maar er is nog geen enkele registratie: dan is
+  // elke kaart leeg en zegt de KPI-strook vier keer "—". Eén uitleg met een
+  // volgende stap is dan bruikbaarder dan zeven lege vakken. Alle bronnen
+  // moeten leeg zijn — één ingevulde uitslag is al genoeg om de gewone pagina
+  // te tonen.
+  //
+  // LET OP bij de eerste voorwaarde: `inzichten_aanwezigheid` levert ALTIJD
+  // precies één rij, ook zonder registraties (dan 0/0) — zie AanwezigheidRij
+  // in lib/inzichten.ts. `aanwezigheidData` is daarom vrijwel nooit null; het
+  // ontbreken van data zit in `percentage === null`. Op `=== null` toetsen
+  // maakt deze hele conditie stilzwijgend onbereikbaar.
+  const geenEnkeleData =
+    (aanwezigheidData === null || aanwezigheidData.percentage === null) &&
+    maandOpkomst.length === 0 &&
+    teamRating.length === 0 &&
+    doelpunten.length === 0 &&
+    vormItems.length === 0 &&
+    ratingTopWorst.top.length === 0 &&
+    aanwezigheidTopWorst.top.length === 0
+
+  if (geenEnkeleData) {
+    // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
+    // hele seizoen is er écht nog niets en is "ga registreren" het juiste
+    // antwoord. Bij een afgeknipte periode kán er elders wél data zijn — dan
+    // moet de periodekiezer zichtbaar blijven, anders zit de gebruiker vast
+    // in een lege pagina zonder weg terug.
+    const smallerDanSeizoen = periode !== PERIODE_STANDAARD
+    return (
+      <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
+        <div>
+          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
+          <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
+        </div>
+        {smallerDanSeizoen ? (
+          <>
+            <PeriodeFilter actief={periode} t={t} />
+            <div className="max-w-lg surface-card p-10 text-center flex flex-col items-center gap-3">
+              <span className="ms text-[40px] text-faint">calendar_month</span>
+              <p className="text-ink font-bold">{t.insights.periodeLeeg}</p>
+              <p className="text-faint text-sm">{t.insights.periodeLeegHint}</p>
+            </div>
+          </>
+        ) : (
+          <LegeStaat
+            icoon="insights"
+            titel={t.insights.geenDataTitle}
+            hint={t.insights.geenDataHint}
+            actieHref="/events"
+            actieLabel={t.insights.geenDataNaarAgenda}
+          />
+        )}
+      </div>
+    )
+  }
+
+  const periodeLabel =
+    periode === '4w' ? t.insights.periode4w : periode === '8w' ? t.insights.periode8w : t.insights.periodeSeizoen
+
   return (
-    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      <div>
-        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
-        <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
+    <>
+      {/* Dual-markup: het scherm drukt niet mee. Wat er uit de printer komt is
+          het los opgemaakte rapport hieronder, niet deze pagina — recharts-SVG
+          en een schermindeling op A4 leveren nooit een presentabel document
+          op. Zelfde patroon als de wedstrijdselectie (MatchSquadEditor). */}
+      <div className="print:hidden max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
+          <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
+        </div>
+        <PrintButton />
       </div>
 
+      <PeriodeFilter actief={periode} t={t} />
+
+      {/* Conclusie eerst, detail daarna. De vier cijfers en de signalen staan
+          bewust bóven de grafieken: wie de pagina opent wil weten hoe het
+          ervoor staat, niet meteen zes grafieken tegelijk lezen. */}
+      <KpiStrip
+        opkomst={opkomstTrend}
+        maanden={maandOpkomst}
+        aanwezigheidPercentage={aanwezigheidData?.percentage ?? null}
+        rating={ratingTrend}
+        saldo={saldo}
+        t={t}
+      />
+
+      <SignalenBlok signalen={signalen} t={t} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <AanwezigheidChart data={aanwezigheidData} t={t} />
-        <OpkomstPerMaandChart data={maandOpkomst} t={t} />
-        <RatingsChart teamData={teamRating} spelers={spelers} t={t} />
-        <DoelpuntenChart items={doelpunten} t={t} />
-        <TopWorstRatings data={ratingTopWorst} t={t} />
-        <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />
+        {/* De vorm-strook staat boven de detailgrafieken en over de volle
+            breedte: het is de meest bekeken regel van de pagina en stond
+            eerder helemaal onderaan. */}
         <div className="lg:col-span-2">
           <VormChart items={vormItems} telling={vormTelling} t={t} />
         </div>
+        <OpkomstPerMaandChart data={maandOpkomst} t={t} />
+        <AanwezigheidChart data={aanwezigheidData} t={t} />
+        <RatingsChart teamData={teamRating} spelers={spelers} periode={periode} t={t} />
+        <DoelpuntenChart items={doelpunten} t={t} />
+        <TopWorstRatings data={ratingTopWorst} t={t} />
+        <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />
       </div>
-    </div>
+      </div>
+
+      <SeizoensrapportPrint
+        t={t}
+        teamName={teamName}
+        teamLogoUrl={teamLogoUrl}
+        venster={venster}
+        periodeLabel={periodeLabel}
+        opkomst={opkomstTrend}
+        maanden={maandOpkomst}
+        aanwezigheidPercentage={aanwezigheidData?.percentage ?? null}
+        rating={ratingTrend}
+        saldo={saldo}
+        signalen={signalen}
+        ratingTopWorst={ratingTopWorst}
+        aanwezigheidTopWorst={aanwezigheidTopWorst}
+        vormTelling={vormTelling}
+        primaryColor={clubColors.primary}
+        secondaryColor={clubColors.secondary}
+      />
+    </>
   )
 }

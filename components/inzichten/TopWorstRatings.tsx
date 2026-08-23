@@ -3,8 +3,11 @@ import type { RatingPerSpelerRij, TopWorst } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 
 // Rond op 1 decimaal — zelfde afronding en weergave (punt, geen
-// locale-notatie) als de teamrating-grafiek (RatingsChart.tsx:14-16), zodat
-// eenzelfde gemiddelde overal op de pagina hetzelfde cijfer toont.
+// locale-notatie) als de teamrating-grafiek (RatingsChart.tsx), zodat
+// eenzelfde gemiddelde overal op de pagina hetzelfde cijfer toont. De
+// weergave gebruikt bewust toFixed(1) en niet String(): anders staat een
+// gemiddelde van precies 8 als "8" tussen "8.2" en "7.7", wat in een lijstje
+// leest als een ander soort getal.
 function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
@@ -28,7 +31,7 @@ function RatingLijst({ titel, rows, t }: { titel: string; rows: RatingPerSpelerR
             <span className="text-ink font-semibold truncate">{r.naam}</span>
             <span className="text-faint font-semibold whitespace-nowrap">
               {t.insights.topWorstRatingsWaarde
-                .replace('{gemiddelde}', String(round1(r.gemiddelde)))
+                .replace('{gemiddelde}', round1(r.gemiddelde).toFixed(1))
                 .replace('{aantal}', String(r.aantal))}
             </span>
           </li>

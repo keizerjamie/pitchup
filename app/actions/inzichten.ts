@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { assertOwnPlayer, isUuid } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
-import { seizoensVenster } from '@/lib/inzichten'
+import { seizoensVenster, periodeVenster, isPeriode, PERIODE_STANDAARD } from '@/lib/inzichten'
 import { getAllSettings } from '@/app/actions/settings'
 import type { SpelerRatingPunt } from '@/lib/inzichten'
 
@@ -18,7 +18,7 @@ import type { SpelerRatingPunt } from '@/lib/inzichten'
 // geen wedstrijden in het venster, nog geen ratings, of een inactieve speler
 // (die filtert de RPC weg, net als de teamgrafiek — zie O3 in
 // supabase/inzichten.sql).
-export async function getSpelerRatingReeks(playerId: string): Promise<SpelerRatingPunt[]> {
+export async function getSpelerRatingReeks(playerId: string, periode?: string): Promise<SpelerRatingPunt[]> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
@@ -35,8 +35,15 @@ export async function getSpelerRatingReeks(playerId: string): Promise<SpelerRati
   // Zelfde hergebruik van getAllSettings() als deleteSeasonTrainings
   // (app/actions/settings.ts:79-81).
   const settings = await getAllSettings()
-  const venster = seizoensVenster(settings)
-  if (!venster) return []
+  const seizoen = seizoensVenster(settings)
+  if (!seizoen) return []
+
+  // De periode komt wél van de client, maar uitsluitend als TOKEN ('4w'/'8w'/
+  // 'seizoen') — nooit als datumbereik. isPeriode() weigert alles wat daar
+  // niet exact op past en valt terug op het hele seizoen, en periodeVenster()
+  // rekent de datums hier server-side uit binnen het eigen seizoensvenster.
+  // Een aanroeper kan daarmee nog steeds geen zelfgekozen bereik afdwingen.
+  const venster = periodeVenster(seizoen, isPeriode(periode) ? periode : PERIODE_STANDAARD)
 
   // De RPC is security invoker en filtert zelf op team_id = auth.uid() bovenop
   // RLS; er gaat daarom bewust géén team_id-parameter mee.

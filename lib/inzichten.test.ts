@@ -525,3 +525,241 @@ describe('topWorstAanwezigheid', () => {
     expect(rows).toEqual(kopie)
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════
+// Samenvattingscijfers en signalen (de bovenste laag van /inzichten)
+// ═══════════════════════════════════════════════════════════════════════
+
+import {
+  OPKOMST_DOEL,
+  SPELER_ZORGDREMPEL,
+  MAX_SIGNALEN,
+  RATING_TREND_VENSTER,
+  PERIODE_STANDAARD,
+  isPeriode,
+  periodeVenster,
+  bepaalSignalen,
+  doelsaldo,
+  laatsteMaandTrend,
+  teamRatingTrend,
+  type MaandOpkomst,
+  type SignaalInvoer,
+  type TeamRatingRij,
+} from '@/lib/inzichten'
+
+function trendMaand(m: string, aanwezig: number, afwezig: number): MaandOpkomst {
+  return { maand: m, aanwezig, afwezig, percentage: berekenAanwezigheidPercentage(aanwezig, afwezig) }
+}
+
+function trendRatingRij(datum: string, gemiddelde: number): TeamRatingRij {
+  return { event_id: `e-${datum}`, datum, tegenstander: null, gemiddelde, aantal: 11 }
+}
+
+function trendWedstrijd(id: string, voor: number | null, tegen: number | null): DoelpuntItem {
+  return { id, date: '2026-03-01', opponent: null, match_type: 'league', goals_for: voor, goals_against: tegen }
+}
+
+describe('laatsteMaandTrend', () => {
+  it('geeft de laatste maand met een percentage plus het verschil met de maand daarvoor', () => {
+    const trend = laatsteMaandTrend([trendMaand('2026-01', 8, 2), trendMaand('2026-02', 6, 4)])
+    expect(trend).toEqual({ maand: '2026-02', percentage: 60, vorigePercentage: 80, delta: -20 })
+  })
+
+  it('slaat maanden zonder percentage over in plaats van ze als 0% mee te tellen', () => {
+    // 2026-02 heeft geen enkele registratie (0/0) → percentage null. De
+    // vergelijking hoort dan tegen januari te gaan, niet tegen "0%".
+    const trend = laatsteMaandTrend([trendMaand('2026-01', 8, 2), trendMaand('2026-02', 0, 0), trendMaand('2026-03', 9, 1)])
+    expect(trend).toEqual({ maand: '2026-03', percentage: 90, vorigePercentage: 80, delta: 10 })
+  })
+
+  it('één maand: geen vergelijking, delta blijft null (geen 0)', () => {
+    expect(laatsteMaandTrend([trendMaand('2026-01', 8, 2)])).toEqual({
+      maand: '2026-01', percentage: 80, vorigePercentage: null, delta: null,
+    })
+  })
+
+  it('geen enkele maand met data → null', () => {
+    expect(laatsteMaandTrend([])).toBeNull()
+    expect(laatsteMaandTrend([trendMaand('2026-01', 0, 0)])).toBeNull()
+  })
+})
+
+describe('teamRatingTrend', () => {
+  it('berekent het gemiddelde over alle wedstrijden en de trend tussen de twee laatste vensters', () => {
+    // Eerste 5 gemiddeld 6.0, laatste 5 gemiddeld 7.0 → delta +1.0.
+    const rows = [
+      ...[6, 6, 6, 6, 6].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g)),
+      ...[7, 7, 7, 7, 7].map((g, i) => trendRatingRij(`2026-02-0${i + 1}`, g)),
+    ]
+    const trend = teamRatingTrend(rows)
+    expect(trend?.aantal).toBe(10)
+    expect(trend?.gemiddelde).toBeCloseTo(6.5, 5)
+    expect(trend?.delta).toBeCloseTo(1, 5)
+  })
+
+  it('te weinig wedstrijden voor twee volle vensters → gemiddelde wel, delta null', () => {
+    const rows = [6, 7, 8].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g))
+    const trend = teamRatingTrend(rows)
+    expect(trend?.gemiddelde).toBeCloseTo(7, 5)
+    expect(trend?.delta).toBeNull()
+  })
+
+  it('geen wedstrijden → null', () => {
+    expect(teamRatingTrend([])).toBeNull()
+  })
+
+  it('muteert de invoer niet (de RPC-volgorde blijft oplopend op datum)', () => {
+    const rows = [trendRatingRij('2026-01-01', 5), trendRatingRij('2026-01-02', 9)]
+    const kopie = rows.map((r) => ({ ...r }))
+    teamRatingTrend(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+describe('doelsaldo', () => {
+  it('telt alleen wedstrijden met een volledige uitslag', () => {
+    expect(doelsaldo([trendWedstrijd('a', 3, 1), trendWedstrijd('b', 0, 2), trendWedstrijd('c', 4, null), trendWedstrijd('d', null, null)]))
+      .toEqual({ voor: 3, tegen: 3, saldo: 0, wedstrijden: 2 })
+  })
+
+  it('lege lijst → alles nul, geen deling door nul', () => {
+    expect(doelsaldo([])).toEqual({ voor: 0, tegen: 0, saldo: 0, wedstrijden: 0 })
+  })
+})
+
+describe('bepaalSignalen', () => {
+  const leeg: SignaalInvoer = { maanden: [], aanwezigheidPerSpeler: [], teamRating: [], doelpunten: [] }
+
+  it('zonder enige data: geen signalen (het blok hoort dan helemaal weg te blijven)', () => {
+    expect(bepaalSignalen(leeg)).toEqual([])
+  })
+
+  it('een speler onder de zorgdrempel levert een zorg-signaal met naam en aantal', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [
+        { player_id: 'p1', naam: 'Sem de Vries', aanwezig: 4, afwezig: 6 }, // 40%
+        { player_id: 'p2', naam: 'Tim Jansen', aanwezig: 9, afwezig: 1 }, // 90%
+      ],
+    })
+    expect(signalen).toHaveLength(1)
+    expect(signalen[0].toon).toBe('zorg')
+    expect(signalen[0].tekstSleutel).toBe('signaalSpelerWegblijver')
+    expect(signalen[0].waarden).toMatchObject({ aantal: 1, naam: 'Sem de Vries', drempel: SPELER_ZORGDREMPEL })
+  })
+
+  it('spelers zonder enige registratie tellen niet als wegblijver (geen data is geen 0%)', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Nieuw Lid', aanwezig: 0, afwezig: 0 }],
+    })
+    expect(signalen).toEqual([])
+  })
+
+  it('opkomst onder de norm levert een let-op; precies op de norm juist een compliment', () => {
+    const onder = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 8, 2)] }) // 80%
+    expect(onder[0].toon).toBe('letop')
+    expect(onder[0].waarden.doel).toBe(OPKOMST_DOEL)
+
+    const op = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 85, 15)] }) // exact 85%
+    expect(op[0].toon).toBe('goed')
+    expect(op[0].tekstSleutel).toBe('signaalOpkomstBovenDoel')
+  })
+
+  it('opkomst onder de norm én gedaald gebruikt de dalingsvariant met het aantal punten', () => {
+    const signalen = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-01', 8, 2), trendMaand('2026-02', 6, 4)] })
+    expect(signalen[0].tekstSleutel).toBe('signaalOpkomstOnderDoelDaling')
+    expect(signalen[0].waarden.daling).toBe(20)
+  })
+
+  it('een ratingverschil onder de ruisdrempel levert geen signaal op', () => {
+    const rows = [
+      ...[7.0, 7.0, 7.0, 7.0, 7.0].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g)),
+      ...[7.1, 7.1, 7.1, 7.1, 7.1].map((g, i) => trendRatingRij(`2026-02-0${i + 1}`, g)),
+    ]
+    expect(bepaalSignalen({ ...leeg, teamRating: rows })).toEqual([])
+  })
+
+  it('doelsaldo telt pas mee vanaf genoeg wedstrijden', () => {
+    const weinig = Array.from({ length: RATING_TREND_VENSTER - 1 }, (_, i) => trendWedstrijd(`w${i}`, 3, 0))
+    expect(bepaalSignalen({ ...leeg, doelpunten: weinig })).toEqual([])
+
+    const genoeg = Array.from({ length: RATING_TREND_VENSTER }, (_, i) => trendWedstrijd(`w${i}`, 3, 0))
+    const signalen = bepaalSignalen({ ...leeg, doelpunten: genoeg })
+    expect(signalen[0].tekstSleutel).toBe('signaalDoelsaldoPositief')
+  })
+
+  it('een zorgsignaal verdringt een compliment, nooit andersom, en het blok blijft op MAX_SIGNALEN', () => {
+    const signalen = bepaalSignalen({
+      // 3 wegblijvers, opkomst boven de norm, ratingstijging, positief saldo:
+      // meer treffers dan MAX_SIGNALEN.
+      maanden: [trendMaand('2026-02', 95, 5)],
+      aanwezigheidPerSpeler: [
+        { player_id: 'p1', naam: 'A', aanwezig: 1, afwezig: 9 },
+        { player_id: 'p2', naam: 'B', aanwezig: 2, afwezig: 8 },
+      ],
+      teamRating: [
+        ...[6, 6, 6, 6, 6].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g)),
+        ...[8, 8, 8, 8, 8].map((g, i) => trendRatingRij(`2026-02-0${i + 1}`, g)),
+      ],
+      doelpunten: Array.from({ length: 6 }, (_, i) => trendWedstrijd(`w${i}`, 3, 0)),
+    })
+    expect(signalen).toHaveLength(MAX_SIGNALEN)
+    expect(signalen[0].toon).toBe('zorg')
+    // Het positieve doelsaldo is het laatste compliment in de vaste volgorde
+    // en valt daarmee als eerste af.
+    expect(signalen.map((s) => s.id)).not.toContain('doelsaldo-positief')
+  })
+})
+
+
+describe('isPeriode', () => {
+  it('accepteert alleen de drie bekende waarden', () => {
+    expect(isPeriode('4w')).toBe(true)
+    expect(isPeriode('8w')).toBe(true)
+    expect(isPeriode('seizoen')).toBe(true)
+  })
+
+  it('weigert alles daarbuiten, inclusief niet-strings', () => {
+    for (const waarde of ['4W', '4 weken', '', '2w', null, undefined, 4, {}, ['4w']]) {
+      expect(isPeriode(waarde)).toBe(false)
+    }
+  })
+})
+
+describe('periodeVenster', () => {
+  const seizoen = { start: '2026-07-01', end: '2026-12-31' }
+
+  it("'seizoen' laat het venster ongemoeid", () => {
+    expect(periodeVenster(seizoen, 'seizoen', '2026-10-15')).toEqual(seizoen)
+    expect(PERIODE_STANDAARD).toBe('seizoen')
+  })
+
+  it("'4w' knipt de start af op 28 dagen terug, inclusief vandaag", () => {
+    // 2026-10-15 min 27 dagen = 2026-09-18; dat is dag 1 van 28 t/m vandaag.
+    expect(periodeVenster(seizoen, '4w', '2026-10-15')).toEqual({ start: '2026-09-18', end: '2026-12-31' })
+  })
+
+  it("'8w' knipt de start af op 56 dagen terug", () => {
+    expect(periodeVenster(seizoen, '8w', '2026-10-15')).toEqual({ start: '2026-08-21', end: '2026-12-31' })
+  })
+
+  it('de start gaat nooit vóór de seizoensstart', () => {
+    // Seizoen begint pas twee dagen geleden: "laatste 8 weken" mag niet
+    // buiten het seizoen om data ophalen.
+    const kort = { start: '2026-10-13', end: '2026-12-31' }
+    expect(periodeVenster(kort, '8w', '2026-10-15')).toEqual(kort)
+  })
+
+  it('een seizoen dat al voorbij is levert een leeg (start > end) venster op, geen crash', () => {
+    const afgelopen = { start: '2025-08-01', end: '2025-12-31' }
+    const venster = periodeVenster(afgelopen, '4w', '2026-10-15')
+    expect(venster.start > venster.end).toBe(true)
+  })
+
+  it('muteert het meegegeven venster niet', () => {
+    const origineel = { start: '2026-07-01', end: '2026-12-31' }
+    periodeVenster(origineel, '4w', '2026-10-15')
+    expect(origineel).toEqual({ start: '2026-07-01', end: '2026-12-31' })
+  })
+})

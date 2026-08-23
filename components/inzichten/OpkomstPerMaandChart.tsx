@@ -1,22 +1,11 @@
 'use client'
 
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
+import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, ReferenceLine } from 'recharts'
 import type { Dict } from '@/messages/nl'
-import type { MaandOpkomst } from '@/lib/inzichten'
+import { OPKOMST_DOEL, maandLabel, type MaandOpkomst } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
-
-// Zelfde tijdzone-veilige aanpak als lib/season-dates.ts: 'YYYY-MM' gaat via
-// Date.UTC naar een leesbaar maandlabel. timeZone:'UTC' is VERPLICHT bij het
-// formatteren, anders kan de browser-tijdzone van de bezoeker de getoonde
-// maand laten verschuiven (bv. eind/begin van de maand rond middernacht UTC).
-function maandLabel(maand: string, locale: string): string {
-  const [jaar, maandNr] = maand.split('-').map(Number)
-  const ms = Date.UTC(jaar, maandNr - 1, 1)
-  const label = new Date(ms).toLocaleDateString(locale, { month: 'short', year: 'numeric', timeZone: 'UTC' })
-  return label.charAt(0).toUpperCase() + label.slice(1)
-}
 
 export default function OpkomstPerMaandChart({ data, t }: { data: MaandOpkomst[]; t: Dict }) {
   const isEmpty = data.length === 0
@@ -50,7 +39,7 @@ export default function OpkomstPerMaandChart({ data, t }: { data: MaandOpkomst[]
         // VormChart.tsx, zodat schermlezers de volledige cijfers wél bereiken.
         <>
           <div role="img" aria-label={summary} className="overflow-x-auto">
-            <BarChart width={Math.max(280, chartData.length * 64)} height={220} data={chartData}>
+            <BarChart width={Math.max(280, chartData.length * 64) + 70} height={220} data={chartData} margin={{ top: 8, right: 70, left: 0, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke={GRID_STROKE} className="chart-grid" />
               <XAxis dataKey="maand" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={AXIS_TICK_LINE} className="chart-axis" />
               <YAxis
@@ -62,7 +51,39 @@ export default function OpkomstPerMaandChart({ data, t }: { data: MaandOpkomst[]
                 tickLine={AXIS_TICK_LINE}
                 className="chart-axis"
               />
-              <Bar dataKey="percentage" fill="var(--primary)" className="chart-fill-primary" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+              {/* Normlijn op OPKOMST_DOEL. Dit is wat een percentage in een
+                  oordeel verandert: zonder referentie is 78% een getal, met
+                  referentie is het "onder de norm". */}
+              <ReferenceLine
+                y={OPKOMST_DOEL}
+                stroke="var(--brand-accent)"
+                strokeDasharray="5 4"
+                strokeWidth={1.5}
+                className="chart-stroke-primary"
+                label={{
+                  value: t.insights.kpiOpkomstDoel.replace('{doel}', String(OPKOMST_DOEL)),
+                  // Buiten het plotvlak, in de rechtermarge hierboven: elke
+                  // `inside*`-positie legt dit label over de staaf van de
+                  // laatste maand heen.
+                  position: 'right',
+                  fill: 'var(--brand-accent)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              />
+              {/* Maanden onder de norm krijgen de waarschuwingskleur in plaats
+                  van het gewone groen. Per staaf via <Cell>, want één `fill` op
+                  de <Bar> geldt voor alle staven. Kleuren als var(...)-string,
+                  nooit als hex — zie chartTheme.ts. */}
+              <Bar dataKey="percentage" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                {chartData.map((d) => (
+                  <Cell
+                    key={d.maand}
+                    className={d.percentage !== null && d.percentage < OPKOMST_DOEL ? 'chart-fill-amber' : 'chart-fill-primary'}
+                    fill={d.percentage !== null && d.percentage < OPKOMST_DOEL ? 'var(--chip-amber-fg)' : 'var(--brand-accent)'}
+                  />
+                ))}
+              </Bar>
             </BarChart>
           </div>
           <ChartDataTable

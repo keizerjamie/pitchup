@@ -648,4 +648,247 @@ body::after {
     background: var(--club-primary, #004f3b) !important;
     color: #ffffff !important;
   }
+
+  /* ── Wedstrijdselectie-poster (components/MatchSquadPrintList.tsx) ─────
+     Het printblok van de wedstrijdselectie is geen document maar een poster:
+     één doorlopend kleurvlak van rand tot rand, met de spelerslijst als wit
+     vlak daarbinnen. Alles hieronder staat in CSS in plaats van als
+     Tailwind-utility op het component, om dezelfde reden als de
+     `.print-club-*`-klassen hierboven: het zijn print-only regels die met de
+     clubkleur-variabelen werken, en die variabelen bestaan alleen tijdens het
+     afdrukken.
+
+     NAMED PAGE — de kern van "poster in plaats van document". De algemene
+     `@page`-regel bovenaan dit blok zet 12mm marge op élke pagina; die marge
+     is een gegarandeerde witte lijst rondom, waardoor een full-bleed
+     kleurvlak fysiek onmogelijk is. `@page squad { margin: 0 }` plus
+     `page: squad` haalt die marge weg voor uitsluitend deze ene pagina — de
+     trainingsplan-print houdt zijn 12mm.
+
+     BEWUSTE TERUGVAL: named pages worden door Chromium ondersteund maar niet
+     door elke WebKit-versie. Waar `page:` genegeerd wordt, blijft de 12mm
+     staan en rendert exact hetzelfde ontwerp binnen een witte rand. Dat mag
+     niet stukgaan, en daarom gebruikt dit blok NERGENS een negatieve marge of
+     een viewport-brede truc om "buiten de marge te breken": de poster is een
+     gewone flex-kolom die zich naar de beschikbare paginabreedte voegt. De
+     enige zichtbare consequentie van de terugval is de witte rand zelf. */
+  @page squad { size: A4; margin: 0; }
+
+  .print-poster {
+    page: squad;
+    /* !important: wint van Tailwinds `print:block`-utility op hetzelfde
+       element (zie de `hidden print:block`-wrapper in het component). */
+    display: flex !important;
+    flex-direction: column;
+    /* Vult de paginahoogte zodat de donkere voetstrook onderaan het papier
+       staat in plaats van vlak onder de laatste spelersnaam. `100vh` past
+       zich automatisch aan of de named page nu wél of niet is toegepast
+       (297mm resp. 273mm beschikbare hoogte) — een vaste mm-waarde zou in
+       precies één van die twee gevallen een tweede, lege pagina opleveren. */
+    min-height: 100vh;
+    background: var(--club-primary, #004f3b) !important;
+    color: #ffffff !important;
+  }
+
+  .print-poster-hero { padding: 16mm 14mm 14mm; }
+  .print-poster-hero .print-poster-plate {
+    background: #ffffff;
+    border-radius: 3mm;
+    padding: 1.5mm;
+    display: inline-flex;
+  }
+
+  /* Effen balk in de secundaire clubkleur, over de volle breedte. Vervangt de
+     twee dunne lijnen waartussen de tijden eerder stonden. */
+  .print-poster-band {
+    display: flex;
+    background: var(--club-secondary, #009966) !important;
+    color: #ffffff !important;
+  }
+  .print-poster-band > div { flex: 1; padding: 5mm 14mm; }
+  .print-poster-band > div + div { border-left: 0.4mm solid rgba(255, 255, 255, 0.35); }
+
+  /* Wit vlak met de selectie. `flex: 1` duwt de voetstrook naar de onderrand;
+     bij een korte selectie groeit dit vlak mee in plaats van wit papier onder
+     de poster te laten vallen. */
+  .print-poster-sheet {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff !important;
+    color: var(--club-primary, #004f3b) !important;
+    padding: 10mm 14mm 12mm;
+  }
+
+  /* Het vormblok (MatchFormCards) is het laatste kind van het witte vlak en
+     wordt naar de onderrand geduwd. Zonder dit verzamelt alle overgebleven
+     hoogte zich als één dood gat ónder het vormblok — zichtbaar zodra de
+     selectie kort is. Nu valt de witruimte tússen selectie en vorm, waar hij
+     als bewuste marge leest in plaats van als restruimte. */
+  .print-poster-sheet > :last-child { margin-top: auto; }
+
+  /* Rugnummer via `::before` met `content: attr(...)`, NIET als tekstnode in
+     de <li>. Dat is geen stijlkeuze maar een harde eis: de acceptatietest
+     (wedstrijdselectie-pdf.acceptance.test.tsx, Story-AC9) legt vast dat de
+     textContent van elke <li> EXACT de spelersnaam is — die garantie bestaat
+     om te voorkomen dat er ooit een aanvoerder-teken of gast-label in de
+     lijst sluipt, en die is het waard om te behouden. Zelfde middel als de
+     "·" in de footer van dit component (`before:content-['·']`).
+
+     Zonder ingevuld rugnummer blijft `data-jersey` leeg: het kader houdt dan
+     zijn breedte (uitlijning van de namen blijft over beide kolommen gelijk)
+     maar toont niets. Een verzonnen volgnummer zou op een teamsheet gelezen
+     worden als een echt rugnummer. */
+  .print-squad-item::before {
+    content: attr(data-jersey);
+    display: inline-block;
+    min-width: 8mm;
+    text-align: right;
+    margin-right: 3mm;
+    font-family: var(--font-pdf-display), system-ui, sans-serif;
+    color: var(--club-secondary, #009966);
+  }
+
+  /* Vormkaartjes op het witte selectievlak. Vóór deze ronde waren dit
+     omkaderde vakjes met `border-gray-300` — de laatste plek waar de PDF nog
+     als document las in plaats van als poster. Nu een egale, zeer lichte tint
+     van de primaire clubkleur zonder rand: het kaartje wordt een vlak in
+     dezelfde huisstijl in plaats van een tabelcel.
+
+     `color-mix` in plaats van een vaste lichtgrijze hex, zodat de tint
+     meebeweegt met de ingestelde clubkleur — hetzelfde uitgangspunt als de
+     rest van dit blok, waar geen enkele kleur los van de clubkleur staat. */
+  .print-form-card {
+    background: color-mix(in srgb, var(--club-primary, #004f3b) 7%, #ffffff) !important;
+    border-radius: 2mm;
+  }
+  .print-form-date { color: color-mix(in srgb, var(--club-primary, #004f3b) 55%, #ffffff) !important; }
+
+  .print-poster-foot {
+    background: var(--club-primary, #004f3b) !important;
+    color: #ffffff !important;
+    padding: 6mm 14mm;
+  }
+
+  /* ── Seizoensrapport (components/inzichten/SeizoensrapportPrint.tsx) ───
+     Bewust een DOCUMENT, geen poster: dit blok gebruikt géén named page en
+     houdt dus de gewone 12mm-marge van de `@page`-regel bovenaan dit blok.
+     De clubkleur is hier accent (koplijn, koppen, balken), niet vlak — het
+     rapport wordt gelezen, de wedstrijdselectie wordt opgehangen.
+
+     Alle maten in millimeters: dit vel wordt uitsluitend afgedrukt, dus een
+     paginamaat is een betekenisvollere eenheid dan pixels. */
+  .rapport { color: #111827 !important; font-size: 9pt; line-height: 1.35; }
+
+  .rapport-kop {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 6mm;
+    border-bottom: 1.2mm solid var(--club-primary, #004f3b);
+    padding-bottom: 3mm;
+  }
+  .rapport-kop-links { display: flex; align-items: center; gap: 3mm; }
+  .rapport-team { font-size: 15pt; color: var(--club-primary, #004f3b); line-height: 1.1; }
+  .rapport-periode {
+    font-size: 7.5pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--club-secondary, #009966); margin-top: 0.6mm;
+  }
+  .rapport-titel {
+    font-size: 8pt; text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--club-secondary, #009966); white-space: nowrap;
+  }
+
+  .rapport-kpis { display: flex; gap: 3mm; margin-top: 6mm; }
+  .rapport-kpi {
+    flex: 1;
+    border: 0.3mm solid #d1d5db;
+    border-top: 1mm solid var(--club-secondary, #009966);
+    border-radius: 1.5mm;
+    padding: 2.5mm 3mm 3mm;
+  }
+  .rapport-kpi-label {
+    font-size: 6.5pt; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.09em; color: #6b7280;
+  }
+  .rapport-kpi-waarde { font-size: 19pt; line-height: 1.05; color: var(--club-primary, #004f3b); margin-top: 1mm; }
+  .rapport-kpi-detail { font-size: 6.5pt; font-weight: 700; color: #6b7280; margin-top: 0.8mm; }
+
+  /* Elke sectie blijft als geheel op één pagina staan. Een kopje onderaan
+     pagina 1 met zijn inhoud op pagina 2 is precies het soort slordigheid dat
+     een rapport amateuristisch maakt. */
+  .rapport-sectie { margin-top: 7mm; break-inside: avoid; }
+  .rapport-sectiekop {
+    font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--club-primary, #004f3b);
+    border-bottom: 0.3mm solid #d1d5db; padding-bottom: 1mm; margin-bottom: 2mm;
+  }
+  .rapport-signaal { font-size: 8.5pt; font-weight: 600; padding: 1.4mm 0 1.4mm 4mm; position: relative; }
+  .rapport-signaal::before {
+    content: '';
+    position: absolute; left: 0; top: 2.6mm;
+    width: 1.6mm; height: 1.6mm; border-radius: 50%;
+    background: var(--club-secondary, #009966);
+  }
+
+  /* Maandbalken. `height` per staaf is een percentage van deze vaste hoogte,
+     zodat de normlijn (die óók op een percentage staat) altijd exact bij de
+     juiste staafhoogte uitkomt. */
+  /* Het staafvlak bevat UITSLUITEND staven — geen bijschriften. Alleen zo is
+     `height: 71%` op een staaf werkelijk 71% van de grafiekhoogte, en staat de
+     normlijn op `bottom: 85%` precies op de juiste hoogte. De bijschriften
+     staan in een tweede rij met identieke flex-instellingen, zodat de kolommen
+     onder elkaar uitlijnen. */
+  .rapport-bars {
+    display: flex; align-items: flex-end; justify-content: flex-start; gap: 2mm;
+    height: 32mm; position: relative;
+  }
+  /* `max-width` is hier geen cosmetiek: met `flex: 1` en één datamaand rekt die
+     ene staaf op tot de volle paginabreedte en leest hij als een gekleurd blok
+     in plaats van als een grafiek. Een team dat halverwege het seizoen begint
+     of de laatste 4 weken bekijkt, heeft precies dat geval. Bij veel maanden
+     krimpen de kolommen onder deze grens en verandert er niets. */
+  .rapport-bars > .rapport-bar-kolom { flex: 1 1 0; min-width: 0; max-width: 26mm; height: 100%; display: flex; align-items: flex-end; }
+  .rapport-bar { display: block; width: 100%; background: var(--club-secondary, #009966); border-radius: 0.8mm 0.8mm 0 0; }
+  .rapport-bar-onder { background: #c2703a; }
+
+  /* Identieke flex-instellingen als de staafrij hierboven, inclusief de
+     max-width: anders schuiven de bijschriften onder de staven vandaan zodra
+     die grens actief wordt. */
+  .rapport-bar-labels { display: flex; justify-content: flex-start; gap: 2mm; margin-top: 1mm; }
+  .rapport-bar-labels > .rapport-bar-kolom { flex: 1 1 0; min-width: 0; max-width: 26mm; display: flex; flex-direction: column; }
+  .rapport-bar-waarde { font-size: 6.5pt; font-weight: 800; text-align: center; color: var(--club-primary, #004f3b); }
+  .rapport-bar-label { font-size: 6pt; font-weight: 700; text-align: center; color: #6b7280; }
+  .rapport-norm {
+    position: absolute; left: 0; right: 0;
+    border-top: 0.35mm dashed var(--club-primary, #004f3b);
+  }
+
+  .rapport-kolommen { display: flex; gap: 6mm; }
+  .rapport-kolommen > * { flex: 1; min-width: 0; }
+  .rapport-lijst { margin-top: 2mm; break-inside: avoid; }
+  .rapport-lijst-kop {
+    font-size: 6.5pt; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.09em; color: #6b7280; margin-bottom: 0.8mm;
+  }
+  .rapport-lijst-rij {
+    display: flex; justify-content: space-between; gap: 3mm;
+    font-size: 8pt; font-weight: 700; padding: 1.1mm 0;
+    border-bottom: 0.2mm solid #eef2f0;
+  }
+  .rapport-lijst-waarde { color: #6b7280; font-weight: 700; white-space: nowrap; }
+  .rapport-vorm { font-size: 9pt; font-weight: 700; }
+
+  .rapport-voet {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 6mm; padding-top: 2mm;
+    border-top: 0.3mm solid #d1d5db;
+    font-size: 6.5pt; font-weight: 700; color: #6b7280;
+  }
+  .rapport-voet-merk {
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--club-secondary, #009966); font-weight: 800;
+  }
 }
+
+

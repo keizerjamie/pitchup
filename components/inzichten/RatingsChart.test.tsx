@@ -42,7 +42,7 @@ afterEach(() => {
 
 describe('RatingsChart', () => {
   it('toont de teamrating-grafiek met role="img", een niet-lege aria-label, en de waarden ook als tekst (sr-only tabel)', () => {
-    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} t={nl} />)
+    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} periode="seizoen" t={nl} />)
     const img = screen.getByRole('img')
     expect(img.getAttribute('aria-label')).toBeTruthy()
     expect(screen.getAllByText(/5 sep/).length).toBeGreaterThan(0)
@@ -50,7 +50,7 @@ describe('RatingsChart', () => {
   })
 
   it('inactieve spelers komen niet in de selector voor (props bevatten alleen wat de pagina meegeeft)', () => {
-    render(<RatingsChart teamData={TEAM_DATA} spelers={[{ id: 'p1', name: 'Piet Peters' }]} t={nl} />)
+    render(<RatingsChart teamData={TEAM_DATA} spelers={[{ id: 'p1', name: 'Piet Peters' }]} periode="seizoen" t={nl} />)
     expect(screen.queryByText('Jan Jansen')).toBeNull()
   })
 
@@ -58,17 +58,17 @@ describe('RatingsChart', () => {
     mockGetReeks.mockResolvedValue([
       { event_id: 'e1', datum: '2026-09-05', tegenstander: 'DVC', rating: 8 },
     ])
-    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} t={nl} />)
+    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} periode="seizoen" t={nl} />)
 
     await selectPlayer('Piet Peters')
 
-    expect(mockGetReeks).toHaveBeenCalledWith('p1')
+    expect(mockGetReeks).toHaveBeenCalledWith('p1', 'seizoen')
     expect(screen.getAllByRole('img')).toHaveLength(2) // team + speler
   })
 
   it('lege reeks (geldige lege array) → lege staat, geen foutmelding', async () => {
     mockGetReeks.mockResolvedValue([])
-    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} t={nl} />)
+    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} periode="seizoen" t={nl} />)
 
     await selectPlayer('Jan Jansen')
 
@@ -78,7 +78,7 @@ describe('RatingsChart', () => {
 
   it('server action gooit → generieke foutstaat, nooit de ruwe melding', async () => {
     mockGetReeks.mockRejectedValue(new Error('Speler niet gevonden'))
-    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} t={nl} />)
+    render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} periode="seizoen" t={nl} />)
 
     await selectPlayer('Piet Peters')
 
@@ -87,7 +87,7 @@ describe('RatingsChart', () => {
   })
 
   it('teamData leeg → lege staat voor de hele kaart', () => {
-    render(<RatingsChart teamData={[]} spelers={SPELERS} t={nl} />)
+    render(<RatingsChart teamData={[]} spelers={SPELERS} periode="seizoen" t={nl} />)
     expect(screen.getByText(nl.insights.ratingsEmpty)).toBeInTheDocument()
     expect(screen.queryByRole('img')).toBeNull()
   })
@@ -98,7 +98,7 @@ describe('RatingsChart', () => {
   // `style={{ color: '#fff' }}` verschijnt hier nooit als hex in de HTML —
   // zie de bron-check hieronder die dat gat wél dicht.
   it('regressie: geen hardcoded hex-kleuren in de gerenderde markup', () => {
-    const { container } = render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} t={nl} />)
+    const { container } = render(<RatingsChart teamData={TEAM_DATA} spelers={SPELERS} periode="seizoen" t={nl} />)
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}/)
   })
 

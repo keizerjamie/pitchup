@@ -74,7 +74,7 @@
 //          bestaande AC's + de bestaande bouwer-uitbreidingen blijven groen.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, configure } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 
@@ -112,13 +112,30 @@ type Row = Record<string, unknown>
 // precedent als dashboard-vorm.acceptance.test.tsx.
 const TODAY = '2026-10-15'
 
+// De pagina rendert sinds het seizoensrapport twee versies van dezelfde
+// inhoud: het scherm (`print:hidden`) en het print-rapport (`hidden
+// print:block`, gemarkeerd met `data-print-only`). Beide staan in de DOM, dus
+// een kale `screen.getByText('Aanwezigheid per speler')` zou twee treffers
+// geven en terecht klappen.
+//
+// Deze configuratie laat élke schermquery in dit bestand het printblok
+// overslaan — inclusief zijn nakomelingen, vandaar de tweede selector: RTL's
+// `ignore` filtert alleen knopen die de selector zélf matchen, niet automatisch
+// hun kinderen. De tests hieronder toetsen daarmee onveranderd wat de
+// gebruiker op het scherm ziet; het rapport heeft zijn eigen tests
+// (seizoensrapport.acceptance.test.tsx) die er juist wél in kijken.
+const STANDAARD_IGNORE = 'script, style'
+const NEGEER_PRINTBLOK = `${STANDAARD_IGNORE}, [data-print-only], [data-print-only] *`
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
   vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
+  configure({ defaultIgnore: NEGEER_PRINTBLOK })
 })
 
 afterEach(() => {
+  configure({ defaultIgnore: STANDAARD_IGNORE })
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
@@ -494,10 +511,18 @@ function makeSupabaseMock(opts: {
   }
 }
 
-async function renderInzichten(opts: Parameters<typeof makeSupabaseMock>[0] = {}) {
+async function renderInzichten(
+  opts: Parameters<typeof makeSupabaseMock>[0] = {},
+  // Optioneel: zonder deze parameter wordt de pagina aangeroepen zoals
+  // voorheen (helemaal zonder props), zodat elke bestaande test onveranderd
+  // de standaardperiode "heel seizoen" toetst.
+  periode?: string,
+) {
   const mock = makeSupabaseMock(opts)
   vi.mocked(createClient).mockResolvedValue(mock as unknown as Awaited<ReturnType<typeof createClient>>)
-  const el = await InzichtenPage()
+  const el = periode === undefined
+    ? await InzichtenPage()
+    : await InzichtenPage({ searchParams: Promise.resolve({ periode }) })
   const rendered = render(<DictProvider dict={nl}>{el}</DictProvider>)
   return { ...rendered, rpcCalls: mock.__rpcCalls, fromCalls: mock.__fromCalls }
 }
@@ -579,6 +604,139 @@ describe('geen seizoen ingesteld', () => {
     const { rpcCalls } = await renderInzichten({ settings: seasonSettings('2026-12-31', '2026-07-01') })
     expect(screen.getByText(nl.insights.noSeason)).toBeInTheDocument()
     expect(rpcCalls).toHaveLength(0)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Seizoensrapport — de pagina levert het print-blok mee en drukt zelf niet af
+// ═══════════════════════════════════════════════════════════════════════
+describe('seizoensrapport op de pagina', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+  const events = [eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC', match_type: 'league', goals_for: 3, goals_against: 1 })]
+
+  it('rendert het print-blok naast de schermweergave, met de ingestelde clubkleuren en teamnaam', async () => {
+    const { container } = await renderInzichten({
+      settings: [
+        ...settings,
+        { team_id: TEAM, key: 'team_name', value: 'FC Voorbeeld' },
+        { team_id: TEAM, key: 'team_color_primary', value: '#a1b2c3' },
+        { team_id: TEAM, key: 'team_color_secondary', value: '#4d4dff' },
+      ],
+      events,
+    })
+    const blok = container.querySelector('[data-print-only]') as HTMLElement
+    expect(blok).not.toBeNull()
+    expect(blok.getAttribute('style')).toContain('--club-primary: #a1b2c3')
+    expect(blok.textContent).toContain('FC Voorbeeld')
+    expect(blok.textContent).toContain(nl.insights.rapportTitle)
+  })
+
+  it('de schermweergave draagt print:hidden, zodat er nooit twee versies uit de printer komen', async () => {
+    const { container } = await renderInzichten({ settings, events })
+    const scherm = container.querySelector('.print\\:hidden')
+    expect(scherm).not.toBeNull()
+    // De paginakop hoort bij het scherm-blok, niet bij het rapport.
+    expect(scherm?.textContent).toContain(nl.insights.pageTitle)
+  })
+
+  it('het rapport volgt de gekozen periode, niet altijd het hele seizoen', async () => {
+    const { container } = await renderInzichten({ settings, events }, '8w')
+    const blok = container.querySelector('[data-print-only]') as HTMLElement
+    expect(blok.textContent).toContain(nl.insights.periode8w)
+    expect(blok.textContent).not.toContain(nl.insights.periodeSeizoen)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Periodefilter — ?periode=4w/8w knipt het venster af dat naar élke RPC en
+// query gaat. TODAY staat vast op 2026-10-15 (zie boven), dus de verwachte
+// startdatums hieronder zijn deterministisch.
+// ═══════════════════════════════════════════════════════════════════════
+describe('periodefilter', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+
+  // Startdatum die de RPC's meekregen. Alle zes gebruiken dezelfde p_start,
+  // op de aanwezigheids-RPC's na — die knippen daarnaast op gisteren af, maar
+  // dat raakt p_end, niet p_start.
+  function rpcStarts(rpcCalls: { name: string; args: unknown }[]): string[] {
+    return [...new Set(rpcCalls.map((c) => String((c.args as { p_start?: unknown }).p_start)))]
+  }
+
+  it('zonder parameter: het volledige seizoensvenster gaat naar de RPC\'s', async () => {
+    const { rpcCalls } = await renderInzichten({ settings })
+    expect(rpcStarts(rpcCalls)).toEqual(['2026-07-01'])
+  })
+
+  it('?periode=4w knipt de start af op 28 dagen terug, voor élke RPC', async () => {
+    const { rpcCalls } = await renderInzichten({ settings }, '4w')
+    expect(rpcStarts(rpcCalls)).toEqual(['2026-09-18'])
+  })
+
+  it('?periode=8w knipt de start af op 56 dagen terug', async () => {
+    const { rpcCalls } = await renderInzichten({ settings }, '8w')
+    expect(rpcStarts(rpcCalls)).toEqual(['2026-08-21'])
+  })
+
+  it('een onbekende periode valt terug op het hele seizoen — nooit stilzwijgend een smaller venster', async () => {
+    const { rpcCalls } = await renderInzichten({ settings }, 'gisteren')
+    expect(rpcStarts(rpcCalls)).toEqual(['2026-07-01'])
+  })
+
+  it('de periodekiezer markeert de actieve periode en linkt de standaard naar /inzichten zonder parameter', async () => {
+    await renderInzichten({ settings }, '4w')
+    const groep = screen.getByRole('group', { name: nl.insights.periodeLabel })
+    const actief = within(groep).getByText(nl.insights.periode4w)
+    expect(actief).toHaveAttribute('aria-current', 'page')
+    expect(within(groep).getByText(nl.insights.periodeSeizoen)).toHaveAttribute('href', '/inzichten')
+    expect(within(groep).getByText(nl.insights.periode8w)).toHaveAttribute('href', '/inzichten?periode=8w')
+  })
+
+  it('een periode zonder data houdt de periodekiezer zichtbaar — anders zit de gebruiker vast in een lege pagina', async () => {
+    // Wedstrijd valt binnen het seizoen maar ruim buiten de laatste 4 weken.
+    await renderInzichten({
+      settings,
+      events: [eventRow({ id: 'match-oud', type: 'match', date: '2026-07-05', opponent: 'DVC', match_type: 'league', goals_for: 2, goals_against: 0 })],
+    }, '4w')
+    expect(screen.getByText(nl.insights.periodeLeeg)).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: nl.insights.periodeLabel })).toBeInTheDocument()
+    // NIET de onboarding-lege staat: er ís data, alleen niet in deze periode.
+    expect(screen.queryByText(nl.insights.geenDataTitle)).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Seizoen ingesteld maar nog geen enkele registratie → één pagina-brede lege
+// staat in plaats van zeven kaarten die elk apart "nog geen data" melden.
+//
+// Grens die deze twee tests samen vastleggen: ALLE bronnen leeg → lege staat;
+// één ingevulde uitslag is al genoeg om de gewone pagina te tonen. Zonder die
+// tweede test zou een te ruime conditie (bv. "geen aanwezigheid") ongemerkt
+// een pagina met wél data kunnen wegdrukken.
+// ═══════════════════════════════════════════════════════════════════════
+describe('seizoen ingesteld, nog geen enkele registratie', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+
+  it('geen events, spelers, aanwezigheid of ratings → pagina-brede lege staat, geen enkele grafiekkaart', async () => {
+    await renderInzichten({ settings })
+    expect(screen.getByText(nl.insights.geenDataTitle)).toBeInTheDocument()
+    expect(screen.getByText(nl.insights.geenDataHint)).toBeInTheDocument()
+    // Geen van de kaarten en ook de KPI-strook niet: dit is een lege PAGINA.
+    expect(screen.queryByText(nl.insights.aanwezigheidTitle)).toBeNull()
+    expect(screen.queryByText(nl.insights.opkomstTitle)).toBeNull()
+    expect(screen.queryByText(nl.insights.vormTitle)).toBeNull()
+    expect(screen.queryByText(nl.insights.kpiOpkomstLabel)).toBeNull()
+    // De paginakop blijft wél staan — de gebruiker moet zien wáár hij is.
+    expect(screen.getByText(nl.insights.pageTitle)).toBeInTheDocument()
+  })
+
+  it('één wedstrijd met een volledige uitslag is genoeg: gewone pagina, geen lege staat', async () => {
+    await renderInzichten({
+      settings,
+      events: [eventRow({ id: 'match-1', type: 'match', date: '2026-09-05', opponent: 'DVC', match_type: 'league', goals_for: 3, goals_against: 1 })],
+    })
+    expect(screen.queryByText(nl.insights.geenDataTitle)).toBeNull()
+    expect(screen.getByText(nl.insights.vormTitle)).toBeInTheDocument()
+    expect(screen.getByText(nl.insights.kpiDoelsaldoLabel)).toBeInTheDocument()
   })
 })
 
@@ -1179,19 +1337,40 @@ describe('AC19/AC20 — opkomst per maand: randgevallen', () => {
 describe('AC8/AC21/AC25 — lege staten zonder brondata', () => {
   const settings = seasonSettings('2026-07-01', '2026-12-31')
 
+  // AANGEPAST SCENARIO (niet het criterium): deze drie tests draaiden eerder
+  // op `renderInzichten({ settings })` — een seizoen zónder ook maar één
+  // registratie. Sinds de pagina-brede lege staat (zie de describe
+  // "seizoen ingesteld, nog geen enkele registratie") rendert dat scenario
+  // helemaal geen grafiekkaarten meer, dus daar viel de per-kaart lege staat
+  // niet langer te bewijzen.
+  //
+  // Het CRITERIUM is ongewijzigd en wordt hieronder nog steeds volledig
+  // getoetst: zonder brondata toont een kaart zijn lege-staattekst en NOOIT
+  // een verzonnen 0%. Er is alleen één losstaande wedstrijd toegevoegd zodat
+  // de pagina normaal rendert — die wedstrijd voedt uitsluitend de
+  // doelpunten-/vormkaart en raakt aanwezigheid, opkomst en ratings niet.
+  const losseWedstrijd = eventRow({
+    id: 'match-los', type: 'match', date: '2026-09-05',
+    opponent: 'DVC', match_type: 'league', goals_for: 3, goals_against: 1,
+  })
+
   it('AC8: geen aanwezigheidsdata binnen het venster → lege staat, geen verzonnen 0%', async () => {
-    await renderInzichten({ settings })
+    await renderInzichten({ settings, events: [losseWedstrijd] })
     expect(screen.getByText(nl.insights.aanwezigheidEmpty)).toBeInTheDocument()
     expect(aanwezigheidPercentage()).toBeNull()
   })
 
   it('AC21: geen trainingen/aanwezigheidsregistraties binnen het venster → opkomst-per-maand toont zijn lege staat', async () => {
-    await renderInzichten({ settings })
+    await renderInzichten({ settings, events: [losseWedstrijd] })
     expect(screen.getByText(nl.insights.opkomstEmpty)).toBeInTheDocument()
   })
 
   it('AC25: geen match_ratings van actieve spelers binnen het venster → team- én per-speler-weergave allebei leeg (selector verschijnt niet eens)', async () => {
-    await renderInzichten({ settings, players: [playerRow({ id: PLAYER_ACTIVE, active: true })] })
+    await renderInzichten({
+      settings,
+      events: [losseWedstrijd],
+      players: [playerRow({ id: PLAYER_ACTIVE, active: true })],
+    })
     expect(screen.getByText(nl.insights.ratingsEmpty)).toBeInTheDocument()
     expect(screen.queryByLabelText(nl.insights.spelerSelectLabel)).toBeNull()
   })

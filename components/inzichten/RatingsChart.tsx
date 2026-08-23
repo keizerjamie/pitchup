@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
 import type { Dict } from '@/messages/nl'
-import type { TeamRatingRij, SpelerOptie, SpelerRatingPunt } from '@/lib/inzichten'
+import type { TeamRatingRij, SpelerOptie, SpelerRatingPunt, Periode } from '@/lib/inzichten'
 import { getSpelerRatingReeks } from '@/app/actions/inzichten'
 import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
@@ -39,10 +39,15 @@ function RatingLine({ data, dataKey, height }: { data: { datum: string }[]; data
 export default function RatingsChart({
   teamData,
   spelers,
+  periode,
   t,
 }: {
   teamData: TeamRatingRij[]
   spelers: SpelerOptie[]
+  // Puur doorgegeven aan de server action, die er zelf zijn datums uit
+  // afleidt. Zonder dit zou de individuele grafiek het hele seizoen tonen
+  // terwijl de teamgrafiek ernaast op vier weken staat.
+  periode: Periode
   t: Dict
 }) {
   const [playerId, setPlayerId] = useState('')
@@ -60,7 +65,7 @@ export default function RatingsChart({
       // getSpelerRatingReeks() gooit bij een ongeldig/vreemd speler-id of een
       // DB-probleem (app/actions/inzichten.ts) — een lege array is een
       // geldige uitkomst en geen fout, dus die valt hier NIET in de catch.
-      const data = await getSpelerRatingReeks(id)
+      const data = await getSpelerRatingReeks(id, periode)
       setReeks(data)
     } catch {
       // Nooit de ruwe foutmelding tonen — alleen de generieke tekst.
