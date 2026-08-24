@@ -5,7 +5,7 @@ import {
   READABLE_INK_DARK,
   isClubColorSlot,
   normalizeHexColor,
-  readableInkOn,
+  readableAccentOnWhite,
   resolveClubColors,
 } from '@/lib/club-colors'
 
@@ -199,27 +199,28 @@ describe('resolveClubColors', () => {
   })
 })
 
-describe('readableInkOn', () => {
-  it('kiest wit op de donkere fallbackkleuren (het oude gedrag blijft)', () => {
-    expect(readableInkOn(CLUB_COLOR_FALLBACK.primary)).toBe('#ffffff')
-    expect(readableInkOn(CLUB_COLOR_FALLBACK.secondary)).toBe('#ffffff')
-    expect(readableInkOn('#000000')).toBe('#ffffff')
+describe('readableAccentOnWhite', () => {
+  it('geeft de clubkleur zelf terug zolang die op wit minstens 3:1 haalt (donkere fallbackkleuren blijven zichzelf)', () => {
+    expect(readableAccentOnWhite(CLUB_COLOR_FALLBACK.primary)).toBe(CLUB_COLOR_FALLBACK.primary)
+    expect(readableAccentOnWhite(CLUB_COLOR_FALLBACK.secondary)).toBe(CLUB_COLOR_FALLBACK.secondary)
+    expect(readableAccentOnWhite('#1d8acd')).toBe('#1d8acd') // middenblauw (CSW)
+    expect(readableAccentOnWhite('#000000')).toBe('#000000')
   })
 
-  it('kiest donker op lichte clubkleuren (wit is daar onleesbaar)', () => {
-    expect(readableInkOn('#ffff00')).toBe(READABLE_INK_DARK) // geel
-    expect(readableInkOn('#ffffff')).toBe(READABLE_INK_DARK)
-    expect(readableInkOn('#ffd700')).toBe(READABLE_INK_DARK) // goud
-    expect(readableInkOn('#87ceeb')).toBe(READABLE_INK_DARK) // lichtblauw
+  it('vervangt een lichte clubkleur door de vaste donkere accentkleur (op wit onleesbaar)', () => {
+    expect(readableAccentOnWhite('#ffff00')).toBe(READABLE_INK_DARK) // geel
+    expect(readableAccentOnWhite('#ffffff')).toBe(READABLE_INK_DARK)
+    expect(readableAccentOnWhite('#ffd700')).toBe(READABLE_INK_DARK) // goud
+    expect(readableAccentOnWhite('#87ceeb')).toBe(READABLE_INK_DARK) // lichtblauw
   })
 
   it('accepteert ook 3-cijferige hex en hoofdletters (zelfde normalisatie als de rest)', () => {
-    expect(readableInkOn('#FF0')).toBe(READABLE_INK_DARK)
-    expect(readableInkOn('004F3B')).toBe('#ffffff')
+    expect(readableAccentOnWhite('#FF0')).toBe(READABLE_INK_DARK)
+    expect(readableAccentOnWhite('004F3B')).toBe('#004f3b')
   })
 
-  it('valt op wit terug bij onparseerbare invoer (gedrag van vóór de waarborg)', () => {
-    expect(readableInkOn('kapot')).toBe('#ffffff')
-    expect(readableInkOn('')).toBe('#ffffff')
+  it('valt op de primaire fallbackkleur terug bij onparseerbare invoer', () => {
+    expect(readableAccentOnWhite('kapot')).toBe(CLUB_COLOR_FALLBACK.primary)
+    expect(readableAccentOnWhite('')).toBe(CLUB_COLOR_FALLBACK.primary)
   })
 })

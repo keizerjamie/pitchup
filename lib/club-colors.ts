@@ -71,16 +71,18 @@ export function resolveClubColors(settings: Record<string, string>): ClubColors 
   }
 }
 
-// ── Leesbare tekstkleur op een clubkleur-vlak ───────────────────────────────
-// De poster-PDF zet tekst óp de ingestelde clubkleur. Die kleur is vrij te
-// kiezen; bij een lichte kleur (bv. geel) is vaste witte tekst onleesbaar.
-// Daarom kiest de server per kleur wit of donker, op WCAG-relatieve
-// luminantie — de uitkomst gaat als kale string mee naar de printcomponenten
+// ── Leesbare accentkleur op wit ─────────────────────────────────────────────
+// De wedstrijdselectie-teamsheet (herontwerp 2026-08-24, "clean document")
+// staat op een witte ondergrond en gebruikt de primaire clubkleur als
+// tékstaccent (kopjes, labels). Die kleur is vrij te kiezen; een lichte
+// kleur (bv. geel) is op wit onleesbaar. De server kiest daarom per kleur:
+// de clubkleur zelf zolang die op wit minstens 3:1 haalt (AA voor de vette
+// kapitaal-labels waarvoor hij gebruikt wordt), anders een vaste donkere
+// vervanger. De uitkomst gaat als kale string mee naar de printcomponenten
 // (die mogen dit bestand niet importeren, zie clubkleuren.acceptance K4).
 
-// Donkere variant: de app-ink van het lichte thema. Bewust geen puur zwart —
-// oogt op een gekleurd vlak zachter en blijft ruim boven 4.5:1 op elke kleur
-// waar wit het niet haalt.
+// Donkere vervanger: de app-ink van het lichte thema. Bewust geen puur
+// zwart — leest als een bewuste tekstkleur naast de neutrale #111827-namen.
 export const READABLE_INK_DARK = '#0a2e2a'
 
 // WCAG 2.x relatieve luminantie van een '#rrggbb'-kleur (0 = zwart, 1 = wit).
@@ -92,18 +94,10 @@ function relativeLuminance(hex: string): number {
   return 0.2126 * kanaal(1) + 0.7152 * kanaal(3) + 0.0722 * kanaal(5)
 }
 
-// Kiest wit of donker voor tekst op de gegeven achtergrondkleur. Wit blijft
-// de voorkeur zolang het minstens 3:1 haalt (AA voor grote/vette tekst — de
-// poster zet uitsluitend zwaar display-schrift op de kleurvlakken, en de
-// secundaire fallback #009966 zit met wit op 3.65:1: het bestaande, gewenste
-// ontwerp). Pas als wit daaronder zakt (lichte clubkleur) wint de beste van
-// de twee. Onparseerbare invoer valt terug op wit — het oude gedrag.
-export function readableInkOn(background: string): string {
-  const norm = normalizeHexColor(background)
-  if (!norm) return '#ffffff'
+export function readableAccentOnWhite(color: string): string {
+  const norm = normalizeHexColor(color)
+  if (!norm) return CLUB_COLOR_FALLBACK.primary
   const l = relativeLuminance(norm)
-  const contrastWit = 1.05 / (l + 0.05)
-  if (contrastWit >= 3) return '#ffffff'
-  const contrastDonker = (l + 0.05) / (relativeLuminance(READABLE_INK_DARK) + 0.05)
-  return contrastWit >= contrastDonker ? '#ffffff' : READABLE_INK_DARK
+  const contrastOpWit = 1.05 / (l + 0.05)
+  return contrastOpWit >= 3 ? norm : READABLE_INK_DARK
 }

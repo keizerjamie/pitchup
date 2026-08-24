@@ -625,16 +625,15 @@ describe('AC8 — Wedstrijdselectie-PDF gebruikt per kleur de ingestelde waarde 
     expect(style).toContain('--club-secondary: #4d4dff')
     const kop = block.querySelector('.border-b-4') as HTMLElement
     expect(kop.style.borderColor).toBe('var(--club-primary, #004f3b)')
-    // Herontwerp 2026-08-24: de titel draagt GEEN secundaire kleur meer —
-    // tekst op het primaire vlak staat altijd in de inktkleur (opacity voor
-    // hiërarchie); de secundaire kleur op het primaire vlak was onleesbaar
-    // bij bv. rood op blauw. De secundaire kleur bereikt de PDF nog via de
-    // accentbalk en de infoband (CSS-klassen op de --club-secondary-var).
+    // Clean-document-herontwerp 2026-08-24: de titel draagt de gewaarborgde
+    // accent-tekstklasse (kleur via --club-accent-text), nooit een inline
+    // clubkleur — een lichte clubkleur als tekst was onleesbaar. De
+    // secundaire kleur bereikt de PDF via het tweede segment van de
+    // clubbalk (.print-poster-accent, CSS op de --club-secondary-var).
     const title = within(block).getByText(nl.matchSquad.exportTitle)
     expect(title.style.color).toBe('')
-    expect(title.className).toContain('opacity-70')
+    expect(title.className).toContain('print-accent-text')
     expect(block.querySelector('.print-poster-accent')).not.toBeNull()
-    expect(block.querySelector('.print-poster-band')).not.toBeNull()
   })
 
   it('team zonder clublogo maar met ingestelde clubkleuren: logo ontbreekt, kleuren worden alsnog toegepast (onafhankelijk van elkaar)', () => {

@@ -59,7 +59,7 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
     // CLUB_COLOR_FALLBACK-hex leunt op precies deze var-aanroep).
     <div className="mt-5 border-t-2 pt-3" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
       <div className="flex items-end justify-between gap-2">
-        <p className="font-pdf-display text-sm font-black">{t.matchSquad.formHeading}</p>
+        <p className="print-accent-text font-pdf-display text-sm font-black uppercase tracking-[0.14em]">{t.matchSquad.formHeading}</p>
         {items.length > 0 && (
           <p className="text-[10px] font-black uppercase tracking-[0.14em] print-poster-meta">{summaryText}</p>
         )}

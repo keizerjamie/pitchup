@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Player } from '@/lib/types'
 import { formatDateLong, todayLocal } from '@/lib/utils'
 import { toMatchFormItems } from '@/lib/match-form'
-import { resolveClubColors, readableInkOn } from '@/lib/club-colors'
+import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
 import MatchSquadEditor from '@/components/MatchSquadEditor'
 import { getDict } from '@/lib/i18n'
 
@@ -100,8 +100,7 @@ export default async function MatchSquadPage({ params }: Props) {
         formItems={formItems}
         primaryColor={clubColors.primary}
         secondaryColor={clubColors.secondary}
-        primaryInk={readableInkOn(clubColors.primary)}
-        secondaryInk={readableInkOn(clubColors.secondary)}
+        accentText={readableAccentOnWhite(clubColors.primary)}
       />
     </div>
   )

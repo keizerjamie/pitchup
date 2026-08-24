@@ -94,8 +94,7 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}
         secondaryColor={overrides.secondaryColor ?? '#009966'}
-        primaryInk={overrides.primaryInk}
-        secondaryInk={overrides.secondaryInk}
+        accentText={overrides.accentText}
       />
     </DictProvider>,
   )
@@ -680,31 +679,40 @@ describe('Lange teamnamen — trapsgewijze verkleining van BEIDE teamregels (lan
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Leesbare inktkleur op de clubkleur-vlakken — de server kiest wit of donker
-// (lib/club-colors.ts:readableInkOn) en geeft dat als kale string door; het
-// component zet hem als CSS-var zodat de printregels in globals.css
-// (--club-primary-ink/--club-secondary-ink) hem oppakken.
+// Accent-tekstkleur op wit — de server kiest de clubkleur zelf of een vaste
+// donkere vervanger (lib/club-colors.ts:readableAccentOnWhite) en geeft dat
+// als kale string door; het component zet hem als CSS-var zodat
+// .print-accent-text (globals.css) hem oppakt.
 // ═══════════════════════════════════════════════════════════════════════
-describe('Leesbare inktkleur op de clubkleur-vlakken', () => {
-  it('zet de meegegeven inktkleuren als CSS-vars op de poster-wrapper', () => {
-    const { container } = renderPrintList({ primaryInk: '#0a2e2a', secondaryInk: '#ffffff' })
+describe('Accent-tekstkleur op wit (clean-document-herontwerp)', () => {
+  it('zet de meegegeven accentkleur als CSS-var op de wrapper', () => {
+    const { container } = renderPrintList({ accentText: '#0a2e2a' })
     const block = getPrintBlock(container)
-    expect(block.style.getPropertyValue('--club-primary-ink')).toBe('#0a2e2a')
-    expect(block.style.getPropertyValue('--club-secondary-ink')).toBe('#ffffff')
+    expect(block.style.getPropertyValue('--club-accent-text')).toBe('#0a2e2a')
   })
 
-  it('zonder props valt de var terug op wit — het gedrag van vóór de waarborg', () => {
+  it('zonder prop valt de var terug op de donkere primaire fallback', () => {
     const { container } = renderPrintList()
     const block = getPrintBlock(container)
-    expect(block.style.getPropertyValue('--club-primary-ink')).toBe('#ffffff')
-    expect(block.style.getPropertyValue('--club-secondary-ink')).toBe('#ffffff')
+    expect(block.style.getPropertyValue('--club-accent-text')).toBe('#004f3b')
   })
 
-  it('globals.css: de poster-vlakken kleuren via de ink-vars met wit als fallback', () => {
+  it('globals.css: .print-accent-text kleurt via de var met de donkere fallback; het vel zelf is wit met neutrale inkt', () => {
     const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
-    expect(css).toMatch(/\.print-poster\s*\{[^}]*color:\s*var\(--club-primary-ink,\s*#ffffff\)\s*!important/)
-    expect(css).toMatch(/\.print-poster-band\s*\{[^}]*color:\s*var\(--club-secondary-ink,\s*#ffffff\)\s*!important/)
-    expect(css).toMatch(/\.print-poster-foot\s*\{[^}]*color:\s*var\(--club-primary-ink,\s*#ffffff\)\s*!important/)
+    expect(css).toMatch(/\.print-accent-text\s*\{[^}]*color:\s*var\(--club-accent-text,\s*#004f3b\)\s*!important/)
+    expect(css).toMatch(/\.print-poster\s*\{[^}]*background:\s*#ffffff\s*!important/)
+    expect(css).toMatch(/\.print-poster\s*\{[^}]*color:\s*#111827\s*!important/)
+  })
+
+  it('kop-titel, sectiekoppen en footer-merk dragen de accentklasse; teamregels en namen niet (neutraal donker)', () => {
+    const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen' })
+    const block = getPrintBlock(container)
+    expect(within(block).getByText(nl.matchSquad.exportTitle).className).toContain('print-accent-text')
+    expect(within(block).getByText(nl.matchSquad.sectionSelection).className).toContain('print-accent-text')
+    expect(within(block).getByText(nl.matchSquad.footerGenerated).className).toContain('print-accent-text')
+    const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
+    expect(ownEl.className).not.toContain('print-accent-text')
+    expect(block.querySelector('li')!.className).not.toContain('print-accent-text')
   })
 })
 
@@ -757,17 +765,21 @@ describe('Geen rugnummers op de selectieposter (het team heeft geen vaste nummer
   })
 })
 
-describe('Harde één-A4-garantie in de poster-CSS', () => {
-  it('.print-poster heeft height: 100vh + overflow: hidden + break-inside: avoid (géén min-height meer — die liet de inhoud naar pagina 2 groeien)', () => {
+describe('Eén-A4-opzet van het teamsheet (clean document)', () => {
+  it('geen named page en geen vaste-hoogtetrucs meer: de sheet volgt de gewone 12mm-@page en het één-A4-resultaat komt uit het inhoudsbudget', () => {
     const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
+    // De named page (`@page squad`/`page: squad`) is bewust weg: iOS Safari
+    // rekende de bijbehorende 100vh-garantie anders en knipte het vormblok
+    // af. Zonder named page rendert elke engine identiek binnen 12mm marge.
+    expect(css).not.toContain('@page squad')
+    expect(css).not.toMatch(/page:\s*squad/)
     const posterStart = css.indexOf('.print-poster {')
     expect(posterStart).toBeGreaterThan(-1)
     const posterBlock = css.slice(posterStart, css.indexOf('}', posterStart))
-    expect(posterBlock).toMatch(/height:\s*100vh/)
-    // Als DECLARATIE (met dubbele punt) — het woord komt nog wel in het
-    // uitleg-commentaar voor.
-    expect(posterBlock).not.toMatch(/min-height\s*:/)
-    expect(posterBlock).toMatch(/overflow:\s*hidden/)
-    expect(posterBlock).toMatch(/break-inside:\s*avoid/)
+    // Geen height/overflow-declaraties op de root: inhoud mag nooit meer
+    // afgeknipt worden (de Safari-bug uit de vorige ronde).
+    expect(posterBlock).not.toMatch(/height\s*:/)
+    expect(posterBlock).not.toMatch(/overflow\s*:/)
+    expect(posterBlock).toMatch(/background:\s*#ffffff/)
   })
 })

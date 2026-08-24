@@ -682,121 +682,81 @@ body::after {
   }
   .print-plan-voet-merk img { width: 3.5mm; height: 3.5mm; object-fit: contain; }
 
-  /* ── Wedstrijdselectie-poster (components/MatchSquadPrintList.tsx) ─────
-     Het printblok van de wedstrijdselectie is geen document maar een poster:
-     één doorlopend kleurvlak van rand tot rand, met de spelerslijst als wit
-     vlak daarbinnen. Alles hieronder staat in CSS in plaats van als
-     Tailwind-utility op het component, om dezelfde reden als de
-     `.print-club-*`-klassen hierboven: het zijn print-only regels die met de
-     clubkleur-variabelen werken, en die variabelen bestaan alleen tijdens het
-     afdrukken.
+  /* ── Wedstrijdselectie-teamsheet (components/MatchSquadPrintList.tsx) ──
+     Herontwerp 2026-08-24, tweede ronde: een CLEAN DOCUMENT op wit, binnen
+     de gewone 12mm-paginamarge — geen named page en geen full-bleed
+     kleurvlakken meer. De vorige poster-opzet (een named page zonder marge +
+     `height: 100vh` + `overflow: hidden` als één-pagina-garantie) knipte op
+     Safari/iOS het vormblok af: Safari rekent 100vh in paged media anders
+     dan Chromium. Een document met marges rendert op élke engine identiek
+     en het één-A4-resultaat volgt uit het inhoudsbudget: ~200mm bij 30
+     spelers, ruim binnen de 273mm bruikbare hoogte.
 
-     NAMED PAGE — de kern van "poster in plaats van document". De algemene
-     `@page`-regel bovenaan dit blok zet 12mm marge op élke pagina; die marge
-     is een gegarandeerde witte lijst rondom, waardoor een full-bleed
-     kleurvlak fysiek onmogelijk is. `@page squad { margin: 0 }` plus
-     `page: squad` haalt die marge weg voor uitsluitend deze ene pagina — de
-     trainingsplan-print houdt zijn 12mm.
-
-     BEWUSTE TERUGVAL: named pages worden door Chromium ondersteund maar niet
-     door elke WebKit-versie. Waar `page:` genegeerd wordt, blijft de 12mm
-     staan en rendert exact hetzelfde ontwerp binnen een witte rand. Dat mag
-     niet stukgaan, en daarom gebruikt dit blok NERGENS een negatieve marge of
-     een viewport-brede truc om "buiten de marge te breken": de poster is een
-     gewone flex-kolom die zich naar de beschikbare paginabreedte voegt. De
-     enige zichtbare consequentie van de terugval is de witte rand zelf. */
-  @page squad { size: A4; margin: 0; }
-
+     Clubkleuren zijn hier bewust SUBTIEL (expliciete gebruikerswens): een
+     dunne tweekleurige balk bovenaan, accent-tekstkleur op kopjes/labels
+     (--club-accent-text, serverzijdig gewaarborgd leesbaar op wit via
+     lib/club-colors.ts:readableAccentOnWhite) en dunne clubkleur-lijnen.
+     Alle inhoudstekst is neutraal donker. */
   .print-poster {
-    page: squad;
     /* !important: wint van Tailwinds `print:block`-utility op hetzelfde
        element (zie de `hidden print:block`-wrapper in het component). */
-    display: flex !important;
-    flex-direction: column;
-    /* HARDE ÉÉN-A4-GARANTIE (herontwerp 2026-08-24): vaste hoogte van
-       precies één pagina + overflow hidden + break-inside avoid — er kan
-       fysiek geen tweede pagina meer ontstaan. De oude `min-height` liet de
-       inhoud doorgroeien, waardoor het vormblok op een tweede pagina viel.
-       `100vh` past zich aan of de named page is toegepast (297mm) of de
-       12mm-marge-terugval geldt (273mm); de inhoud is ontworpen op ruim
-       binnen het krapste geval (~200mm bij 30 spelers). */
-    height: 100vh;
-    overflow: hidden;
-    break-inside: avoid;
-    background: var(--club-primary, #004f3b) !important;
-    /* Tekstkleur óp de clubkleur is serverzijdig gekozen (wit of donker,
-       lib/club-colors.ts:readableInkOn) — vaste witte tekst was onleesbaar
-       zodra iemand een lichte primaire clubkleur instelt. Fallback wit =
-       het oude gedrag, correct bij de donkere fallbackkleuren. */
-    color: var(--club-primary-ink, #ffffff) !important;
-  }
-
-  .print-poster-top { padding: 9mm 14mm 0; }
-  .print-poster-top .border-b-4 { padding-bottom: 3.5mm; }
-  .print-poster-plate {
-    background: #ffffff;
-    border-radius: 3mm;
-    padding: 1.5mm;
-    display: inline-flex;
-  }
-
-  /* Affiche: meta-regel, accentbalk en de twee even grote teamregels. */
-  .print-poster-matchup { padding: 6mm 14mm 9mm; }
-  /* De enige plek voor de secundaire kleur op het primaire vlak: een
-     decoratieve balk, géén tekst (tekst in de secundaire kleur op het
-     primaire vlak was onleesbaar bij bv. rood op blauw — de aanleiding voor
-     dit herontwerp). */
-  .print-poster-accent {
-    display: block;
-    width: 12mm; height: 1.4mm;
-    border-radius: 0.7mm;
-    background: var(--club-secondary, #009966) !important;
-    margin: 3mm 0 4mm;
-  }
-
-  /* Effen infoband in de secundaire clubkleur, over de volle breedte:
-     verzamelen · aftrap · locatie. */
-  .print-poster-band {
-    display: flex;
-    background: var(--club-secondary, #009966) !important;
-    color: var(--club-secondary-ink, #ffffff) !important;
-  }
-  .print-poster-band > div { flex: 1; padding: 4mm 14mm; min-width: 0; }
-  /* currentColor: de scheidingslijn volgt de gekozen inktkleur, zodat hij ook
-     op een lichte band (donkere inkt) zichtbaar blijft. */
-  .print-poster-band > div + div { border-left: 0.4mm solid color-mix(in srgb, currentColor 35%, transparent); }
-
-  /* Wit vlak met de selectie. `flex: 1` duwt de voetstrook naar de onderrand.
-     Tekst op het witte vel is bewust NEUTRAAL donker, niet de clubkleur: een
-     licht ingestelde clubkleur zou de namen onleesbaar maken. Clubkleuren
-     verschijnen op dit vel alleen als rand/accent (non-tekst). `min-height`
-     + `overflow: hidden` horen bij de één-A4-garantie van de root. */
-  .print-poster-sheet {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
+    display: block !important;
     background: #ffffff !important;
     color: #111827 !important;
-    padding: 8mm 14mm 8mm;
   }
 
-  /* Gedempte metatekst op het witte vel (aantal-regel, vormsamenvatting). */
+  /* Accent-tekstkleur op wit — de gewaarborgde variant van de primaire
+     clubkleur (zie het component). */
+  .print-accent-text { color: var(--club-accent-text, #004f3b) !important; }
+
+  /* Gedempte metatekst (labels, aantal-regel, vormsamenvatting). */
   .print-poster-meta { color: #6b7280 !important; }
 
-  /* Het vormblok (MatchFormCards) is het laatste kind van het witte vlak en
-     wordt naar de onderrand geduwd. Zonder dit verzamelt alle overgebleven
-     hoogte zich als één dood gat ónder het vormblok — zichtbaar zodra de
-     selectie kort is. Nu valt de witruimte tússen selectie en vorm, waar hij
-     als bewuste marge leest in plaats van als restruimte. */
-  .print-poster-sheet > :last-child { margin-top: auto; }
+  /* Dunne tweekleurige clubbalk bovenaan — het enige kleurvlak op het vel.
+     Het tweede segment (.print-poster-accent) draagt de secundaire kleur. */
+  .print-poster-topbar { display: flex; height: 2.2mm; break-inside: avoid; }
+  .print-poster-topbar-primair {
+    flex: 3;
+    background: var(--club-primary, #004f3b) !important;
+  }
+  .print-poster-accent {
+    flex: 1;
+    background: var(--club-secondary, #009966) !important;
+  }
+
+  /* Kop: logo + teamnaam | documenttitel, met een dunne clubkleur-lijn
+     eronder. De inline borderColor op `.border-b-4` is het AC8-bewijsanker
+     (clubkleuren.acceptance); hier verfijnd tot een dunne lijn. */
+  .print-poster-top { margin-top: 6mm; break-inside: avoid; }
+  .print-poster-top .border-b-4 {
+    border-bottom-width: 0.5mm !important;
+    padding-bottom: 3mm;
+  }
+  .print-poster-plate { display: inline-flex; }
+
+  .print-poster-matchup { margin-top: 7mm; break-inside: avoid; }
+  .print-poster-matchup > p:first-child { margin-bottom: 3mm; }
+
+  /* Inforegel (verzamelen · aftrap · locatie): witte rij tussen twee dunne
+     neutrale lijnen; cellen gescheiden door een dunne lijn. */
+  .print-poster-band {
+    display: flex;
+    margin-top: 6mm;
+    border-top: 0.2mm solid #e5e7eb;
+    border-bottom: 0.2mm solid #e5e7eb;
+    break-inside: avoid;
+  }
+  .print-poster-band > div { flex: 1; padding: 3.5mm 0 3.5mm 5mm; min-width: 0; }
+  .print-poster-band > div:first-child { padding-left: 0; }
+  .print-poster-band > div + div { border-left: 0.2mm solid #e5e7eb; }
+
+  .print-poster-sheet { margin-top: 7mm; }
 
   /* Namenlijst: kale namen (geen rugnummers — dit team heeft geen vaste
      nummers; geen gast-/positie-info — zie het component). De textContent
      van elke <li> is EXACT de spelersnaam (Story-AC9). */
   .print-squad-item {
-    padding: 1.6mm 0;
+    padding: 1.8mm 0;
     font-size: 10.5pt;
     font-weight: 700;
     border-bottom: 0.2mm solid #e5e7eb;
@@ -806,7 +766,7 @@ body::after {
     text-overflow: ellipsis;
   }
   /* Drie-koloms variant (19+ spelers): iets kleiner en strakker. */
-  .print-squad-item-compact { font-size: 9.5pt; padding: 1.4mm 0; }
+  .print-squad-item-compact { font-size: 9.5pt; padding: 1.5mm 0; }
 
   /* Compacte vormcellen: letterbadge + uitslag naast elkaar. */
   .print-form-cel {
@@ -818,10 +778,14 @@ body::after {
     background: #f3f4f6 !important;
   }
 
+  /* Voetregel: neutrale hairline, gedempte tekst; het merk in de
+     accentkleur. */
   .print-poster-foot {
-    background: var(--club-primary, #004f3b) !important;
-    color: var(--club-primary-ink, #ffffff) !important;
-    padding: 5mm 14mm;
+    margin-top: 8mm;
+    padding-top: 2.5mm;
+    border-top: 0.2mm solid #e5e7eb;
+    color: #6b7280 !important;
+    break-inside: avoid;
   }
 
   /* ── Seizoensrapport (components/inzichten/SeizoensrapportPrint.tsx) ───
