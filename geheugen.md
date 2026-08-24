@@ -2105,3 +2105,69 @@ de "Aankomend"-kolom.
 - Spelers: ratingbadge heeft `title`/`aria-label` (bestaande key
   `players.rating`); regexvlag `/s` kan niet in testbestanden (TS-target <
   es2018) — `[^}]*` matcht newlines al.
+
+## Wedstrijdselectie-poster van scratch (2026-08-24, tweede ronde)
+Aanleiding: de eigenaar stuurde de echte PDF-uitdraai — 2 pagina's, en de
+secundaire clubkleur (rood) als tekst óp de primaire (blauw) was nauwelijks
+leesbaar. Verzoek: 1 A4, onderzoek hoe profclubs het doen, géén rugnummers
+(team heeft geen vaste nummers), van scratch, mét clubkleuren + logo-optie.
+
+### Het ontwerp (profclub-patroon)
+Vier vlakken: compacte kop (logo-plate + teamnaam | titel) → affiche
+(meta-regel, accentbalk, beide teams EVEN groot) → infoband op de secundaire
+kleur (verzamelen · aftrap · **locatie** — nieuw prop `location`, kale string
+door de hele keten) → wit selectievel (kopregel, platte namenlijst, compacte
+vormstrip) → voetstrook. Thuisploeg blijft op regel 1 (eerdere expliciete
+wens, ongewijzigd); "eigen team groter" is vervangen door "even groot, eigen
+team op volle inkt / tegenstander opacity-75" — profconventie, expliciet
+onderdeel van het door de eigenaar goedgekeurde scratch-ontwerp.
+
+### Contrastregels (systematisch, dit was de kernfout)
+- Op een clubkleur-vlak staat tekst UITSLUITEND in de berekende inktkleur
+  (`--club-primary-ink`/`--club-secondary-ink`), met opacity voor hiërarchie.
+- De secundaire kleur op het primaire vlak is alleen nog de decoratieve
+  `.print-poster-accent`-balk (non-tekst). De titel/datum/footer-merk in
+  secundair-op-primair zijn weg — clubkleuren.acceptance AC8 is daarop
+  aangepast (titel: geen inline kleur meer, wel opacity-70).
+- Het witte vel heeft NEUTRALE donkere tekst (#111827), nooit de clubkleur
+  (een licht ingestelde clubkleur zou namen onleesbaar maken); clubkleuren
+  zijn daar alleen randen (kop-onderstreping, vormstrip-topstreep).
+
+### Harde één-A4-garantie
+`.print-poster { height: 100vh; overflow: hidden; break-inside: avoid }` —
+géén `min-height` meer (die liet het vormblok naar pagina 2 groeien). Met
+regressietest op de CSS-declaraties (let op: `min-height` als wóórd staat in
+het commentaar — de test checkt op `min-height\s*:`). Inhoud ontworpen op
+~200mm bij 30 spelers; krapste geval (12mm-terugval) is 273mm.
+
+### Bewust behouden eerdere beslissingen
+- **Geen positiegroepering** op dit vel: profclubs groeperen wel op positie,
+  maar wedstrijdselectie-AC2 t/m AC4 leggen expliciet vast dat deze PDF geen
+  positie-/tactiekinfo lekt (hij gaat naar de spelers). Aan de eigenaar
+  gemeld als omkeerbare optie; niet stilzwijgend omgedraaid.
+- Geen gast-aanduiding; elke `<li>` is exact de spelersnaam; precies één
+  `<ul>`; K4-importbeperking (alleen `Player` uit lib/types, kleuren als kale
+  strings) — allemaal ongewijzigd van kracht.
+- Rugnummers: `data-jersey`/`::before` volledig weg, met regressietest dat
+  er geen nummer meer in de lijst staat.
+
+### Vormstrip
+`MatchFormCards` = kop + samenvatting + max 5 cellen (letterbadge + uitslag).
+Tegenstandernaam en datum bewust geschrapt (kapten af, kostten hoogte). De
+adaptieve namenlijst: 2 kolommen t/m 18 spelers, 3 daarboven
+(`print-squad-item-compact`); trapsgewijze verkleining van de teamregels
+volgt nu de LANGSTE van de twee (≤18 → text-5xl, 19–30 → text-3xl, >30 →
+text-2xl), zodat beide regels altijd hetzelfde formaat delen.
+
+### Verificatiemethode (herbruikbaar, verfijning van de bestaande pipeline)
+Wegwerp-vitest-render naar HTML + `npx @tailwindcss/cli -i app/globals.css`
++ Playwright `page.pdf({ preferCSSPageSize: true, printBackground: true })`
++ `sips` naar PNG. Google Fonts laden prima in Playwright (`networkidle` +
+`document.fonts.ready` afwachten). Let op: de 12mm-TERUGVAL is in Chromium
+níét te simuleren via de `margin`-optie van page.pdf — de named page
+(`@page squad { margin: 0 }`) wint altijd; de terugval blijft dus alleen op
+iOS Safari zelf te testen (nog steeds open punt voor de eigenaar). Het
+wegwerp-testbestand matcht het vitest-patroon (`*.test.tsx` in de root) en
+draait dus mee in `npm test` zolang het bestaat — direct verwijderen.
+Printtip voor de eigenaar: browser-"kop- en voetteksten" uitzetten, anders
+drukt de browser URL/datum in de marge.
