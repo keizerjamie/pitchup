@@ -15,11 +15,13 @@ function AanwezigheidLijst({ titel, rows, t }: { titel: string; rows: Aanwezighe
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-bold text-muted">{titel}</h3>
+      {/* Naam wrapt (geen truncate), waarde vast rechts in tabular-nums —
+          zelfde afweging als RatingLijst (TopWorstRatings.tsx). */}
       <ol className="flex flex-col gap-1.5">
         {rows.map((r) => (
           <li key={r.player_id} className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="text-ink font-semibold truncate">{r.naam}</span>
-            <span className="text-faint font-semibold whitespace-nowrap">
+            <span className="text-ink font-semibold min-w-0 leading-snug">{r.naam}</span>
+            <span className="text-faint font-semibold whitespace-nowrap tabular-nums">
               {t.insights.topWorstAanwezigheidWaarde
                 .replace('{percentage}', String(r.percentage))
                 .replace('{aanwezig}', String(r.aanwezig))

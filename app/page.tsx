@@ -16,6 +16,7 @@ import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
+import { OPKOMST_DOEL } from '@/lib/inzichten'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 // AANNAME A1 (goedgekeurd): backward-fetchhorizon voor To-do kandidaat-events —
@@ -326,53 +327,78 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <StatCard
-          label={t.home.statAttendance}
-          icon="trending_up"
-          value={attendancePct !== null ? `${attendancePct}%` : '—'}
-        >
-          <div className="h-[7px] rounded-full overflow-hidden" style={{ background: 'var(--track)' }}>
-            <div className="h-full" style={{ width: `${attendancePct ?? 0}%`, background: 'linear-gradient(90deg,#16a34a,#4ade80)' }} />
-          </div>
-        </StatCard>
-        <StatCard label={t.home.statActivePlayers} icon="groups" value={totalActive}>
-          <div className="flex flex-col gap-2">
-            {/* Segmentvolgorde = beschikbaar (groen fit, oranje gast) links,
-                niet-beschikbaar (rood) rechts. De hexkleuren zijn bewust
-                constant over beide thema's, net als de opkomstbalk hierboven. */}
-            <div className="h-[7px] rounded-full overflow-hidden flex" style={{ background: 'var(--track)' }}>
-              {totalActive > 0 && fitCount > 0 && (
-                <div style={{ width: `${(fitCount / totalActive) * 100}%`, background: '#16a34a' }} />
-              )}
-              {totalActive > 0 && guestCount > 0 && (
-                <div style={{ width: `${(guestCount / totalActive) * 100}%`, background: '#f59e0b' }} />
-              )}
-              {totalActive > 0 && injuredCount > 0 && (
-                <div style={{ width: `${(injuredCount / totalActive) * 100}%`, background: '#ef4444' }} />
-              )}
-            </div>
-            <span className="text-[11.5px] font-semibold text-faint">
-              {fitCount} {t.home.fit}
-              {guestCount > 0 && ` · ${guestCount} ${t.home.guest}`}
-              {` · ${injuredCount} ${t.home.injured} (${injuredPct}%)`}
-            </span>
-          </div>
-        </StatCard>
-        <StatCard label={t.home.statForm} icon={<ChartBarIcon className="w-5 h-5" />} value={
-          recentForm.length > 0
-            ? <FormStrip items={recentForm} t={t} />
-            : <span className="text-[13px] font-semibold text-faint">{t.home.formEmpty}</span>
-        } />
-        <NextMatch match={nextMatch} t={t} />
-      </div>
+      {!heeftNulmeting && <SetupNulmeting t={t} />}
 
-      {/* Two columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
-        {!heeftNulmeting && <SetupNulmeting t={t} />}
-        <TodoList items={todoItems} />
-        <div className="flex flex-col gap-4">
+      {/* Beslissing-eerst-volgorde (mobiel én desktop dezelfde DOM-volgorde):
+          eerst de open taken, dan pas de kengetallen — het dashboard is een
+          "vandaag"-scherm, de analyse leeft op /inzichten. De vier tegels
+          staan als 2×2-bento in de hoofdkolom en linken elk door naar hun
+          detailpagina. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 items-start">
+        <div className="flex flex-col gap-4 min-w-0">
+          <TodoList items={todoItems} />
+
+          <div className="grid grid-cols-2 gap-3.5">
+            <StatCard
+              label={t.home.statAttendance}
+              icon="trending_up"
+              href="/inzichten"
+              value={attendancePct !== null ? `${attendancePct}%` : '—'}
+            >
+              <div className="flex flex-col gap-2">
+                <div className="relative">
+                  <div className="h-[7px] rounded-full overflow-hidden" style={{ background: 'var(--track)' }}>
+                    <div className="h-full" style={{ width: `${attendancePct ?? 0}%`, background: 'linear-gradient(90deg,#16a34a,#4ade80)' }} />
+                  </div>
+                  {/* Doelstreepje op de balk: maakt van het percentage een
+                      oordeel (zelfde 85%-norm als de inzichtenpagina). */}
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-[-2px] h-[11px] w-[2px] rounded-full"
+                    style={{ left: `${OPKOMST_DOEL}%`, background: 'var(--faint)' }}
+                  />
+                </div>
+                <span
+                  className="text-[11.5px] font-semibold"
+                  style={{ color: attendancePct !== null && attendancePct >= OPKOMST_DOEL ? 'var(--chip-green-fg)' : 'var(--faint)' }}
+                >
+                  {t.home.attendanceGoal.replace('{n}', String(OPKOMST_DOEL))}
+                </span>
+              </div>
+            </StatCard>
+            <StatCard label={t.home.statActivePlayers} icon="groups" href="/players" value={totalActive}>
+              <div className="flex flex-col gap-2">
+                {/* Segmentvolgorde = beschikbaar (groen fit, oranje gast) links,
+                    niet-beschikbaar (rood) rechts. De hexkleuren zijn bewust
+                    constant over beide thema's, net als de opkomstbalk hierboven. */}
+                <div className="h-[7px] rounded-full overflow-hidden flex" style={{ background: 'var(--track)' }}>
+                  {totalActive > 0 && fitCount > 0 && (
+                    <div style={{ width: `${(fitCount / totalActive) * 100}%`, background: '#16a34a' }} />
+                  )}
+                  {totalActive > 0 && guestCount > 0 && (
+                    <div style={{ width: `${(guestCount / totalActive) * 100}%`, background: '#f59e0b' }} />
+                  )}
+                  {totalActive > 0 && injuredCount > 0 && (
+                    <div style={{ width: `${(injuredCount / totalActive) * 100}%`, background: '#ef4444' }} />
+                  )}
+                </div>
+                <span className="text-[11.5px] font-semibold text-faint">
+                  {fitCount} {t.home.fit}
+                  {guestCount > 0 && ` · ${guestCount} ${t.home.guest}`}
+                  {` · ${injuredCount} ${t.home.injured} (${injuredPct}%)`}
+                </span>
+              </div>
+            </StatCard>
+            <StatCard label={t.home.statForm} icon={<ChartBarIcon className="w-5 h-5" />} href="/inzichten" value={
+              recentForm.length > 0
+                ? <FormStrip items={recentForm} t={t} />
+                : <span className="text-[13px] font-semibold text-faint">{t.home.formEmpty}</span>
+            } />
+            <NextMatch match={nextMatch} t={t} />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4 min-w-0">
           <Availability items={availabilityItems} t={t} />
           <QuickActions t={t} />
         </div>

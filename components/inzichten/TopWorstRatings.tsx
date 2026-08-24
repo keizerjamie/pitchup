@@ -25,11 +25,14 @@ function RatingLijst({ titel, rows, t }: { titel: string; rows: RatingPerSpelerR
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-xs font-bold text-muted">{titel}</h3>
+      {/* De naam krijgt voorrang op de waarde: hij wrapt in plaats van af te
+          kappen ("Victor Du…"); de waarde staat vast rechts in tabular-nums
+          zodat de cijfers als kolom uitlijnen. */}
       <ol className="flex flex-col gap-1.5">
         {rows.map((r) => (
           <li key={r.player_id} className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="text-ink font-semibold truncate">{r.naam}</span>
-            <span className="text-faint font-semibold whitespace-nowrap">
+            <span className="text-ink font-semibold min-w-0 leading-snug">{r.naam}</span>
+            <span className="text-faint font-semibold whitespace-nowrap tabular-nums">
               {t.insights.topWorstRatingsWaarde
                 .replace('{gemiddelde}', round1(r.gemiddelde).toFixed(1))
                 .replace('{aantal}', String(r.aantal))}

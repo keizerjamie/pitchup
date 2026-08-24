@@ -53,9 +53,23 @@ export default function TodoList({ items }: { items: TodoItem[] }) {
     training_plan: t.todo.taskTraining,
   }
 
+  // Teller = alleen ÓPEN taken (afgevinkt telt niet mee) en beweegt live mee
+  // met de optimistische checkbox-state.
+  const openCount = items.filter((item) => !(item.auto || manual[`${item.eventId}:${item.taskType}`])).length
+
   return (
     <div className="surface-card p-5 flex flex-col gap-3.5">
-      <span className="font-display text-[17px] font-bold text-ink">{t.todo.title}</span>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-faint">{t.todo.title}</span>
+        {openCount > 0 && (
+          <span
+            className="text-[11px] font-extrabold px-2 py-[2px] rounded-full"
+            style={{ color: 'var(--warning-text)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)' }}
+          >
+            {openCount}
+          </span>
+        )}
+      </div>
 
       {items.length === 0 ? (
         <p className="text-[13.5px] text-faint font-medium py-2">{t.todo.empty}</p>
@@ -91,7 +105,7 @@ export default function TodoList({ items }: { items: TodoItem[] }) {
                 className="flex-1 flex flex-col gap-0.5"
                 style={{ minWidth: 0 }}
               >
-                <span className={`text-[14.5px] font-bold truncate ${checked ? 'line-through text-faint' : 'text-ink'}`}>{label[item.taskType]}</span>
+                <span className={`text-[14.5px] font-bold leading-snug line-clamp-2 ${checked ? 'line-through text-faint' : 'text-ink'}`}>{label[item.taskType]}</span>
                 <span className="text-[12.5px] font-semibold text-muted truncate">{context}</span>
               </Link>
 

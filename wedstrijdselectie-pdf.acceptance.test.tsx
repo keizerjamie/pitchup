@@ -93,6 +93,8 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}
         secondaryColor={overrides.secondaryColor ?? '#009966'}
+        primaryInk={overrides.primaryInk}
+        secondaryInk={overrides.secondaryInk}
       />
     </DictProvider>,
   )
@@ -630,5 +632,73 @@ describe('Story-AC10 (Deel B) — importbeperking van MatchSquadPrintList.tsx bl
     for (const name of forbidden) {
       expect(named).not.toContain(name)
     }
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Lange teamnamen — trapsgewijze verkleining van de eigen-teamregel, zodat
+// een lange clubnaam niet met vrijwel rakende regels wrapt (leading 0.9) of
+// van het blad loopt. Drempels: ≤18 tekens text-6xl, 19–30 text-4xl, >30
+// text-3xl (zie ownNameClass in MatchSquadPrintList.tsx).
+// ═══════════════════════════════════════════════════════════════════════
+describe('Lange teamnamen — trapsgewijze verkleining van de eigen-teamregel', () => {
+  it('korte naam (≤18 tekens) blijft text-6xl met leading-[0.9]', () => {
+    const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'home' })
+    const ownEl = within(getPrintBlock(container)).getByText('FC Voorbeeld', { selector: 'p' })
+    expect(ownEl.className).toContain('text-6xl')
+    expect(ownEl.className).toContain('leading-[0.9]')
+  })
+
+  it('middellange naam (19–30 tekens) zakt naar text-4xl met ruimere leading', () => {
+    const naam = 'SV Blauw-Wit Amstelveen' // 23 tekens
+    const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'home' })
+    const ownEl = within(getPrintBlock(container)).getByText(naam, { selector: 'p' })
+    expect(ownEl.className).toContain('text-4xl')
+    expect(ownEl.className).not.toContain('text-6xl')
+    expect(ownEl.className).not.toContain('leading-[0.9]')
+  })
+
+  it('zeer lange naam (>30 tekens) zakt naar text-3xl', () => {
+    const naam = 'Sportvereniging Blauw-Wit Amsterdam' // 35 tekens
+    const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'away' })
+    const ownEl = within(getPrintBlock(container)).getByText(naam, { selector: 'p' })
+    expect(ownEl.className).toContain('text-3xl')
+    expect(ownEl.className).not.toContain('text-6xl')
+  })
+
+  it('de tegenstander-regel blijft in alle gevallen text-xl', () => {
+    const naam = 'Sportvereniging Blauw-Wit Amsterdam'
+    const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'home' })
+    const opponentEl = within(getPrintBlock(container)).getByText('FC Rivalen', { selector: 'p' })
+    expect(opponentEl.className).toContain('text-xl')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Leesbare inktkleur op de clubkleur-vlakken — de server kiest wit of donker
+// (lib/club-colors.ts:readableInkOn) en geeft dat als kale string door; het
+// component zet hem als CSS-var zodat de printregels in globals.css
+// (--club-primary-ink/--club-secondary-ink) hem oppakken.
+// ═══════════════════════════════════════════════════════════════════════
+describe('Leesbare inktkleur op de clubkleur-vlakken', () => {
+  it('zet de meegegeven inktkleuren als CSS-vars op de poster-wrapper', () => {
+    const { container } = renderPrintList({ primaryInk: '#0a2e2a', secondaryInk: '#ffffff' })
+    const block = getPrintBlock(container)
+    expect(block.style.getPropertyValue('--club-primary-ink')).toBe('#0a2e2a')
+    expect(block.style.getPropertyValue('--club-secondary-ink')).toBe('#ffffff')
+  })
+
+  it('zonder props valt de var terug op wit — het gedrag van vóór de waarborg', () => {
+    const { container } = renderPrintList()
+    const block = getPrintBlock(container)
+    expect(block.style.getPropertyValue('--club-primary-ink')).toBe('#ffffff')
+    expect(block.style.getPropertyValue('--club-secondary-ink')).toBe('#ffffff')
+  })
+
+  it('globals.css: de poster-vlakken kleuren via de ink-vars met wit als fallback', () => {
+    const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
+    expect(css).toMatch(/\.print-poster\s*\{[^}]*color:\s*var\(--club-primary-ink,\s*#ffffff\)\s*!important/)
+    expect(css).toMatch(/\.print-poster-band\s*\{[^}]*color:\s*var\(--club-secondary-ink,\s*#ffffff\)\s*!important/)
+    expect(css).toMatch(/\.print-poster-foot\s*\{[^}]*color:\s*var\(--club-primary-ink,\s*#ffffff\)\s*!important/)
   })
 })

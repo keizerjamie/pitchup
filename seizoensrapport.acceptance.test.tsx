@@ -93,13 +93,64 @@ describe('seizoensrapport — kop en huisstijl', () => {
     expect(blok.textContent).toMatch(/2026/)
   })
 
+  // Scoped op de kop (.rapport-kop), niet op het hele blok: sinds de
+  // voetstrook-uitbreiding staat er altijd een (vast, decoratief)
+  // Pitchup-logo in de voet, los van teamLogoUrl — zelfde precedent als de
+  // kop-scoping in wedstrijdselectie-pdf.acceptance.test.tsx.
   it('zonder clublogo verschijnt er geen <img> en geen placeholder in de kop', () => {
-    expect(renderRapport({ teamLogoUrl: null }).querySelector('img')).toBeNull()
+    const kop = renderRapport({ teamLogoUrl: null }).querySelector('.rapport-kop') as HTMLElement
+    expect(kop).not.toBeNull()
+    expect(kop.querySelector('img')).toBeNull()
   })
 
-  it('met clublogo staat er een <img> met die src', () => {
-    const blok = renderRapport({ teamLogoUrl: 'https://cdn.example.com/logo.png' })
-    expect(blok.querySelector('img')?.getAttribute('src')).toContain('logo.png')
+  it('met clublogo staat er een <img> met die src in de kop', () => {
+    const kop = renderRapport({ teamLogoUrl: 'https://cdn.example.com/logo.png' }).querySelector('.rapport-kop') as HTMLElement
+    expect(kop.querySelector('img')?.getAttribute('src')).toContain('logo.png')
+  })
+
+  it('de voetstrook draagt het vaste, decoratieve Pitchup-logo en (indien meegegeven) de generatiedatum', () => {
+    const blok = renderRapport({ teamLogoUrl: null, generatedOn: '24 aug 2026' })
+    const voet = blok.querySelector('.rapport-voet') as HTMLElement
+    const merkLogo = voet.querySelector('img') as HTMLImageElement
+    expect(merkLogo.getAttribute('src')).toBe('/logo.png')
+    expect(merkLogo.getAttribute('alt')).toBe('')
+    expect(merkLogo.getAttribute('aria-hidden')).toBe('true')
+    expect(within(voet).getByText('24 aug 2026')).toBeInTheDocument()
+  })
+
+  it('zonder generatedOn staat er geen datum-span in de voet (gedrag van vóór de uitbreiding)', () => {
+    const blok = renderRapport({ teamLogoUrl: null })
+    expect(blok.querySelector('.rapport-voet-datum')).toBeNull()
+  })
+
+  it('toont de laatste-5-reeks als W/G/V-badges in dezelfde vaste kleurenfamilie, meest recent eerst', () => {
+    const blok = renderRapport({
+      vormItems: [
+        { id: 'v1', result: 'win' },
+        { id: 'v2', result: 'draw' },
+        { id: 'v3', result: 'loss' },
+        { id: 'v4', result: 'unknown' },
+      ],
+    })
+    const badges = Array.from(blok.querySelectorAll('.rapport-vorm-badge'))
+    expect(badges.map((b) => b.textContent)).toEqual([
+      nl.home.formLetterWin,
+      nl.home.formLetterDraw,
+      nl.home.formLetterLoss,
+      nl.home.formLetterUnknown,
+    ])
+    expect(badges[0].className).toContain('rapport-vorm-badge-win')
+    expect(badges[1].className).toContain('rapport-vorm-badge-draw')
+    expect(badges[2].className).toContain('rapport-vorm-badge-loss')
+    expect(badges[3].className).toContain('rapport-vorm-badge-unknown')
+  })
+
+  it('zonder vormItems geen badge-rij; de leesbare telregel blijft altijd staan', () => {
+    const blok = renderRapport()
+    expect(blok.querySelector('.rapport-vorm-badges')).toBeNull()
+    expect(blok.textContent).toContain(
+      nl.insights.vormSummary.replace('{win}', '3').replace('{gelijk}', '1').replace('{verlies}', '1'),
+    )
   })
 
   it('zonder teamnaam crasht het rapport niet en blijft de titel staan', () => {

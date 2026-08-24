@@ -21,11 +21,11 @@ export default function NextMatch({ match, t }: { match: FootballEvent | null; t
   return (
     <Link
       href={match ? `/events/${match.id}` : '/events/new'}
-      className="surface-card p-[17px] flex flex-col gap-2.5 transition-colors hover:bg-surface-sunken"
+      className="surface-card p-[17px] flex flex-col gap-2.5 h-full transition-[background-color,transform] active:scale-[0.99]"
     >
-      <div className="flex items-center justify-between">
-        <span className="text-[12.5px] font-bold text-muted">{t.home.nextMatch}</span>
-        <span className="ms text-[20px] text-brand-accent">emoji_events</span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10.5px] font-extrabold uppercase tracking-[0.06em] text-faint leading-[1.35]">{t.home.nextMatch}</span>
+        <span className="ms text-[19px] text-brand-accent">emoji_events</span>
       </div>
       <div
         className={`font-display text-[20px] font-bold leading-tight truncate ${match ? 'text-ink' : 'text-faint'}`}

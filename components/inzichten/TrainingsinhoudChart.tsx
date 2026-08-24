@@ -38,11 +38,13 @@ export default function TrainingsinhoudChart({
     .replace('{n}', String(rijen.filter((r) => r.aantal > 0).length))
     .replace('{totaal}', String(totaal))
 
+  // Lege staat gebruikt "assignment" i.p.v. "list_alt": list_alt zit niet in
+  // de gesubsette icoonfont en rendert daar als letterlijke tekst (GSUB-check).
   return (
     <InsightCard
       title={t.insights.inhoudTitle}
       description={t.insights.inhoudDescription}
-      empty={isEmpty ? <InsightEmpty icon="list_alt" text={t.insights.inhoudEmpty} /> : undefined}
+      empty={isEmpty ? <InsightEmpty icon="assignment" text={t.insights.inhoudEmpty} /> : undefined}
     >
       {!isEmpty && (
         <>

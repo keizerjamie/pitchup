@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getAllSettings } from '@/app/actions/settings'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
-import { todayLocal } from '@/lib/utils'
+import { formatDate, todayLocal } from '@/lib/utils'
 import { matchResult } from '@/lib/match-analysis.mjs'
 import { countCategoryOccurrences } from '@/lib/periodization'
 import { addDays } from '@/lib/utils'
@@ -400,6 +400,8 @@ export default async function InzichtenPage({
         ratingTopWorst={ratingTopWorst}
         aanwezigheidTopWorst={aanwezigheidTopWorst}
         vormTelling={vormTelling}
+        vormItems={vormItems}
+        generatedOn={formatDate(today, t.browserLocale)}
         primaryColor={clubColors.primary}
         secondaryColor={clubColors.secondary}
       />

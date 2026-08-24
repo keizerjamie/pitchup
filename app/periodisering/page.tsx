@@ -169,7 +169,7 @@ export default async function PeriodizationPage() {
   )
 
   return (
-    <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
+    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <div>
         <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.periodization.pageTitle}</h1>
         <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.periodization.pageSubtitle}</p>
@@ -261,7 +261,7 @@ export default async function PeriodizationPage() {
           <NulmetingManager history={history} />
         </div>
       ) : (
-        <div className="max-w-lg flex flex-col gap-5">
+        <div className="max-w-lg w-full mx-auto flex flex-col gap-5">
           {volgendeTrainingKaart}
           <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
             <span className="ms text-[40px] text-faint">monitoring</span>

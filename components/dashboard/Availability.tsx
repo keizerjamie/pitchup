@@ -33,7 +33,7 @@ export default function Availability({ items, t }: { items: AvailabilityItem[]; 
   return (
     <div className="surface-card p-[18px] flex flex-col gap-3 flex-1 min-h-0">
       <div className="flex items-center justify-between">
-        <span className="font-display text-[16px] font-bold text-ink">{t.home.availability}</span>
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-faint">{t.home.availability}</span>
         <Link href="/players" className="text-[12.5px] font-bold text-brand-accent">{t.home.seeAll}</Link>
       </div>
       <div className="flex flex-col gap-2 overflow-hidden">

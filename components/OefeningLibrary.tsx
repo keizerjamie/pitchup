@@ -1,8 +1,9 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Oefening, PERIODIZATION_CATEGORIES } from '@/lib/types'
+import { Oefening, OefeningCategorie, Veldzone, OEFENING_CATEGORIES, VALID_VELDZONES, PERIODIZATION_CATEGORIES } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
+import { matchesOefeningFilters, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
 import type { OefeningInput } from '@/lib/oefening'
 import { createOefening, updateOefening, deleteOefening } from '@/app/actions/oefening-library'
 import FormationField from '@/components/FormationField'
@@ -32,7 +33,12 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
     setOefeningen(initialOefeningen)
   }
 
-  const [query, setQuery] = useState('')
+  // Zelfde filtermodel als de oefening-picker in de trainingsflow
+  // (lib/oefening-filter.ts): één state-object, AND-combinatie met de
+  // zoekbalk. De uitgebreide filters zitten achter een toggle (progressive
+  // disclosure) — de bibliotheek opent rustig, filteren is één tik verder.
+  const [filters, setFilters] = useState<OefeningFilters>(EMPTY_OEFENING_FILTERS)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [editing, setEditing] = useState<OefeningWithUsage | 'new' | null>(null)
   // Filter op oefeningen zonder ingevulde duur. Die vallen niet op in een
   // lange lijst, maar breken wél de sessietijdlijn van elke training waarin ze
@@ -42,22 +48,24 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const q = query.trim().toLowerCase()
   const zonderDuurAantal = useMemo(
     () => oefeningen.filter((o) => o.duur_min == null).length,
     [oefeningen],
   )
 
-  const filtered = useMemo(
-    () => (q || alleenZonderDuur
-      ? oefeningen.filter(
-          (o) =>
-            (!q || o.naam.toLowerCase().includes(q)) &&
-            (!alleenZonderDuur || o.duur_min == null),
-        )
-      : oefeningen),
-    [oefeningen, q, alleenZonderDuur],
-  )
+  // Aantal actieve uitgebreide filters (zonder de zoekbalk) — gebruikt als
+  // teller op de Filters-knop. `!== null`-checks, nooit truthiness: 0 is een
+  // geldige actieve filterwaarde (zie lib/oefening-filter.ts).
+  const actieveFilters =
+    (filters.categorie !== null ? 1 : 0) +
+    (filters.veldzone !== null ? 1 : 0) +
+    (filters.aantalMin !== null || filters.aantalMax !== null ? 1 : 0) +
+    (filters.duurMin !== null || filters.duurMax !== null ? 1 : 0)
+
+  const filtered = useMemo(() => {
+    const basis = oefeningen.filter((o) => matchesOefeningFilters(o, filters))
+    return alleenZonderDuur ? basis.filter((o) => o.duur_min == null) : basis
+  }, [oefeningen, filters, alleenZonderDuur])
 
   const catLabel = (key: string) => t.periodization.categories[key] ?? key
   const catColor = (key: string) => PERIODIZATION_CATEGORIES.find((c) => c.key === key)?.color ?? 'bg-surface-sunken text-muted'
@@ -91,11 +99,25 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
         <h1 className="text-xl font-bold text-ink">{t.oefeningen.libraryTitle}</h1>
         <div className="flex items-center gap-2">
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={filters.query}
+            onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
             placeholder={t.oefeningen.searchPlaceholder}
             className="px-3 py-2 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink placeholder:text-faint w-[150px] sm:w-[220px] min-w-0"
           />
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((open) => !open)}
+            aria-expanded={filtersOpen}
+            className={`text-sm font-semibold rounded-xl px-3.5 py-2 transition-colors flex-shrink-0 ${filtersOpen || actieveFilters > 0 ? 'text-white' : 'text-muted'}`}
+            style={
+              filtersOpen || actieveFilters > 0
+                ? { background: 'var(--brand-btn)' }
+                : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
+            }
+          >
+            {t.oefeningen.filtersToggle}
+            {actieveFilters > 0 && ` · ${actieveFilters}`}
+          </button>
           <button
             type="button"
             onClick={() => setEditing('new')}
@@ -105,6 +127,125 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
           </button>
         </div>
       </div>
+
+      {/* Uitgebreide filters — zelfde velden en semantiek als de
+          oefening-picker in de trainingsflow (components/OefeningPicker.tsx),
+          zodat filteren overal hetzelfde werkt. Eigen input-ids
+          (bib-filter-*) zodat ze nooit met de picker-ids kunnen botsen. */}
+      {filtersOpen && (
+        <div className="surface-card p-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label htmlFor="bib-filter-categorie" className="block text-xs font-semibold text-muted mb-1">
+              {t.oefeningen.filterCategoryLabel}
+            </label>
+            <select
+              id="bib-filter-categorie"
+              value={filters.categorie ?? ''}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, categorie: e.target.value ? (e.target.value as OefeningCategorie) : null }))
+              }
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
+            >
+              <option value="">{t.oefeningen.filterAll}</option>
+              {OEFENING_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>{t.periodization.categories[cat] ?? cat}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="bib-filter-veldzone" className="block text-xs font-semibold text-muted mb-1">
+              {t.oefeningen.filterZoneLabel}
+            </label>
+            <select
+              id="bib-filter-veldzone"
+              value={filters.veldzone ?? ''}
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, veldzone: e.target.value ? (e.target.value as Veldzone) : null }))
+              }
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
+            >
+              <option value="">{t.oefeningen.filterAll}</option>
+              {VALID_VELDZONES.map((zone) => (
+                <option key={zone} value={zone}>{t.trainingPlan.fieldZones[zone]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-muted mb-1">{t.oefeningen.filterCountLabel}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label htmlFor="bib-filter-aantal-min" className="sr-only">
+                  {`${t.oefeningen.filterCountLabel} ${t.oefeningen.filterMinPlaceholder}`}
+                </label>
+                <input
+                  id="bib-filter-aantal-min"
+                  type="number"
+                  min={0}
+                  value={filters.aantalMin ?? ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, aantalMin: e.target.value === '' ? null : Number(e.target.value) }))
+                  }
+                  placeholder={t.oefeningen.filterMinPlaceholder}
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="bib-filter-aantal-max" className="sr-only">
+                  {`${t.oefeningen.filterCountLabel} ${t.oefeningen.filterMaxPlaceholder}`}
+                </label>
+                <input
+                  id="bib-filter-aantal-max"
+                  type="number"
+                  min={0}
+                  value={filters.aantalMax ?? ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, aantalMax: e.target.value === '' ? null : Number(e.target.value) }))
+                  }
+                  placeholder={t.oefeningen.filterMaxPlaceholder}
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
+                />
+              </div>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-muted mb-1">{t.oefeningen.filterDurationLabel}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label htmlFor="bib-filter-duur-min" className="sr-only">
+                  {`${t.oefeningen.filterDurationLabel} ${t.oefeningen.filterMinPlaceholder}`}
+                </label>
+                <input
+                  id="bib-filter-duur-min"
+                  type="number"
+                  min={0}
+                  value={filters.duurMin ?? ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, duurMin: e.target.value === '' ? null : Number(e.target.value) }))
+                  }
+                  placeholder={t.oefeningen.filterMinPlaceholder}
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
+                />
+              </div>
+              <div>
+                <label htmlFor="bib-filter-duur-max" className="sr-only">
+                  {`${t.oefeningen.filterDurationLabel} ${t.oefeningen.filterMaxPlaceholder}`}
+                </label>
+                <input
+                  id="bib-filter-duur-max"
+                  type="number"
+                  min={0}
+                  value={filters.duurMax ?? ''}
+                  onChange={(e) =>
+                    setFilters((f) => ({ ...f, duurMax: e.target.value === '' ? null : Number(e.target.value) }))
+                  }
+                  placeholder={t.oefeningen.filterMaxPlaceholder}
+                  className="w-full px-3 py-2 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {zonderDuurAantal > 0 && (
         <div className="mb-4 surface-card px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -200,25 +341,29 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                 </div>
               </div>
 
-              {o.diagram ? (
-                <div className="mt-3">
-                  <DiagramView diagram={o.diagram} sizePx={140} />
-                </div>
-              ) : o.teams.length > 0 && (
-                <div className="flex flex-wrap gap-3 mt-3 min-w-0">
-                  {o.teams.map((tm, i) => {
+              {/* Vaste thumbnail-zone: elke kaart krijgt hetzelfde visuele
+                  vlak (vaste hoogte, inhoud gecentreerd), of er nu een groot
+                  diagram, een formatieveld of niets in staat — anders leest
+                  het raster als een ratjetoe van kaarthoogtes. */}
+              <div className="mt-3 h-[190px] flex items-center justify-center gap-3 overflow-hidden rounded-xl min-w-0">
+                {o.diagram ? (
+                  <DiagramView diagram={o.diagram} sizePx={130} />
+                ) : o.teams.length > 0 ? (
+                  o.teams.map((tm, i) => {
                     const basis = basisFormatieDef(tm)
                     return (
                       <FormationField
                         key={i}
                         positions={basis?.positions ?? []}
                         label={`${tm.grootte}${basis ? ` · ${basis.label}` : ''}`}
-                        sizePx={72}
+                        sizePx={90}
                       />
                     )
-                  })}
-                </div>
-              )}
+                  })
+                ) : (
+                  <span className="ms text-[30px] text-faint/60" aria-hidden="true">sports_soccer</span>
+                )}
+              </div>
 
               {/* AC21: deleteConfirm wordt alleen gezet bij koppelingCount >= 1
                   (zie de delete-knop hierboven) — N=0 verwijdert direct. */}

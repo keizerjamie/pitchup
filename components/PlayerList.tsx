@@ -142,7 +142,9 @@ export default function PlayerList({ active, inactive }: Props) {
         </div>
         {player.rating != null && (
           <span className="text-[11.5px] font-extrabold text-brand-accent px-2 py-0.5 rounded-full flex-shrink-0"
-            style={{ background: 'color-mix(in srgb, var(--brand-accent) 14%, transparent)' }}>
+            style={{ background: 'color-mix(in srgb, var(--brand-accent) 14%, transparent)' }}
+            title={t.players.rating}
+            aria-label={`${t.players.rating}: ${player.rating}`}>
             {player.rating}
           </span>
         )}

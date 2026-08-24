@@ -26,6 +26,12 @@ interface Props {
   // fallback-logica of null-checks nodig.
   primaryColor: string
   secondaryColor: string
+  // Leesbare tekstkleur óp elk clubkleur-vlak (wit of donker, serverzijdig
+  // gekozen via lib/club-colors.ts:readableInkOn — dat bestand mag hier niet
+  // geïmporteerd worden, vandaar kale strings). Optioneel met wit als
+  // default: het gedrag van vóór deze waarborg.
+  primaryInk?: string
+  secondaryInk?: string
 }
 
 // Print-only presentatie van de wedstrijdselectie (dual-markup-patroon, zie
@@ -60,6 +66,8 @@ export default function MatchSquadPrintList({
   formItems,
   primaryColor,
   secondaryColor,
+  primaryInk = '#ffffff',
+  secondaryInk = '#ffffff',
 }: Props) {
   const t = useDict()
   const sorted = sortSquadForExport(players, t.browserLocale)
@@ -81,12 +89,25 @@ export default function MatchSquadPrintList({
   const gather = formatTime(gatherTime)
   const kickoff = formatTime(kickoffTime)
 
+  // Lange clubnamen: op text-6xl met leading-[0.9] wrapt een lange naam met
+  // vrijwel rakende regels. Trapsgewijs kleiner op naamlengte, met iets
+  // ruimere leading zodra wrappen waarschijnlijk wordt — elke naam blijft zo
+  // poster-waardig. Drempels ruwweg op wat er op 182mm binnenpast.
+  const ownNameClass =
+    ownTeamLine === null
+      ? ''
+      : ownTeamLine.length > 30
+        ? 'text-3xl leading-[1.05]'
+        : ownTeamLine.length > 18
+          ? 'text-4xl leading-[1.02]'
+          : 'text-6xl leading-[0.9]'
+
   // Aantal rijen per kolom bij twee kolommen. Minimaal 1: `repeat(0, auto)` is
   // ongeldige CSS, en een lege selectie (0 spelers) is een bestaand geval.
   const squadColumnRows = Math.max(1, Math.ceil(sorted.length / 2))
 
   return (
-    <div className="hidden print:block print-poster" style={{ '--club-primary': primaryColor, '--club-secondary': secondaryColor } as React.CSSProperties}>
+    <div className="hidden print:block print-poster" style={{ '--club-primary': primaryColor, '--club-secondary': secondaryColor, '--club-primary-ink': primaryInk, '--club-secondary-ink': secondaryInk } as React.CSSProperties}>
       <div className="print-poster-hero">
         {/* Kop: logo (alleen als aanwezig, geen placeholder) + teamnaam links,
             titel rechts. De `border-b-4` in de primaire clubkleur staat op
@@ -132,11 +153,11 @@ export default function MatchSquadPrintList({
               homeAway === 'away' ? (
                 <>
                   <p className="font-pdf-display text-xl font-black" style={{ color: 'var(--club-secondary, #009966)' }}>{opponentLine}</p>
-                  <p className="font-pdf-display text-6xl font-black leading-[0.9] tracking-tight">{ownTeamLine}</p>
+                  <p className={`font-pdf-display font-black tracking-tight ${ownNameClass}`}>{ownTeamLine}</p>
                 </>
               ) : (
                 <>
-                  <p className="font-pdf-display text-6xl font-black leading-[0.9] tracking-tight">{ownTeamLine}</p>
+                  <p className={`font-pdf-display font-black tracking-tight ${ownNameClass}`}>{ownTeamLine}</p>
                   <p className="font-pdf-display text-xl font-black mt-2" style={{ color: 'var(--club-secondary, #009966)' }}>{opponentLine}</p>
                 </>
               )

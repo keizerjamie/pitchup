@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import type { Dict } from '@/messages/nl'
 
-// Four shortcut tiles to the most common actions — all real routes.
+// Zes snelkoppelingen naar de meest gebruikte routes — bewust een rustige
+// 3×2-grid (de oude grid-cols-4 brak de zes tegels in een rommelige 4+2-rij).
 export default function QuickActions({ t }: { t: Dict }) {
   const actions = [
     { href: '/events/new', icon: 'add_circle', label: t.home.qaNewEvent },
@@ -17,17 +18,17 @@ export default function QuickActions({ t }: { t: Dict }) {
   ]
   return (
     <div className="surface-card p-4 flex flex-col gap-3">
-      <span className="font-display text-[15px] font-bold text-ink">{t.home.quickActions}</span>
-      <div className="grid grid-cols-4 gap-2.5">
+      <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-faint">{t.home.quickActions}</span>
+      <div className="grid grid-cols-3 gap-2">
         {actions.map((a) => (
           <Link
             key={a.href}
             href={a.href}
-            className="flex flex-col items-center gap-2 py-3 px-1 rounded-[13px] bg-surface-sunken transition-colors hover:bg-surface"
+            className="flex flex-col items-center gap-1.5 py-2.5 px-1 rounded-[12px] bg-surface-sunken transition-colors hover:bg-surface active:scale-[0.98]"
             style={{ border: '1px solid var(--border-soft)' }}
           >
-            <span className="ms text-[23px] text-brand-accent">{a.icon}</span>
-            <span className="text-[11.5px] font-bold text-muted text-center leading-tight">{a.label}</span>
+            <span className="ms text-[21px] text-brand-accent">{a.icon}</span>
+            <span className="text-[11px] font-bold text-muted text-center leading-tight">{a.label}</span>
           </Link>
         ))}
       </div>

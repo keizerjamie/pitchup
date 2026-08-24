@@ -66,6 +66,23 @@ export default function DashboardHero({
           background: 'radial-gradient(circle,rgba(74,222,128,.28),transparent 65%)',
         }}
       />
+      {/* Veldlijnen-motief: subtiel merkelement, puur decoratief. Inline SVG
+          (geen icoonfont — de gesubsette Material Symbols mist elke nieuwe
+          glyph stilzwijgend, zie ChartBarIcon.tsx). */}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 100 140"
+        fill="none"
+        className="absolute pointer-events-none w-[170px] lg:w-[270px] -right-10 lg:-right-6 -top-12 lg:-top-24 rotate-[14deg]"
+      >
+        <g stroke="#ffffff" strokeOpacity="0.08" strokeWidth="1.5">
+          <rect x="4" y="4" width="92" height="132" rx="3" />
+          <line x1="4" y1="70" x2="96" y2="70" />
+          <circle cx="50" cy="70" r="14" />
+          <rect x="26" y="4" width="48" height="18" />
+          <rect x="26" y="118" width="48" height="18" />
+        </g>
+      </svg>
 
       {/* ── Mobile (compact) ── */}
       <div className="lg:hidden relative flex flex-col gap-3">

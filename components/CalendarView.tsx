@@ -7,6 +7,7 @@ import { FootballEvent } from '@/lib/types'
 import { cn, formatTime, todayLocal } from '@/lib/utils'
 import { monthMatrix, sameMonth } from '@/lib/calendar.mjs'
 import { useDict } from '@/lib/i18n-context'
+import UploadIcon from '@/components/icons/UploadIcon'
 
 interface Props {
   events: FootballEvent[]
@@ -95,7 +96,9 @@ export default function CalendarView({ events, attendanceMap }: Props) {
             </button>
             <Link href="/events/bulk"
               className="hidden md:flex h-10 rounded-xl px-3 items-center gap-1.5 text-[13.5px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors flex-shrink-0">
-              <span className="ms text-[19px]">upload_file</span>
+              {/* Inline SVG: "upload_file" zit niet in de gesubsette icoonfont
+                  en rendert daar als letterlijke tekst (zie UploadIcon.tsx). */}
+              <UploadIcon className="w-[19px] h-[19px]" />
               <span>{t.event.bulk.fabLabel}</span>
             </Link>
             <Link href="/events/new"
@@ -179,7 +182,7 @@ export default function CalendarView({ events, attendanceMap }: Props) {
 
       {/* Desktop "upcoming" sidebar */}
       <aside className="hidden md:flex md:flex-col md:w-[300px] md:flex-shrink-0 surface-card p-5 gap-4 self-start">
-        <span className="font-display text-[17px] font-bold text-ink">{t.calendar.upcoming}</span>
+        <span className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-faint">{t.calendar.upcoming}</span>
         {upcoming.length === 0 ? (
           <p className="text-faint text-sm">{t.calendar.noEvents}</p>
         ) : (
@@ -224,14 +227,25 @@ function LegendRow({ color, label }: { color: string; label: string }) {
 
 function CalendarPill({ event, t }: { event: FootballEvent; t: Dict }) {
   const color = colorFor(event)
+  const title = eventTitle(event, t)
   return (
     <Link
       href={`/events/${event.id}`}
-      className="block rounded-md px-1.5 py-1 text-[11px] font-semibold leading-tight truncate text-ink hover:brightness-95 transition"
+      title={title}
+      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold leading-tight text-ink hover:brightness-95 transition-[filter] min-w-0"
       style={{ background: `color-mix(in srgb, ${color} 18%, transparent)` }}
     >
-      {event.time && <span className="tabular-nums mr-1" style={{ color }}>{formatTime(event.time)}</span>}
-      {eventTitle(event, t)}
+      {/* In een smalle maandcel is een afgekapte titel ("Tr…") ruis; de
+          kleurstip + tijd vertellen daar het hele verhaal. De titel doet pas
+          mee op zeer brede schermen (2xl — op xl eet de sidebar de cellen al
+          te smal) en staat altijd in het title-attribuut. */}
+      <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+      {event.time ? (
+        <span className="tabular-nums flex-shrink-0" style={{ color }}>{formatTime(event.time)}</span>
+      ) : (
+        <span className="truncate">{title}</span>
+      )}
+      {event.time && <span className="hidden 2xl:inline truncate">{title}</span>}
     </Link>
   )
 }

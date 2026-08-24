@@ -23,8 +23,9 @@ export default function InsightCard({
   return (
     <div className="surface-card overflow-hidden">
       <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-soft)' }}>
-        <h2 className="font-display text-[16px] font-bold text-ink">{title}</h2>
-        {description && <p className="text-xs font-semibold text-faint mt-0.5">{description}</p>}
+        {/* Eyebrow-kopstijl, gelijk aan de dashboard-kaarten — één familie. */}
+        <h2 className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-faint">{title}</h2>
+        {description && <p className="text-xs font-semibold text-muted mt-1">{description}</p>}
       </div>
       <div className="px-5 py-4">{empty !== undefined ? empty : children}</div>
     </div>

@@ -15,6 +15,8 @@ import {
 } from '@/lib/inzichten'
 import { vulSignaalIn } from '@/lib/signaal-tekst'
 import TeamLogo from '@/components/TeamLogo'
+import type { FormStripItem } from '@/components/dashboard/FormStrip'
+import type { MatchResult } from '@/lib/types'
 
 // Print-only seizoensrapport (dual-markup-patroon, zie MatchSquadPrintList.tsx
 // en AttendanceSummary.tsx): één A4 dat een trainer kan meenemen naar een
@@ -42,6 +44,16 @@ function datumLabel(datum: string, locale: string): string {
     month: 'short',
     year: 'numeric',
   })
+}
+
+// Zelfde letterkeuze als FormStrip/MatchFormCards: de i18n-letters per taal.
+function vormLetter(t: Dict, result: MatchResult): string {
+  switch (result) {
+    case 'win': return t.home.formLetterWin
+    case 'draw': return t.home.formLetterDraw
+    case 'loss': return t.home.formLetterLoss
+    default: return t.home.formLetterUnknown
+  }
 }
 
 function Kpi({ label, waarde, detail }: { label: string; waarde: string; detail: string }) {
@@ -84,6 +96,8 @@ export default function SeizoensrapportPrint({
   ratingTopWorst,
   aanwezigheidTopWorst,
   vormTelling,
+  vormItems = [],
+  generatedOn = null,
   primaryColor,
   secondaryColor,
 }: {
@@ -101,6 +115,13 @@ export default function SeizoensrapportPrint({
   ratingTopWorst: TopWorst<RatingPerSpelerRij>
   aanwezigheidTopWorst: TopWorst<AanwezigheidPerSpeler>
   vormTelling: VormTelling
+  // De laatste-5-reeks als W/G/V-badges naast de telling — zelfde visuele
+  // familie als de wedstrijdselectie-poster (MatchFormCards). Optioneel met
+  // lege default zodat bestaande aanroepen/testharnassen blijven compileren.
+  vormItems?: FormStripItem[]
+  // Al geformatteerde generatiedatum voor de voetstrook (server bepaalt de
+  // datum en het locale-formaat; dit component blijft deterministisch).
+  generatedOn?: string | null
   primaryColor: string
   secondaryColor: string
 }) {
@@ -179,7 +200,12 @@ export default function SeizoensrapportPrint({
               dezelfde reden kan de normlijn nu wél kloppen: hij staat op
               `bottom: 85%` van precies het vlak waar de staven in staan. */}
           <div className="rapport-bars">
-            <span className="rapport-norm" style={{ bottom: `${OPKOMST_DOEL}%` }} />
+            {/* Label óp de normlijn — de schermgrafiek benoemt de norm al
+                ("Norm 85%"), zonder label is de stippellijn op papier niet
+                zelfstandig leesbaar. */}
+            <span className="rapport-norm" style={{ bottom: `${OPKOMST_DOEL}%` }}>
+              <span className="rapport-norm-label">{OPKOMST_DOEL}%</span>
+            </span>
             {metCijfer.map((m) => (
               <span key={m.maand} className="rapport-bar-kolom">
                 <span
@@ -254,12 +280,32 @@ export default function SeizoensrapportPrint({
 
       <div className="rapport-sectie">
         <p className="rapport-sectiekop font-pdf-display">{t.insights.vormTitle}</p>
+        {/* W/G/V-badges (meest recent links) in dezelfde vaste
+            groen/amber/rood-familie als de wedstrijdselectie-poster; de
+            leesbare telregel eronder blijft staan. */}
+        {vormItems.length > 0 && (
+          <div className="rapport-vorm-badges" aria-hidden="true">
+            {vormItems.map((item) => (
+              <span key={item.id} className={`rapport-vorm-badge rapport-vorm-badge-${item.result} font-pdf-display`}>
+                {vormLetter(t, item.result)}
+              </span>
+            ))}
+          </div>
+        )}
         <p className="rapport-vorm">{vormRegel}</p>
       </div>
 
       <div className="rapport-voet">
         <span>{teamName}</span>
-        <span className="rapport-voet-merk">{t.matchSquad.footerGenerated}</span>
+        {generatedOn && <span className="rapport-voet-datum">{generatedOn}</span>}
+        <span className="rapport-voet-merk">
+          {/* Decoratief (alt="" + aria-hidden): de merknaam staat er als
+              tekst direct naast. Zo blijft de a11y-boom van /inzichten
+              beperkt tot de grafieken met aria-label. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- print-only blok, zelfde afweging als de poster-footer (MatchSquadPrintList.tsx): een gewone <img> rendert synchroon bij afdrukken */}
+          <img src="/logo.png" alt="" aria-hidden="true" />
+          {t.matchSquad.footerGenerated}
+        </span>
       </div>
     </div>
   )

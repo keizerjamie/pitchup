@@ -302,6 +302,19 @@ body {
   box-shadow: 0 1px 2px rgba(10, 46, 42, 0.04), 0 10px 30px -24px rgba(10, 46, 42, 0.35);
 }
 
+/* Klikbare kaart (StatCard met href, NextMatch): hover-tint. Moet hier
+   ongelaagd staan — een Tailwind `hover:bg-*`-utility zit in @layer utilities
+   en verliest de cascade van de ongelaagde .surface-card-achtergrond
+   hierboven (zelfde valkuil als .glass-card in het printblok onderaan; noem
+   dat blok hier niet bij zijn letterlijke at-rule-naam — de C1-tests zoeken
+   het via indexOf op die string en zouden dan dit commentaar vinden).
+   Gegate op hover-capable devices zodat touch geen sticky hover krijgt. */
+@media (hover: hover) and (pointer: fine) {
+  a.surface-card:hover {
+    background: var(--surface-sunken);
+  }
+}
+
 /* Decorative background blobs — give glass elements something to blur */
 body::before {
   content: '';
@@ -649,6 +662,26 @@ body::after {
     color: #ffffff !important;
   }
 
+  /* Voetstrook van de trainingsplan-print (app/events/[id]/training-plan/
+     page.tsx) — zelfde conventie als de poster-/rapportvoet: teamnaam ·
+     datum links, merk rechts. `clear: both` is dragend: de voet moet ónder
+     de gefloate aanwezigheidskolom uitkomen, niet ernaast. */
+  .print-plan-voet {
+    clear: both;
+    margin-top: 4mm; padding-top: 2mm;
+    border-top: 0.3mm solid var(--club-primary, #004f3b);
+    font-size: 6.5pt; font-weight: 700; color: #6b7280;
+  }
+  .print-plan-voet-datum::before { content: '·'; margin-right: 1.6mm; }
+  .print-plan-voet-datum { margin-left: 1.6mm; }
+  .print-plan-voet-merk {
+    display: inline-flex; align-items: center; gap: 1.2mm;
+    margin-left: auto;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--club-secondary, #009966); font-weight: 800;
+  }
+  .print-plan-voet-merk img { width: 3.5mm; height: 3.5mm; object-fit: contain; }
+
   /* ── Wedstrijdselectie-poster (components/MatchSquadPrintList.tsx) ─────
      Het printblok van de wedstrijdselectie is geen document maar een poster:
      één doorlopend kleurvlak van rand tot rand, met de spelerslijst als wit
@@ -687,7 +720,11 @@ body::after {
        precies één van die twee gevallen een tweede, lege pagina opleveren. */
     min-height: 100vh;
     background: var(--club-primary, #004f3b) !important;
-    color: #ffffff !important;
+    /* Tekstkleur óp de clubkleur is serverzijdig gekozen (wit of donker,
+       lib/club-colors.ts:readableInkOn) — vaste witte tekst was onleesbaar
+       zodra iemand een lichte primaire clubkleur instelt. Fallback wit =
+       het oude gedrag, correct bij de donkere fallbackkleuren. */
+    color: var(--club-primary-ink, #ffffff) !important;
   }
 
   .print-poster-hero { padding: 16mm 14mm 14mm; }
@@ -703,10 +740,12 @@ body::after {
   .print-poster-band {
     display: flex;
     background: var(--club-secondary, #009966) !important;
-    color: #ffffff !important;
+    color: var(--club-secondary-ink, #ffffff) !important;
   }
   .print-poster-band > div { flex: 1; padding: 5mm 14mm; }
-  .print-poster-band > div + div { border-left: 0.4mm solid rgba(255, 255, 255, 0.35); }
+  /* currentColor: de scheidingslijn volgt de gekozen inktkleur, zodat hij ook
+     op een lichte band (donkere inkt) zichtbaar blijft. */
+  .print-poster-band > div + div { border-left: 0.4mm solid color-mix(in srgb, currentColor 35%, transparent); }
 
   /* Wit vlak met de selectie. `flex: 1` duwt de voetstrook naar de onderrand;
      bij een korte selectie groeit dit vlak mee in plaats van wit papier onder
@@ -766,7 +805,7 @@ body::after {
 
   .print-poster-foot {
     background: var(--club-primary, #004f3b) !important;
-    color: #ffffff !important;
+    color: var(--club-primary-ink, #ffffff) !important;
     padding: 6mm 14mm;
   }
 
@@ -863,6 +902,26 @@ body::after {
     position: absolute; left: 0; right: 0;
     border-top: 0.35mm dashed var(--club-primary, #004f3b);
   }
+  /* Label óp de normlijn, rechts uitgelijnd nét boven de stippellijn. */
+  .rapport-norm-label {
+    position: absolute; right: 0; bottom: 0.4mm;
+    font-size: 6pt; font-weight: 800;
+    color: var(--club-primary, #004f3b);
+  }
+
+  /* W/G/V-badges in de vormsectie — zelfde vaste kleurenfamilie als de
+     vormkaartjes op de wedstrijdselectie-poster (MatchFormCards.tsx),
+     bewust los van de clubkleuren. */
+  .rapport-vorm-badges { display: flex; gap: 1.6mm; margin-bottom: 1.6mm; }
+  .rapport-vorm-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 6mm; height: 6mm; border-radius: 1.2mm;
+    font-size: 9pt;
+  }
+  .rapport-vorm-badge-win { background: #16a34a; color: #ffffff; }
+  .rapport-vorm-badge-draw { background: #ffffff; color: var(--chip-amber-fg); border: 0.4mm solid var(--chip-amber-fg); }
+  .rapport-vorm-badge-loss { background: #fee2e2; color: var(--chip-red-fg); }
+  .rapport-vorm-badge-unknown { background: var(--track); color: var(--faint); }
 
   .rapport-kolommen { display: flex; gap: 6mm; }
   .rapport-kolommen > * { flex: 1; min-width: 0; }
@@ -879,16 +938,26 @@ body::after {
   .rapport-lijst-waarde { color: #6b7280; font-weight: 700; white-space: nowrap; }
   .rapport-vorm { font-size: 9pt; font-weight: 700; }
 
+  /* Links teamnaam (· datum), rechts het merk — zelfde conventie als de
+     poster-voetstrook. Geen space-between: het merk duwt zichzelf naar
+     rechts, zodat de datum optioneel kan zijn zonder de verdeling te breken. */
   .rapport-voet {
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; align-items: center;
     margin-top: 6mm; padding-top: 2mm;
     border-top: 0.3mm solid #d1d5db;
     font-size: 6.5pt; font-weight: 700; color: #6b7280;
   }
+  /* De "·"-scheiding via CSS zodat de teamnaam-span zijn kale tekst houdt
+     (zelfde middel als de poster-foot). */
+  .rapport-voet-datum::before { content: '·'; margin-right: 1.6mm; }
+  .rapport-voet-datum { margin-left: 1.6mm; }
   .rapport-voet-merk {
+    display: inline-flex; align-items: center; gap: 1.2mm;
+    margin-left: auto;
     text-transform: uppercase; letter-spacing: 0.1em;
     color: var(--club-secondary, #009966); font-weight: 800;
   }
+  .rapport-voet-merk img { width: 3.5mm; height: 3.5mm; object-fit: contain; }
 }
 
 

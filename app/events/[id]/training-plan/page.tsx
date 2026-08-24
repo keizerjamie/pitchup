@@ -9,6 +9,7 @@ import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import type { KopieerOptie } from '@/components/KopieerVorigeTraining'
 import AttendanceSummary from '@/components/AttendanceSummary'
 import PrintButton from '@/components/PrintButton'
+import TeamLogo from '@/components/TeamLogo'
 import { getDict } from '@/lib/i18n'
 
 interface Props {
@@ -38,7 +39,7 @@ export default async function TrainingPlanPage({ params }: Props) {
       .order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
     supabase.from('settings').select('key, value').eq('team_id', user.id)
-      .in('key', ['team_color_primary', 'team_color_secondary']),
+      .in('key', ['team_color_primary', 'team_color_secondary', 'team_name', 'team_logo_url']),
   ])
   const activePlayers: Player[] = playersData ?? []
   const presentIds = new Set((attendanceData ?? []).filter((a) => a.status === 'present').map((a) => a.player_id))
@@ -52,6 +53,10 @@ export default async function TrainingPlanPage({ params }: Props) {
   const settingsMap: Record<string, string> = {}
   for (const row of settingsRows ?? []) settingsMap[row.key] = row.value
   const clubColors = resolveClubColors(settingsMap)
+  // Voor de print-kop en -voet (familieconventie met de wedstrijdselectie-
+  // poster en het seizoensrapport): teamnaam + logo, zelfde settings-batch.
+  const teamName = settingsMap['team_name']?.trim() || null
+  const teamLogoUrl = settingsMap['team_logo_url'] || null
 
   // ── Find latest meting event before this training ──
   const { data: metingEvents } = await supabase
@@ -174,6 +179,14 @@ export default async function TrainingPlanPage({ params }: Props) {
           <h1 className="text-xl font-bold text-ink print:text-sm print-club-primary">{t.event.trainingPlan}</h1>
           <p className="text-sm text-muted print:text-xs print-club-secondary">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
+        {/* Print-only: teamnaam + clublogo rechts in de kopregel — dezelfde
+            familieconventie als de poster- en rapportkop. */}
+        {(teamName || teamLogoUrl) && (
+          <div className="hidden print:flex items-center gap-1.5 flex-shrink-0">
+            {teamLogoUrl && <TeamLogo src={teamLogoUrl} size={16} alt="" fallback={null} />}
+            {teamName && <span className="text-xs font-bold print-club-primary">{teamName}</span>}
+          </div>
+        )}
         <PrintButton />
       </div>
 
@@ -214,6 +227,19 @@ export default async function TrainingPlanPage({ params }: Props) {
             kopieerOpties={kopieerOpties}
           />
         </div>
+      </div>
+
+      {/* Print-only voetstrook — zelfde drie-elementenconventie als de
+          poster-foot (teamnaam · datum · merk). `.print-plan-voet` cleart de
+          gefloate aanwezigheidskolom (globals.css). */}
+      <div className="hidden print:flex print-plan-voet items-center">
+        <span>{teamName}</span>
+        <span className="print-plan-voet-datum">{formatDateLong(event.date, t.browserLocale)}</span>
+        <span className="print-plan-voet-merk">
+          {/* eslint-disable-next-line @next/next/no-img-element -- print-only, zelfde afweging als de poster-/rapportvoet: synchroon renderende <img> */}
+          <img src="/logo.png" alt="" aria-hidden="true" />
+          {t.matchSquad.footerGenerated}
+        </span>
       </div>
 
     </div>

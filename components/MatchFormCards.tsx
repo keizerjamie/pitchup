@@ -77,11 +77,14 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
           <p className="text-[11px] font-black uppercase tracking-[0.14em]" style={{ color: 'var(--club-secondary, #009966)' }}>{summaryText}</p>
         )}
       </div>
-      <div className="mt-2 flex flex-wrap gap-2">
+      {/* Vast 5-koloms grid i.p.v. flex-wrap: bij 4 of 5 kaartjes gaf
+          flex-1/basis een ongelijke laatste rij; in het grid zijn de kaartjes
+          altijd even breed (max. 5 items — de vorm is "laatste 5"). */}
+      <div className="mt-2 grid grid-cols-5 gap-2">
         {items.map((item) => {
           const score = orderedScore(item)
           return (
-          <div key={item.id} className="print-form-card min-w-[104px] flex-1 basis-[104px] p-3">
+          <div key={item.id} className="print-form-card min-w-0 p-3">
             <span
               className="font-pdf-display inline-flex h-10 w-10 items-center justify-center rounded-lg text-lg font-black"
               style={{

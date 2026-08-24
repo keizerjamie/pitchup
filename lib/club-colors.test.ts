@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   CLUB_COLOR_FALLBACK,
   CLUB_COLOR_KEYS,
+  READABLE_INK_DARK,
   isClubColorSlot,
   normalizeHexColor,
+  readableInkOn,
   resolveClubColors,
 } from '@/lib/club-colors'
 
@@ -194,5 +196,30 @@ describe('resolveClubColors', () => {
       expect(kleuren.primary).toMatch(/^#[0-9a-f]{6}$/)
       expect(kleuren.secondary).toMatch(/^#[0-9a-f]{6}$/)
     }
+  })
+})
+
+describe('readableInkOn', () => {
+  it('kiest wit op de donkere fallbackkleuren (het oude gedrag blijft)', () => {
+    expect(readableInkOn(CLUB_COLOR_FALLBACK.primary)).toBe('#ffffff')
+    expect(readableInkOn(CLUB_COLOR_FALLBACK.secondary)).toBe('#ffffff')
+    expect(readableInkOn('#000000')).toBe('#ffffff')
+  })
+
+  it('kiest donker op lichte clubkleuren (wit is daar onleesbaar)', () => {
+    expect(readableInkOn('#ffff00')).toBe(READABLE_INK_DARK) // geel
+    expect(readableInkOn('#ffffff')).toBe(READABLE_INK_DARK)
+    expect(readableInkOn('#ffd700')).toBe(READABLE_INK_DARK) // goud
+    expect(readableInkOn('#87ceeb')).toBe(READABLE_INK_DARK) // lichtblauw
+  })
+
+  it('accepteert ook 3-cijferige hex en hoofdletters (zelfde normalisatie als de rest)', () => {
+    expect(readableInkOn('#FF0')).toBe(READABLE_INK_DARK)
+    expect(readableInkOn('004F3B')).toBe('#ffffff')
+  })
+
+  it('valt op wit terug bij onparseerbare invoer (gedrag van vóór de waarborg)', () => {
+    expect(readableInkOn('kapot')).toBe('#ffffff')
+    expect(readableInkOn('')).toBe('#ffffff')
   })
 })

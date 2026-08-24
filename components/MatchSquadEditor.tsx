@@ -33,6 +33,11 @@ interface Props {
   // logica hier.
   primaryColor: string
   secondaryColor: string
+  // Serverzijdig gekozen leesbare tekstkleur óp de clubkleur-vlakken
+  // (lib/club-colors.ts: readableInkOn). Optioneel met wit als default, zodat
+  // bestaande aanroepen/testharnassen ongewijzigd blijven werken.
+  primaryInk?: string
+  secondaryInk?: string
 }
 
 export default function MatchSquadEditor({
@@ -51,6 +56,8 @@ export default function MatchSquadEditor({
   formItems,
   primaryColor,
   secondaryColor,
+  primaryInk = '#ffffff',
+  secondaryInk = '#ffffff',
 }: Props) {
   const [selected, setSelected] = useState(() => new Set(initialSelectedIds))
   // Zuiver een zichtbaarheidsfilter (zie page.tsx): welke spelers voor dit
@@ -228,6 +235,8 @@ export default function MatchSquadEditor({
         formItems={formItems}
         primaryColor={primaryColor}
         secondaryColor={secondaryColor}
+        primaryInk={primaryInk}
+        secondaryInk={secondaryInk}
       />
     </>
   )
