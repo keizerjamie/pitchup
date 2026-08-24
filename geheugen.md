@@ -1881,3 +1881,91 @@ themaflits bij elke load. **Elk nieuw inline script heeft dit nodig.** `?? undef
   niet. **Alleen `rm -rf .next` + herstart.** Diagnose die het uitwees: een tijdelijke
   `console.log(Object.keys(t.insights).length)` in de server component — niet blijven staren
   naar de bundel op schijf.
+
+## Trainingsflow: sessietijdlijn, kopiëren, periodisering die vooruitkijkt (2026-08-24, commit `4b842f8`)
+Aanleiding: "het maken van trainingen voelt als een feature die niet lekker werkt; het moet
+soepeler end-to-end, en de periodisering moet erin passen". Diagnose gedaan op de echte data in
+de draaiende app, niet alleen op de code.
+
+### Wat er werkelijk aan de hand was
+- **`duur_min` en `events.time` stonden er al en werden nergens gebruikt.** De planner toonde een
+  lijst zonder optelsom. Een trainer denkt in minuten; je merkte pas op het veld dat de sessie te
+  lang was.
+- **De periodisering stond stil zonder nulmeting.** Alles zit achter `latestMeting`: geen
+  cyclusweek, dus geen suggesties in de planner en geen status. De feature was niet kapot maar
+  onzichtbaar, en de bestaande waarschuwingen stonden op plekken die je pas bereikt als je al
+  aan het plannen bent.
+- **ONDERZOEKSFOUT om te onthouden**: ik concludeerde eerst dat géén enkele training oefeningen
+  had, op basis van twee tóékomstige (en toevallig lege) trainingen. Fout — de eerdere trainingen
+  zijn wél gevuld (warming-up 7×, positiespel 7×, steigerungs 7×, partijen groot 6×). Dat bleek
+  pas uit de nieuwe trainingsinhoud-kaart. **Twee steekproeven zijn geen bevinding.**
+
+### Sessietijdlijn (`lib/sessie-tijdlijn.ts`)
+- **Een parallelle groep telt ÉÉN keer mee, met de LANGSTE duur van zijn leden** — die oefeningen
+  draaien tegelijk. Optellen zou de sessie kunstmatig lang maken.
+- **Een oefening zonder duur is niet nul minuten.** De klok stopt daar (`startMin` blijft bekend,
+  `eindTijd` wordt null, alles daarna heeft geen betrouwbare tijd meer) en het aantal wordt apart
+  gemeld. Een te laag totaal als hard getal presenteren is erger dan zeggen dat je het niet weet.
+- **`minutenNaarTijd()` loopt bewust niet over middernacht**: een training die na 23:59 eindigt
+  levert null op in plaats van een tijd die stilzwijgend de volgende dag is.
+- **Richttijd `STANDAARD_SESSIEDUUR_MIN = 90`** als constante, geen instelling. Onderzoek naar
+  jeugdtrainingen komt uit op 60–90 min in vijf fasen, blokken van 12–15 min voor deze leeftijd.
+  Referentie, geen limiet: de balk vult tot 100% en daarboven neemt de tekst het over ("12 min
+  over de richttijd") — een balk die over zijn eigen rand groeit leest als een renderfout.
+
+### Oefening toevoegen: sheet blijft open
+`OefeningPicker` sloot na elke keuze. Een training heeft er vier tot zes, dus opende je hem vijf
+keer én filterde je vijf keer opnieuw. Nu blijft de lijst staan met filter, met een teller per rij
+en een sluitknop die meetelt. **Dit is de enige ingreep die het EERSTE plan sneller maakt** —
+kopiëren en sjablonen hebben een bestaande sessie nodig.
+
+Een periodiseringssuggestie opende hiervóór meteen het "nieuwe oefening"-formulier
+(`useState(!!presetCategorie)`). Dat duwde je naar opnieuw intypen terwijl die categorie meestal
+al in de bibliotheek staat; in een tweede seizoen groeit je bibliotheek daardoor vol varianten.
+Nu opent hij de bibliotheek voorgefilterd, met nieuw maken als tweede keuze.
+
+### Kopiëren (`lib/kopieer-trainingsplan.ts` + `kopieerTrainingsplan`)
+- **Groep-id's worden opnieuw uitgedeeld**, niet overgenomen: ze horen bij één training en
+  hergebruik zou twee trainingen aan elkaar knopen zodra er ooit over meerdere events tegelijk
+  gequeryd wordt. Leden van dezelfde bron-groep krijgen wél hetzelfde nieuwe id.
+- **`spelerindeling` en `parallel_spelers` komen NIET mee.** Bij een andere training staat er een
+  andere groep op het veld; een overgenomen indeling verwijst naar spelers die er niet zijn en
+  kost meer tijd om op te ruimen dan om opnieuw te maken. Het PLAN wordt gekopieerd, niet de
+  opstelling.
+- **Append, nooit overschrijven.** Een variant die het doelplan leegmaakt is bewust niet gebouwd
+  (niet terug te draaien); de UI biedt kopiëren alleen aan bij een leeg plan.
+- De bron-volgorde wordt verschoven, niet hernummerd: gaten blijven staan en parallelle leden
+  houden hun gedeelde volgorde.
+
+### Periodisering en dashboard
+- De vooruitblik-kaart ("volgende training, dit is aan de beurt, plan hem") staat **buiten** de
+  `latestMeting`-voorwaarde. Zonder nulmeting was die pagina een doodlopende lege staat; de
+  categorie-badges hebben de cyclus wél nodig en vallen dan stil weg.
+- De setup-kaart op het dashboard is **bewust geen to-do-item**: `lib/todos.mjs` gaat over taken
+  bij één event (opstelling, analyse, trainingsplan). Een nulmeting is een team-instelling zonder
+  event en zou dat model vervuilen. En **geen wegklik-knop** — de kaart verdwijnt vanzelf zodra er
+  een nulmeting staat; een aparte verberg-status vraagt een kolom en een migratie voor iets dat je
+  één keer doet.
+
+### Twee valkuilen die tijd kostten
+- **`geenEnkeleData` op /inzichten moet élke bron kennen.** Na het toevoegen van de
+  trainingsinhoud-kaart viel een seizoen mét gekoppelde oefeningen maar zónder aanwezigheid of
+  uitslagen onterecht terug op de onboarding-lege-staat. Bij elke nieuwe kaart op die pagina hoort
+  deze conditie mee te groeien.
+- **De inzichten-testmock gooit op onbekende tabellen** (`Onverwachte tabel in test`). Dat is
+  goede bewaking: een nieuwe query op die pagina vraagt een expliciete uitbreiding van het
+  harnas, geen stilzwijgend lege lijst.
+
+### Bewust NIET gedaan
+- **Slepen om te herordenen.** Fatsoenlijke drag-and-drop die ook op touch werkt vraagt een
+  dependency (dnd-kit) of een eigen pointer-implementatie; HTML5-DnD werkt niet op mobiel. Half
+  werk zou slechter zijn dan de huidige pijltjes.
+- **Sessiesjablonen.** Vraagt een nieuwe tabel — datamodel-wijziging, niet ongevraagd.
+
+### Testcontract
+Vijf acceptatietests toetsten "toevoegen sluit het paneel" — precies het omgedraaide gedrag. Hun
+criteria (juiste server action, geen client-dedupe, bibliotheek-oefening wordt gekoppeld en niet
+gekopieerd) zijn ongewijzigd; alleen die ene assertie is meeverhuisd, met de reden erbij. Eén
+dedupe-test was daardoor tijdsafhankelijk geworden: de kaartknop is `disabled` zolang de transitie
+loopt, dus de tweede klik verdween. Die wacht nu op de knopstatus in plaats van op timing —
+**bij een sheet die openblijft altijd op `not.toBeDisabled()` wachten vóór een tweede klik.**
