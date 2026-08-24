@@ -266,6 +266,7 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
         homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : 'home'}
         gatherTime={'gatherTime' in overrides ? overrides.gatherTime ?? null : '17:30'}
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : '19:00'}
+        location={'location' in overrides ? overrides.location ?? null : null}
         selectedCount={overrides.selectedCount ?? players.length}
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? CLUB_COLOR_FALLBACK.primary}
@@ -616,13 +617,24 @@ describe('AC8 — Wedstrijdselectie-PDF gebruikt per kleur de ingestelde waarde 
     expect(style).toContain(`--club-secondary: ${CLUB_COLOR_FALLBACK.secondary}`)
   })
 
-  it('beide ingesteld → beide CSS-vars gezet op de eigen waarde, en de kop-rand/titel/datumregel gebruiken die kleuren via var(--club-*, fallback)', () => {
+  it('beide ingesteld → beide CSS-vars gezet op de eigen waarde, en de kop-rand gebruikt de primaire kleur via var(--club-primary, fallback)', () => {
     const { container } = renderPrintList({ primaryColor: '#a1b2c3', secondaryColor: '#4d4dff', teamName: 'FC Voorbeeld' })
     const block = getPrintBlock(container)
+    const style = block.getAttribute('style') ?? ''
+    expect(style).toContain('--club-primary: #a1b2c3')
+    expect(style).toContain('--club-secondary: #4d4dff')
     const kop = block.querySelector('.border-b-4') as HTMLElement
     expect(kop.style.borderColor).toBe('var(--club-primary, #004f3b)')
+    // Herontwerp 2026-08-24: de titel draagt GEEN secundaire kleur meer —
+    // tekst op het primaire vlak staat altijd in de inktkleur (opacity voor
+    // hiërarchie); de secundaire kleur op het primaire vlak was onleesbaar
+    // bij bv. rood op blauw. De secundaire kleur bereikt de PDF nog via de
+    // accentbalk en de infoband (CSS-klassen op de --club-secondary-var).
     const title = within(block).getByText(nl.matchSquad.exportTitle)
-    expect(title.style.color).toBe('var(--club-secondary, #009966)')
+    expect(title.style.color).toBe('')
+    expect(title.className).toContain('opacity-70')
+    expect(block.querySelector('.print-poster-accent')).not.toBeNull()
+    expect(block.querySelector('.print-poster-band')).not.toBeNull()
   })
 
   it('team zonder clublogo maar met ingestelde clubkleuren: logo ontbreekt, kleuren worden alsnog toegepast (onafhankelijk van elkaar)', () => {

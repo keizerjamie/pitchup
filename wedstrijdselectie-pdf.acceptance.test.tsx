@@ -89,6 +89,7 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
         homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : 'home'}
         gatherTime={'gatherTime' in overrides ? overrides.gatherTime ?? null : '17:30'}
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : '19:00'}
+        location={'location' in overrides ? overrides.location ?? null : null}
         selectedCount={overrides.selectedCount ?? players.length}
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}
@@ -152,30 +153,35 @@ describe('Kop — logo (indien aanwezig) + teamnaam + exportTitle', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Team-volgorde en -grootte in de matchup-kop — directe gebruikerswens
-// bovenop het ontwerp: de thuisploeg staat altijd op regel 1 (standaard
-// voetbalconventie), en het eigen team is altijd groter/groener dan de
-// tegenstander, ongeacht de volgorde.
+// Team-volgorde en -nadruk in de matchup-kop. Herontwerp 2026-08-24
+// (profconventie): beide teamregels EVEN groot; de eigen ploeg staat op
+// volle inkt, de tegenstander gedempt (opacity-75). De thuisploeg blijft
+// altijd op regel 1 staan (standaard voetbalconventie, eerdere expliciete
+// gebruikerswens — ongewijzigd).
 // ═══════════════════════════════════════════════════════════════════════
-describe('Team-volgorde en -grootte — thuisploeg eerst, eigen team altijd groter', () => {
-  it('thuiswedstrijd: eigen team op regel 1 (groter), tegenstander op regel 2 (kleiner)', () => {
+describe('Team-volgorde en -nadruk — thuisploeg eerst, beide even groot, eigen team op volle inkt', () => {
+  it('thuiswedstrijd: eigen team op regel 1, zelfde formaatklasse als de tegenstander; alleen de tegenstander is gedempt', () => {
     const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'home' })
     const block = getPrintBlock(container)
     const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
     const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
-    expect(ownEl.className).toContain('text-6xl')
-    expect(opponentEl.className).toContain('text-xl')
+    expect(ownEl.className).toContain('text-5xl')
+    expect(opponentEl.className).toContain('text-5xl')
+    expect(ownEl.className).not.toContain('opacity-75')
+    expect(opponentEl.className).toContain('opacity-75')
     // Eigen team staat DOM-technisch vóór de tegenstander (regel 1 vs regel 2).
     expect(ownEl.compareDocumentPosition(opponentEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('uitwedstrijd: tegenstander (dan thuisploeg) op regel 1 (kleiner), eigen team op regel 2 (groter)', () => {
+  it('uitwedstrijd: tegenstander (thuisploeg) op regel 1, zelfde formaat, gedempt; eigen team op regel 2 op volle inkt', () => {
     const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'away' })
     const block = getPrintBlock(container)
     const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
     const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
-    expect(opponentEl.className).toContain('text-xl')
-    expect(ownEl.className).toContain('text-6xl')
+    expect(ownEl.className).toContain('text-5xl')
+    expect(opponentEl.className).toContain('text-5xl')
+    expect(ownEl.className).not.toContain('opacity-75')
+    expect(opponentEl.className).toContain('opacity-75')
     // Tegenstander staat DOM-technisch vóór het eigen team (regel 1 vs regel 2).
     expect(opponentEl.compareDocumentPosition(ownEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -307,15 +313,14 @@ describe('Vorm-blok — toont zoveel kaartjes als er items zijn, blok nooit verb
     expect(block.textContent).toContain(nl.matchSquad.formSummaryLost.replace('{n}', '1'))
   })
 
-  it('vorm-kaartje: geen "vs "-prefix voor de tegenstander, en de datum toont geen dagnaam-afkorting', () => {
+  it('vorm-cel: letter + uitslag, zonder tegenstandernaam en zonder datum (herontwerp — die kapten af en duwden de poster naar pagina 2)', () => {
     const { container } = renderPrintList({
-      formItems: [formItem({ id: 'a', opponent: 'FC Kolping', date: '2026-08-01' })],
+      formItems: [formItem({ id: 'a', opponent: 'FC Kolping', date: '2026-08-01', result: 'win', goalsFor: 2, goalsAgainst: 1 })],
     })
     const block = getPrintBlock(container)
-    expect(block.textContent).toContain('FC Kolping')
-    expect(block.textContent).not.toMatch(new RegExp(`${nl.lineup.vsLabel}\\s*FC Kolping`))
-    expect(block.textContent).toContain('1 aug')
-    expect(block.textContent).not.toMatch(/\bza\b/)
+    expect(block.textContent).toContain('2–1')
+    expect(block.textContent).not.toContain('FC Kolping')
+    expect(block.textContent).not.toContain('1 aug')
   })
 
   it('uitwedstrijd met verlies: de score in het vorm-kaartje staat in thuis-uit-volgorde (tegenstander eerst), niet eigen team eerst — Nederhorst-scenario', () => {
@@ -407,6 +412,7 @@ describe('Live-update — verzameltijd-wijziging beweegt het print-blok direct m
           teamLogoUrl={null}
           homeAway="home"
           kickoffTime="19:00"
+          location={null}
           initialGatherTime={null}
           formItems={[]}
           primaryColor="#004f3b"
@@ -515,12 +521,11 @@ describe('Story-AC11 (Deel B) — MatchFormCards rendert geen <ul>/<li>, ook nie
     expect(uls[0].querySelectorAll('li').length).toBe(1)
 
     // Het vorm-blok zelf (alles na de "VORM · LAATSTE 5"-kop, inclusief de
-    // samenvattingsregel en de kaartjes) bevat geen enkel <li>. BEWUSTE
-    // AANPASSING (frontend-fix): de kop staat sinds deze ronde in een eigen
-    // flex-rij samen met de samenvattingsregel, dus scopen we via .closest()
-    // op de buitenste vorm-blok-container i.p.v. één niveau omhoog.
+    // samenvattingsregel en de cellen) bevat geen enkel <li>. Gescoped via
+    // .closest() op de buitenste vorm-blok-container (sinds het herontwerp
+    // een border-t-2 in de primaire clubkleur).
     const formHeading = within(block).getByText(nl.matchSquad.formHeading)
-    const formSection = formHeading.closest('.border-t-4') as HTMLElement
+    const formSection = formHeading.closest('.border-t-2') as HTMLElement
     expect(formSection).not.toBeNull()
     expect(formSection.querySelectorAll('li').length).toBe(0)
     expect(formSection.querySelectorAll('ul').length).toBe(0)
@@ -641,36 +646,36 @@ describe('Story-AC10 (Deel B) — importbeperking van MatchSquadPrintList.tsx bl
 // van het blad loopt. Drempels: ≤18 tekens text-6xl, 19–30 text-4xl, >30
 // text-3xl (zie ownNameClass in MatchSquadPrintList.tsx).
 // ═══════════════════════════════════════════════════════════════════════
-describe('Lange teamnamen — trapsgewijze verkleining van de eigen-teamregel', () => {
-  it('korte naam (≤18 tekens) blijft text-6xl met leading-[0.9]', () => {
+describe('Lange teamnamen — trapsgewijze verkleining van BEIDE teamregels (langste regel bepaalt)', () => {
+  it('korte namen (≤18 tekens) blijven op de grootste trap (text-5xl)', () => {
     const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'home' })
     const ownEl = within(getPrintBlock(container)).getByText('FC Voorbeeld', { selector: 'p' })
-    expect(ownEl.className).toContain('text-6xl')
-    expect(ownEl.className).toContain('leading-[0.9]')
+    expect(ownEl.className).toContain('text-5xl')
   })
 
-  it('middellange naam (19–30 tekens) zakt naar text-4xl met ruimere leading', () => {
+  it('middellange naam (19–30 tekens) zakt naar text-3xl — óók de korte tegenregel, zodat de twee regels altijd hetzelfde formaat delen', () => {
     const naam = 'SV Blauw-Wit Amstelveen' // 23 tekens
     const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'home' })
-    const ownEl = within(getPrintBlock(container)).getByText(naam, { selector: 'p' })
-    expect(ownEl.className).toContain('text-4xl')
-    expect(ownEl.className).not.toContain('text-6xl')
-    expect(ownEl.className).not.toContain('leading-[0.9]')
+    const block = getPrintBlock(container)
+    const ownEl = within(block).getByText(naam, { selector: 'p' })
+    const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
+    expect(ownEl.className).toContain('text-3xl')
+    expect(opponentEl.className).toContain('text-3xl')
+    expect(ownEl.className).not.toContain('text-5xl')
   })
 
-  it('zeer lange naam (>30 tekens) zakt naar text-3xl', () => {
+  it('zeer lange naam (>30 tekens) zakt naar text-2xl', () => {
     const naam = 'Sportvereniging Blauw-Wit Amsterdam' // 35 tekens
     const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'away' })
     const ownEl = within(getPrintBlock(container)).getByText(naam, { selector: 'p' })
-    expect(ownEl.className).toContain('text-3xl')
-    expect(ownEl.className).not.toContain('text-6xl')
+    expect(ownEl.className).toContain('text-2xl')
+    expect(ownEl.className).not.toContain('text-5xl')
   })
 
-  it('de tegenstander-regel blijft in alle gevallen text-xl', () => {
-    const naam = 'Sportvereniging Blauw-Wit Amsterdam'
-    const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'home' })
-    const opponentEl = within(getPrintBlock(container)).getByText('FC Rivalen', { selector: 'p' })
-    expect(opponentEl.className).toContain('text-xl')
+  it('een lange TEGENSTANDER-naam verkleint ook de eigen regel mee (langste regel bepaalt)', () => {
+    const { container } = renderPrintList({ teamName: 'CSW 2', opponent: 'Sportvereniging Blauw-Wit Amsterdam', homeAway: 'home' })
+    const ownEl = within(getPrintBlock(container)).getByText('CSW 2', { selector: 'p' })
+    expect(ownEl.className).toContain('text-2xl')
   })
 })
 
@@ -700,5 +705,69 @@ describe('Leesbare inktkleur op de clubkleur-vlakken', () => {
     expect(css).toMatch(/\.print-poster\s*\{[^}]*color:\s*var\(--club-primary-ink,\s*#ffffff\)\s*!important/)
     expect(css).toMatch(/\.print-poster-band\s*\{[^}]*color:\s*var\(--club-secondary-ink,\s*#ffffff\)\s*!important/)
     expect(css).toMatch(/\.print-poster-foot\s*\{[^}]*color:\s*var\(--club-primary-ink,\s*#ffffff\)\s*!important/)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Herontwerp 2026-08-24 — locatie in de infoband, géén rugnummers meer,
+// en de harde één-A4-garantie in de poster-CSS.
+// ═══════════════════════════════════════════════════════════════════════
+describe('Infoband — locatie-cel', () => {
+  it('met locatie: toont t.event.location als label + de locatie zelf in de band', () => {
+    const { container } = renderPrintList({ location: 'Sportpark CSW' })
+    const block = getPrintBlock(container)
+    const label = within(block).getByText(nl.event.location)
+    expect(label).toBeInTheDocument()
+    expect(within(block).getByText('Sportpark CSW')).toBeInTheDocument()
+    // Zelfde twee-niveaus-structuur als de tijden-cellen (band → cel → label).
+    const band = label.parentElement!.parentElement as HTMLElement
+    expect(band.className).toContain('print-poster-band')
+  })
+
+  it('zonder locatie: geen locatie-cel; band blijft staan zolang er een tijd is', () => {
+    const { container } = renderPrintList({ location: null })
+    const block = getPrintBlock(container)
+    expect(within(block).queryByText(nl.event.location)).toBeNull()
+    expect(within(block).getByText(nl.matchSquad.gatherTimeLabel)).toBeInTheDocument()
+  })
+
+  it('alles leeg (geen tijden, geen locatie): de hele band verdwijnt', () => {
+    const { container } = renderPrintList({ gatherTime: null, kickoffTime: null, location: null })
+    expect(getPrintBlock(container).querySelector('.print-poster-band')).toBeNull()
+  })
+})
+
+describe('Geen rugnummers op de selectieposter (het team heeft geen vaste nummers)', () => {
+  it('geen enkel data-jersey-attribuut en geen nummer-tekst in de spelerslijst', () => {
+    const players = [
+      makePlayer({ id: 'p1', name: 'Anna Appel', jersey_number: 9 }),
+      makePlayer({ id: 'p2', name: 'Bram Bakker', jersey_number: 23 }),
+    ]
+    const { container } = renderPrintList({ players })
+    const block = getPrintBlock(container)
+    expect(block.querySelectorAll('[data-jersey]').length).toBe(0)
+    const ul = block.querySelector('ul') as HTMLElement
+    expect(ul.textContent).not.toMatch(/\b9\b/)
+    expect(ul.textContent).not.toMatch(/\b23\b/)
+  })
+
+  it('globals.css: de oude rugnummer-::before-regel bestaat niet meer', () => {
+    const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
+    expect(css).not.toContain('attr(data-jersey)')
+  })
+})
+
+describe('Harde één-A4-garantie in de poster-CSS', () => {
+  it('.print-poster heeft height: 100vh + overflow: hidden + break-inside: avoid (géén min-height meer — die liet de inhoud naar pagina 2 groeien)', () => {
+    const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
+    const posterStart = css.indexOf('.print-poster {')
+    expect(posterStart).toBeGreaterThan(-1)
+    const posterBlock = css.slice(posterStart, css.indexOf('}', posterStart))
+    expect(posterBlock).toMatch(/height:\s*100vh/)
+    // Als DECLARATIE (met dubbele punt) — het woord komt nog wel in het
+    // uitleg-commentaar voor.
+    expect(posterBlock).not.toMatch(/min-height\s*:/)
+    expect(posterBlock).toMatch(/overflow:\s*hidden/)
+    expect(posterBlock).toMatch(/break-inside:\s*avoid/)
   })
 })

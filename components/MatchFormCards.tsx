@@ -1,17 +1,10 @@
 import { orderedScore, type MatchFormItem } from '@/lib/match-form'
 import type { MatchResult } from '@/lib/types'
-import { formatDateShort } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
 
-// KleurenFAMILIE (groen/amber/rood) LETTERLIJK overgenomen uit
-// components/dashboard/FormStrip.tsx (STATUS_STYLE-precedent, zie de comment
-// daar) — dat component zelf wordt hier bewust niet hergebruikt/gewijzigd,
-// dit is een nieuw, apart component voor het print-blok van de
-// wedstrijdselectie. Alleen de PRESENTATIE wijkt af van FormStrip, naar het
-// goedgekeurde ontwerp: W/V krijgen een effen (niet-transparante) achtergrond
-// i.p.v. FormStrip's rgba-vulling (een transparante rgba over de witte
-// print-achtergrond oogt te vaag voor het steviger badge-formaat hieronder);
-// G krijgt bewust GEEN vulling maar een outline in dezelfde amber-tint.
+// KleurenFAMILIE (groen/amber/rood) gedeeld met FormStrip.tsx /
+// SeizoensrapportPrint.tsx — vaste kleuren, bewust los van de clubkleuren
+// (clubkleuren.acceptance AC10). W/V effen, G als outline, onbekend gedempt.
 const FORM_STYLE: Record<MatchResult, { bg: string; fg: string; border?: string }> = {
   win: { bg: '#16a34a', fg: '#ffffff' },
   draw: { bg: '#ffffff', fg: 'var(--chip-amber-fg)', border: 'var(--chip-amber-fg)' },
@@ -19,24 +12,20 @@ const FORM_STYLE: Record<MatchResult, { bg: string; fg: string; border?: string 
   unknown: { bg: 'var(--track)', fg: 'var(--faint)' },
 }
 
+// Compacte vormstrip onderaan het witte selectievel (herontwerp 2026-08-24):
+// één regel kop + samenvatting, daaronder maximaal vijf kleine cellen met
+// letterbadge + uitslag. Tegenstandernaam en datum zijn bewust geschrapt —
+// die kapten af in de kaartjes ("TOS ACTIE…") en duwden het blok naar een
+// tweede pagina; de uitslag zelf is de informatie die de spelers iets zegt.
+//
 // HARDE EIS: geen <ul>/<li> — de bestaande acceptatietest
 // (wedstrijdselectie.acceptance.test.tsx, AC4) bewijst dat er precies één
-// <ul> in het print-blok zit (de spelerslijst); een tweede <ul> hier zou die
-// test terecht laten falen.
+// <ul> in het print-blok zit (de spelerslijst).
 //
-// Score-scheidingsteken: EN-DASH (–, U+2013), niet een gewoon koppelteken
-// (-, U+002D). Reden: elke FORMATIONS-sleutel (bv. "4-3-3") gebruikt
-// uitsluitend het gewone koppelteken; een en-dash matcht dat teken nooit, dus
-// kan een reeks en-dash-scores nooit — ook niet via de tekst-aaneenschakeling
-// die wedstrijdselectie-pdf.acceptance.test.tsx (Story-AC12) via
-// `block.textContent` toetst — per ongeluk een geldige FORMATIONS-sleutel
-// vormen. Een gewoon koppelteken zou dat risico weliswaar ook nauwelijks
-// introduceren (elke score staat in een eigen <p>, gevolgd door tegenstander-
-// en/of datumtekst, dus twee scores staan nooit direct na elkaar zonder
-// tussenliggende, niet-cijfermatige tekst) — maar een en-dash sluit het risico
-// categorisch uit (ander Unicode-teken dan de FORMATIONS-sleutels ooit
-// gebruiken) én oogt vrijwel identiek aan het "liggend streepje" uit het
-// ontwerp, dus is de veiligere keuze zonder esthetisch verlies.
+// Score-scheidingsteken: EN-DASH (–, U+2013), niet een gewoon koppelteken —
+// elke FORMATIONS-sleutel (bv. "4-3-3") gebruikt uitsluitend het gewone
+// koppelteken, dus kan een en-dash-score nooit per ongeluk als
+// formatie-tekst gelezen worden (Story-AC12-conventie, ongewijzigd).
 export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
   const t = useDict()
 
@@ -53,13 +42,8 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
     unknown: t.home.formUnknown,
   }
 
-  // Samenvattingsregel ("3 GEWONNEN · 1 GELIJK · 1 VERLOREN") — uitsluitend
-  // gebaseerd op win/draw/loss; 'unknown' (geen uitslag) telt bewust in geen
-  // van de drie mee, dat is geen gewonnen/gelijk/verloren wedstrijd. Bij 0
-  // items wordt de regel helemaal weggelaten (zie hieronder) in plaats van
-  // "0 GEWONNEN · 0 GELIJK · 0 VERLOREN" te tonen — dat oogt rommelig naast
-  // een verder leeg vormblok en herhaalt alleen wat de afwezigheid van
-  // kaartjes al toont.
+  // Samenvattingsregel ("3 GEWONNEN · 1 GELIJK · 1 VERLOREN") — 'unknown'
+  // telt bewust nergens in mee. Bij 0 items geen samenvatting.
   const won = items.filter((i) => i.result === 'win').length
   const drawn = items.filter((i) => i.result === 'draw').length
   const lost = items.filter((i) => i.result === 'loss').length
@@ -70,46 +54,37 @@ export default function MatchFormCards({ items }: { items: MatchFormItem[] }) {
   ].join(' · ')
 
   return (
-    <div className="mt-6 border-t-4 pt-4" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
+    // De dunne kopstreep in de primaire clubkleur is het enige clubkleur-
+    // accent in dit blok (non-tekst; de regressietest op de letterlijke
+    // CLUB_COLOR_FALLBACK-hex leunt op precies deze var-aanroep).
+    <div className="mt-5 border-t-2 pt-3" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
       <div className="flex items-end justify-between gap-2">
-        <p className="font-pdf-display text-sm font-black" style={{ color: 'var(--club-primary, #004f3b)' }}>{t.matchSquad.formHeading}</p>
+        <p className="font-pdf-display text-sm font-black">{t.matchSquad.formHeading}</p>
         {items.length > 0 && (
-          <p className="text-[11px] font-black uppercase tracking-[0.14em]" style={{ color: 'var(--club-secondary, #009966)' }}>{summaryText}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] print-poster-meta">{summaryText}</p>
         )}
       </div>
-      {/* Vast 5-koloms grid i.p.v. flex-wrap: bij 4 of 5 kaartjes gaf
-          flex-1/basis een ongelijke laatste rij; in het grid zijn de kaartjes
-          altijd even breed (max. 5 items — de vorm is "laatste 5"). */}
-      <div className="mt-2 grid grid-cols-5 gap-2">
+      <div className="mt-2 flex gap-2">
         {items.map((item) => {
           const score = orderedScore(item)
           return (
-          <div key={item.id} className="print-form-card min-w-0 p-3">
-            <span
-              className="font-pdf-display inline-flex h-10 w-10 items-center justify-center rounded-lg text-lg font-black"
-              style={{
-                background: FORM_STYLE[item.result].bg,
-                color: FORM_STYLE[item.result].fg,
-                border: FORM_STYLE[item.result].border ? `2px solid ${FORM_STYLE[item.result].border}` : undefined,
-              }}
-            >
-              {letter[item.result]}
-            </span>
-            {/* Zichtbaar niet nodig naast de letter-badge (dubbelop in het
-                kleine kaartje), maar blijft als tekst in de DOM staan — o.a.
-                MatchFormCards.test.tsx toetst hierop via container.textContent. */}
-            <span className="sr-only">{label[item.result]}</span>
-            {item.result !== 'unknown' && score !== null && (
-              <p className="font-pdf-display mt-2 text-base font-black">{score.first}–{score.second}</p>
-            )}
-            {/* Geen "vs "-prefix meer hier (wel elders in het print-blok, bij
-                de hoofd-matchup) — het ontwerp toont in deze kaartjes alleen
-                de kale tegenstandernaam. */}
-            {item.opponent && (
-              <p className="truncate text-[11px] font-extrabold uppercase tracking-wide">{item.opponent}</p>
-            )}
-            <p className="print-form-date text-[10px] font-bold uppercase tracking-wide">{formatDateShort(item.date, t.browserLocale)}</p>
-          </div>
+            <div key={item.id} className="print-form-cel">
+              <span
+                className="font-pdf-display inline-flex h-8 w-8 items-center justify-center rounded-lg text-base font-black"
+                style={{
+                  background: FORM_STYLE[item.result].bg,
+                  color: FORM_STYLE[item.result].fg,
+                  border: FORM_STYLE[item.result].border ? `2px solid ${FORM_STYLE[item.result].border}` : undefined,
+                }}
+              >
+                {letter[item.result]}
+              </span>
+              {/* Volledige uitkomst als tekst voor assistive technology. */}
+              <span className="sr-only">{label[item.result]}</span>
+              {item.result !== 'unknown' && score !== null && (
+                <span className="font-pdf-display text-sm font-black">{score.first}–{score.second}</span>
+              )}
+            </div>
           )
         })}
       </div>

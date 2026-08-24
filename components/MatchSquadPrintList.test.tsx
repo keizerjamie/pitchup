@@ -33,6 +33,7 @@ function renderPrintList(players: Player[]) {
         homeAway="home"
         gatherTime="17:30"
         kickoffTime="19:00"
+        location={null}
         selectedCount={players.length}
         formItems={[]}
         primaryColor="#004f3b"
@@ -103,5 +104,26 @@ describe('Geen gast-aanduiding op de wedstrijdselectie-PDF', () => {
     ])
     const li = container.querySelector('li')
     expect(li?.textContent).toBe('Reguliere Speler')
+  })
+})
+
+describe('Adaptieve kolommen (herontwerp): 2 kolommen tot 18 spelers, 3 daarboven', () => {
+  const veel = (n: number) =>
+    Array.from({ length: n }, (_, i) => makePlayer({ id: `sp${i}`, name: `Speler ${String(i).padStart(2, '0')}` }))
+
+  it('18 spelers → grid-cols-2 met 9 rijen', () => {
+    const { container } = renderPrintList(veel(18))
+    const ul = container.querySelector('ul') as HTMLElement
+    expect(ul.className).toContain('grid-cols-2')
+    expect(ul.style.gridTemplateRows).toBe('repeat(9, auto)')
+    expect(ul.style.gridAutoFlow).toBe('column')
+  })
+
+  it('19 spelers → grid-cols-3 met 7 rijen, compacte itemvariant', () => {
+    const { container } = renderPrintList(veel(19))
+    const ul = container.querySelector('ul') as HTMLElement
+    expect(ul.className).toContain('grid-cols-3')
+    expect(ul.style.gridTemplateRows).toBe('repeat(7, auto)')
+    expect(ul.querySelector('li')!.className).toContain('print-squad-item-compact')
   })
 })

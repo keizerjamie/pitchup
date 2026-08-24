@@ -27,6 +27,8 @@ interface Props {
   // naartoe stromen.
   homeAway: 'home' | 'away' | null
   kickoffTime: string | null
+  // Locatie voor de infoband op de print — kale string, puur doorgegeven.
+  location: string | null
   initialGatherTime: string | null
   formItems: MatchFormItem[]
   // Kale strings, puur doorgegeven aan MatchSquadPrintList — geen state, geen
@@ -52,6 +54,7 @@ export default function MatchSquadEditor({
   teamLogoUrl,
   homeAway,
   kickoffTime,
+  location,
   initialGatherTime,
   formItems,
   primaryColor,
@@ -231,6 +234,7 @@ export default function MatchSquadEditor({
         homeAway={homeAway}
         gatherTime={gatherTime}
         kickoffTime={kickoffTime}
+        location={location}
         selectedCount={selected.size}
         formItems={formItems}
         primaryColor={primaryColor}

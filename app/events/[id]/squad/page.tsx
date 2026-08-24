@@ -95,6 +95,7 @@ export default async function MatchSquadPage({ params }: Props) {
         teamLogoUrl={teamLogoUrl}
         homeAway={event.home_away}
         kickoffTime={event.time}
+        location={event.location}
         initialGatherTime={event.gather_time}
         formItems={formItems}
         primaryColor={clubColors.primary}

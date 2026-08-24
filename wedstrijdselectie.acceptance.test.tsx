@@ -190,6 +190,7 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
         homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : null}
         gatherTime={'gatherTime' in overrides ? overrides.gatherTime ?? null : null}
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
+        location={'location' in overrides ? overrides.location ?? null : null}
         selectedCount={overrides.selectedCount ?? players.length}
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}
@@ -214,6 +215,7 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         teamLogoUrl={'teamLogoUrl' in overrides ? overrides.teamLogoUrl ?? null : null}
         homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : null}
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
+        location={'location' in overrides ? overrides.location ?? null : null}
         initialGatherTime={'initialGatherTime' in overrides ? overrides.initialGatherTime ?? null : null}
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}
@@ -1365,15 +1367,18 @@ describe('Validator-bevinding (Gap 3) — een wedstrijd met een datum in de TOEK
 })
 
 describe('Validator-bevinding (Gap 3) — meer dan 5 afgeronde wedstrijden in het verleden → precies 5 kaartjes, en wel de 5 meest recente', () => {
-  it('7 afgeronde wedstrijden leveren precies 5 kaartjes op: de 5 met de meest recente datum, niet de 2 oudste', async () => {
+  it('7 afgeronde wedstrijden leveren precies 5 cellen op: de 5 met de meest recente datum, niet de 2 oudste', async () => {
+    // Sinds het herontwerp tonen de vormcellen geen tegenstandernaam meer;
+    // de recentheid wordt daarom bewezen via een unieke score per wedstrijd
+    // (m1 → 1–0 … m7 → 7–0).
     const events = [
-      matchEventRow({ id: 'e1', date: '2020-02-01', opponent: 'FC Rivalen', goals_for: 1, goals_against: 0 }),
+      matchEventRow({ id: 'e1', date: '2020-02-01', opponent: 'FC Rivalen', goals_for: 9, goals_against: 0 }),
       ...Array.from({ length: 7 }, (_, i) =>
         matchEventRow({
           id: `m${i + 1}`,
           date: `2020-01-0${i + 1}`,
           opponent: `FC M${i + 1}`,
-          goals_for: 3,
+          goals_for: i + 1,
           goals_against: 0,
         }),
       ),
@@ -1385,15 +1390,15 @@ describe('Validator-bevinding (Gap 3) — meer dan 5 afgeronde wedstrijden in he
       id: 'e1',
     })
     const block = getPrintBlock(container)
-    // Precies 5 kaartjes — nooit meer, ondanks 7 beschikbare wedstrijden.
+    // Precies 5 cellen — nooit meer, ondanks 7 beschikbare wedstrijden.
     expect(within(block).getAllByText(nl.home.formLetterWin).length).toBe(5)
     // De 5 MEEST RECENTE (m3..m7, data 01-03 t/m 01-07) horen erbij...
-    for (const opponent of ['FC M3', 'FC M4', 'FC M5', 'FC M6', 'FC M7']) {
-      expect(block.textContent).toContain(opponent)
+    for (const score of ['3–0', '4–0', '5–0', '6–0', '7–0']) {
+      expect(block.textContent).toContain(score)
     }
     // ...de 2 OUDSTE (m1, m2) horen er terecht NIET bij.
-    for (const opponent of ['FC M1', 'FC M2']) {
-      expect(block.textContent).not.toContain(opponent)
+    for (const score of ['1–0', '2–0']) {
+      expect(block.textContent).not.toContain(score)
     }
   })
 })

@@ -42,21 +42,16 @@ describe('MatchFormCards', () => {
     }
   })
 
-  it('toont de juiste letter, score (en-dash), tegenstander (geen "vs"-prefix) en datum (geen dagnaam)', () => {
+  it('toont letter en score (en-dash); tegenstander en datum staan er sinds het herontwerp bewust NIET meer in (kapten af en duwden de poster naar pagina 2)', () => {
     const { container } = renderCards([item({ id: 'a', result: 'win', goalsFor: 3, goalsAgainst: 1, opponent: 'FC Test', date: '2026-08-01' })])
     expect(screen.getByText(nl.home.formLetterWin)).toBeInTheDocument()
-    // De overige velden staan als losse tekstnodes naast elkaar (geen eigen
-    // omhullend element) — getByText matcht daar niet op, dus we toetsen op
-    // de samengevoegde tekst van het kaartje.
     expect(container.textContent).toContain(nl.home.formWin)
     expect(container.textContent).toContain('3–1')
     expect(container.textContent).not.toContain('3:1')
-    expect(container.textContent).toContain('FC Test')
-    // Geen "vs "-prefix meer voor de tegenstandernaam in dit kaartje.
-    expect(container.textContent).not.toMatch(new RegExp(`${nl.lineup.vsLabel}\\s*FC Test`))
-    // Datum zonder dagnaam-afkorting ("1 aug", niet "za 1 aug").
-    expect(container.textContent).toContain('1 aug')
-    expect(container.textContent).not.toMatch(/\bza\b/)
+    // Herontwerp 2026-08-24: geen tegenstandernaam en geen datum meer in de
+    // compacte vormcellen — de uitslag is de informatie.
+    expect(container.textContent).not.toContain('FC Test')
+    expect(container.textContent).not.toContain('1 aug')
   })
 
   it('uitwedstrijd (homeAway: "away") toont de score als thuisploeg–uitploeg (tegenstander eerst), niet eigen team eerst — Nederhorst-scenario uit de bugmelding', () => {

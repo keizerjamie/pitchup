@@ -56,6 +56,7 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         teamLogoUrl={'teamLogoUrl' in overrides ? overrides.teamLogoUrl ?? null : null}
         homeAway={'homeAway' in overrides ? overrides.homeAway ?? null : null}
         kickoffTime={'kickoffTime' in overrides ? overrides.kickoffTime ?? null : null}
+        location={'location' in overrides ? overrides.location ?? null : null}
         initialGatherTime={'initialGatherTime' in overrides ? overrides.initialGatherTime ?? null : null}
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}

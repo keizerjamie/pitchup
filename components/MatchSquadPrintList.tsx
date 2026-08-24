@@ -19,9 +19,11 @@ interface Props {
   homeAway: 'home' | 'away' | null
   gatherTime: string | null
   kickoffTime: string | null
+  // Locatie van de wedstrijd (logistieke info, geen tactiek) — kale string.
+  location: string | null
   selectedCount: number
   formItems: MatchFormItem[]
-  // Kale strings, geen import van elders (zie de importbeperking hierboven):
+  // Kale strings, geen import van elders (zie de importbeperking hieronder):
   // al server-side geresolved (ingesteld óf fallback), dus hier geen
   // fallback-logica of null-checks nodig.
   primaryColor: string
@@ -35,24 +37,31 @@ interface Props {
 }
 
 // Print-only presentatie van de wedstrijdselectie (dual-markup-patroon, zie
-// AttendanceSummary.tsx). Geen groepering zichtbaar: sortSquadForExport
-// bepaalt puur de VOLGORDE (keepers eerst), er is geen kop/scheiding/witruimte
-// die de grens tussen keepers en veldspelers verraadt — één doorlopende <ul>.
+// AttendanceSummary.tsx). Herontwerp 2026-08-24 ("van scratch", naar het
+// patroon van profclub-selectieposters): één gegarandeerd A4, vier vlakken —
+// kop en affiche op de primaire clubkleur, infoband op de secundaire, wit
+// selectievel, voetstrook op de primaire. Zie `.print-poster*` in
+// app/globals.css.
 //
-// POSTER-INDELING (vier stapelvlakken, zie `.print-poster*` in
-// app/globals.css): donkere kop in de primaire clubkleur, effen tijdenbalk in
-// de secundaire kleur, wit selectievlak dat de resterende paginahoogte vult,
-// en een donkere voetstrook. De vlakken lopen tot aan de papierrand via een
-// named page (`@page squad`); waar de browser dat negeert blijft de gewone
-// 12mm-marge staan en wordt het hetzelfde ontwerp binnen een witte rand.
+// CONTRASTREGELS (systematisch, n.a.v. een onleesbare rood-op-blauw-poster):
+// op een clubkleur-vlak staat tekst uitsluitend in de meegegeven inktkleur
+// (--club-primary-ink/--club-secondary-ink, met opacity voor secundaire
+// tekst); de secundaire kleur verschijnt op het primaire vlak alleen nog als
+// decoratieve accentbalk (geen tekst). Op het witte vel is alle tekst
+// neutraal donker; clubkleuren zijn daar alleen randen/accenten.
+//
+// GEEN RUGNUMMERS: het team heeft geen vaste nummers (expliciete
+// gebruikerswens 2026-08-24) — de lijst is kaal: uitsluitend namen.
+//
+// GEEN POSITIEGROEPERING: profclubs groeperen vaak op positie, maar deze
+// selectie gaat naar de spelers zelf en mag geen positie-/tactiekinfo lekken
+// — een eerdere, expliciete eigen beslissing (wedstrijdselectie-AC2 t/m AC4).
+// Eén doorlopende lijst, keepers eerst (sortSquadForExport), geen tussenkop.
 //
 // Bewuste importbeperking: uit `@/lib/types` alleen `Player`. Geen
 // FORMATIONS/POSITION_GROUPS/LineupPosition/POSITION_ABBREVIATIONS/HomeAway —
-// dit bestand mag nooit opstelling-info kunnen lekken. Deze beperking geldt
-// óók voor alle nieuwe content in dit bestand (kop/tijden/vorm-blok): geen van
-// die toevoegingen importeert iets buiten `Player` (homeAway is bijvoorbeeld
-// bewust een inline literal union, geen `HomeAway`-import) en `MatchFormItem`
-// komt uit `@/lib/match-form`, niet uit `@/lib/types`.
+// dit bestand mag nooit opstelling-info kunnen lekken. `MatchFormItem` komt
+// uit `@/lib/match-form`, niet uit `@/lib/types`.
 export default function MatchSquadPrintList({
   players,
   opponent,
@@ -62,6 +71,7 @@ export default function MatchSquadPrintList({
   homeAway,
   gatherTime,
   kickoffTime,
+  location,
   selectedCount,
   formItems,
   primaryColor,
@@ -74,165 +84,146 @@ export default function MatchSquadPrintList({
 
   const homeAwayLabel = homeAway === 'home' ? t.calendar.homeLabel : homeAway === 'away' ? t.calendar.awayLabel : null
 
-  // "Eigen team vs. tegenstander, groot en onder elkaar": zonder tegenstander
-  // is er niets zinnigs om te vergelijken, dus die regel vervalt dan helemaal
-  // (geen "vs null"/"vs undefined"). Zonder teamnaam (geen instelling) blijft
-  // de bestaande, kortere "vs <opponent>"-vorm staan als ÉÉN tekstregel — dat
-  // exacte, samengestelde formaat ("{vsLabel} {opponent}") wordt letterlijk
-  // getoetst in wedstrijdselectie.acceptance.test.tsx (AC5/AC11) en mag dus
-  // niet uiteenvallen in losse tekstnodes. Mét teamnaam splitsen we wél op in
-  // twee losse, grote/vette regels (eigen team + tegenstander) — geen enkele
-  // bestaande test legt voor dát geval een exacte, samengevoegde string vast.
+  // Zonder tegenstander vervalt de matchup (geen "vs null"); zonder teamnaam
+  // blijft de bestaande, kortere "vs <opponent>"-vorm als ÉÉN tekstregel —
+  // dat samengestelde formaat wordt letterlijk getoetst
+  // (wedstrijdselectie.acceptance AC5/AC11) en mag niet uiteenvallen.
   const ownTeamLine = opponent && teamName ? teamName : null
   const opponentLine = opponent ? (teamName ? opponent : `${t.lineup.vsLabel} ${opponent}`) : null
 
   const gather = formatTime(gatherTime)
   const kickoff = formatTime(kickoffTime)
 
-  // Lange clubnamen: op text-6xl met leading-[0.9] wrapt een lange naam met
-  // vrijwel rakende regels. Trapsgewijs kleiner op naamlengte, met iets
-  // ruimere leading zodra wrappen waarschijnlijk wordt — elke naam blijft zo
-  // poster-waardig. Drempels ruwweg op wat er op 182mm binnenpast.
-  const ownNameClass =
-    ownTeamLine === null
-      ? ''
-      : ownTeamLine.length > 30
-        ? 'text-3xl leading-[1.05]'
-        : ownTeamLine.length > 18
-          ? 'text-4xl leading-[1.02]'
-          : 'text-6xl leading-[0.9]'
+  // Beide teamregels even groot (profconventie: gelijkwaardige affichering;
+  // de eigen ploeg onderscheidt zich met volle inkt, de tegenstander staat
+  // gedempt). De trap volgt de LANGSTE van de twee regels zodat ze altijd
+  // hetzelfde formaat delen en een lange clubnaam nooit van het blad loopt.
+  const langsteRegel = Math.max(ownTeamLine?.length ?? 0, opponentLine?.length ?? 0)
+  const matchupClass =
+    langsteRegel > 30
+      ? 'text-2xl leading-[1.12]'
+      : langsteRegel > 18
+        ? 'text-3xl leading-[1.1]'
+        : 'text-5xl leading-[1.05]'
 
-  // Aantal rijen per kolom bij twee kolommen. Minimaal 1: `repeat(0, auto)` is
-  // ongeldige CSS, en een lege selectie (0 spelers) is een bestaand geval.
-  const squadColumnRows = Math.max(1, Math.ceil(sorted.length / 2))
+  // Kolommen passen zich aan de groepsgrootte aan: tot 18 namen twee ruime
+  // kolommen, daarboven drie compactere — zo blijft de lijst één blok zonder
+  // ooit de pagina te verlengen. Minimaal 1 rij: `repeat(0, auto)` is
+  // ongeldige CSS en een lege selectie is een bestaand geval.
+  const squadCols = sorted.length > 18 ? 3 : 2
+  const squadRows = Math.max(1, Math.ceil(sorted.length / squadCols))
 
   return (
     <div className="hidden print:block print-poster" style={{ '--club-primary': primaryColor, '--club-secondary': secondaryColor, '--club-primary-ink': primaryInk, '--club-secondary-ink': secondaryInk } as React.CSSProperties}>
-      <div className="print-poster-hero">
-        {/* Kop: logo (alleen als aanwezig, geen placeholder) + teamnaam links,
-            titel rechts. De `border-b-4` in de primaire clubkleur staat op
-            dezelfde achtergrondkleur en is daardoor niet zichtbaar — hij
-            blijft staan omdat clubkleuren.acceptance.test.tsx (AC8) deze
-            selector én zijn inline `borderColor` als bewijs gebruikt dat de
-            ingestelde clubkleur de PDF daadwerkelijk bereikt. */}
-        <div className="flex items-start justify-between gap-4 border-b-4 pb-4" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
+      {/* ── Kop (primair vlak): logo + teamnaam links, titel rechts ──
+          De `border-b-4` in de primaire clubkleur staat op dezelfde
+          achtergrondkleur en is daardoor niet zichtbaar — hij blijft staan
+          omdat clubkleuren.acceptance.test.tsx (AC8) deze selector én zijn
+          inline `borderColor` als bewijs gebruikt dat de ingestelde
+          clubkleur de PDF daadwerkelijk bereikt. */}
+      <div className="print-poster-top">
+        <div className="flex items-center justify-between gap-4 border-b-4" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
           <div className="flex items-center gap-3">
             {/* Wit plaatje onder het clublogo: clublogo's zijn vrijwel altijd
-                voor een lichte ondergrond getekend en verdwijnen anders in het
-                donkere kopvlak. */}
+                voor een lichte ondergrond getekend en verdwijnen anders in
+                het gekleurde kopvlak. */}
             {teamLogoUrl && (
               <span className="print-poster-plate">
                 <TeamLogo src={teamLogoUrl} size={40} alt={teamName ?? 'Pitchup'} fallback={null} />
               </span>
             )}
-            {teamName && <span className="font-pdf-display text-xl font-black">{teamName}</span>}
+            {teamName && <span className="font-pdf-display text-lg font-black">{teamName}</span>}
           </div>
-          <span className="font-pdf-display text-xs font-extrabold uppercase tracking-wide" style={{ color: 'var(--club-secondary, #009966)' }}>{t.matchSquad.exportTitle}</span>
+          {/* Titel in de inktkleur op halve sterkte — nooit meer de secundaire
+              clubkleur als tekst op het primaire vlak (onleesbaar bij bv.
+              rood op blauw). */}
+          <span className="font-pdf-display text-xs font-extrabold uppercase tracking-[0.2em] opacity-70">{t.matchSquad.exportTitle}</span>
         </div>
+      </div>
 
-        {/* Datumregel: dagnaam+datum + thuis/uit */}
-        <p className="mt-6 text-[11px] font-extrabold uppercase tracking-[0.18em]" style={{ color: 'var(--club-secondary, #009966)' }}>
+      {/* ── Affiche (primair vlak): meta-regel + beide teams even groot ── */}
+      <div className="print-poster-matchup">
+        <p className="text-[10px] font-extrabold uppercase tracking-[0.22em] opacity-75">
           {dateLabel}
           {homeAwayLabel && <> · {homeAwayLabel}</>}
         </p>
-
-        {/* Volgorde volgt thuis/uit (thuisploeg altijd op regel 1, standaard
-            voetbalconventie): bij een uitwedstrijd staat de tegenstander (dan
-            de thuisploeg) eerst, bij een thuiswedstrijd het eigen team eerst.
-            Zonder homeAway (fallback, niet expliciet gespecificeerd) blijft het
-            eigen team eerst staan, zoals voorheen. Grootte is bewust NIET
-            symmetrisch: het eigen team is groter, de tegenstander een stuk
-            kleiner — dit wijkt bewust af van het oorspronkelijke ontwerp (waar
-            beide regels ongeveer gelijk groot zijn), directe gebruikerswens.
-            `tracking-tight` hoort bij die keuze: Archivo Black op text-6xl
-            staat standaard zo ruim dat de teamnaam als losse letters leest in
-            plaats van als één blok. */}
+        {/* Decoratieve accentbalk — de enige plek voor de secundaire kleur op
+            het primaire vlak (geen tekst, dus geen contrasteis). */}
+        <span aria-hidden="true" className="print-poster-accent" />
         {opponentLine && (
-          <div className="mt-3">
-            {ownTeamLine ? (
-              homeAway === 'away' ? (
-                <>
-                  <p className="font-pdf-display text-xl font-black" style={{ color: 'var(--club-secondary, #009966)' }}>{opponentLine}</p>
-                  <p className={`font-pdf-display font-black tracking-tight ${ownNameClass}`}>{ownTeamLine}</p>
-                </>
-              ) : (
-                <>
-                  <p className={`font-pdf-display font-black tracking-tight ${ownNameClass}`}>{ownTeamLine}</p>
-                  <p className="font-pdf-display text-xl font-black mt-2" style={{ color: 'var(--club-secondary, #009966)' }}>{opponentLine}</p>
-                </>
-              )
+          ownTeamLine ? (
+            // Thuisploeg altijd op regel 1 (voetbalconventie); eigen team op
+            // volle inkt, tegenstander gedempt — zelfde formaat.
+            homeAway === 'away' ? (
+              <>
+                <p className={`font-pdf-display font-black tracking-tight opacity-75 ${matchupClass}`}>{opponentLine}</p>
+                <p className={`font-pdf-display font-black tracking-tight ${matchupClass}`}>{ownTeamLine}</p>
+              </>
             ) : (
-              <p className="font-pdf-display text-3xl font-black tracking-tight">{opponentLine}</p>
-            )}
-          </div>
+              <>
+                <p className={`font-pdf-display font-black tracking-tight ${matchupClass}`}>{ownTeamLine}</p>
+                <p className={`font-pdf-display font-black tracking-tight opacity-75 ${matchupClass}`}>{opponentLine}</p>
+              </>
+            )
+          ) : (
+            <p className="font-pdf-display text-3xl font-black tracking-tight">{opponentLine}</p>
+          )
         )}
       </div>
 
-      {/* Verzameltijd + aftraptijd als effen balk in de secundaire clubkleur;
-          ontbrekende tijd wordt stilzwijgend weggelaten, beide leeg → hele
-          balk weg. De structuur blijft exact twee niveaus diep (balk → kolom →
-          label): wedstrijdselectie-pdf.acceptance.test.tsx zoekt de
-          gemeenschappelijke voorouder van beide tijden via
-          `label.parentElement.parentElement`. */}
-      {(gather || kickoff) && (
+      {/* ── Infoband (secundair vlak): verzamelen · aftrap · locatie ──
+          Structuur blijft exact twee niveaus diep (band → cel → label):
+          wedstrijdselectie-pdf.acceptance.test.tsx zoekt de gemeenschappelijke
+          voorouder van beide tijden via `label.parentElement.parentElement`.
+          Ontbrekende waarde → cel weg; alles leeg → hele band weg. */}
+      {(gather || kickoff || location) && (
         <div className="print-poster-band">
           {gather && (
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] opacity-80">{t.matchSquad.gatherTimeLabel}</p>
-              <p className="font-pdf-display text-3xl font-black leading-none mt-1">{gather}</p>
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] opacity-80">{t.matchSquad.gatherTimeLabel}</p>
+              <p className="font-pdf-display text-2xl font-black leading-none mt-1">{gather}</p>
             </div>
           )}
           {kickoff && (
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] opacity-80">{t.matchSquad.kickoffTimeLabel}</p>
-              <p className="font-pdf-display text-3xl font-black leading-none mt-1">{kickoff}</p>
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] opacity-80">{t.matchSquad.kickoffTimeLabel}</p>
+              <p className="font-pdf-display text-2xl font-black leading-none mt-1">{kickoff}</p>
+            </div>
+          )}
+          {location && (
+            <div>
+              <p className="text-[9px] font-extrabold uppercase tracking-[0.16em] opacity-80">{t.event.location}</p>
+              <p className="font-pdf-display text-base font-black leading-tight mt-1">{location}</p>
             </div>
           )}
         </div>
       )}
 
+      {/* ── Selectievel (wit): kopregel + platte namenlijst + vormstrip ── */}
       <div className="print-poster-sheet">
-        {/* Sectiekop + aantal + statisch label — geen tweede statistiek */}
         <div className="flex items-end justify-between border-b-2 pb-1" style={{ borderColor: 'var(--club-primary, #004f3b)' }}>
           <p className="font-pdf-display text-lg font-black">{t.matchSquad.sectionSelection}</p>
-          <p className="text-[11px] font-black uppercase tracking-[0.14em]" style={{ color: 'var(--club-secondary, #009966)' }}>{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] print-poster-meta">{selectedCount} {t.matchSquad.playersLabel} · {t.matchSquad.calledUpLabel}</p>
         </div>
 
-        {/* Twee kolommen via CSS grid, bewust NIET via `columns-2` (multi-column):
-            WebKit — en dus iOS Safari, waar de eigenaar zijn PDF maakt — valt bij
-            het printen van een multi-column container regelmatig terug op één
-            kolom. Grid overleeft paged media wél.
-
-            `gridAutoFlow: column` + een expliciet aantal rijen geeft exact
-            dezelfde VERTICALE vulvolgorde als multicol had: eerste helft in de
-            linkerkolom, tweede helft rechts. Met de standaard rij-flow zou de
-            lijst links-rechts-links gaan lopen en zou de volgorde uit
-            sortSquadForExport (keepers eerst) anders lezen.
-
-            De structuur blijft ongemoeid: precies één <ul> met uitsluitend
-            <li>-children — dat wordt getoetst in AC4
-            (wedstrijdselectie.acceptance.test.tsx). */}
+        {/* Twee of drie kolommen via CSS grid, bewust NIET via `columns-*`
+            (multi-column): WebKit — en dus iOS Safari, waar de eigenaar zijn
+            PDF maakt — valt bij het printen van een multi-column container
+            regelmatig terug op één kolom. Grid overleeft paged media wél.
+            `gridAutoFlow: column` + expliciete rijen = verticale vulvolgorde
+            (keepers eerst, uit sortSquadForExport).
+            De structuur: precies één <ul> met uitsluitend <li>-children, elk
+            <li> exact de spelersnaam — géén rugnummers (geen vaste nummers in
+            dit team), géén gast-aanduiding (lijst gaat naar de spelers zelf),
+            géén groepskoppen (geen positie-info op dit vel). */}
         <ul
-          className="mt-3 grid grid-cols-2 gap-x-10"
-          style={{ gridTemplateRows: `repeat(${squadColumnRows}, auto)`, gridAutoFlow: 'column' }}
+          className={`mt-3 grid ${squadCols === 3 ? 'grid-cols-3 gap-x-6' : 'grid-cols-2 gap-x-10'}`}
+          style={{ gridTemplateRows: `repeat(${squadRows}, auto)`, gridAutoFlow: 'column' }}
         >
           {sorted.map((p) => (
-            // Bewust ALLEEN de naam als tekstinhoud: geen gast-aanduiding. Deze
-            // lijst gaat naar de spelers zelf, en wie gastspeler is hoort daar
-            // niet in te staan. Het onderscheid blijft wel zichtbaar in de app
-            // (PlayerList, MatchSquadEditor) en in de trainingsplan-print
-            // (AttendanceSummary).
-            //
-            // Het rugnummer staat in `data-jersey` en wordt door
-            // `.print-squad-item::before` (app/globals.css) getoond, juist
-            // zodat het GEEN tekstnode in de <li> wordt — zie de toelichting
-            // daar. Zonder ingevuld nummer blijft het attribuut een lege
-            // string en toont het kader niets.
             <li
               key={p.id}
-              data-jersey={p.jersey_number === null ? '' : String(p.jersey_number)}
-              className="print-squad-item break-inside-avoid py-1.5 text-sm font-extrabold"
-              style={{ borderBottom: '1px solid #e5e7eb' }}
+              className={`print-squad-item ${squadCols === 3 ? 'print-squad-item-compact' : ''}`}
             >
               {p.name}
             </li>
@@ -242,16 +233,15 @@ export default function MatchSquadPrintList({
         <MatchFormCards items={formItems} />
       </div>
 
-      {/* Footer: exact drie elementen, geen apart wedstrijddag-label (zou
-          dubbelen met de dagnaam die al in dateLabel zit). De "·" tussen
-          teamnaam en datum wordt puur visueel via CSS (`before:content`)
-          toegevoegd aan de datum-span zelf, zodat het aantal children op 3
-          blijft staan. */}
-      <div className="print-poster-foot flex items-center text-[11px]">
+      {/* ── Voetstrook (primair vlak): exact drie elementen ──
+          De "·" tussen teamnaam en datum via CSS (`before:content`), zodat
+          het aantal children op 3 blijft staan. Het merk staat in de
+          inktkleur (was: secundaire kleur — onleesbaar bij rood op blauw). */}
+      <div className="print-poster-foot flex items-center text-[10px]">
         <span className="font-semibold">{teamName}</span>
         <span className={teamName ? "font-semibold before:content-['·'] before:mx-1" : 'font-semibold'}>{dateLabel}</span>
-        <span className="ml-auto flex items-center gap-1.5 font-black uppercase tracking-wide" style={{ color: 'var(--club-secondary, #009966)' }}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- zie TeamLogo.tsx-kopcomment: dit printbestand gebruikt bewust <img>, geen next/image, om diezelfde print-timing-reden; /logo.png is hier weliswaar lokaal (geen remotePatterns-issue), maar next/image zou dat voordeel bij afdrukken alsnog tenietdoen (async optimizer-ronde) en breekt de consistente <img>-stijl van dit bestand */}
+        <span className="ml-auto flex items-center gap-1.5 font-black uppercase tracking-[0.14em] opacity-85">
+          {/* eslint-disable-next-line @next/next/no-img-element -- zie TeamLogo.tsx-kopcomment: dit printbestand gebruikt bewust <img>, geen next/image — een synchroon renderende <img> is betrouwbaar bij afdrukken */}
           <img src="/logo.png" alt="Pitchup" className="h-4 w-4 object-contain" />
           {t.matchSquad.footerGenerated}
         </span>
