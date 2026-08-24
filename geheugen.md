@@ -2171,3 +2171,38 @@ wegwerp-testbestand matcht het vitest-patroon (`*.test.tsx` in de root) en
 draait dus mee in `npm test` zolang het bestaat — direct verwijderen.
 Printtip voor de eigenaar: browser-"kop- en voetteksten" uitzetten, anders
 drukt de browser URL/datum in de marge.
+
+## Wedstrijdselectie derde ronde: clean teamsheet (2026-08-24, definitief)
+De poster-versie sneuvelde op de echte iPhone-uitdraai van de eigenaar:
+**Safari rekent `100vh` in paged media anders dan Chromium**, dus de
+één-A4-garantie (`height: 100vh` + `overflow: hidden`) knipte daar het
+vormblok half af. Les: een op 100vh gebaseerde hoogtegarantie is in
+print-CSS niet cross-engine te vertrouwen — het één-pagina-resultaat moet
+uit het INHOUDSBUDGET komen, niet uit klemmen.
+
+### Definitieve vorm (expliciet door de eigenaar goedgekeurd)
+Wit document binnen de gewone 12mm-marge — geen named page, geen
+full-bleed, geen hoogte-/overflow-declaraties op de root (regressietest
+bewaakt dit én de afwezigheid van de named page; let op: noem de named
+page in CSS-commentaar niet bij zijn letterlijke at-rule-naam, zelfde
+indexOf-valkuil als bij de C1-tests). Clubkleuren SUBTIEL (expliciete
+wens): dunne tweekleurige clubbalk bovenaan (primair 3 : secundair 1 —
+het secundaire segment draagt de klasse `.print-poster-accent`, het
+AC8-anker), primaire kleur als accent-tekst op kopjes/labels via
+`.print-accent-text` op `--club-accent-text`, en dunne lijnen. Alle
+inhoudstekst neutraal donker (#111827/#6b7280).
+
+### readableAccentOnWhite vervangt readableInkOn
+`lib/club-colors.ts`: er zijn geen tekst-op-kleurvlakken meer, dus de
+wit-of-donker-keuze is vervangen door een op-wit-waarborg: de clubkleur
+zelf zolang die op wit ≥3:1 haalt, anders `READABLE_INK_DARK`. Serverzijdig
+berekend in squad/page.tsx en als kale string (`accentText`) doorgegeven
+(K4-importbeperking blijft). De ink-props/vars (`primaryInk`/`--club-*-ink`)
+zijn overal verwijderd.
+
+### Blijvend geldig uit de poster-ronde
+Thuisploeg op regel 1, beide teamregels even groot met de tegenstander op
+opacity-75, trapsgewijze verkleining op de langste regel, adaptieve
+2/3-koloms namenlijst, compacte vormcellen (letter + uitslag, geen
+tegenstander/datum), locatie-cel in de inforegel, geen rugnummers, geen
+positiegroepen, exact-naam-li's, footer met precies 3 children.
