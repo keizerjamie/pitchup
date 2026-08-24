@@ -9,6 +9,7 @@ import { validateParallelSpelers, assertGeenOverlap } from '@/lib/parallel-groep
 import { joinedCategorie } from '@/lib/periodization'
 import { clampStapOverride } from '@/lib/periodization-stappen'
 import { genericError, logError } from '@/lib/errors'
+import { kopieerKoppelingen, type BronKoppeling } from '@/lib/kopieer-trainingsplan'
 
 // ────────────────────────────────────────────────
 // Meting
@@ -816,4 +817,60 @@ export async function verplaatsParallelSpeler(
   }
 
   revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Neemt de oefeningen van een eerdere training over in deze training.
+//
+// Weken lijken op elkaar: dezelfde warming-up, dezelfde partijvorm, met één
+// blok anders. Opnieuw samenstellen kostte evenveel handelingen als de eerste
+// keer, terwijl dupliceren-en-aanpassen het werkelijke gedrag is.
+//
+// APPEND, NOOIT OVERSCHRIJVEN: de gekopieerde oefeningen komen áchter wat er al
+// staat. Een variant die het doelplan eerst leegmaakt is bewust niet gebouwd —
+// dat is niet terug te draaien, en de UI biedt het kopiëren alleen aan bij een
+// leeg plan.
+//
+// Wat NIET meekomt: spelerindeling en parallel_spelers. Zie de toelichting in
+// lib/kopieer-trainingsplan.ts — bij een andere training staat er een andere
+// groep op het veld.
+export async function kopieerTrainingsplan(
+  doelEventId: string,
+  bronEventId: string,
+): Promise<{ aantal: number }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  if (doelEventId === bronEventId) throw new Error('Bron en doel zijn dezelfde training')
+
+  // Beide events moeten van dit team zijn. Zonder de bron-check zou een
+  // aanroeper het plan van een andere gebruiker kunnen binnenhalen.
+  await Promise.all([
+    assertOwnEvent(supabase, doelEventId, user.id),
+    assertOwnEvent(supabase, bronEventId, user.id),
+  ])
+
+  const { data: bronRijen, error: leesError } = await supabase
+    .from('training_oefeningen')
+    .select('oefening_id, volgorde, stap_override, parallel_groep_id')
+    .eq('event_id', bronEventId)
+    .eq('team_id', user.id)
+    .order('volgorde')
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+  if (leesError) throw genericError('trainingPlan.kopieerTrainingsplan.lezen', leesError)
+
+  const bron = bronRijen ?? []
+  if (bron.length === 0) return { aantal: 0 }
+
+  const offset = await nextVolgordeForEvent(supabase, doelEventId, user.id)
+  const nieuw = kopieerKoppelingen(bron as BronKoppeling[], offset, () => crypto.randomUUID())
+
+  const { error } = await supabase.from('training_oefeningen').insert(
+    nieuw.map((rij) => ({ ...rij, team_id: user.id, event_id: doelEventId })),
+  )
+  if (error) throw genericError('trainingPlan.kopieerTrainingsplan', error)
+
+  revalidatePath(`/events/${doelEventId}/training-plan`)
+  return { aantal: nieuw.length }
 }

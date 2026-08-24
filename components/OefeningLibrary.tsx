@@ -34,13 +34,29 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
 
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<OefeningWithUsage | 'new' | null>(null)
+  // Filter op oefeningen zonder ingevulde duur. Die vallen niet op in een
+  // lange lijst, maar breken wél de sessietijdlijn van elke training waarin ze
+  // zitten: de klok kan daar niet doortellen. Dit maakt ze in één klik
+  // vindbaar en aanpasbaar.
+  const [alleenZonderDuur, setAlleenZonderDuur] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const q = query.trim().toLowerCase()
+  const zonderDuurAantal = useMemo(
+    () => oefeningen.filter((o) => o.duur_min == null).length,
+    [oefeningen],
+  )
+
   const filtered = useMemo(
-    () => (q ? oefeningen.filter((o) => o.naam.toLowerCase().includes(q)) : oefeningen),
-    [oefeningen, q],
+    () => (q || alleenZonderDuur
+      ? oefeningen.filter(
+          (o) =>
+            (!q || o.naam.toLowerCase().includes(q)) &&
+            (!alleenZonderDuur || o.duur_min == null),
+        )
+      : oefeningen),
+    [oefeningen, q, alleenZonderDuur],
   )
 
   const catLabel = (key: string) => t.periodization.categories[key] ?? key
@@ -89,6 +105,34 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
           </button>
         </div>
       </div>
+
+      {zonderDuurAantal > 0 && (
+        <div className="mb-4 surface-card px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button
+            type="button"
+            onClick={() => setAlleenZonderDuur((aan) => !aan)}
+            aria-pressed={alleenZonderDuur}
+            className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${alleenZonderDuur ? 'text-white' : 'text-muted'}`}
+            style={
+              alleenZonderDuur
+                ? { background: 'var(--warning)' }
+                : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
+            }
+          >
+            {t.oefeningen.withoutDurationCount.replace('{n}', String(zonderDuurAantal))}
+          </button>
+          <p className="text-xs text-faint min-w-0 flex-1">{t.oefeningen.withoutDurationHint}</p>
+          {alleenZonderDuur && (
+            <button
+              type="button"
+              onClick={() => setAlleenZonderDuur(false)}
+              className="text-xs font-semibold text-warning-text hover:underline flex-shrink-0"
+            >
+              {t.oefeningen.withoutDurationShowAll}
+            </button>
+          )}
+        </div>
+      )}
 
       {oefeningen.length === 0 ? (
         <div className="rounded-2xl border-2 border-dashed border-[var(--border-soft)] p-8 text-center">

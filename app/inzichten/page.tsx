@@ -6,6 +6,8 @@ import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
 import { todayLocal } from '@/lib/utils'
 import { matchResult } from '@/lib/match-analysis.mjs'
+import { countCategoryOccurrences } from '@/lib/periodization'
+import { addDays } from '@/lib/utils'
 import {
   seizoensVenster,
   verledenSeizoensVenster,
@@ -43,6 +45,7 @@ import KpiStrip from '@/components/inzichten/KpiStrip'
 import SignalenBlok from '@/components/inzichten/SignalenBlok'
 import PeriodeFilter from '@/components/inzichten/PeriodeFilter'
 import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
+import TrainingsinhoudChart from '@/components/inzichten/TrainingsinhoudChart'
 import PrintButton from '@/components/PrintButton'
 import { resolveClubColors } from '@/lib/club-colors'
 
@@ -242,6 +245,24 @@ export default async function InzichtenPage({
       }
     : null
 
+  // Trainingsinhoud: in hoeveel trainingen kwam elke oefeningcategorie voor.
+  // Hergebruikt de bestaande telling uit de periodisering — dezelfde functie
+  // die daar de stap mee berekent, zodat beide pagina's nooit een ander cijfer
+  // tonen.
+  //
+  // `verleden` en niet `venster`: dit gaat over wat je gedáán hebt. Een al
+  // ingeplande training van volgende week heeft misschien al oefeningen, maar
+  // die heb je nog niet getraind.
+  //
+  // De grenzen zijn EXCLUSIEF (zie countCategoryOccurrences), dus een dag naar
+  // buiten om het venster inclusief te maken.
+  const inhoudTellingen = await countCategoryOccurrences(
+    supabase,
+    user.id,
+    addDays(verleden.start, -1),
+    addDays(verleden.end, 1),
+  )
+
   // Conclusie-laag. Alles hieronder rekent op de rijen die hierboven al zijn
   // opgehaald — geen extra query, geen extra RPC.
   const opkomstTrend = laatsteMaandTrend(maandOpkomst)
@@ -272,7 +293,11 @@ export default async function InzichtenPage({
     doelpunten.length === 0 &&
     vormItems.length === 0 &&
     ratingTopWorst.top.length === 0 &&
-    aanwezigheidTopWorst.top.length === 0
+    aanwezigheidTopWorst.top.length === 0 &&
+    // Ook de trainingsinhoud telt mee: een seizoen waarin je wél oefeningen aan
+    // trainingen koppelde maar nog geen aanwezigheid of uitslagen invulde, is
+    // niet leeg — die kaart heeft dan wél iets te tonen.
+    Object.values(inhoudTellingen).every((n) => n === 0)
 
   if (geenEnkeleData) {
     // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
@@ -356,6 +381,7 @@ export default async function InzichtenPage({
         <DoelpuntenChart items={doelpunten} t={t} />
         <TopWorstRatings data={ratingTopWorst} t={t} />
         <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />
+        <TrainingsinhoudChart tellingen={inhoudTellingen} t={t} />
       </div>
       </div>
 

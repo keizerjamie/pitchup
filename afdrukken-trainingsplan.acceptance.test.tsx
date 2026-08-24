@@ -282,7 +282,7 @@ function renderPlan(props: Partial<Parameters<typeof TrainingPlanEditor>[0]> = {
         hasNulmeting={props.hasNulmeting ?? false}
         suggestion={props.suggestion ?? null}
         players={props.players ?? players3}
-        presentPlayerIds={props.presentPlayerIds ?? ['p1', 'p2', 'p3']}
+        presentPlayerIds={props.presentPlayerIds ?? ['p1', 'p2', 'p3']} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )

@@ -2,8 +2,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { PERIODIZATION_CATEGORIES, MetingData } from '@/lib/types'
-import { cycleWeekFor, computeCurrentSteps, getTrainingLog, TrainingLogEntry, LastDoneEntry, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
-import { addDays, formatDate, todayLocal } from '@/lib/utils'
+import { cycleWeekFor, computeCurrentSteps, getTrainingLog, dueCategories, TrainingLogEntry, LastDoneEntry, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
+import { addDays, formatDate, formatDateLong, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import NulmetingManager from '@/components/NulmetingManager'
 
@@ -57,6 +57,35 @@ export default async function PeriodizationPage() {
     cycleWeek = cycleWeekFor(latestEvent.date, today)
   }
 
+  // ── Vooruitblik: de eerstvolgende training ─────────────────────────
+  // De pagina keek uitsluitend terug (huidige stap, log van gedane
+  // trainingen). Daarmee beantwoordde hij niet de vraag waarvoor een trainer
+  // hem opent: "wat moet ik donderdag doen?" Deze query is dezelfde
+  // team-gescopede vorm als de rest van de pagina en kost één extra ronde.
+  //
+  // `gte` op vandaag, niet `gt`: een training van vanavond is nog steeds de
+  // eerstvolgende — dezelfde grens als de agenda (lib/utils.ts: isUpcoming).
+  const { data: komendeTrainingen } = await supabase
+    .from('events')
+    .select('id, date, time')
+    .eq('team_id', user.id)
+    .eq('type', 'training')
+    .gte('date', today)
+    .order('date', { ascending: true })
+    .order('time', { ascending: true, nullsFirst: true })
+    .limit(1)
+
+  const volgendeTraining = komendeTrainingen?.[0] ?? null
+
+  // Cyclusweek van díé training (niet van vandaag): een training van volgende
+  // week valt in een andere week van de zes en heeft dus andere categorieën
+  // aan de beurt. Zonder nulmeting is er geen cyclus en dus geen advies.
+  const volgendeWeek =
+    volgendeTraining && latestEvent && latestMeting
+      ? cycleWeekFor(latestEvent.date, volgendeTraining.date)
+      : null
+  const volgendeDue = volgendeWeek !== null ? dueCategories(volgendeWeek) : []
+
   const history = events
     .filter((e) => metingByEvent.has(e.id))
     .map((e) => {
@@ -77,6 +106,68 @@ export default async function PeriodizationPage() {
 
   const metingCategories = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
 
+  // Vooruitblik op de eerstvolgende training. BEWUST BUITEN de
+  // nulmeting-voorwaarde hieronder: zonder nulmeting toonde deze pagina
+  // alleen een lege staat met "stel eerst een nulmeting in", terwijl "je
+  // volgende training is donderdag, plan hem" ook dán het nuttigste is wat de
+  // pagina kan zeggen. De categorie-badges hebben de cyclus wél nodig en
+  // vallen zonder nulmeting stilzwijgend weg.
+  const volgendeTrainingKaart = (
+            <div className="surface-card overflow-hidden">
+              <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                <h2 className="font-display text-[16px] font-bold text-ink">{t.periodization.nextTrainingTitle}</h2>
+              </div>
+              <div className="px-5 py-4">
+                {volgendeTraining ? (
+                  <>
+                    <p className="text-[15px] font-bold text-ink">
+                      {formatDateLong(volgendeTraining.date, t.browserLocale)}
+                    </p>
+                    {volgendeWeek !== null && (
+                      <p className="text-xs font-bold text-faint mt-0.5">
+                        {t.periodization.nextTrainingDue.replace('{n}', String(volgendeWeek))}
+                      </p>
+                    )}
+
+                    {volgendeDue.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 mt-3">
+                        {volgendeDue.map((cat) => (
+                          <span
+                            key={cat.key}
+                            className="text-xs font-bold px-2.5 py-1 rounded-full text-white"
+                            style={{ background: BAR_COLORS[cat.key] ?? '#0d3d38' }}
+                          >
+                            {t.periodization.categories[cat.key] ?? cat.label}
+                            {currentSteps[cat.key] != null && (
+                              <span className="opacity-80"> · {t.periodization.step} {currentSteps[cat.key]}</span>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      volgendeWeek !== null && (
+                        <p className="text-xs font-semibold text-faint mt-3">{t.periodization.nextTrainingNothingDue}</p>
+                      )
+                    )}
+
+                    <Link
+                      href={`/events/${volgendeTraining.id}/training-plan`}
+                      className="mt-4 h-11 rounded-xl px-5 inline-flex items-center gap-2 text-sm font-bold text-white"
+                      style={{ background: 'var(--primary)' }}
+                    >
+                      {t.periodization.nextTrainingPlan}
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-bold text-ink">{t.periodization.nextTrainingNone}</p>
+                    <p className="text-xs text-faint mt-1">{t.periodization.nextTrainingNoneHint}</p>
+                  </>
+                )}
+              </div>
+            </div>
+  )
+
   return (
     <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <div>
@@ -87,6 +178,7 @@ export default async function PeriodizationPage() {
       {latestEvent && latestMeting ? (
         <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start flex flex-col gap-5">
           <div className="flex flex-col gap-5">
+            {volgendeTrainingKaart}
             {/* Current cycle phase */}
             {cycleWeek !== null && (
               <div className="rounded-2xl p-5 text-white" style={{ background: 'linear-gradient(135deg,#0a2e2a,#14655c)' }}>
@@ -170,6 +262,7 @@ export default async function PeriodizationPage() {
         </div>
       ) : (
         <div className="max-w-lg flex flex-col gap-5">
+          {volgendeTrainingKaart}
           <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
             <span className="ms text-[40px] text-faint">monitoring</span>
             <p className="text-ink font-bold">{t.periodization.noMeting}</p>

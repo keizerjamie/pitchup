@@ -23,18 +23,37 @@ interface Props {
 export default function OefeningPicker({ eventId, library, onClose, presetCategorie }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
-  const [filters, setFilters] = useState<OefeningFilters>(EMPTY_OEFENING_FILTERS)
+  // Een periodiseringssuggestie opent de bibliotheek VOORGEFILTERD op die
+  // categorie — niet meteen het "nieuwe oefening"-formulier, zoals eerder.
+  // Dat oude gedrag duwde je naar een nieuwe oefening maken terwijl je die
+  // categorie waarschijnlijk allang in je bibliotheek hebt staan; zeker in een
+  // tweede seizoen is opnieuw intypen precies het verkeerde antwoord.
+  // Nieuw maken blijft één klik weg, als bewuste tweede keuze.
+  const [filters, setFilters] = useState<OefeningFilters>(
+    presetCategorie ? { ...EMPTY_OEFENING_FILTERS, categorie: presetCategorie } : EMPTY_OEFENING_FILTERS,
+  )
   const [error, setError] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(!!presetCategorie)
+  const [showCreate, setShowCreate] = useState(false)
+  // Wat er tijdens déze sheet-sessie is toegevoegd. Een array en geen Set:
+  // dezelfde oefening twee keer aan één training koppelen is bestaand,
+  // bedoeld gedrag (zie dezelfde-oefening-meerdere-keren.acceptance.test.tsx),
+  // dus het aantal telt.
+  const [toegevoegd, setToegevoegd] = useState<string[]>([])
 
   const filtered = useMemo(() => filterOefeningen(library, filters), [library, filters])
 
+  const aantalToegevoegd = (id: string) => toegevoegd.filter((x) => x === id).length
+
+  // Toevoegen sluit de sheet NIET. Een training bestaat uit vier tot zes
+  // oefeningen; met sluiten-per-oefening opende je dit paneel vijf keer,
+  // inclusief vijf keer opnieuw filteren. Nu blijft de lijst staan en sluit je
+  // zelf af als je klaar bent.
   function handlePick(oefeningId: string) {
     setError(null)
     startTransition(async () => {
       try {
         await addOefeningToTraining(eventId, oefeningId)
-        onClose()
+        setToegevoegd((eerder) => [...eerder, oefeningId])
       } catch (e) {
         setError(e instanceof Error ? e.message : t.oefeningen.genericError)
       }
@@ -43,13 +62,19 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
 
   async function handleCreateAndAdd(input: OefeningInput) {
     await createAndAddOefening(eventId, input)
-    onClose()
+    // Zelfde ritme als een keuze uit de bibliotheek: terug naar de lijst, sheet
+    // blijft open. De nieuwe oefening zit in de volgende `library`-prop van de
+    // server, dus hij staat er meteen tussen.
+    setShowCreate(false)
+    setToegevoegd((eerder) => [...eerder, 'nieuw'])
   }
 
   if (showCreate) {
     return (
       <OefeningEditor
-        onCancel={() => (presetCategorie ? onClose() : setShowCreate(false))}
+        // Altijd terug naar de lijst, ook bij een suggestie: annuleren betekent
+        // "toch geen nieuwe maken", niet "laat de hele training met rust".
+        onCancel={() => setShowCreate(false)}
         onSubmit={handleCreateAndAdd}
         presetCategorie={presetCategorie}
         presetNaam={presetCategorie ? (t.periodization.categories[presetCategorie] ?? presetCategorie) : undefined}
@@ -75,6 +100,10 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
             <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
               {error}
             </div>
+          )}
+
+          {presetCategorie && (
+            <p className="text-xs font-semibold text-faint">{t.oefeningen.pickerSuggestionHint}</p>
           )}
 
           <input
@@ -229,11 +258,32 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                       {t.periodization.categories[o.categorie] ?? o.categorie}
                     </span>
                     {o.duur_min != null && <span className="text-xs text-faint">{o.duur_min} min</span>}
+                    {aantalToegevoegd(o.id) > 0 && (
+                      <span className="text-xs font-bold" style={{ color: 'var(--brand-accent)' }}>
+                        {t.oefeningen.pickerAddedTimes.replace('{n}', String(aantalToegevoegd(o.id)))}
+                      </span>
+                    )}
                   </div>
                 </button>
               ))}
             </div>
           )}
+        </div>
+
+        {/* Sluitknop onderaan: sinds toevoegen de sheet openhoudt, moet er een
+            duidelijke manier zijn om te zeggen "ik ben klaar". Sticky, zodat
+            hij bij een lange bibliotheek in beeld blijft. */}
+        <div className="sticky bottom-0 bg-surface border-t border-[var(--border-soft)] px-5 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full h-11 rounded-xl text-sm font-bold text-white active:scale-[0.98] transition"
+            style={{ background: 'var(--primary)' }}
+          >
+            {toegevoegd.length === 0
+              ? t.oefeningen.pickerDone
+              : t.oefeningen.pickerDoneCount.replace('{n}', String(toegevoegd.length))}
+          </button>
         </div>
       </div>
     </div>

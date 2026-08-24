@@ -6,6 +6,7 @@ import { formatDateLong } from '@/lib/utils'
 import { resolveClubColors } from '@/lib/club-colors'
 import BackButton from '@/components/BackButton'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
+import type { KopieerOptie } from '@/components/KopieerVorigeTraining'
 import AttendanceSummary from '@/components/AttendanceSummary'
 import PrintButton from '@/components/PrintButton'
 import { getDict } from '@/lib/i18n'
@@ -92,6 +93,53 @@ export default async function TrainingPlanPage({ params }: Props) {
     teams: normalizeOefeningTeams(o.teams),
   }))
 
+  // ── Kandidaten om van te kopiëren ──────────────────────────────────
+  // Eerdere trainingen van dit team die daadwerkelijk oefeningen hebben. Twee
+  // ronden: eerst de events, dan één telquery over die id's — een join met een
+  // count per rij levert de ongetypeerde client geen bruikbare vorm op.
+  //
+  // `lt` op de datum van DEZE training, niet op vandaag: bij het vooruit
+  // plannen van meerdere weken wil je van de vorige week kopiëren, niet van de
+  // laatste training die al geweest is.
+  const { data: eerdereTrainingen } = await supabase
+    .from('events')
+    .select('id, date')
+    .eq('team_id', user.id)
+    .eq('type', 'training')
+    .lt('date', event.date)
+    .order('date', { ascending: false })
+    .limit(10)
+
+  // De Supabase-client is ongetypeerd (lib/supabase/server.ts) en levert bij
+  // een fout of een andere querystaat geen array. Zelfde defensieve vorm als
+  // vormParallelGroep() in app/actions/training-plan.ts.
+  const eerdereRijen: { id: string; date: string }[] = Array.isArray(eerdereTrainingen)
+    ? (eerdereTrainingen as { id: string; date: string }[])
+    : []
+  const eerdereIds = eerdereRijen.map((e) => e.id)
+  const { data: koppelingTellingen } = eerdereIds.length > 0
+    ? await supabase
+        .from('training_oefeningen')
+        .select('event_id')
+        .in('event_id', eerdereIds)
+        .eq('team_id', user.id)
+    : { data: [] }
+
+  const aantalPerEvent = new Map<string, number>()
+  const tellingRijen: { event_id: string }[] = Array.isArray(koppelingTellingen)
+    ? (koppelingTellingen as { event_id: string }[])
+    : []
+  for (const rij of tellingRijen) {
+    aantalPerEvent.set(rij.event_id, (aantalPerEvent.get(rij.event_id) ?? 0) + 1)
+  }
+
+  // Alleen trainingen met inhoud, en hooguit vijf: dit is een snelkoppeling,
+  // geen archief.
+  const kopieerOpties: KopieerOptie[] = eerdereRijen
+    .map((e) => ({ id: e.id, date: e.date, aantal: aantalPerEvent.get(e.id) ?? 0 }))
+    .filter((e) => e.aantal > 0)
+    .slice(0, 5)
+
   // ── Current steps per category, as of this training's date ──
   const occurrences = latestMetingEvent
     ? await countCategoryOccurrences(supabase, user.id, latestMetingEvent.date, event.date)
@@ -162,6 +210,8 @@ export default async function TrainingPlanPage({ params }: Props) {
             suggestion={suggestion}
             players={activePlayers}
             presentPlayerIds={Array.from(presentIds)}
+            startTijd={event.time}
+            kopieerOpties={kopieerOpties}
           />
         </div>
       </div>

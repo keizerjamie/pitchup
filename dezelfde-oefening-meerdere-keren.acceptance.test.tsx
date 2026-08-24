@@ -190,7 +190,7 @@ function renderPlan(
         hasNulmeting={false}
         suggestion={null}
         players={opts.players ?? players2}
-        presentPlayerIds={opts.presentPlayerIds ?? players2.map((p) => p.id)}
+        presentPlayerIds={opts.presentPlayerIds ?? players2.map((p) => p.id)} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )
@@ -240,15 +240,28 @@ describe('AC1 — nogmaals klikken op dezelfde oefening in de OefeningPicker', (
       </DictProvider>,
     )
 
-    fireEvent.click(screen.getByText('Rondo'))
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    // De sheet blijft sinds de multi-add-flow open na een keuze, dus twee keer
+    // dezelfde oefening aanklikken is nu precies wat een gebruiker ook echt
+    // doet — deze test hoefde daar eerder omheen te werken (het component bleef
+    // alleen "door de test" gemount na het sluiten).
+    // De kaartknop is `disabled` zolang de transitie loopt (OefeningPicker).
+    // Zonder daarop te wachten wordt de tweede klik stilzwijgend genegeerd en
+    // is deze test tijdsafhankelijk.
+    const kaart = () => screen.getByText('Rondo').closest('button') as HTMLButtonElement
 
-    // Component blijft (door de test) gemount — een reëel tweede bezoek aan
-    // de picker (nieuwe render vanaf de parent) zou hetzelfde item opnieuw
-    // tonen; hier bewijzen we het kernpunt: een tweede klik voert een tweede,
-    // onafhankelijke koppelactie uit i.p.v. een no-op.
-    fireEvent.click(screen.getByText('Rondo'))
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2))
+    fireEvent.click(kaart())
+    await waitFor(() =>
+      expect(m.calls.insert.filter((i) => i.table === 'training_oefeningen')).toHaveLength(1),
+    )
+    await waitFor(() => expect(kaart()).not.toBeDisabled())
+
+    fireEvent.click(kaart())
+    await waitFor(() =>
+      expect(m.calls.insert.filter((i) => i.table === 'training_oefeningen')).toHaveLength(2),
+    )
+    // Kernpunt blijft: een tweede klik voert een tweede, onafhankelijke
+    // koppelactie uit i.p.v. een no-op — geen client-dedupe.
+    expect(onClose).not.toHaveBeenCalled()
 
     const inserts = m.calls.insert.filter((i) => i.table === 'training_oefeningen')
     expect(inserts).toHaveLength(2)

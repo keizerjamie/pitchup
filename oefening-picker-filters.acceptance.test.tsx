@@ -98,7 +98,7 @@ function renderEditor(library: Oefening[]) {
         hasNulmeting={false}
         suggestion={null}
         players={[]}
-        presentPlayerIds={[]}
+        presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )
@@ -383,7 +383,7 @@ describe('AC8 — filter terugzetten naar "geen filter" toont de volledige (of n
 // addOefeningToTraining wordt nog aangeroepen, onClose nog getriggerd.
 // ────────────────────────────────────────────────
 describe('AC9 — regressie: oefening toevoegen werkt nog zoals voorheen', () => {
-  it('klikken op een kaart (ook na filteren) koppelt de oefening en sluit de picker', async () => {
+  it('klikken op een kaart (ook na filteren) koppelt de oefening en houdt de picker open', async () => {
     const m = makeSupabase({
       tables: {
         events: { data: { id: 'e1' } },
@@ -396,10 +396,17 @@ describe('AC9 — regressie: oefening toevoegen werkt nog zoals voorheen', () =>
     openPicker()
     fireEvent.change(categorieSelect(), { target: { value: 'positiespel' } })
     fireEvent.click(screen.getByText('Rondo 4v2'))
-    // Picker is dicht: titel niet meer op het scherm (onClose is getriggerd).
-    await waitFor(() => expect(screen.queryByText(nl.oefeningen.pickerTitle)).not.toBeInTheDocument())
-    const link = m.calls.insert.find((i) => i.table === 'training_oefeningen')
+    const link = await waitFor(() => {
+      const gevonden = m.calls.insert.find((i) => i.table === 'training_oefeningen')
+      expect(gevonden).toBeDefined()
+      return gevonden
+    })
     expect(link?.payload.oefening_id).toBe('o1')
+    // GEWIJZIGD GEDRAG (bewust): de sheet blijft open zodat je meerdere
+    // oefeningen achter elkaar kunt kiezen. Het gezette filter blijft daarbij
+    // ook staan — dat was juist de reden dat opnieuw-openen zo vervelend was.
+    expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument()
+    expect((categorieSelect() as HTMLSelectElement).value).toBe('positiespel')
   })
 })
 

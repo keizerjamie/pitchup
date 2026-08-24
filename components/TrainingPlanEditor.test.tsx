@@ -90,7 +90,7 @@ function renderPlan(koppelingen: TrainingOefeningWithData[]) {
         hasNulmeting={false}
         suggestion={null}
         players={players}
-        presentPlayerIds={['p1']}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )
@@ -184,7 +184,7 @@ function renderPlanWith(koppeling: TrainingOefeningWithData) {
         hasNulmeting={false}
         suggestion={null}
         players={players}
-        presentPlayerIds={['p1']}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )

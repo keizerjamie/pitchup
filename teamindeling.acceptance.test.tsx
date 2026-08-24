@@ -156,7 +156,7 @@ function renderPlan(koppeling: TrainingOefeningWithData, opts: { players?: Playe
         hasNulmeting={false}
         suggestion={null}
         players={opts.players ?? players4}
-        presentPlayerIds={opts.presentPlayerIds ?? ['p1', 'p2', 'p3', 'p4']}
+        presentPlayerIds={opts.presentPlayerIds ?? ['p1', 'p2', 'p3', 'p4']} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )

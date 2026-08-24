@@ -211,7 +211,11 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
     fireEvent.click(screen.getByText('Rondo 4v2'))
     await waitFor(() => expect(m.calls.insert.some((i) => i.table === 'training_oefeningen')).toBe(true))
     expect(m.calls.insert.some((i) => i.table === 'oefeningen')).toBe(false)
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // GEWIJZIGD GEDRAG (bewust): de sheet blijft open na het toevoegen, zodat
+    // je meerdere oefeningen achter elkaar kunt kiezen. Het criterium van deze
+    // test — de bibliotheek-oefening wordt gekoppeld, niet gekopieerd — is
+    // ongewijzigd.
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('(UI) "+ Nieuwe oefening aanmaken" maakt een bibliotheek-item aan én koppelt het meteen', async () => {
@@ -236,7 +240,11 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
     await waitFor(() => expect(
       m.calls.insert.some((i) => i.table === 'training_oefeningen' && i.payload.oefening_id === 'new-1'),
     ).toBe(true))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // Na aanmaken keert de sheet terug naar de bibliotheeklijst in plaats van
+    // te sluiten (zelfde ritme als een keuze uit de lijst); de nieuwe oefening
+    // is dan al gekoppeld.
+    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument())
   })
 
   it('(UI) trainingsschema toont de opgeslagen team-/formatiekeuzes van de gekoppelde oefening', () => {
@@ -248,7 +256,7 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
         />
       </DictProvider>,
     )
@@ -351,7 +359,7 @@ describe('AC8/AC17 — volgorde/stap_override/genest_in zijn training-specifiek'
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppelingA, koppelingB]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
         />
       </DictProvider>,
     )

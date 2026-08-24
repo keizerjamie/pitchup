@@ -196,7 +196,11 @@ function tableFactory(rows: Row[]) {
       },
       maybeSingle: () => Promise.resolve({ data: resolveRows()[0] ?? null }),
       single: () => Promise.resolve({ data: resolveRows()[0] ?? null }),
-      then: (resolve: (v: { data: Row[] }) => unknown) => resolve({ data: resolveRows() }),
+      // `count` hoort erbij zodra een aanroeper `{ count: 'exact' }` vraagt
+      // (app/page.tsx doet dat voor de nulmeting-bestaanscheck). Altijd
+      // meesturen is onschadelijk: wie er niet om vroeg leest 'm niet.
+      then: (resolve: (v: { data: Row[]; count: number }) => unknown) =>
+        resolve({ data: resolveRows(), count: resolveRows().length }),
     }
     return chain
   }
@@ -244,6 +248,7 @@ function makeSupabaseMock(opts: {
   players?: Row[]
   teamName?: string | null
   vormQueryReturnsError?: boolean
+  metingen?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const eventsFactory = opts.vormQueryReturnsError
@@ -253,6 +258,7 @@ function makeSupabaseMock(opts: {
   const settingsFactory = tableFactory(
     opts.teamName ? [{ team_id: TEAM, key: 'team_name', value: opts.teamName }] : [],
   )
+  const metingenFactory = tableFactory(opts.metingen ?? [])
   const emptyFactory = tableFactory([]) // attendance/lineups/match_ratings/match_events/training_oefeningen/task_overrides
   return {
     auth: { getUser: async () => ({ data: { user } }) },
@@ -260,6 +266,7 @@ function makeSupabaseMock(opts: {
       if (table === 'events') return eventsFactory()
       if (table === 'players') return playersFactory()
       if (table === 'settings') return settingsFactory()
+      if (table === 'metingen') return metingenFactory()
       return emptyFactory()
     },
   }
@@ -271,6 +278,7 @@ async function renderDashboard(opts: {
   players?: Row[]
   teamName?: string | null
   vormQueryReturnsError?: boolean
+  metingen?: Row[]
 } = {}) {
   vi.mocked(createClient).mockResolvedValue(
     makeSupabaseMock(opts) as unknown as Awaited<ReturnType<typeof createClient>>,
@@ -827,5 +835,33 @@ describe('i18n-dekking — statForm en formEmpty in alle 5 dictionaries', () => 
   it('formEmpty verschilt zinvol per taal (alle 5 talen hebben een eigen volledige zin)', () => {
     const values = dicts.map(([, dict]) => dict.home.formEmpty)
     expect(new Set(values).size).toBe(5)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Setup-kaart: periodisering staat uit zolang er geen nulmeting is
+//
+// De trainingsplanner en de periodiseringspagina waarschuwen hier al voor,
+// maar dat zijn plekken die je pas bereikt als je al aan het plannen bent.
+// Het dashboard is de enige plek waar je hoe dan ook langskomt.
+// ═══════════════════════════════════════════════════════════════════════
+describe('setup-kaart nulmeting', () => {
+  it('zonder nulmeting staat de kaart op het dashboard, met een link naar /periodisering', async () => {
+    await renderDashboard({ metingen: [] })
+    expect(screen.getByText(nl.home.setupNulmetingTitle)).toBeInTheDocument()
+    const cta = screen.getByText(nl.home.setupNulmetingCta)
+    expect(cta.closest('a')).toHaveAttribute('href', '/periodisering')
+  })
+
+  it('zodra er één nulmeting is, verdwijnt de kaart — zonder wegklik-status', async () => {
+    await renderDashboard({ metingen: [{ team_id: TEAM, event_id: 'm1' }] })
+    expect(screen.queryByText(nl.home.setupNulmetingTitle)).toBeNull()
+  })
+
+  it('de kaart telt alleen nulmetingen van het eigen team', async () => {
+    // Een meting van een ander team mag de kaart niet wegdrukken; de query is
+    // op team_id gescoped, deze test bewijst dat de scoping ook echt werkt.
+    await renderDashboard({ metingen: [{ team_id: 'ander-team', event_id: 'm9' }] })
+    expect(screen.getByText(nl.home.setupNulmetingTitle)).toBeInTheDocument()
   })
 })

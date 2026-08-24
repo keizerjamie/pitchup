@@ -462,6 +462,10 @@ function makeSupabaseMock(opts: {
   // AC27: laat de niet-RPC-gedreven `events`-query (doelpunten + vormstrook)
   // falen zonder de RPC-gedreven kaarten te raken.
   eventsError?: unknown
+  // Koppelingen van oefeningen aan trainingen, voor de trainingsinhoud-kaart.
+  // Vorm: { event_id, oefeningen: { categorie } } — de gejoinde vorm die
+  // countCategoryOccurrences() leest (lib/periodization.ts).
+  trainingOefeningen?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const db: Db = {
@@ -482,6 +486,7 @@ function makeSupabaseMock(opts: {
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)
   const settingsFactory = tableFactory(opts.settings ?? [])
+  const trainingOefeningenFactory = tableFactory(opts.trainingOefeningen ?? [])
   const rpcCalls: { name: string; args: unknown }[] = []
   // AC14: bewijst dat een client-side filterwissel geen nieuwe `.from(...)`
   // -aanroep doet — zonder dit zou "geen page-reload/nieuwe fetch" alleen op
@@ -497,6 +502,7 @@ function makeSupabaseMock(opts: {
       if (table === 'events') return eventsFactory()
       if (table === 'players') return playersFactory()
       if (table === 'settings') return settingsFactory()
+      if (table === 'training_oefeningen') return trainingOefeningenFactory()
       throw new Error(`Onverwachte tabel in test: "${table}"`)
     },
     rpc: (name: string, args: Row) => {
@@ -2018,5 +2024,81 @@ describe('FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC\'s', () => {
       expect(keys).not.toContain('teamId')
       expect(keys.sort()).toEqual(['p_end', 'p_start'])
     }
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Trainingsinhoud — in hoeveel TRAININGEN kwam elke categorie voor.
+//
+// Hergebruikt countCategoryOccurrences() uit de periodisering, zodat de
+// inzichtenpagina en de periodiseringspagina nooit een ander cijfer tonen.
+// ═══════════════════════════════════════════════════════════════════════
+describe('trainingsinhoud', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+  const trainingen = [
+    eventRow({ id: 't1', type: 'training', date: '2026-09-01' }),
+    eventRow({ id: 't2', type: 'training', date: '2026-09-08' }),
+  ]
+
+  function inhoudCard(): HTMLElement {
+    return screen.getByText(nl.insights.inhoudTitle).closest('.surface-card') as HTMLElement
+  }
+
+  // De sr-only tabel van de kaart draagt de exacte cijfers (ChartDataTable).
+  function aantalVoor(card: HTMLElement, label: string): string | null {
+    const rij = Array.from(card.querySelectorAll('tbody tr')).find(
+      (tr) => tr.querySelector('td')?.textContent === label,
+    )
+    return rij?.querySelectorAll('td')[1]?.textContent ?? null
+  }
+
+  it('zonder gekoppelde oefeningen toont de kaart zijn lege staat', async () => {
+    // Eén wedstrijd met uitslag erbij, anders valt de héle pagina terug op de
+    // onboarding-lege-staat en is er geen kaart om op te toetsen.
+    await renderInzichten({
+      settings,
+      events: [
+        ...trainingen,
+        eventRow({ id: 'm1', type: 'match', date: '2026-09-05', opponent: 'DVC', match_type: 'league', goals_for: 2, goals_against: 0 }),
+      ],
+    })
+    expect(within(inhoudCard()).getByText(nl.insights.inhoudEmpty)).toBeInTheDocument()
+  })
+
+  it('telt per TRAINING, niet per oefening: twee vormen in dezelfde training tellen als één', async () => {
+    await renderInzichten({
+      settings,
+      events: trainingen,
+      trainingOefeningen: [
+        { team_id: TEAM, event_id: 't1', oefeningen: { categorie: 'positiespel' } },
+        { team_id: TEAM, event_id: 't1', oefeningen: { categorie: 'positiespel' } },
+        { team_id: TEAM, event_id: 't2', oefeningen: { categorie: 'positiespel' } },
+      ],
+    })
+    // Twee trainingen met positiespel, niet drie oefeningen.
+    expect(aantalVoor(inhoudCard(), nl.periodization.categories.positiespel)).toBe('2')
+  })
+
+  it('categorieën die je nooit deed blijven staan met 0 — dat is juist het inzicht', async () => {
+    await renderInzichten({
+      settings,
+      events: trainingen,
+      trainingOefeningen: [{ team_id: TEAM, event_id: 't1', oefeningen: { categorie: 'positiespel' } }],
+    })
+    const card = inhoudCard()
+    expect(aantalVoor(card, nl.periodization.categories.partijen_groot)).toBe('0')
+    expect(aantalVoor(card, nl.periodization.categories.warming_up)).toBe('0')
+  })
+
+  it('een training van een ander team telt niet mee', async () => {
+    await renderInzichten({
+      settings,
+      events: trainingen,
+      trainingOefeningen: [
+        { team_id: TEAM, event_id: 't1', oefeningen: { categorie: 'positiespel' } },
+        { team_id: 'ander-team', event_id: 't2', oefeningen: { categorie: 'positiespel' } },
+      ],
+    })
+    expect(aantalVoor(inhoudCard(), nl.periodization.categories.positiespel)).toBe('1')
   })
 })

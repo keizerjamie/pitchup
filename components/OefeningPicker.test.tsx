@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
+import type { OefeningCategorie } from '@/lib/types'
 import { nl } from '@/messages/nl'
 import type { Oefening } from '@/lib/types'
 import OefeningPicker from '@/components/OefeningPicker'
@@ -32,10 +33,10 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function renderPicker(library: Oefening[], onClose = vi.fn()) {
+function renderPicker(library: Oefening[], onClose = vi.fn(), presetCategorie?: OefeningCategorie) {
   render(
     <DictProvider dict={nl}>
-      <OefeningPicker eventId="event-1" library={library} onClose={onClose} />
+      <OefeningPicker eventId="event-1" library={library} onClose={onClose} presetCategorie={presetCategorie} />
     </DictProvider>,
   )
   return { onClose }
@@ -145,11 +146,67 @@ describe('OefeningPicker', () => {
     expect(screen.getByText('Balbezitoefening')).toBeInTheDocument()
   })
 
-  it('klik op een kaart roept addOefeningToTraining aan en sluit de picker (regressie)', async () => {
+  it('klik op een kaart roept addOefeningToTraining aan en houdt de picker OPEN (meerdere achter elkaar toevoegen)', async () => {
     const { onClose } = renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })])
     fireEvent.click(screen.getByText('Rondo'))
     await waitFor(() => expect(addOefeningToTraining).toHaveBeenCalledWith('event-1', 'o1'))
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // GEWIJZIGD GEDRAG (bewust): toevoegen sloot de sheet, waardoor je hem voor
+    // elke oefening van een training opnieuw moest openen én opnieuw filteren.
+    // De sheet blijft nu staan; sluiten doet de gebruiker zelf.
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText('Rondo')).toBeInTheDocument()
+  })
+
+  it('de sluitknop onderaan sluit de sheet en toont hoeveel er is toegevoegd', async () => {
+    const { onClose } = renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })])
+    // Vóór het toevoegen: kale "Klaar".
+    expect(screen.getByText(nl.oefeningen.pickerDone)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Rondo'))
+    await waitFor(() => expect(addOefeningToTraining).toHaveBeenCalled())
+    const klaar = await screen.findByText(nl.oefeningen.pickerDoneCount.replace('{n}', '1'))
+    fireEvent.click(klaar)
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // Periodiseringssuggestie ("+ Voeg toe" op de trainingsplanner).
+  //
+  // GEWIJZIGD GEDRAG (bewust): een suggestie opende hiervóór meteen het
+  // "nieuwe oefening"-formulier. Dat duwde je naar iets nieuws maken terwijl
+  // je die categorie waarschijnlijk allang in je bibliotheek hebt — in een
+  // tweede seizoen is opnieuw intypen precies het verkeerde antwoord. De
+  // suggestie opent nu de bibliotheek, voorgefilterd op die categorie.
+  // ────────────────────────────────────────────────────────────────
+  it('een suggestie opent de bibliotheek voorgefilterd op die categorie, niet het nieuwe-oefening-formulier', () => {
+    renderPicker(
+      [
+        makeOefening({ id: 'o1', naam: 'Rondo', categorie: 'positiespel' }),
+        makeOefening({ id: 'o2', naam: 'Sprintserie', categorie: 'sprints_veel_rust' }),
+      ],
+      vi.fn(),
+      'sprints_veel_rust',
+    )
+    // De lijst staat er (niet het formulier)...
+    expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument()
+    expect(screen.queryByLabelText(`${nl.trainingPlan.exerciseName} *`)).toBeNull()
+    // ...met het categoriefilter al gezet...
+    expect((screen.getByLabelText(nl.oefeningen.filterCategoryLabel) as HTMLSelectElement).value).toBe('sprints_veel_rust')
+    // ...en dus alleen de passende oefening.
+    expect(screen.getByText('Sprintserie')).toBeInTheDocument()
+    expect(screen.queryByText('Rondo')).toBeNull()
+    // Nieuw maken blijft één klik weg, als tweede keuze.
+    expect(screen.getByText(nl.oefeningen.pickerCreateNew)).toBeInTheDocument()
+  })
+
+  it('annuleren in het nieuwe-oefening-formulier gaat terug naar de lijst, ook bij een suggestie', () => {
+    const { onClose } = renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })], vi.fn(), 'sprints_veel_rust')
+    fireEvent.click(screen.getByText(nl.oefeningen.pickerCreateNew))
+    expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toBeInTheDocument()
+    fireEvent.click(screen.getByText(nl.trainingPlan.cancel))
+    // Terug in de lijst — annuleren betekent "toch geen nieuwe maken", niet
+    // "laat de hele training met rust".
+    expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('filters zonder match bij gevulde bibliotheek tonen pickerEmpty, niet pickerEmptyLibrary', () => {

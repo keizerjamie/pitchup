@@ -167,7 +167,7 @@ function renderPlan(
         hasNulmeting={opts.hasNulmeting ?? true}
         suggestion={null}
         players={[]}
-        presentPlayerIds={[]}
+        presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
       />
     </DictProvider>,
   )

@@ -8,6 +8,9 @@ import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
 import { vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
 import { blokkenVanKoppelingen, blokLabel } from '@/lib/parallel-groep'
+import { berekenTijdlijn } from '@/lib/sessie-tijdlijn'
+import SessieTijdlijn from '@/components/SessieTijdlijn'
+import KopieerVorigeTraining, { type KopieerOptie } from '@/components/KopieerVorigeTraining'
 import { clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
@@ -26,6 +29,11 @@ interface Props {
   suggestion: { week: number; items: { key: string; step: number | null }[] } | null
   players: Player[]
   presentPlayerIds: string[]
+  /** Starttijd van de training ('HH:MM' of null). Voedt de kloktijden in de
+   *  sessietijdlijn; zonder starttijd blijven die leeg en telt alleen de duur. */
+  startTijd: string | null
+  /** Eerdere trainingen met oefeningen, om het plan van over te nemen. */
+  kopieerOpties: KopieerOptie[]
 }
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
@@ -39,7 +47,7 @@ const ALL_CATS = PERIODIZATION_CATEGORIES
 // de referentie stabiel zolang `spelerindeling` zelf niet verandert.
 const EMPTY_INDELING: Spelerindeling = []
 
-export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds }: Props) {
+export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
@@ -66,6 +74,15 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   // Doorlopende nummering van de bestaande parallelle groepen in dit event,
   // voor de "Groep {n}"-optielabels in het "Parallel aan"-veld (los van de
   // blok-badge-nummering "1a/1b", die per lid al zijn eigen label heeft).
+  // Sessietijdlijn uit dezelfde blokken die hieronder gerenderd worden — zo
+  // kan het totaal nooit uit de pas lopen met wat er op het scherm staat. Een
+  // parallelle groep telt één keer mee (zie lib/sessie-tijdlijn.ts).
+  const tijdlijn = useMemo(() => berekenTijdlijn(blokken, startTijd), [blokken, startTijd])
+  const tijdPerBlok = useMemo(
+    () => new Map(tijdlijn.blokken.map((b) => [b.key, b])),
+    [tijdlijn],
+  )
+
   const parallelGroepNummers = useMemo(
     () =>
       blokken
@@ -380,6 +397,14 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
       {/* Exercises */}
       <div data-testid="exercises-section" className={koppelingen.length === 0 ? 'print:hidden' : ''}>
+        {/* Sessietijdlijn: pas zinvol zodra er iets gepland staat — bij een
+            lege training doet de bestaande lege staat hieronder dat werk al. */}
+        {koppelingen.length > 0 && (
+          <div className="mb-3">
+            <SessieTijdlijn tijdlijn={tijdlijn} startTijd={startTijd} t={t} />
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-3">
           {/* Op print weggelaten: de genummerde oefeningen kondigen zichzelf al
               aan (badge "1", "2", ...), dus deze sectiekop voegt op papier
@@ -401,6 +426,13 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
             </svg>
             <p className="font-medium text-muted">{t.trainingPlan.noExercises}</p>
             <p className="text-sm text-faint mt-1">{t.trainingPlan.noExercisesHint}</p>
+            {/* Alleen hier: kopiëren plakt achter wat er staat, en dat is bij
+                een half gevuld plan zelden de bedoeling. */}
+            {kopieerOpties.length > 0 && (
+              <div className="mt-4 max-w-xs mx-auto">
+                <KopieerVorigeTraining eventId={eventId} opties={kopieerOpties} />
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-2 print:space-y-[3mm]">
@@ -409,8 +441,24 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               // heeft (blokkenVanKoppelingen degradeert een eenzaam lid al
               // naar groepId: null, dit is een extra defensieve check).
               const isGroup = blok.groepId !== null && blok.leden.length > 1
+              // Kloktijd van dít blok. Bewust ook op papier: op het veld is
+              // "19:15" bruikbaarder dan "blok 2", en de trainer heeft het
+              // uitgeprinte plan in zijn hand.
+              const blokTijd = tijdPerBlok.get(blok.key)
               return (
                 <div key={blok.key} className={isGroup ? 'print:break-inside-avoid' : undefined}>
+                  {blokTijd && (blokTijd.startTijd || blokTijd.duurMin !== null) && (
+                    <p className="text-[11px] font-bold text-faint mb-1 tabular-nums print:text-[7pt] print:mb-[0.5mm]">
+                      {blokTijd.startTijd && blokTijd.eindTijd
+                        ? `${blokTijd.startTijd} – ${blokTijd.eindTijd}`
+                        : blokTijd.startTijd}
+                      {blokTijd.duurMin !== null && (
+                        <span className={blokTijd.startTijd ? 'text-faint' : undefined}>
+                          {blokTijd.startTijd ? ' · ' : ''}{blokTijd.duurMin} min
+                        </span>
+                      )}
+                    </p>
+                  )}
                   <div
                     className={
                       isGroup

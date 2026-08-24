@@ -98,4 +98,61 @@ describe('OefeningLibrary', () => {
     renderLibrary([makeOefening({ aantal_neutralen: 4 })])
     expect(screen.getByText(nl.oefeningen.neutralsBadge.replace('{n}', '4'))).toBeInTheDocument()
   })
+
+  // ────────────────────────────────────────────────────────────────
+  // Filter op oefeningen zonder duur.
+  //
+  // Waarom dit bestaat: zo'n oefening valt in een lange lijst niet op, maar
+  // breekt wel de sessietijdlijn van elke training waarin hij zit — de klok
+  // kan daar niet doortellen (lib/sessie-tijdlijn.ts).
+  // ────────────────────────────────────────────────────────────────
+  describe('oefeningen zonder duur', () => {
+    const metDuur = makeOefening({ id: 'o1', naam: 'Rondo', duur_min: 15 })
+    const zonder1 = makeOefening({ id: 'o2', naam: 'Eindpartij', duur_min: null })
+    const zonder2 = makeOefening({ id: 'o3', naam: 'Cooling-down', duur_min: null })
+
+    it('telt hoeveel oefeningen geen duur hebben', () => {
+      renderLibrary([metDuur, zonder1, zonder2])
+      expect(screen.getByText(nl.oefeningen.withoutDurationCount.replace('{n}', '2'))).toBeInTheDocument()
+      expect(screen.getByText(nl.oefeningen.withoutDurationHint)).toBeInTheDocument()
+    })
+
+    it('zonder zulke oefeningen verschijnt de balk helemaal niet', () => {
+      renderLibrary([metDuur])
+      expect(screen.queryByText(nl.oefeningen.withoutDurationHint)).toBeNull()
+    })
+
+    it('klikken filtert de lijst tot alleen die oefeningen, en nogmaals klikken zet hem terug', () => {
+      renderLibrary([metDuur, zonder1, zonder2])
+      const knop = screen.getByText(nl.oefeningen.withoutDurationCount.replace('{n}', '2'))
+
+      fireEvent.click(knop)
+      expect(knop).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('Eindpartij')).toBeInTheDocument()
+      expect(screen.getByText('Cooling-down')).toBeInTheDocument()
+      expect(screen.queryByText('Rondo')).toBeNull()
+
+      fireEvent.click(knop)
+      expect(knop).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByText('Rondo')).toBeInTheDocument()
+    })
+
+    it('het filter werkt samen met de zoekbalk in plaats van hem te overschrijven', () => {
+      renderLibrary([metDuur, zonder1, zonder2])
+      fireEvent.click(screen.getByText(nl.oefeningen.withoutDurationCount.replace('{n}', '2')))
+      fireEvent.change(screen.getByPlaceholderText(nl.oefeningen.searchPlaceholder), {
+        target: { value: 'cooling' },
+      })
+      expect(screen.getByText('Cooling-down')).toBeInTheDocument()
+      expect(screen.queryByText('Eindpartij')).toBeNull()
+    })
+
+    it('"Toon alles" verschijnt pas als het filter aanstaat en zet hem uit', () => {
+      renderLibrary([metDuur, zonder1, zonder2])
+      expect(screen.queryByText(nl.oefeningen.withoutDurationShowAll)).toBeNull()
+      fireEvent.click(screen.getByText(nl.oefeningen.withoutDurationCount.replace('{n}', '2')))
+      fireEvent.click(screen.getByText(nl.oefeningen.withoutDurationShowAll))
+      expect(screen.getByText('Rondo')).toBeInTheDocument()
+    })
+  })
 })

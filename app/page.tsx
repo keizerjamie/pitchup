@@ -11,6 +11,7 @@ import NextMatch from '@/components/dashboard/NextMatch'
 import TodoList, { TaskType, TodoItem } from '@/components/dashboard/TodoList'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
 import QuickActions from '@/components/dashboard/QuickActions'
+import SetupNulmeting from '@/components/dashboard/SetupNulmeting'
 import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
@@ -35,6 +36,14 @@ export default async function DashboardPage() {
 
   const today = todayLocal()
   const windowEnd = addDays(today, FORWARD)
+
+  // Bestaat er al een nulmeting? Alleen het BESTAAN telt hier, niet de inhoud
+  // — vandaar `head: true` met een count in plaats van de rijen ophalen.
+  const { count: nulmetingCount } = await supabase
+    .from('metingen')
+    .select('event_id', { count: 'exact', head: true })
+    .eq('team_id', user.id)
+  const heeftNulmeting = (nulmetingCount ?? 0) > 0
   const fetchStart = addDays(today, -FETCH_HORIZON_DAYS)
 
   const [
@@ -361,6 +370,7 @@ export default async function DashboardPage() {
 
       {/* Two columns */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
+        {!heeftNulmeting && <SetupNulmeting t={t} />}
         <TodoList items={todoItems} />
         <div className="flex flex-col gap-4">
           <Availability items={availabilityItems} t={t} />
