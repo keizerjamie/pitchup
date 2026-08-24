@@ -1969,3 +1969,139 @@ gekopieerd) zijn ongewijzigd; alleen die ene assertie is meeverhuisd, met de red
 dedupe-test was daardoor tijdsafhankelijk geworden: de kaartknop is `disabled` zolang de transitie
 loopt, dus de tweede klik verdween. Die wacht nu op de knopstatus in plaats van op timing —
 **bij een sheet die openblijft altijd op `not.toBeDisabled()` wachten vóór een tweede klik.**
+
+## Designsprint 2: dashboard-herontwerp + app-brede designronde + PDF-familie (2026-08-24)
+Aanleiding: "check online de beste appdesigns, herontwerp de hoofdpagina en doe
+aanbevelingen voor de rest + de PDF's" — daarna: "voer alle aanbevelingen door".
+Onderzoek (NN/g progressive disclosure, dashboard-principes 2026, bento):
+beslissing-eerst, 5–9 kengetallen met hiërarchie, van-getal-naar-oordeel,
+drill-down, rust. Volledig rapport als Claude-artifact gepubliceerd.
+
+### Dashboard (app/page.tsx + components/dashboard/*)
+- **Beslissing-eerst-volgorde, mobiel en desktop dezelfde DOM**: hero →
+  (SetupNulmeting) → To-do → 2×2-bento-kengetallen → beschikbaarheid → snelle
+  acties. De To-do-teller-chip telt alleen ÓPEN taken en beweegt live mee met de
+  optimistische checkbox-state.
+- **StatCard heeft nu een optionele `href`** (hele kaart klikbaar, drill-down):
+  Aanwezigheid/Vorm → /inzichten, Actieve spelers → /players. Data-logica en
+  queries onaangeroerd — de broncontract-tests (match-form/todos, `.mjs`) pinnen
+  de querychains in app/page.tsx letterlijk.
+- **Doelstreepje op de aanwezigheidsbalk**: `OPKOMST_DOEL` uit lib/inzichten
+  hergebruikt (85%), tekst kleurt `--chip-green-fg` bij gehaald. Nieuwe i18n-key
+  `home.attendanceGoal` (alle 5 talen).
+- **Veldlijnen-motief in de hero**: inline SVG (nooit icoonfont), aria-hidden.
+
+### Eyebrow-kopconventie (nu app-breed op kaarten)
+`text-[11px] font-extrabold uppercase tracking-[0.08em] text-faint` op
+kaartkoppen (dashboard-kaarten, InsightCard, Beschikbaarheid, Snelle acties,
+kalender-"Aankomend"); op de smalle 2×2-tegels `text-[10.5px]
+tracking-[0.06em]` (11px wrapte op 375px: "ACTIEVE SPELERS"). **Val in de
+"Actieve spelers"-tegel nooit terug op 11.5px voor een label**:
+gastspelers.acceptance.test.tsx vindt het bijschrift via `span.text-[11.5px]`
+(eerste match in de kaart) — een label op die maat kaapt de selector.
+
+### Twee cascade-/testvalkuilen die hier speelden
+- **`hover:bg-*` op `.surface-card` was een dode klasse**: `.surface-card` is
+  ongelaagde CSS en wint van Tailwinds `@layer utilities`-hover (zelfde valkuil
+  als .glass-card bij print). Fix: ongelaagde regel `a.surface-card:hover`
+  in globals.css, gegate op `(hover: hover) and (pointer: fine)`.
+- **De C1-print-tests vinden het printblok via `indexOf('@media print')`** —
+  een CSS-commentaar dat die letterlijke string bevat, laat de extractie het
+  verkeerde blok pakken (10 tests rood zonder echte breuk). Noem het printblok
+  in commentaar dus nooit bij zijn at-rule-naam.
+- **Systemisch al gedekt, audit-notitie verouderd**: Tailwind v4.3 gate't élke
+  `hover:`-utility zelf al achter `@media (hover: hover)` (gecheckt in de
+  gecompileerde bundel), en `transition-all` staat op 0 voorkomens.
+
+### Icoonfont-inventaris (derde en vierde vondst; werkwijze vastgelegd)
+Volledige check van alle gebruikte `.ms`-namen tegen de GSUB-ligatuurtabel van
+de gesubsette font (python3 + fontTools op
+public/fonts/material-symbols-rounded.woff2 — let op: de ligaturen zitten in
+Extension-lookups, type 7). Kapot gevonden en gefixt: `upload_file`
+(CalendarView-kop, rendert als letterlijke tekst "UPLOAD_FILE") → nieuw
+components/icons/UploadIcon.tsx; `list_alt` (lege staat TrainingsinhoudChart)
+→ bestaand icoon `assignment`. Daarmee is de inventaris schoon. Regel blijft:
+elk nieuw icoon als inline SVG, of eerst de GSUB-check draaien.
+
+### Kalender (CalendarView.tsx)
+Maandcel-pil = kleurstip + tijd (tabular-nums); de titel doet pas op 2xl mee
+(op xl eet de 256px-sidebar de cellen te smal — op 1280px viewport werd de
+titel weer "T.."). Volledige titel altijd in het `title`-attribuut; details in
+de "Aankomend"-kolom.
+
+### Oefeningenbibliotheek (OefeningLibrary.tsx)
+- Filterrij uit de picker nu ook hier, achter een "Filters"-toggle met
+  actieve-filters-teller (`t.oefeningen.filtersToggle`, alle 5 talen).
+  Hergebruikt `matchesOefeningFilters`/`EMPTY_OEFENING_FILTERS`; de losse
+  zonder-duur-toggle blijft er als extra AND-filter bovenop. Falsy-zero-regel
+  gerespecteerd (teller telt met `!== null`, nooit truthiness). Dit sluit het
+  open punt "filters ook op de bibliotheekpagina" uit de filter-feature.
+- **Vaste thumbnail-zone (h-[190px], gecentreerd)** per kaart: diagram op 130px
+  breed, formatievelden op 90px, placeholder-icoon (`sports_soccer`, bevestigd
+  in de font) als er niets te tonen is — het raster leest weer als raster.
+
+### Inzichten
+- Uitblinkers/Aandachtspunten: naam wrapt (geen truncate meer), waarde vast
+  rechts in `tabular-nums`.
+- InsightCard-kop in de eyebrow-stijl.
+
+### Wedstrijdselectie-poster — contrastwaarborg + lange namen + vormgrid
+- **`readableInkOn()` in lib/club-colors.ts**: kiest wit of donker
+  (`READABLE_INK_DARK` #0a2e2a) voor tekst óp een clubkleur-vlak. Wit blijft
+  zolang het ≥3:1 haalt (AA-large; de secundaire fallback #009966 zit met wit
+  op 3.65:1 en dat is het bestaande ontwerp — een pure "hoogste contrast
+  wint"-regel zou dáár al omslaan naar donker en de default-poster wijzigen);
+  pas daaronder wint de beste van de twee. Serverzijdig berekend in
+  squad/page.tsx en als kale strings (`primaryInk`/`secondaryInk`, optioneel,
+  default wit) doorgegeven — MatchSquadPrintList/MatchFormCards mogen
+  lib/club-colors niet importeren (K4-importbeperking, clubkleuren-test). Het
+  component zet ze als `--club-primary-ink`/`--club-secondary-ink`; de
+  poster-CSS kleurt via `var(--club-*-ink, #ffffff)` en de band-scheidingslijn
+  via `color-mix(in srgb, currentColor 35%, transparent)`.
+- **Lange teamnamen**: trapsgewijze verkleining van de eigen-teamregel
+  (≤18 tekens text-6xl/leading-[0.9], 19–30 text-4xl, >30 text-3xl) — een
+  lange naam wrapte anders met rakende regels. Getest in
+  wedstrijdselectie-pdf.acceptance.test.tsx.
+- **Vormkaartjes in `grid grid-cols-5`** i.p.v. flex-wrap/basis-104px: bij 4-5
+  kaartjes was de laatste rij ongelijk; max is toch 5 ("laatste 5").
+- **Nog steeds handmatig te doen (eigenaar, iOS Safari)**: de named-page-
+  terugval (`@page squad`) is nooit op iOS getest.
+
+### Seizoensrapport (SeizoensrapportPrint.tsx)
+- W/G/V-badges van de laatste 5 (nieuwe optionele prop `vormItems`,
+  `.rapport-vorm-badge-*` in dezelfde vaste kleurenfamilie als de poster); de
+  leesbare telregel blijft eronder staan.
+- "85%"-label op de normlijn (`.rapport-norm-label`).
+- Voetstrook = teamnaam · generatiedatum (`generatedOn`, serverzijdig
+  geformatteerd — component blijft deterministisch) · merk mét logo. **Het
+  logo is decoratief (`alt="" aria-hidden`)** — met een alt-tekst telt hij mee
+  in `getAllByRole('img')` van de inzichten-a11y-test, die op elke img een
+  aria-label eist. De "geen logo zonder clublogo"-test is naar de kop gescoped
+  (zelfde precedent als de poster-kop-scoping).
+
+### Trainingsplan-print — familie-kop en -voet
+- Kopregel toont op print nu ook teamnaam + clublogo rechts (settings-batch
+  uitgebreid met team_name/team_logo_url).
+- Nieuwe `.print-plan-voet` (teamnaam · datum · merk, zelfde conventie als
+  poster/rapport). **`clear: both` is dragend** — anders schuift de voet naast
+  de gefloate aanwezigheidskolom. Kost met de kop samen ±14mm extra vaste
+  overhead; het 6-oefeningen-budget (2 A4) blijft ruim staan.
+- De sessietijden per blok stonden al op print (trainingsflow-feature) — de
+  aanbeveling "tijden meeprinten" bleek al gedekt.
+- **Bewust NIET gebouwd**: compacte lijstmodus zonder diagrammen bij 7+
+  oefeningen (was een "overweeg"; raakt het strak gemeten print-hoogtebudget
+  en de E1-klassecontracten — aparte, eigen afweging).
+
+### Overige lessen deze sessie
+- **Stale-Turbopack-module wéér opgetreden**: nieuwe i18n-key
+  (`filtersToggle`) rendert leeg op een draaiende dev-server terwijl tests en
+  typecheck groen zijn — `rm -rf .next` + herstart, zoals al gedocumenteerd.
+- **Achtergebleven dev-server van een eerdere sessie blokkeert elke nieuwe**
+  (`Another next dev server is already running`, PID in de melding): checken
+  met `ps`/`lsof`, en als het werk van die sessie gecommit/gepusht is, is het
+  proces veilig te killen.
+- Periodisering volgt nu de containerconventie (lg:max-w-6xl; de lege staat
+  was een niet-gecentreerde max-w-lg die links hing).
+- Spelers: ratingbadge heeft `title`/`aria-label` (bestaande key
+  `players.rating`); regexvlag `/s` kan niet in testbestanden (TS-target <
+  es2018) — `[^}]*` matcht newlines al.
