@@ -2206,3 +2206,42 @@ opacity-75, trapsgewijze verkleining op de langste regel, adaptieve
 2/3-koloms namenlijst, compacte vormcellen (letter + uitslag, geen
 tegenstander/datum), locatie-cel in de inforegel, geen rugnummers, geen
 positiegroepen, exact-naam-li's, footer met precies 3 children.
+
+## Trainingsplan-print verstrakt (2026-08-25, zelfde familie als het teamsheet)
+Aanleiding: "namen links compacter, blokken moderner, makkelijker op 1 kantje".
+
+### Wat er veranderde (en welke testankers meebewogen)
+- **Namenkolom 42mm → 34mm** (`.print-attendance-col`; C1.3 pint de breedte
+  letterlijk — mee-geüpdatet). Lettertype 9px → 8px; rugnummer in een vaste
+  uitlijn-span (`.print-attendance-nr`). **Let op**: door die span ziet RTL's
+  `getByText` (getNodeText = alleen directe tekstnodes) de li-tekst niet meer
+  als één string — de gast-/AC15-asserties matchen nu op de volledige
+  li-textContent via een functie-matcher (gastspelers.acceptance +
+  AttendanceSummary.test).
+- **Open blokken i.p.v. kaders op print**: `.print-plan-kaart` (ongelaagd in
+  het printblok, wint van de Tailwind-utilities op de kaart) strips rand/
+  achtergrond/padding; `.print-oefening-blok + .print-oefening-blok` zet één
+  dunne lijn tússen blokken. Elke blok-wrapper draagt nu ook
+  `print:break-inside-avoid` zodat de tijdregel nooit los van zijn oefening
+  raakt. De print-kopregel is gesplitst in een vette naam-span + gedempte
+  meta-span — daardoor bezit de naam-span de oefeningnaam als eigen tekst en
+  vindt `getByText(naam)` twee elementen (scherm + print): AC8 gebruikt nu
+  getAllByText.
+- **"Nog niet ingedeeld" print alleen nog als er íéts is ingedeeld**
+  (TeamIndelingEditor + ParallelGroepEditor): een volledig lege indeling
+  herhaalde anders per oefening de complete namenlijst — dít was de grootste
+  ruimtevreter. Bestaande AC15/B5-tests hadden altijd iets ingedeeld en
+  bleven groen.
+- **Diagram 42→32mm (groep 26mm), formatieveld 30→22mm (groep 18mm)** —
+  A1.2/E1.3 pinnen die klassenstrings letterlijk, mee-geüpdatet.
+- **Familie-stijl**: tweekleurige clubbalk (klassen gedeeld met het
+  teamsheet), kop "TRAININGSPLANNER"/teamnaam/kolomkopjes via
+  `.print-accent-text`; de page-root zet daarvoor `--club-accent-text`
+  (readableAccentOnWhite) naast de bestaande clubkleur-vars. De
+  clubkleuren-test op de AttendanceSummary-kop assert nu die klasse én de
+  var-terugval bij een te lichte kleur (#a1b2c3 → #0a2e2a).
+- Meetscenario (Playwright, dev-preview-route + bypass, daarna verwijderd):
+  5 oefeningen incl. parallelblok, 3 diagrammen, 18 spelers → 1 A4 (was 2).
+- **Stale-.next-valkuil, nieuwe variant**: na het verwijderen van een
+  tijdelijke route faalt `tsc` op `.next/dev/types/validator.ts` die nog naar
+  de verdwenen pagina verwijst — `rm -rf .next` en opnieuw draaien.
