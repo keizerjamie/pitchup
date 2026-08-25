@@ -2201,8 +2201,11 @@ berekend in squad/page.tsx en als kale string (`accentText`) doorgegeven
 zijn overal verwijderd.
 
 ### Blijvend geldig uit de poster-ronde
-Thuisploeg op regel 1, beide teamregels even groot met de tegenstander op
-opacity-75, trapsgewijze verkleining op de langste regel, adaptieve
+Thuisploeg op regel 1 en de tegenstander op opacity-75. *Update
+2026-08-25 (expliciete wens): de teamregels zijn niet langer even groot —
+het eigen team staat één formaattrap groter (EIGEN_TRAPPEN/OPP_TRAPPEN in
+MatchSquadPrintList.tsx); elke regel klemt op zijn eigen lengte en de
+tegenstander is altijd minimaal één trap kleiner.* Verder: adaptieve
 2/3-koloms namenlijst, compacte vormcellen (letter + uitslag, geen
 tegenstander/datum), locatie-cel in de inforegel, geen rugnummers, geen
 positiegroepen, exact-naam-li's, footer met precies 3 children.
