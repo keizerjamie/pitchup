@@ -90,17 +90,18 @@ export default function MatchSquadPrintList({
   const gather = formatTime(gatherTime)
   const kickoff = formatTime(kickoffTime)
 
-  // Beide teamregels even groot (profconventie); de eigen ploeg op volle
-  // inkt, de tegenstander gedempt (opacity-75 op de donkere inkt = grijs).
-  // De trap volgt de LANGSTE van de twee regels, zodat ze altijd hetzelfde
-  // formaat delen en een lange clubnaam nooit van het blad loopt.
-  const langsteRegel = Math.max(ownTeamLine?.length ?? 0, opponentLine?.length ?? 0)
-  const matchupClass =
-    langsteRegel > 30
-      ? 'text-2xl leading-[1.12]'
-      : langsteRegel > 18
-        ? 'text-3xl leading-[1.1]'
-        : 'text-5xl leading-[1.05]'
+  // Eigen team één trap groter dan de tegenstander (expliciete gebruikerswens
+  // 2026-08-25); de tegenstander blijft daarnaast gedempt (opacity-75).
+  // Elke regel wordt op zijn éígen lengte geklemd zodat geen van beide ooit
+  // van het blad loopt, en de tegenstander-trap is minimaal die van het eigen
+  // team — OPP_TRAPPEN[i] is precies één maat kleiner dan EIGEN_TRAPPEN[i],
+  // dus het eigen team is altijd strikt groter.
+  const EIGEN_TRAPPEN = ['text-5xl leading-[1.05]', 'text-3xl leading-[1.1]', 'text-2xl leading-[1.12]']
+  const OPP_TRAPPEN = ['text-3xl leading-[1.1]', 'text-2xl leading-[1.12]', 'text-xl leading-[1.15]']
+  const trapVoor = (lengte: number) => (lengte > 30 ? 2 : lengte > 18 ? 1 : 0)
+  const eigenTrap = trapVoor(ownTeamLine?.length ?? 0)
+  const ownClass = EIGEN_TRAPPEN[eigenTrap]
+  const oppClass = OPP_TRAPPEN[Math.max(eigenTrap, trapVoor(opponentLine?.length ?? 0))]
 
   // Kolommen passen zich aan de groepsgrootte aan: tot 18 namen twee ruime
   // kolommen, daarboven drie compactere. Minimaal 1 rij: `repeat(0, auto)`
@@ -135,7 +136,7 @@ export default function MatchSquadPrintList({
         </div>
       </div>
 
-      {/* ── Matchup: meta-regel + beide teams even groot ── */}
+      {/* ── Matchup: meta-regel + eigen team groter dan de tegenstander ── */}
       <div className="print-poster-matchup">
         <p className="print-accent-text text-[10px] font-extrabold uppercase tracking-[0.22em]">
           {dateLabel}
@@ -144,16 +145,16 @@ export default function MatchSquadPrintList({
         {opponentLine && (
           ownTeamLine ? (
             // Thuisploeg altijd op regel 1 (voetbalconventie); eigen team op
-            // volle inkt, tegenstander gedempt — zelfde formaat.
+            // volle inkt en één trap groter; tegenstander gedempt en kleiner.
             homeAway === 'away' ? (
               <>
-                <p className={`font-pdf-display font-black tracking-tight opacity-75 ${matchupClass}`}>{opponentLine}</p>
-                <p className={`font-pdf-display font-black tracking-tight ${matchupClass}`}>{ownTeamLine}</p>
+                <p className={`font-pdf-display font-black tracking-tight opacity-75 ${oppClass}`}>{opponentLine}</p>
+                <p className={`font-pdf-display font-black tracking-tight ${ownClass}`}>{ownTeamLine}</p>
               </>
             ) : (
               <>
-                <p className={`font-pdf-display font-black tracking-tight ${matchupClass}`}>{ownTeamLine}</p>
-                <p className={`font-pdf-display font-black tracking-tight opacity-75 ${matchupClass}`}>{opponentLine}</p>
+                <p className={`font-pdf-display font-black tracking-tight ${ownClass}`}>{ownTeamLine}</p>
+                <p className={`font-pdf-display font-black tracking-tight opacity-75 ${oppClass}`}>{opponentLine}</p>
               </>
             )
           ) : (

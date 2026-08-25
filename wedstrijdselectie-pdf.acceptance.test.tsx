@@ -152,33 +152,33 @@ describe('Kop — logo (indien aanwezig) + teamnaam + exportTitle', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Team-volgorde en -nadruk in de matchup-kop. Herontwerp 2026-08-24
-// (profconventie): beide teamregels EVEN groot; de eigen ploeg staat op
-// volle inkt, de tegenstander gedempt (opacity-75). De thuisploeg blijft
-// altijd op regel 1 staan (standaard voetbalconventie, eerdere expliciete
-// gebruikerswens — ongewijzigd).
+// Team-volgorde en -nadruk in de matchup-kop. Sinds 2026-08-25 (expliciete
+// gebruikerswens): het eigen team staat één formaattrap GROTER dan de
+// tegenstander én op volle inkt; de tegenstander is gedempt (opacity-75).
+// De thuisploeg blijft altijd op regel 1 staan (standaard voetbalconventie,
+// eerdere expliciete gebruikerswens — ongewijzigd).
 // ═══════════════════════════════════════════════════════════════════════
-describe('Team-volgorde en -nadruk — thuisploeg eerst, beide even groot, eigen team op volle inkt', () => {
-  it('thuiswedstrijd: eigen team op regel 1, zelfde formaatklasse als de tegenstander; alleen de tegenstander is gedempt', () => {
+describe('Team-volgorde en -nadruk — thuisploeg eerst, eigen team groter en op volle inkt', () => {
+  it('thuiswedstrijd: eigen team op regel 1 (text-5xl), tegenstander kleiner (text-3xl) en gedempt', () => {
     const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'home' })
     const block = getPrintBlock(container)
     const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
     const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
     expect(ownEl.className).toContain('text-5xl')
-    expect(opponentEl.className).toContain('text-5xl')
+    expect(opponentEl.className).toContain('text-3xl')
     expect(ownEl.className).not.toContain('opacity-75')
     expect(opponentEl.className).toContain('opacity-75')
     // Eigen team staat DOM-technisch vóór de tegenstander (regel 1 vs regel 2).
     expect(ownEl.compareDocumentPosition(opponentEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('uitwedstrijd: tegenstander (thuisploeg) op regel 1, zelfde formaat, gedempt; eigen team op regel 2 op volle inkt', () => {
+  it('uitwedstrijd: tegenstander (thuisploeg) op regel 1, kleiner en gedempt; eigen team op regel 2 groter en op volle inkt', () => {
     const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'away' })
     const block = getPrintBlock(container)
     const ownEl = within(block).getByText('FC Voorbeeld', { selector: 'p' })
     const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
     expect(ownEl.className).toContain('text-5xl')
-    expect(opponentEl.className).toContain('text-5xl')
+    expect(opponentEl.className).toContain('text-3xl')
     expect(ownEl.className).not.toContain('opacity-75')
     expect(opponentEl.className).toContain('opacity-75')
     // Tegenstander staat DOM-technisch vóór het eigen team (regel 1 vs regel 2).
@@ -645,36 +645,36 @@ describe('Story-AC10 (Deel B) — importbeperking van MatchSquadPrintList.tsx bl
 // van het blad loopt. Drempels: ≤18 tekens text-6xl, 19–30 text-4xl, >30
 // text-3xl (zie ownNameClass in MatchSquadPrintList.tsx).
 // ═══════════════════════════════════════════════════════════════════════
-describe('Lange teamnamen — trapsgewijze verkleining van BEIDE teamregels (langste regel bepaalt)', () => {
-  it('korte namen (≤18 tekens) blijven op de grootste trap (text-5xl)', () => {
+describe('Lange teamnamen — elke regel klemt op zijn eigen lengte; het eigen team blijft altijd strikt groter', () => {
+  it('korte namen: eigen team text-5xl, tegenstander één trap kleiner (text-3xl)', () => {
     const { container } = renderPrintList({ teamName: 'FC Voorbeeld', opponent: 'FC Rivalen', homeAway: 'home' })
-    const ownEl = within(getPrintBlock(container)).getByText('FC Voorbeeld', { selector: 'p' })
-    expect(ownEl.className).toContain('text-5xl')
+    const block = getPrintBlock(container)
+    expect(within(block).getByText('FC Voorbeeld', { selector: 'p' }).className).toContain('text-5xl')
+    expect(within(block).getByText('FC Rivalen', { selector: 'p' }).className).toContain('text-3xl')
   })
 
-  it('middellange naam (19–30 tekens) zakt naar text-3xl — óók de korte tegenregel, zodat de twee regels altijd hetzelfde formaat delen', () => {
+  it('middellange eigen naam (19–30 tekens): eigen team zakt naar text-3xl, de korte tegenstander mee naar text-2xl (blijft kleiner)', () => {
     const naam = 'SV Blauw-Wit Amstelveen' // 23 tekens
     const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'home' })
     const block = getPrintBlock(container)
-    const ownEl = within(block).getByText(naam, { selector: 'p' })
-    const opponentEl = within(block).getByText('FC Rivalen', { selector: 'p' })
-    expect(ownEl.className).toContain('text-3xl')
-    expect(opponentEl.className).toContain('text-3xl')
-    expect(ownEl.className).not.toContain('text-5xl')
+    expect(within(block).getByText(naam, { selector: 'p' }).className).toContain('text-3xl')
+    expect(within(block).getByText('FC Rivalen', { selector: 'p' }).className).toContain('text-2xl')
   })
 
-  it('zeer lange naam (>30 tekens) zakt naar text-2xl', () => {
+  it('zeer lange eigen naam (>30 tekens): eigen team text-2xl, tegenstander text-xl', () => {
     const naam = 'Sportvereniging Blauw-Wit Amsterdam' // 35 tekens
     const { container } = renderPrintList({ teamName: naam, opponent: 'FC Rivalen', homeAway: 'away' })
-    const ownEl = within(getPrintBlock(container)).getByText(naam, { selector: 'p' })
-    expect(ownEl.className).toContain('text-2xl')
-    expect(ownEl.className).not.toContain('text-5xl')
+    const block = getPrintBlock(container)
+    expect(within(block).getByText(naam, { selector: 'p' }).className).toContain('text-2xl')
+    expect(within(block).getByText('FC Rivalen', { selector: 'p' }).className).toContain('text-xl')
   })
 
-  it('een lange TEGENSTANDER-naam verkleint ook de eigen regel mee (langste regel bepaalt)', () => {
-    const { container } = renderPrintList({ teamName: 'CSW 2', opponent: 'Sportvereniging Blauw-Wit Amsterdam', homeAway: 'home' })
-    const ownEl = within(getPrintBlock(container)).getByText('CSW 2', { selector: 'p' })
-    expect(ownEl.className).toContain('text-2xl')
+  it('een lange TEGENSTANDER-naam klemt alleen zichzelf (text-xl); het korte eigen team blijft gewoon text-5xl', () => {
+    const lang = 'Sportvereniging Blauw-Wit Amsterdam'
+    const { container } = renderPrintList({ teamName: 'CSW 2', opponent: lang, homeAway: 'home' })
+    const block = getPrintBlock(container)
+    expect(within(block).getByText('CSW 2', { selector: 'p' }).className).toContain('text-5xl')
+    expect(within(block).getByText(lang, { selector: 'p' }).className).toContain('text-xl')
   })
 })
 
