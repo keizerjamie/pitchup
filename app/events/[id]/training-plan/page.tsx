@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams } from '@/lib/types'
 import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
-import { resolveClubColors } from '@/lib/club-colors'
+import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
 import BackButton from '@/components/BackButton'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import type { KopieerOptie } from '@/components/KopieerVorigeTraining'
@@ -166,8 +166,15 @@ export default async function TrainingPlanPage({ params }: Props) {
   return (
     <div
       className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-6 print:py-0 print:space-y-[3mm]"
-      style={{ '--club-primary': clubColors.primary, '--club-secondary': clubColors.secondary } as React.CSSProperties}
+      style={{ '--club-primary': clubColors.primary, '--club-secondary': clubColors.secondary, '--club-accent-text': readableAccentOnWhite(clubColors.primary) } as React.CSSProperties}
     >
+
+      {/* Print-only: dunne tweekleurige clubbalk — zelfde familie als het
+          wedstrijdselectie-teamsheet (klassen gedeeld met dat printblok). */}
+      <div className="hidden print:flex print-poster-topbar" aria-hidden="true">
+        <span className="print-poster-topbar-primair" />
+        <span className="print-poster-accent" />
+      </div>
 
       <div className="flex items-center gap-3 print:border-b-2 print:pb-[1mm] print-club-border">
         <BackButton fallback={`/events/${id}`} className="print:hidden text-faint hover:text-ink flex-shrink-0">
@@ -176,15 +183,17 @@ export default async function TrainingPlanPage({ params }: Props) {
           </svg>
         </BackButton>
         <div className="min-w-0 flex-1 print:flex print:items-baseline print:gap-2">
-          <h1 className="text-xl font-bold text-ink print:text-sm print-club-primary">{t.event.trainingPlan}</h1>
-          <p className="text-sm text-muted print:text-xs print-club-secondary">{formatDateLong(event.date, t.browserLocale)}</p>
+          {/* .print-accent-text / .print-poster-meta bestaan alleen in het
+              @media print-blok en raken de schermweergave dus niet. */}
+          <h1 className="text-xl font-bold text-ink print:text-[10px] print:uppercase print:tracking-[0.18em] print-accent-text">{t.event.trainingPlan}</h1>
+          <p className="text-sm text-muted print:text-[10px] print:font-bold print-poster-meta">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
         {/* Print-only: teamnaam + clublogo rechts in de kopregel — dezelfde
             familieconventie als de poster- en rapportkop. */}
         {(teamName || teamLogoUrl) && (
           <div className="hidden print:flex items-center gap-1.5 flex-shrink-0">
             {teamLogoUrl && <TeamLogo src={teamLogoUrl} size={16} alt="" fallback={null} />}
-            {teamName && <span className="text-xs font-bold print-club-primary">{teamName}</span>}
+            {teamName && <span className="text-xs font-bold print-accent-text">{teamName}</span>}
           </div>
         )}
         <PrintButton />

@@ -22,7 +22,7 @@
 //
 // ── Aanvullende dekking na validator-bevindingen (zie onderaan dit bestand) ──
 //   A1.1 → describe('A1.1 — "Afgemeld"-markering ...')            — "Afgemeld" print wél mee
-//   A1.2 → describe('A1.2 — diagram- en formatieveld-breedte ...') — exact print:w-[42mm]!/[30mm]!
+//   A1.2 → describe('A1.2 — diagram- en formatieveld-breedte ...') — exact print:w-[32mm]!/[22mm]! (verstrakt 2026-08-24)
 //   A1.3 → describe('A1.3 — editor-waarschuwingen ...')            — teamsRemoved/sizeMismatch/saveError print:hidden
 //   A1.4 → AC5-blok, extra test 'de root van het aanwezigheidsblok draagt print:break-inside-avoid'
 //   A2   → gefixt in AC3-blok (eerste test): assertie richt zich nu op het juiste element
@@ -670,7 +670,10 @@ describe('AC8 — geen tegenstander-veld of -label op de afdruk', () => {
     // zichzelf niets bewijst. Dit toont aan dat de pagina daadwerkelijk
     // inhoud rendert vóórdat we vaststellen dat een tegenstander-veld
     // daarin ontbreekt.
-    expect(screen.getByText('Positiespel 4v4')).toBeInTheDocument()
+    // getAllByText: de oefeningnaam staat sinds de print-verstrakking twee
+    // keer in de DOM — schermkaart én een eigen naam-span in de print-kopregel
+    // (dual markup, zelfde patroon als poolLabel/poolLabelPrint).
+    expect(screen.getAllByText('Positiespel 4v4').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText(/tegenstander/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/opponent/i)).not.toBeInTheDocument()
     expect(document.querySelector('[data-testid*="opponent"], [data-testid*="tegenstander"]')).toBeNull()
@@ -879,22 +882,22 @@ describe('A1.1 — "Afgemeld"-markering per speler print wél mee, nu inline in 
 // "LAYOUTWIJZIGING": diagram/formatieveld staan nu naast de teamindeling
 // i.p.v. erboven, TrainingPlanEditor.tsx:362-379.)
 describe('A1.2 — diagram- en formatieveld-breedte op de afdruk (TrainingPlanEditor.tsx:364,373)', () => {
-  it('DiagramView krijgt exact de klasse print:w-[42mm]! mee', () => {
+  it('DiagramView krijgt exact de klasse print:w-[32mm]! mee', () => {
     const koppeling = makeKoppeling({
       oefeningen: { ...makeKoppeling().oefeningen, diagram: { markers: [], materiaal: [], lijnen: [] } },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const diagram = screen.getByTestId('diagram-view')
-    expect(diagram.parentElement?.className).toContain('print:w-[42mm]!')
+    expect(diagram.parentElement?.className).toContain('print:w-[32mm]!')
   })
 
-  it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[30mm]! mee', () => {
+  it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[22mm]! mee', () => {
     const koppeling = makeKoppeling({
       oefeningen: { ...makeKoppeling().oefeningen, diagram: null, teams: [{ grootte: 4, formaties: [] }] },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const field = screen.getByTestId('formation-field')
-    expect(field.parentElement?.className).toContain('print:w-[30mm]!')
+    expect(field.parentElement?.className).toContain('print:w-[22mm]!')
   })
 })
 
@@ -1089,10 +1092,10 @@ describe('C1 — print-CSS regressiebewaking (app/globals.css, @media print)', (
     expect(block).toMatch(/display:\s*block\s*!important/)
   })
 
-  it('C1.3 — .print-attendance-col float naar links, 42mm breed met 4mm rechtermarge — de kolom die de kladblok-layout draagt (AC5, AC15)', () => {
+  it('C1.3 — .print-attendance-col float naar links, 34mm breed met 4mm rechtermarge — de kolom die de kladblok-layout draagt (AC5, AC15; verstrakt van 42mm naar 34mm op 2026-08-24)', () => {
     const block = normalizeWhitespace(findRuleBlock(mediaPrintBlock, /\.print-attendance-col\s*\{/))
     expect(block).toMatch(/float:\s*left\s*!important/)
-    expect(block).toMatch(/width:\s*42mm\s*!important/)
+    expect(block).toMatch(/width:\s*34mm\s*!important/)
     expect(block).toMatch(/margin-right:\s*4mm\s*!important/)
   })
 
@@ -1218,11 +1221,11 @@ describe('E1 — klassen die de compacte print-layout dragen', () => {
     })
     renderPlan({ initialOefeningen: [koppeling] })
     // De float staat op de buitenste wrapper (TrainingPlanEditor.tsx:375), niet
-    // op de DiagramView-node zelf — die draagt alleen `print:w-[42mm]!` (A1.2).
+    // op de DiagramView-node zelf — die draagt alleen `print:w-[32mm]!` (A1.2).
     const floatWrapper = screen.getByTestId('diagram-view').closest('.print\\:float-left')
     expect(floatWrapper).not.toBeNull()
     expect(floatWrapper!.className).toContain('print:float-left')
-    expect(floatWrapper!.className).toContain('print:w-[42mm]')
+    expect(floatWrapper!.className).toContain('print:w-[32mm]')
     expect(floatWrapper!.className).toContain('print:mr-[3mm]')
   })
 

@@ -600,14 +600,28 @@ body::after {
   }
 
   /* De linkerkolom: rugnummer + naam onder elkaar, klein lettertype (zie
-     AttendanceSummary.tsx voor de compacte print-only opmaak zelf). 42mm
-     breed is ruim genoeg voor "23 Naam Achternaam" zonder te breken, en laat
-     op staand A4 (186mm binnen de marges) nog ruim >140mm over voor de
-     oefeningen ernaast. */
+     AttendanceSummary.tsx voor de compacte print-only opmaak zelf). Sinds de
+     verstrakking van 2026-08-24 34mm i.p.v. 42mm (op 8px past "23 Naam
+     Achternaam" nog steeds; het nummer staat in een vast uitgelijnd kadertje)
+     — dat geeft de oefeningen ernaast 8mm extra breedte. */
   .print-attendance-col {
     float: left !important;
-    width: 42mm !important;
+    width: 34mm !important;
     margin-right: 4mm !important;
+  }
+  /* Namenrijen in de kolom: strak onder elkaar, nummer rechtsuitgelijnd in
+     een vaste breedte zodat de namen één nette linkerlijn vormen. */
+  .print-attendance-col li {
+    padding: 0.5mm 0;
+    line-height: 1.35;
+  }
+  .print-attendance-nr {
+    display: inline-block;
+    min-width: 4mm;
+    margin-right: 1.5mm;
+    text-align: right;
+    color: #6b7280;
+    font-variant-numeric: tabular-nums;
   }
 
   /* `.glass-card` staat ongelaagd CSS, terwijl
@@ -669,18 +683,40 @@ body::after {
   .print-plan-voet {
     clear: both;
     margin-top: 4mm; padding-top: 2mm;
-    border-top: 0.3mm solid var(--club-primary, #004f3b);
+    border-top: 0.2mm solid #e5e7eb;
     font-size: 6.5pt; font-weight: 700; color: #6b7280;
   }
   .print-plan-voet-datum::before { content: '·'; margin-right: 1.6mm; }
   .print-plan-voet-datum { margin-left: 1.6mm; }
+  /* Merk in de gewaarborgde accentkleur (zelfde familie als het teamsheet) —
+     de secundaire clubkleur als tekst op wit was een leesbaarheidsrisico. */
   .print-plan-voet-merk {
     display: inline-flex; align-items: center; gap: 1.2mm;
     margin-left: auto;
     text-transform: uppercase; letter-spacing: 0.1em;
-    color: var(--club-secondary, #009966); font-weight: 800;
+    color: var(--club-accent-text, #004f3b); font-weight: 800;
   }
   .print-plan-voet-merk img { width: 3.5mm; height: 3.5mm; object-fit: contain; }
+
+  /* ── Moderne, open opmaak van de trainingsplan-print (2026-08-24) ──────
+     De oefeningen stonden in omkaderde kaartjes (rand + afgeronde hoeken);
+     op papier las dat als een stapel dozen. Op de afdruk verliezen de
+     kaarten hun kader/achtergrond en scheiden dunne neutrale lijnen de
+     blokken — zelfde familie als het wedstrijdselectie-teamsheet. Deze
+     regels staan bewust ongelaagd in dit printblok, zodat ze de
+     Tailwind-utilities op de componenten (bg-surface, border, p-4)
+     verslaan — zelfde cascade-argument als .print-attendance-col. */
+  .print-plan-kaart {
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  /* Scheiding tússen opeenvolgende blokken (los of parallel), niet om elk
+     kaartje heen: één dunne lijn per overgang. */
+  .print-oefening-blok { padding: 1.2mm 0; }
+  .print-oefening-blok + .print-oefening-blok { border-top: 0.2mm solid #e5e7eb; }
 
   /* ── Wedstrijdselectie-teamsheet (components/MatchSquadPrintList.tsx) ──
      Herontwerp 2026-08-24, tweede ronde: een CLEAN DOCUMENT op wit, binnen

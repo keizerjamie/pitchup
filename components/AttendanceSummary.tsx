@@ -106,25 +106,28 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
           opleveren en een "Found multiple elements"-fout riskeren in
           bestaande tests, zoals ook bij poolLabel/poolLabelPrint
           (TeamIndelingEditor.tsx). */}
-      <div className="hidden print:block print:text-[9px] print:leading-snug">
-        <p className="print:font-bold print:mb-[1mm] print-club-primary">
+      <div className="hidden print:block print:text-[8px] print:leading-snug">
+        {/* Kopjes in de gewaarborgde accentkleur (kleine kapitalen), nummers
+            rechtsuitgelijnd in een vast kadertje (.print-attendance-nr) zodat
+            de namen één nette linkerlijn vormen — verstrakking 2026-08-24. */}
+        <p className="print:font-extrabold print:uppercase print:tracking-[0.12em] print:text-[7px] print:mb-[1mm] print-accent-text">
           {t.event.attendance} ({present.length}/{present.length + absent.length})
         </p>
         {present.length > 0 && (
           <ul>
             {present.map((p) => (
-              <li key={p.id}>{p.jersey_number ?? '#'} {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
+              <li key={p.id}><span className="print-attendance-nr">{p.jersey_number ?? '#'}</span> {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
             ))}
           </ul>
         )}
         {absent.length > 0 && (
           <>
-            <p className="print:font-bold print:mt-[2mm] print:mb-[1mm] print-club-primary">
+            <p className="print:font-extrabold print:uppercase print:tracking-[0.12em] print:text-[7px] print:mt-[2mm] print:mb-[1mm] print-accent-text">
               {t.event.absentStat} ({absent.length})
             </p>
             <ul>
               {absent.map((p) => (
-                <li key={p.id}>{p.jersey_number ?? '#'} {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
+                <li key={p.id}><span className="print-attendance-nr">{p.jersey_number ?? '#'}</span> {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
               ))}
             </ul>
           </>

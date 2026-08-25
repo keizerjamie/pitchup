@@ -499,7 +499,11 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
             </p>
           )
         })}
-        {pool.length > 0 && (
+        {/* Alleen zodra er íéts is ingedeeld: bij een volledig lege indeling
+            zou "Nog niet ingedeeld: <alle aanwezigen>" geen informatie
+            toevoegen en (per oefening herhaald) de afdruk volproppen —
+            print-verstrakking 2026-08-24. */}
+        {pool.length > 0 && indeling.some((ids) => (ids ?? []).length > 0) && (
           <p>
             <span className="font-bold">{t.teamIndeling.poolLabelPrint}</span>: {pool.map((p) => p.name).join(', ')}
           </p>

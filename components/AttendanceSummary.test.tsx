@@ -28,14 +28,14 @@ describe('print-only Gast-label', () => {
 
     // Twee losse teksten (dual-markup: scherm-blok bevat de naam zonder
     // suffix, print-blok mét) — zoek specifiek op de print-suffix-tekst.
-    expect(screen.getByText(`9 Present Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
-    expect(screen.getByText(`9 Afwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `9 Present Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `9 Afwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
   })
 
   it('toont geen "(Gast)"-suffix bij een reguliere speler', () => {
     const present = [makePlayer({ id: 'p1', name: 'Reguliere Speler', type: 'regular' })]
     render(<AttendanceSummary present={present} absent={[]} eventId="e1" t={nl} />)
-    expect(screen.getByText('9 Reguliere Speler')).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === '9 Reguliere Speler')).toBeInTheDocument()
     expect(screen.queryByText(new RegExp(`Reguliere Speler \\(${nl.players.guestBadge}\\)`))).not.toBeInTheDocument()
   })
 

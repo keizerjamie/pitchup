@@ -470,7 +470,10 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
             </p>
           )
         })}
-        {pool.length > 0 && (
+        {/* Zelfde regel als TeamIndelingEditor: alleen tonen zodra er íéts
+            over de leden verdeeld is — een volledig lege verdeling levert
+            anders een betekenisloze volledige namenlijst op de afdruk op. */}
+        {pool.length > 0 && leden.some((lid) => (assignments[lid.id] ?? []).length > 0) && (
           <p>
             <span className="font-bold">{t.parallelGroep.poolLabelPrint}</span>: {pool.map((p) => p.name).join(', ')}
           </p>

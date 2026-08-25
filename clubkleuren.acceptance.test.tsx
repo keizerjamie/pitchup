@@ -717,8 +717,8 @@ describe('AC9 — Trainingsplan-PDF gebruikt per kleur de ingestelde waarde óf 
     expect(root.style.getPropertyValue('--club-secondary')).toBe('#4d4dff')
   })
 
-  it('AttendanceSummary print-only kopregels dragen de print-club-primary-klasse (erft de CSS-var van de page-root)', async () => {
-    await renderTrainingPlanPage({
+  it('AttendanceSummary print-only kopregels dragen de print-accent-text-klasse en de page-root zet de gewaarborgde --club-accent-text-var (verstrakking 2026-08-24)', async () => {
+    const { container } = await renderTrainingPlanPage({
       settings: [{ key: 'team_color_primary', value: '#a1b2c3' }],
       players: [{ id: 'p1', name: 'Piet Peters', position: 'Spits', secondary_positions: [], jersey_number: 9, active: true, injured: false, rating: 5, created_at: '2024-01-01T00:00:00Z' }],
       attendance: [{ player_id: 'p1', status: 'present' }],
@@ -726,7 +726,13 @@ describe('AC9 — Trainingsplan-PDF gebruikt per kleur de ingestelde waarde óf 
     const printHeading = screen.getByText(
       (_c, el) => el?.tagName === 'P' && el.textContent === `${nl.event.attendance} (1/1)`,
     )
-    expect(printHeading.className).toContain('print-club-primary')
+    expect(printHeading.className).toContain('print-accent-text')
+    // #a1b2c3 haalt op wit geen 3:1 — de gewaarborgde accentvar valt dan
+    // terug op de vaste donkere tint (lib/club-colors.ts:READABLE_INK_DARK),
+    // terwijl --club-primary zelf de ingestelde kleur houdt.
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.getPropertyValue('--club-primary')).toBe('#a1b2c3')
+    expect(root.style.getPropertyValue('--club-accent-text')).toBe('#0a2e2a')
   })
 
   // C1-achtige CSS-regressiebewaking (zelfde balanced-braces-parser als het

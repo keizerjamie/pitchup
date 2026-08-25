@@ -419,6 +419,9 @@ async function renderTrainingPlanPage(opts: {
   return render(<DictProvider dict={nl}>{el}</DictProvider>)
 }
 
+// Sinds de print-verstrakking (2026-08-24) staat het rugnummer in een eigen
+// uitlijn-span binnen de <li>; getByText's getNodeText ziet alleen directe
+// tekstnodes, dus deze asserties matchen op de volledige li-textContent.
 describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (trainingsplan-pagina)', () => {
   it('toont "(Gast)" achter de naam van een AANWEZIGE gast in het printblok', async () => {
     await renderTrainingPlanPage({
@@ -427,7 +430,7 @@ describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (train
       ],
       attendance: [{ event_id: 'e1', team_id: TEAM, player_id: 'p1', status: 'present' }],
     })
-    expect(screen.getByText(`21 Aanwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `21 Aanwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
   })
 
   it('toont "(Gast)" achter de naam van een AFWEZIGE gast in het printblok', async () => {
@@ -437,7 +440,7 @@ describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (train
       ],
       attendance: [], // geen 'present'-rij → valt in absentPlayers
     })
-    expect(screen.getByText(`22 Afwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `22 Afwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
   })
 
   it('een reguliere speler krijgt géén "(Gast)"-suffix, aanwezig noch afwezig', async () => {
@@ -448,8 +451,8 @@ describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (train
       ],
       attendance: [{ event_id: 'e1', team_id: TEAM, player_id: 'p1', status: 'present' }],
     })
-    expect(screen.getByText('5 Reguliere Aanwezige')).toBeInTheDocument()
-    expect(screen.getByText('6 Reguliere Afwezige')).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === '5 Reguliere Aanwezige')).toBeInTheDocument()
+    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === '6 Reguliere Afwezige')).toBeInTheDocument()
     expect(screen.queryByText(new RegExp(`Reguliere .* \\(${nl.players.guestBadge}\\)`))).not.toBeInTheDocument()
   })
 })

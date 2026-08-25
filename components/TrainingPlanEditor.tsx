@@ -315,7 +315,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           opent die BFC zonder verder gedrag te wijzigen. */}
       <div
         data-testid="doelstelling-block"
-        className={`bg-surface rounded-2xl border border-[var(--border-soft)] p-5 print:break-inside-avoid print:p-[2mm] print:rounded-md print:flow-root ${doelstelling.trim() === '' ? 'print:hidden' : ''}`}
+        className={`bg-surface rounded-2xl border border-[var(--border-soft)] p-5 print:break-inside-avoid print:p-[2mm] print:rounded-md print:flow-root print-plan-kaart ${doelstelling.trim() === '' ? 'print:hidden' : ''}`}
       >
         <label className="block text-sm font-semibold text-muted mb-2 flex items-center justify-between print:text-[7px] print:mb-[0.5mm] print:uppercase print:tracking-wide print:text-faint">
           {t.trainingPlan.objective}
@@ -446,7 +446,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               // uitgeprinte plan in zijn hand.
               const blokTijd = tijdPerBlok.get(blok.key)
               return (
-                <div key={blok.key} className={isGroup ? 'print:break-inside-avoid' : undefined}>
+                <div key={blok.key} className={isGroup ? 'print-oefening-blok print:break-inside-avoid' : 'print-oefening-blok print:break-inside-avoid'}>
                   {blokTijd && (blokTijd.startTijd || blokTijd.duurMin !== null) && (
                     <p className="text-[11px] font-bold text-faint mb-1 tabular-nums print:text-[7pt] print:mb-[0.5mm]">
                       {blokTijd.startTijd && blokTijd.eindTijd
@@ -538,8 +538,8 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   key={k.id}
                   className={
                     isGroup
-                      ? 'flex-1 min-w-[240px] print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root'
-                      : 'print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root'
+                      ? 'flex-1 min-w-[240px] print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root print-plan-kaart'
+                      : 'print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root print-plan-kaart'
                   }
                 >
                   <div className="flex items-start gap-3">
@@ -589,11 +589,16 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           gewoon op het scherm staan (zie hieronder). De
                           stap-aanduiding blijft wél staan: die is niet uit de
                           naam af te leiden. */}
-                      <p className="hidden print:block print:text-[10px] print:font-semibold print:leading-snug">
-                        {o.naam}
-                        {o.duur_min != null && <> · {o.duur_min} min</>}
-                        {o.breedte_m && o.lengte_m && <> · {o.breedte_m}×{o.lengte_m}m</>}
-                        {stepText && <> · {stepText}</>}
+                      <p className="hidden print:block print:text-[10px] print:leading-snug">
+                        {/* Naam draagt de regel (vet, donker); de meta-delen
+                            staan gedempt erachter — hiërarchie i.p.v. één
+                            egale grijze regel (verstrakking 2026-08-24). */}
+                        <span className="print:font-bold">{o.naam}</span>
+                        <span className="print:font-semibold print-poster-meta">
+                          {o.duur_min != null && <> · {o.duur_min} min</>}
+                          {o.breedte_m && o.lengte_m && <> · {o.breedte_m}×{o.lengte_m}m</>}
+                          {stepText && <> · {stepText}</>}
+                        </span>
                       </p>
 
                       {o.beschrijving && (
@@ -701,9 +706,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         // Binnen een parallelle groep (isGroup) is de kolom te
                         // smal voor de gefloate volle-breedte-stijl: geen float,
                         // smaller diagram/formatievelden.
-                        <div className={isGroup ? 'mt-2 print:mt-[1mm] print:float-none print:w-[32mm] print:mr-[3mm]' : 'mt-2 print:mt-[1mm] print:float-left print:w-[42mm] print:mr-[3mm]'}>
+                        <div className={isGroup ? 'mt-2 print:mt-[1mm] print:float-none print:w-[26mm] print:mr-[3mm]' : 'mt-2 print:mt-[1mm] print:float-left print:w-[32mm] print:mr-[3mm]'}>
                           {o.diagram ? (
-                            <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[32mm]!' : 'print:w-[42mm]!'} />
+                            <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[26mm]!' : 'print:w-[32mm]!'} />
                           ) : (
                             <div className="flex flex-wrap gap-2 print:flex-col print:gap-[1mm]">
                               {o.teams.map((tm, i) => {
@@ -714,7 +719,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                                     positions={basis?.positions ?? []}
                                     label={`${tm.grootte}${basis ? ` · ${basis.label}` : ''}`}
                                     sizePx={56}
-                                    className={isGroup ? 'print:w-[22mm]!' : 'print:w-[30mm]!'}
+                                    className={isGroup ? 'print:w-[18mm]!' : 'print:w-[22mm]!'}
                                   />
                                 )
                               })}
