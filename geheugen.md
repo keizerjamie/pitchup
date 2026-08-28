@@ -2490,3 +2490,60 @@ zelfde stub als `components/PlayerList.test.tsx`.
   wel). Zelfde niveau als `GlobalFab`.
 - Desktop is ongewijzigd: de sidebar (`SidebarNav.tsx`) houdt alle zeven onderdelen, dus daar is
   met het verdwijnen van Snelle acties niets onbereikbaar geworden.
+
+## Opstelling: clubkleuren op de poppetjes + afgebakende bank (2026-08-28, commit `9116d6c`, live)
+Twee gevraagde wijzigingen aan de opstellingsbouwer, direct gebouwd (geen feature-factory-keten):
+de poppetjes op het veld waren altijd wit, en de bank toonde élke actieve speler.
+**Geen backend**: geen migratie, geen nieuwe tabel, geen server action — beide bestaande tabellen
+(`match_squad`, `settings`) worden alleen extra gelézen op de opstellingspagina.
+
+### Clubtenue op de poppetjes (`lib/club-colors.ts` + `components/LineupBuilder.tsx`)
+- Nieuw en puur: **`resolveKitColors(settings)`** → `{left, right, ink}` of **`null`**, en
+  **`readableInkOn(colors)`** → `KIT_INK_LIGHT` (`#ffffff`) of `READABLE_INK_DARK`.
+- **Bewust NIET `resolveClubColors()` hergebruikt.** Die vult een niet-ingestelde kleur altijd met
+  `CLUB_COLOR_FALLBACK`, wat hier zou betekenen dat elk team zónder clubkleuren ineens
+  donkergroene poppetjes krijgt. De eis was uitdrukkelijk "zodra clubkleuren gekozen zijn", dus
+  moet "geen rij" zichtbaar blijven als het oude wit → vandaar `null` i.p.v. een fallback-tenue.
+  De fallback woont in de component, als het bestaande `bg-white`.
+- Regels: geen kleur gekozen → wit; één kleur gekozen → effen shirt in die kleur (**niet** de
+  andere helft op de fallback — dat zou een kleur tonen die de coach nooit koos); beide gekozen →
+  `linear-gradient(90deg, left 0 50%, right 50% 100%)`, harde stops = scherpe deling, geen verloop.
+- `readableInkOn` rekent met het **slechtste** contrast van de twee helften, niet het gemiddelde:
+  het cijfer staat midden op het poppetje en raakt beide helften. Zwart+geel → donkere ink.
+- Het geselecteerde slot houdt zijn amberkleur (selectie-indicator, geen tenue). De witte ring +
+  schaduw van het oude poppetje blijven, anders valt een donker tenue weg in het veldgroen.
+- `data-testid="speler-poppetje-tenue"` / `"speler-poppetje-wit"` op het bezette slot — de enige
+  manier om wit vs. tenue van buitenaf te onderscheiden zonder op Tailwind-klassen te grepen.
+
+### Afgebakende bank (`app/events/[id]/lineup/page.tsx`)
+- De pagina haalt nu ook `match_squad` op en bepaalt één pool: **is de wedstrijdselectie bepaald,
+  dan uitsluitend die spelers; zolang dat niet zo is, de aanwezige spelers.**
+- `LineupBuilder`-prop `presentPlayerIds` is vervangen door **`eligiblePlayerIds`**: de component
+  kent het onderscheid selectie/aanwezigheid bewust niet, hij krijgt één afgeronde lijst. Die ene
+  set (`eligibleIds`) voedt de bank, de spelerspopup per positie én `autoFillLineup` — liepen die
+  uiteen, dan zou de popup iemand kunnen aanbieden die niet op de bank staat.
+- `players` blijft de VOLLEDIGE lijst en dient ook als namenregister: een al opgestelde speler
+  buiten de selectie blijft mét naam op het veld staan (geen stille leegloop), hij verdwijnt
+  alleen van de bank.
+- Settings-query gebruikt `.in('key', [...])` met alleen de twee kleursleutels — nooit een open
+  select op `settings`, waar ook `team_logo_url` en `season_start` in leven.
+
+### Tests
+- Nieuw: `opstelling-clubkleuren-bank.acceptance.test.tsx` (14 tests) rendert de ECHTE serverpagina
+  met een tabel-engine-mock, inclusief tenant-isolatie op beide nieuwe queries (een `match_squad`-
+  of `settings`-rij van een ander team mag nooit meetellen).
+- `opstelling-vorm.acceptance.test.tsx`: `makeSupabaseMock` uitgebreid met `match_squad` en
+  `settings` — die mock throwt op onbekende tabellen, dus elke nieuwe query op deze pagina vergt
+  daar een regel.
+- **jsdom-detail voor deze asserties:** de losse `color`-property wordt genormaliseerd naar
+  `rgb(r, g, b)`, maar hex binnen de `background`-shorthand blijft hex. Vandaar de `rgbVan()`-
+  helper in de acceptatietest i.p.v. hardgecodeerde rgb-strings.
+
+### Bewust geaccepteerd
+- **"Selectie leeggemaakt" is niet te onderscheiden van "nog niet gekozen".** In het datamodel ís
+  de aanwezigheid van een rij de selectie (`app/actions/match-squad.ts`), dus iedereen uitvinken
+  laat de bank terugvallen op de aanwezige spelers. Gevolg van het model, geen aparte keuze.
+- Het kopje van de pagina toont nog steeds "*n* aanwezig" en de overzichtskolom rechts nog steeds
+  alle aanwezige + afwezige spelers — die lopen niet mee met de wedstrijdselectie. Niet gevraagd.
+- Niet in de browser geverifieerd: de pagina zit achter de Supabase-login. Wel bewezen via de
+  echte serverpagina in jsdom, plus `npm run build` (de Next/Turbopack-compiler).
