@@ -761,9 +761,11 @@ ontwerpvragen via `AskUserQuestion`).
   productie-export is en niet een test-lokale herimplementatie.
 
 ### Bewust geaccepteerd
-- Geen dashboard-todo-koppeling (`lib/todos.mjs`/`task_overrides`), geen maximum aantal
-  spelers, geen automatisch delen vanuit de app (trainer deelt de PDF zelf), geen
-  "neem alle aanwezigen over"-knop — allemaal expliciet out of scope in de story.
+- Geen maximum aantal spelers, geen automatisch delen vanuit de app (trainer deelt de PDF
+  zelf), geen "neem alle aanwezigen over"-knop — allemaal expliciet out of scope in de story.
+- De dashboard-todo-koppeling (`lib/todos.mjs`/`task_overrides`) was hier óók out of scope,
+  maar is dat sinds 2026-08-28 niet meer — zie "To-do: wedstrijdselectie en opstelling
+  gesplitst" onderaan.
 - `MatchSquadEditor` synct zijn `lastConfirmedRef` niet opnieuw bij nieuwe server-props na
   revalidatie (in tegenstelling tot `TeamIndelingEditor`) — onschadelijk zolang één trainer
   per team tegelijk werkt; bij gelijktijdige bewerking in twee tabbladen wint de laatste klik.
@@ -2353,3 +2355,50 @@ aanwezig 1.05:1, afwezig 1.21:1, positiekopjes 1.61:1. Licht thema was altijd in
 - `.glass-card-raised` is dode CSS (nergens gebruikt) — niet aangeraakt, losse opruimtaak.
 - Het `@media print`-blok hoefde niet mee: `.print-attendance-col` zet achtergrond, rand en
   schaduw daar al met `!important` uit.
+
+---
+
+## To-do: wedstrijdselectie en opstelling gesplitst (2026-08-28, commit `72fcd4d`, live)
+De To-do-lijst kende één taaktype `lineup` met het label "Wedstrijdselectie en opstelling
+maken", auto-afgevinkt zodra er een `lineups`-rij bestond. Eén vinkje voor twee activiteiten
+die de eigenaar als los van elkaar ervaart. Verzoek van de eigenaar, niet uit een audit.
+
+### Wat er al was (en wat de fout eigenlijk was)
+De rest van de app kende het onderscheid allang: aparte routes `/events/[id]/squad` en
+`/events/[id]/lineup`, een zelfstandige `match_squad`-tabel, en op de event-detailpagina twee
+losse `ActionCard`s met elk hun eigen done-criterium. **Alleen de To-do plakte ze samen.** Het
+done-criterium voor de nieuwe taak is dan ook niet bedacht maar overgenomen van de bestaande
+selectie-`ActionCard`: ≥1 `match_squad`-rij voor het event.
+
+### Wijzigingen
+- `lib/todos.mjs`: `TASK_TYPES` is nu `['squad', 'lineup', 'analysis', 'training_plan']`.
+  `isTaskVisible` hoefde niet mee — `squad` valt in dezelfde forward-venster-tak als
+  `lineup`/`training_plan`.
+- `app/page.tsx`: extra `match_squad`-query in de bestaande `Promise.all`, en een squad-taak
+  in de opbouwlus. **Squad wordt vóór lineup gepusht**: beide hebben de wedstrijddag als
+  deadline, `compareTasks` geeft dan 0 terug, en `Array.prototype.sort` is stabiel — de
+  push-volgorde ís dus de weergavevolgorde, en dat is ook de werkvolgorde (eerst oproepen,
+  dan opstellen).
+- `TodoList.tsx` / `app/actions/todos.ts`: taaktype-union, `TASK_HREF.squad = 'squad'`, label.
+- `messages/{nl,en,de,es,fr}.ts`: `taskSquad` erbij; `taskLineup` teruggebracht tot alleen de
+  opstelling. DE/ES/FR zijn afgeleid van de labels die daar al voor de twee `ActionCard`s
+  stonden, niet zelf verzonnen.
+
+### Migratie (door de eigenaar gedraaid)
+`supabase/task-overrides.sql` (+ `schema.sql` voor verse installaties): CHECK-constraint
+uitgebreid met `'squad'`, plus een `INSERT ... SELECT` die elke bestaande `lineup`-override
+kopieert naar `squad`. **Zonder die kopie zou een wedstrijd die de gebruiker al had afgevinkt
+ineens weer met een open selectietaak opduiken** — expliciete keuze van de eigenaar.
+
+### Testles: een testharnas dat productiecode nabootst, moet mee veranderen
+`scripts/todos.acceptance.test.mjs` heeft een eigen `buildTodoItems` die de lus uit
+`app/page.tsx` naspeelt. Die uitbreiden brak precies twee bestaande tests, en dat was
+informatief in plaats van vervelend: AC11 (sorteervolgorde) en AC12 (aantal taken per event,
+18 → 24). Beide zijn aangepast in plaats van omzeild. Drie nieuwe tests dekken de splitsing
+zelf: volgorde squad-vóór-lineup bij gelijke deadline, de twee auto-bronnen die elkaar niet
+afvinken, en een `lineup`-override die de selectietaak open laat staan.
+
+### Opgemerkt en meegenomen
+De kopcommentaren in `todos.acceptance.test.mjs` verwezen naar `app/page.tsx` "regels
+±155-203" en `messages/nl.ts:63-65` — allebei al verschoven en dus stil fout. Vervangen door
+symboolverwijzingen (de To-do-lus in `Home`, het `todo`-blok in `messages/nl.ts`).
