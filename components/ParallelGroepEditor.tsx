@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { Player, TrainingOefeningWithData } from '@/lib/types'
+import { Player } from '@/lib/types'
+import type { TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import { saveParallelIndeling, verplaatsParallelSpeler } from '@/app/actions/training-plan'
 import { groepStatus } from '@/lib/parallel-groep'
 import { useDict } from '@/lib/i18n-context'
@@ -45,14 +46,14 @@ interface DragState {
 interface Props {
   eventId: string
   groepId: string
-  leden: TrainingOefeningWithData[]
+  leden: TrainingOefeningMetBezetting[]
   players: Player[]
   presentPlayerIds: string[]
 }
 
 // Platte verdeling per lid, defensief gelezen (parallel_spelers is optioneel
 // getypeerd — zie lib/types.ts:249-250 en de bevestigde beslissingen).
-function buildAssignments(leden: TrainingOefeningWithData[]): Record<string, string[]> {
+function buildAssignments(leden: TrainingOefeningMetBezetting[]): Record<string, string[]> {
   const out: Record<string, string[]> = {}
   for (const lid of leden) {
     out[lid.id] = Array.isArray(lid.parallel_spelers) ? [...lid.parallel_spelers] : []
@@ -116,7 +117,7 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
   const pool = presentPlayers.filter((p) => !assignedIds.has(p.id))
 
   const status = groepStatus({
-    leden: leden.map((l) => ({ id: l.id, parallel_spelers: assignments[l.id] ?? [], oefeningen: l.oefeningen })),
+    leden: leden.map((l) => ({ id: l.id, parallel_spelers: assignments[l.id] ?? [], oefeningen: l.oefeningen, bezetting: l.bezetting })),
     presentPlayerIds,
   })
   const statusByLid = new Map(status.perLid.map((s) => [s.koppelingId, s]))

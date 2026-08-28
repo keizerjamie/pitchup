@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useRef, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, TrainingOefeningWithData } from '@/lib/types'
+import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
@@ -12,17 +12,19 @@ import { berekenTijdlijn } from '@/lib/sessie-tijdlijn'
 import SessieTijdlijn from '@/components/SessieTijdlijn'
 import KopieerVorigeTraining, { type KopieerOptie } from '@/components/KopieerVorigeTraining'
 import { clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
+import { bereikVoorNeutralen, teamBereikLabel, vormLabel, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningPicker from '@/components/OefeningPicker'
 import TeamIndelingEditor from '@/components/TeamIndelingEditor'
 import ParallelGroepEditor from '@/components/ParallelGroepEditor'
+import BezettingStepper from '@/components/BezettingStepper'
 import { useDict } from '@/lib/i18n-context'
 
 interface Props {
   eventId: string
   initialDoelstelling: string | null
-  initialOefeningen: TrainingOefeningWithData[]
+  initialOefeningen: TrainingOefeningMetBezetting[]
   library: Oefening[]
   currentSteps: Record<string, number | null>
   hasNulmeting: boolean
@@ -52,7 +54,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   const [isPending, startTransition] = useTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
   const [doelstellingSaved, setDoelstellingSaved] = useState(false)
-  const [koppelingen, setKoppelingen] = useState<TrainingOefeningWithData[]>(initialOefeningen)
+  const [koppelingen, setKoppelingen] = useState<TrainingOefeningMetBezetting[]>(initialOefeningen)
 
   // Sync when server revalidates and parent sends fresh data
   // (adjust-state-during-render pattern instead of a cascading effect)
@@ -598,6 +600,13 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           {o.duur_min != null && <> · {o.duur_min} min</>}
                           {o.breedte_m && o.lengte_m && <> · {o.breedte_m}×{o.lengte_m}m</>}
                           {stepText && <> · {stepText}</>}
+                          {/* Extra segment binnen de bestaande print-kopregel
+                              (geen nieuwe regel, dus geen extra mm): alleen
+                              zichtbaar zodra het opgeslagen diagram niet meer
+                              met de effectieve bezetting overeenkomt. */}
+                          {o.diagram && k.bezetting.aangepast && (
+                            <> · {t.trainingPlan.diagramBasisvorm.replace('{vorm}', vormLabel(o.teams))}</>
+                          )}
                         </span>
                       </p>
 
@@ -622,11 +631,38 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         {o.breedte_m && o.lengte_m && (
                           <span className="text-xs text-faint">{o.breedte_m}×{o.lengte_m}m</span>
                         )}
-                        {o.aantal_neutralen > 0 && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
-                            {t.oefeningen.neutralsBadge.replace('{n}', String(o.aantal_neutralen))}
-                          </span>
-                        )}
+                        {(() => {
+                          // Leest de EFFECTIEVE bezetting (k.bezetting), niet
+                          // de basisvorm `o` — anders mist de badge een
+                          // vastgelegde override (bv. basis 0 + max 4 +
+                          // override 3 toonde géén badge) of toont hij de
+                          // verkeerde waarde (basis 2 + override 4 toonde
+                          // "2"). Conditie blijft falsy-zero-veilig op het
+                          // BASIS-bereik (`max > 0`), analoog aan de
+                          // bibliotheekkaart (OefeningLibrary.tsx).
+                          const neutraalBereik = bereikVoorNeutralen(o)
+                          if (neutraalBereik.max <= 0) return null
+                          const isBereik = neutraalBereik.max > neutraalBereik.min
+                          // Vóór een vastgelegde bezetting volgt de weergave
+                          // de basisvorm (eigenaarsbesluit 2): toon het
+                          // bereik, net als de bibliotheekkaart. Ná vastleggen
+                          // (bezetting.aangepast) toont de badge het
+                          // effectieve, opgeslagen aantal.
+                          if (isBereik && !k.bezetting.aangepast) {
+                            return (
+                              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
+                                {t.oefeningen.neutralsBadgeRange
+                                  .replace('{min}', String(neutraalBereik.min))
+                                  .replace('{max}', String(neutraalBereik.max))}
+                              </span>
+                            )
+                          }
+                          return (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
+                              {t.oefeningen.neutralsBadge.replace('{n}', String(k.bezetting.aantal_neutralen))}
+                            </span>
+                          )
+                        })()}
                         {parent && (
                           <span className="text-xs text-faint">
                             {t.trainingPlan.nestedInBadge.replace('{name}', parent.oefeningen.naam)}
@@ -702,22 +738,45 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           print-only blok, direct hierna in de DOM) vloeit in
                           de resterende breedte ernaast. De kaarthoogte wordt
                           zo max(diagram, teamindeling) i.p.v. de som. */}
-                      {(o.diagram || o.teams.length > 0) && (
+                      {(o.diagram || k.bezetting.teams.length > 0) && (
                         // Binnen een parallelle groep (isGroup) is de kolom te
                         // smal voor de gefloate volle-breedte-stijl: geen float,
                         // smaller diagram/formatievelden.
                         <div className={isGroup ? 'mt-2 print:mt-[1mm] print:float-none print:w-[26mm] print:mr-[3mm]' : 'mt-2 print:mt-[1mm] print:float-left print:w-[32mm] print:mr-[3mm]'}>
                           {o.diagram ? (
-                            <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[26mm]!' : 'print:w-[32mm]!'} />
+                            <>
+                              <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[26mm]!' : 'print:w-[32mm]!'} />
+                              {/* Op scherm alleen: op de afdruk zit dezelfde
+                                  info al in de kopregel hierboven (geen extra
+                                  mm). print:hidden. */}
+                              {k.bezetting.aangepast && (
+                                <span className="print:hidden mt-1 inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
+                                  {t.trainingPlan.diagramBasisvorm.replace('{vorm}', vormLabel(o.teams))}
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <div className="flex flex-wrap gap-2 print:flex-col print:gap-[1mm]">
-                              {o.teams.map((tm, i) => {
+                              {k.bezetting.teams.map((tm, i) => {
                                 const basis = basisFormatieDef(tm)
+                                // Mismatch-resolutie, PER TEAM (eigenaarsbesluit):
+                                // vergelijk de effectieve grootte van DIT team
+                                // met zijn eigen basisgrootte — niet het
+                                // koppeling-brede `bezetting.aangepast`-vlag,
+                                // dat ook true wordt door een neutralen-only
+                                // override of een override op een ánder team,
+                                // waardoor alle teamlabels onterecht hun
+                                // bereik zouden verliezen. `Object.is` i.p.v.
+                                // `!==` zodat een corrupte NaN-basisgrootte
+                                // niet eeuwig als "afwijkend" telt.
+                                const basisGrootte = o.teams[i]?.grootte
+                                const effectiefAfwijkend = !Object.is(tm.grootte, basisGrootte)
+                                const maat = effectiefAfwijkend ? String(tm.grootte) : teamBereikLabel(tm)
                                 return (
                                   <FormationField
                                     key={i}
                                     positions={basis?.positions ?? []}
-                                    label={`${tm.grootte}${basis ? ` · ${basis.label}` : ''}`}
+                                    label={`${maat}${basis ? ` · ${basis.label}` : ''}`}
                                     sizePx={56}
                                     className={isGroup ? 'print:w-[18mm]!' : 'print:w-[22mm]!'}
                                   />
@@ -756,11 +815,23 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         </p>
                       )}
 
+                      {/* Buiten de `o.teams.length > 0`-conditie: een
+                          oefening met 0 teams maar flexibele neutralen krijgt
+                          zo ook steppers. Rendert zelf niets bij een exacte
+                          oefening (isFlexibel-check in het component). */}
+                      <BezettingStepper
+                        koppelingId={k.id}
+                        eventId={eventId}
+                        basis={o}
+                        initialAantallen={k.aantallen_override ?? null}
+                        aanwezigAantal={presentPlayerIds.length}
+                      />
+
                       {o.teams.length > 0 && (
                         <TeamIndelingEditor
                           koppelingId={k.id}
                           eventId={eventId}
-                          teams={o.teams}
+                          teams={k.bezetting.teams}
                           initialIndeling={k.spelerindeling ?? EMPTY_INDELING}
                           players={players}
                           presentPlayerIds={presentPlayerIds}
@@ -891,6 +962,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           library={library}
           presetCategorie={pickerPresetCategorie}
           onClose={() => setShowPicker(false)}
+          aanwezigAantal={presentPlayerIds.length}
         />
       )}
     </div>

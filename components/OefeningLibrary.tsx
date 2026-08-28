@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { Oefening, OefeningCategorie, Veldzone, OEFENING_CATEGORIES, VALID_VELDZONES, PERIODIZATION_CATEGORIES } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
 import { matchesOefeningFilters, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
+import { bereikLabel, bereikVoorNeutralen, isFlexibel, teamBereikLabel } from '@/lib/oefening-bezetting'
 import type { OefeningInput } from '@/lib/oefening'
 import { createOefening, updateOefening, deleteOefening } from '@/app/actions/oefening-library'
 import FormationField from '@/components/FormationField'
@@ -296,11 +297,29 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${catColor(o.categorie)}`}>
                       {catLabel(o.categorie)}
                     </span>
-                    {o.aantal_neutralen > 0 && (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
-                        {t.oefeningen.neutralsBadge.replace('{n}', String(o.aantal_neutralen))}
+                    {/* Vorm-badge: alleen bij een flexibele oefening (bestaand
+                        gedrag blijft ongewijzigd voor een exacte oefening). */}
+                    {isFlexibel(o) && (
+                      <span
+                        aria-label={`${t.oefeningen.shapeLabel}: ${bereikLabel(o)}`}
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted"
+                      >
+                        {bereikLabel(o)}
                       </span>
                     )}
+                    {(() => {
+                      const neutraalBereik = bereikVoorNeutralen(o)
+                      if (neutraalBereik.max <= 0) return null
+                      return (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
+                          {neutraalBereik.max > neutraalBereik.min
+                            ? t.oefeningen.neutralsBadgeRange
+                                .replace('{min}', String(neutraalBereik.min))
+                                .replace('{max}', String(neutraalBereik.max))
+                            : t.oefeningen.neutralsBadge.replace('{n}', String(neutraalBereik.min))}
+                        </span>
+                      )
+                    })()}
                     {o.duur_min != null && <span className="text-xs text-faint">{o.duur_min} min</span>}
                   </div>
                   {o.beschrijving && (
@@ -355,7 +374,7 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                       <FormationField
                         key={i}
                         positions={basis?.positions ?? []}
-                        label={`${tm.grootte}${basis ? ` · ${basis.label}` : ''}`}
+                        label={`${teamBereikLabel(tm)}${basis ? ` · ${basis.label}` : ''}`}
                         sizePx={90}
                       />
                     )

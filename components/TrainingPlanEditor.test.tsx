@@ -4,6 +4,7 @@ import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import type { Oefening, OefeningCategorie, Player, TrainingOefeningWithData } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 
 vi.mock('@/app/actions/training-plan', () => ({
   saveDoelstelling: vi.fn().mockResolvedValue(undefined),
@@ -45,8 +46,26 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
 
 const players: Player[] = [makePlayer({ id: 'p1', name: 'Piet Peters', jersey_number: 1 })]
 
-function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningWithData {
-  return {
+function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningMetBezetting {
+  const { oefeningen, ...rest } = overrides
+  const basis = {
+    id: 'o1',
+    team_id: 'team1',
+    naam: 'Positiespel',
+    beschrijving: null,
+    categorie: 'positiespel',
+    duur_min: 10,
+    breedte_m: null,
+    lengte_m: null,
+    orientatie: 'vrij',
+    veldzone: null,
+    teams: [{ grootte: 1, formaties: [] }],
+    aantal_neutralen: 0,
+    diagram: null,
+    created_at: '2024-01-01T00:00:00Z',
+    ...oefeningen,
+  } as Oefening
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team1',
     event_id: 'e1',
@@ -58,27 +77,13 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): Train
     // `undefined` op i.p.v. een array (zie TrainingPlanEditor.tsx `?? EMPTY_INDELING`).
     spelerindeling: undefined as unknown as string[][],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: {
-      id: 'o1',
-      team_id: 'team1',
-      naam: 'Positiespel',
-      beschrijving: null,
-      categorie: 'positiespel',
-      duur_min: 10,
-      breedte_m: null,
-      lengte_m: null,
-      orientatie: 'vrij',
-      veldzone: null,
-      teams: [{ grootte: 1, formaties: [] }],
-      aantal_neutralen: 0,
-      diagram: null,
-      created_at: '2024-01-01T00:00:00Z',
-    },
-    ...overrides,
+    oefeningen: basis,
+    ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
-function renderPlan(koppelingen: TrainingOefeningWithData[]) {
+function renderPlan(koppelingen: TrainingOefeningMetBezetting[]) {
   return render(
     <DictProvider dict={nl}>
       <TrainingPlanEditor
@@ -156,8 +161,10 @@ function makeKoppelingFor(
   categorie: OefeningCategorie,
   stap_override: number | null,
   overrides: Partial<TrainingOefeningWithData> = {},
-): TrainingOefeningWithData {
-  return {
+): TrainingOefeningMetBezetting {
+  const { oefeningen, ...rest } = overrides
+  const basis = { ...makeOefeningFixture({ categorie }), ...oefeningen }
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team1',
     event_id: 'e1',
@@ -167,12 +174,13 @@ function makeKoppelingFor(
     genest_in: null,
     spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefeningFixture({ categorie }),
-    ...overrides,
+    oefeningen: basis,
+    ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
-function renderPlanWith(koppeling: TrainingOefeningWithData) {
+function renderPlanWith(koppeling: TrainingOefeningMetBezetting) {
   return render(
     <DictProvider dict={nl}>
       <TrainingPlanEditor

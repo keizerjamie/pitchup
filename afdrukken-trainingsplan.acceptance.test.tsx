@@ -110,7 +110,8 @@ import { en } from '@/messages/en'
 import { de } from '@/messages/de'
 import { fr } from '@/messages/fr'
 import { es } from '@/messages/es'
-import type { Player, TrainingOefeningWithData } from '@/lib/types'
+import type { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import AttendanceSummary from '@/components/AttendanceSummary'
 import PrintButton from '@/components/PrintButton'
@@ -234,8 +235,26 @@ const players3: Player[] = [
   makePlayer({ id: 'p3', name: 'Kees Klaassen', jersey_number: 3 }),
 ]
 
-function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningWithData {
-  return {
+function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningMetBezetting {
+  const { oefeningen, ...rest } = overrides
+  const basis: Oefening = {
+    id: 'o1',
+    team_id: 'team1',
+    naam: 'Positiespel 4v4',
+    beschrijving: 'Balbezit behouden in kleine ruimte',
+    categorie: 'positiespel',
+    duur_min: 12,
+    breedte_m: 20,
+    lengte_m: 30,
+    orientatie: 'vrij',
+    veldzone: null,
+    teams: [{ grootte: 2, formaties: [] }, { grootte: 2, formaties: [] }],
+    aantal_neutralen: 0,
+    diagram: null,
+    created_at: '2024-01-01T00:00:00Z',
+    ...oefeningen,
+  }
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team1',
     event_id: 'e1',
@@ -245,27 +264,13 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): Train
     genest_in: null,
     spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: {
-      id: 'o1',
-      team_id: 'team1',
-      naam: 'Positiespel 4v4',
-      beschrijving: 'Balbezit behouden in kleine ruimte',
-      categorie: 'positiespel',
-      duur_min: 12,
-      breedte_m: 20,
-      lengte_m: 30,
-      orientatie: 'vrij',
-      veldzone: null,
-      teams: [{ grootte: 2, formaties: [] }, { grootte: 2, formaties: [] }],
-      aantal_neutralen: 0,
-      diagram: null,
-      created_at: '2024-01-01T00:00:00Z',
-    },
-    ...overrides,
+    oefeningen: basis,
+    ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
-function renderPlan(props: Partial<Parameters<typeof TrainingPlanEditor>[0]> = {}) {
+function renderPlan(props: Partial<Omit<Parameters<typeof TrainingPlanEditor>[0], 'initialOefeningen'>> & { initialOefeningen?: TrainingOefeningMetBezetting[] } = {}) {
   // Let op: initialDoelstelling mag expliciet `null` zijn (AC17 test dat
   // juist) — dus geen `??` gebruiken (die zou `null` ook naar de default
   // laten terugvallen). `'initialDoelstelling' in props` onderscheidt "niet

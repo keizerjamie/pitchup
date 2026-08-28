@@ -344,6 +344,10 @@ export const nl = {
     parallelNaastOption: 'Naast: {name}',
     parallelBadge: 'Parallel',
     parallelOpslaanMislukt: 'Wijzigen van de parallelle groep is mislukt. Probeer het opnieuw.',
+    // Badge naast het diagram (en extra ·-segment in de print-kopregel) zodra
+    // de effectieve bezetting van deze training afwijkt van de basisvorm
+    // waarop de tekening getekend is (lib/oefening-bezetting.ts).
+    diagramBasisvorm: 'tekening toont basisvorm ({vorm})',
   },
   oefeningen: {
     withoutDurationCount: '{n} zonder duur',
@@ -416,6 +420,14 @@ export const nl = {
     filterDurationLabel: 'Duur (min)',
     filterMinPlaceholder: 'min',
     filterMaxPlaceholder: 'max',
+    teamSizeMax: 'Tot en met',
+    rangeNone: '— vast —',
+    rangeHint: 'Leeg laten voor een vast aantal spelers.',
+    rangeFormationHint: 'Een bereik en een formatie gaan niet samen.',
+    neutralsMaxLabel: 'Neutralen tot en met',
+    neutralsBadgeRange: '{min}–{max} neutralen',
+    shapeLabel: 'Vorm',
+    fitsPresentChip: 'Past bij aanwezigen ({n})',
   },
   periodization: {
     nextTrainingTitle: 'Volgende training',
@@ -548,6 +560,22 @@ export const nl = {
     dragHint: 'Sleep een speler naar een team of tik erop om te selecteren.',
     teamDropZoneLabel: 'Sleepzone voor {team}',
     poolDropZoneLabel: 'Sleepzone voor de pool met nog in te delen spelers',
+  },
+  bezetting: {
+    heading: 'Bezetting deze training',
+    hint: 'Deze aantallen gelden alleen voor deze training.',
+    decreaseAria: 'Eén minder: {label}',
+    increaseAria: 'Eén meer: {label}',
+    totaal: 'Totaal {n} · {m} aanwezig',
+    confirm: 'Bezetting vastleggen',
+    reset: 'Terug naar basisvorm',
+    savedHint: 'Vastgelegd voor deze training',
+    // Voorstel 7: zolang er nog geen override is opgeslagen tonen de steppers
+    // al een suggestie, terwijl de labels/print ernaast nog de basisvorm
+    // tonen (eigenaarsbesluit 2) — zonder deze regel lijkt dat verschil op
+    // een bug.
+    notSavedHint: 'Nog niet vastgelegd — de rest van het plan toont nog de basisvorm.',
+    saveError: 'Vastleggen van de bezetting is mislukt. Probeer het opnieuw.',
   },
   parallelGroep: {
     heading: 'Parallelle verdeling',

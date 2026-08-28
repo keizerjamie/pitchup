@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { Oefening, OefeningCategorie, Veldzone, OEFENING_CATEGORIES, VALID_VELDZONES } from '@/lib/types'
 import type { OefeningInput } from '@/lib/oefening'
 import { filterOefeningen, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
+import { isFlexibel, sorteerOpPassendheid, bereikLabel } from '@/lib/oefening-bezetting'
 import { addOefeningToTraining, createAndAddOefening } from '@/app/actions/training-plan'
 import OefeningEditor from '@/components/OefeningEditor'
 import { useDict } from '@/lib/i18n-context'
@@ -15,12 +16,16 @@ interface Props {
   /** Open direct het "nieuwe oefening"-formulier, voorgevuld met deze categorie
    *  (periodiserings-suggestie "+ Voeg toe"-knop op de trainingsplanner). */
   presetCategorie?: OefeningCategorie
+  /** Aantal aanwezige spelers voor deze training (presentPlayerIds.length).
+   *  Verplicht (geen `?? 0`-fallback): voedt de "past bij aanwezigen"-chip,
+   *  die pas verschijnt bij minstens één aanwezige. */
+  aanwezigAantal: number
 }
 
 // "Kies uit bibliotheek"-sheet voor de trainingsplanner. Voegt een bestaande
 // bibliotheek-oefening aan de training toe, of opent OefeningEditor om
 // meteen een nieuwe oefening te maken én te koppelen.
-export default function OefeningPicker({ eventId, library, onClose, presetCategorie }: Props) {
+export default function OefeningPicker({ eventId, library, onClose, presetCategorie, aanwezigAantal }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   // Een periodiseringssuggestie opent de bibliotheek VOORGEFILTERD op die
@@ -40,7 +45,12 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
   // dus het aantal telt.
   const [toegevoegd, setToegevoegd] = useState<string[]>([])
 
-  const filtered = useMemo(() => filterOefeningen(library, filters), [library, filters])
+  // Exact eerst, daarna oplopende bereikbreedte (alleen hier — de
+  // bibliotheekpagina zelf blijft op created_at desc, eigenaarsbesluit).
+  const filtered = useMemo(
+    () => sorteerOpPassendheid(filterOefeningen(library, filters)),
+    [library, filters],
+  )
 
   const aantalToegevoegd = (id: string) => toegevoegd.filter((x) => x === id).length
 
@@ -238,6 +248,26 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
             {t.oefeningen.pickerCreateNew}
           </button>
 
+          {/* "Past bij aanwezigen"-chip: verborgen bij N=0 (eigenaarsbesluit 4)
+              — er is dan nog geen zinvol aantal om op te filteren. Zelfde
+              toggle-chip-stijl als OefeningLibrary.tsx (aria-pressed,
+              rounded-full, actief var(--warning)). */}
+          {aanwezigAantal > 0 && (
+            <button
+              type="button"
+              aria-pressed={filters.bevatAantal !== null}
+              onClick={() => setFilters((f) => ({ ...f, bevatAantal: f.bevatAantal === null ? aanwezigAantal : null }))}
+              className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${filters.bevatAantal !== null ? 'text-white' : 'text-muted'}`}
+              style={
+                filters.bevatAantal !== null
+                  ? { background: 'var(--warning)' }
+                  : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
+              }
+            >
+              {t.oefeningen.fitsPresentChip.replace('{n}', String(aanwezigAantal))}
+            </button>
+          )}
+
           {library.length === 0 ? (
             <p className="text-center text-faint text-sm py-6">{t.oefeningen.pickerEmptyLibrary}</p>
           ) : filtered.length === 0 ? (
@@ -257,6 +287,14 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
                     <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
                       {t.periodization.categories[o.categorie] ?? o.categorie}
                     </span>
+                    {isFlexibel(o) && (
+                      <span
+                        aria-label={`${t.oefeningen.shapeLabel}: ${bereikLabel(o)}`}
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted"
+                      >
+                        {bereikLabel(o)}
+                      </span>
+                    )}
                     {o.duur_min != null && <span className="text-xs text-faint">{o.duur_min} min</span>}
                     {aantalToegevoegd(o.id) > 0 && (
                       <span className="text-xs font-bold" style={{ color: 'var(--brand-accent)' }}>

@@ -1,3 +1,4 @@
+import { totaalBereik, type Bereik } from '@/lib/oefening-bezetting'
 import type { Oefening, OefeningCategorie, Veldzone } from '@/lib/types'
 
 // Gedeelde, framework-agnostische filter-/aggregatielogica voor de
@@ -13,6 +14,9 @@ export interface OefeningFilters {
   veldzone: Veldzone | null
   aantalMin: number | null
   aantalMax: number | null
+  // "Past bij aanwezigen (N)": alleen oefeningen waarvan het totaalbereik N
+  // BEVAT. null = filter uit. 0 is een geldige waarde, dus nooit truthiness.
+  bevatAantal: number | null
   duurMin: number | null
   duurMax: number | null
 }
@@ -25,6 +29,7 @@ export const EMPTY_OEFENING_FILTERS: OefeningFilters = {
   veldzone: null,
   aantalMin: null,
   aantalMax: null,
+  bevatAantal: null,
   duurMin: null,
   duurMax: null,
 }
@@ -54,6 +59,17 @@ export function matchesRange(value: number | null, min: number | null, max: numb
   return true
 }
 
+// Overlapt het bereik van een oefening met het gevraagde filterbereik? Zelfde
+// null-regels als matchesRange (0 is een geldige grens), maar dan als
+// INTERVAL-overlap: een flexibele oefening matcht zodra ook maar één van haar
+// toegestane speleraantallen binnen het filter valt.
+export function bereikOverlapt(b: Bereik, min: number | null, max: number | null): boolean {
+  if (min === null && max === null) return true
+  if (min !== null && b.max < min) return false
+  if (max !== null && b.min > max) return false
+  return true
+}
+
 // AND-combinatie van alle actieve filters. Een filter op null/'' doet niet mee.
 export function matchesOefeningFilters(o: Oefening, f: OefeningFilters): boolean {
   // Zelfde zoekgedrag als het bestaande zoekveld: getrimd, case-insensitive
@@ -63,7 +79,14 @@ export function matchesOefeningFilters(o: Oefening, f: OefeningFilters): boolean
   if (f.categorie !== null && o.categorie !== f.categorie) return false
   // Een oefening zonder veldzone matcht nooit zodra er op veldzone gefilterd wordt.
   if (f.veldzone !== null && o.veldzone !== f.veldzone) return false
-  if (!matchesRange(totaalAantalSpelers(o), f.aantalMin, f.aantalMax)) return false
+  // Speleraantal als bereik: voor een exacte oefening geldt
+  // bereik.min === bereik.max === totaalAantalSpelers(o), dus daar is het
+  // gedrag identiek aan vóór de flexibele oefenvormen.
+  const bereik = totaalBereik(o)
+  if (!bereikOverlapt(bereik, f.aantalMin, f.aantalMax)) return false
+  if (f.bevatAantal !== null && (bereik.min > f.bevatAantal || bereik.max < f.bevatAantal)) {
+    return false
+  }
   if (!matchesRange(o.duur_min, f.duurMin, f.duurMax)) return false
   return true
 }

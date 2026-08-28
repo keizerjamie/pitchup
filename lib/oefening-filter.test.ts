@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   EMPTY_OEFENING_FILTERS,
+  bereikOverlapt,
   filterOefeningen,
   matchesOefeningFilters,
   matchesRange,
@@ -25,6 +26,7 @@ function makeOefening(over: Partial<Oefening> & { id: string }): Oefening {
     veldzone: over.veldzone ?? null,
     teams: over.teams ?? [],
     aantal_neutralen: over.aantal_neutralen ?? 0,
+    aantal_neutralen_max: over.aantal_neutralen_max ?? null,
     diagram: over.diagram ?? null,
     created_at: over.created_at ?? '2026-01-01T00:00:00Z',
   }
@@ -230,6 +232,145 @@ describe('filterOefeningen — aantal spelers', () => {
   })
 })
 
+// ────────────────────────────────────────────────
+// bereikOverlapt / flexibele oefeningen (interval-overlap)
+// ────────────────────────────────────────────────
+describe('bereikOverlapt', () => {
+  const b = { min: 6, max: 8 }
+
+  it('laat alles door als min en max beide null zijn (filter inactief)', () => {
+    expect(bereikOverlapt(b, null, null)).toBe(true)
+  })
+
+  it('rekent de randen inclusief', () => {
+    expect(bereikOverlapt(b, 8, null)).toBe(true)
+    expect(bereikOverlapt(b, null, 6)).toBe(true)
+    expect(bereikOverlapt(b, 9, null)).toBe(false)
+    expect(bereikOverlapt(b, null, 5)).toBe(false)
+  })
+
+  it('matcht zodra de intervallen elkaar raken, ook zonder volledige dekking', () => {
+    expect(bereikOverlapt(b, 7, 7)).toBe(true)
+    expect(bereikOverlapt(b, 1, 6)).toBe(true)
+    expect(bereikOverlapt(b, 8, 20)).toBe(true)
+    expect(bereikOverlapt(b, 0, 5)).toBe(false)
+  })
+
+  it('behandelt 0 als een geldige actieve grens (geen falsy-zero bug)', () => {
+    expect(bereikOverlapt({ min: 0, max: 0 }, null, 0)).toBe(true)
+    expect(bereikOverlapt({ min: 1, max: 2 }, null, 0)).toBe(false)
+    expect(bereikOverlapt({ min: 0, max: 0 }, 0, 0)).toBe(true)
+  })
+})
+
+describe('filterOefeningen — flexibel aantal spelers', () => {
+  // Bereik 6..8 (team 4–6 plus een vast team van 2).
+  const zesTotAcht = makeOefening({
+    id: 'zes-acht',
+    teams: [
+      { grootte: 4, formaties: [], grootteMax: 6 },
+      { grootte: 2, formaties: [] },
+    ],
+    aantal_neutralen: 0,
+  })
+  // Bereik 9..10.
+  const negenTien = makeOefening({
+    id: 'negen-tien',
+    teams: [{ grootte: 9, formaties: [], grootteMax: 10 }],
+    aantal_neutralen: 0,
+  })
+  const list = [zesTotAcht, negenTien]
+
+  it('matcht zodra het bereik het filter overlapt, ook op de randen', () => {
+    expect(matchesOefeningFilters(zesTotAcht, filters({ aantalMin: 8 }))).toBe(true)
+    expect(matchesOefeningFilters(zesTotAcht, filters({ aantalMax: 6 }))).toBe(true)
+    expect(matchesOefeningFilters(zesTotAcht, filters({ aantalMin: 7, aantalMax: 7 }))).toBe(true)
+  })
+
+  it('matcht niet als het bereik volledig buiten het filter valt', () => {
+    expect(matchesOefeningFilters(zesTotAcht, filters({ aantalMin: 9 }))).toBe(false)
+    expect(matchesOefeningFilters(zesTotAcht, filters({ aantalMax: 5 }))).toBe(false)
+    expect(ids(filterOefeningen(list, filters({ aantalMin: 9 })))).toEqual(['negen-tien'])
+  })
+
+  it('houdt met bevatAantal alleen de oefeningen over waarvan het bereik N bevat', () => {
+    expect(ids(filterOefeningen(list, filters({ bevatAantal: 7 })))).toEqual(['zes-acht'])
+    expect(ids(filterOefeningen(list, filters({ bevatAantal: 9 })))).toEqual(['negen-tien'])
+    // Randen tellen mee, daarbuiten niets.
+    expect(ids(filterOefeningen(list, filters({ bevatAantal: 6 })))).toEqual(['zes-acht'])
+    expect(filterOefeningen(list, filters({ bevatAantal: 11 }))).toEqual([])
+  })
+
+  it('behandelt bevatAantal: 0 als actief filter (0 is niet "geen filter")', () => {
+    const leeg = makeOefening({ id: 'leeg', teams: [], aantal_neutralen: 0 })
+    expect(ids(filterOefeningen([...list, leeg], filters({ bevatAantal: 0 })))).toEqual(['leeg'])
+  })
+
+  it('volgt ook een flexibel aantal neutralen', () => {
+    const flexibeleNeutralen = makeOefening({
+      id: 'neutralen',
+      teams: [{ grootte: 4, formaties: [] }],
+      aantal_neutralen: 0,
+      aantal_neutralen_max: 4,
+    })
+    expect(matchesOefeningFilters(flexibeleNeutralen, filters({ bevatAantal: 4 }))).toBe(true)
+    expect(matchesOefeningFilters(flexibeleNeutralen, filters({ bevatAantal: 8 }))).toBe(true)
+    expect(matchesOefeningFilters(flexibeleNeutralen, filters({ bevatAantal: 9 }))).toBe(false)
+  })
+
+  it('negeert een bereik dat niet geldig is (formatie ⇒ exact)', () => {
+    const metFormatie = makeOefening({
+      id: 'formatie',
+      teams: [{ grootte: 4, formaties: ['2-0-1'], grootteMax: 6 }],
+      aantal_neutralen: 0,
+    })
+    expect(matchesOefeningFilters(metFormatie, filters({ bevatAantal: 4 }))).toBe(true)
+    expect(matchesOefeningFilters(metFormatie, filters({ bevatAantal: 6 }))).toBe(false)
+  })
+})
+
+describe('filterOefeningen — exacte oefeningen: gedrag ongewijzigd', () => {
+  // Exact dezelfde fixtures en verwachtingen als het blok "aantal spelers"
+  // hierboven; dit blok bewijst dat de overstap van exacte som naar
+  // interval-overlap niets aan bestaande oefeningen verandert.
+  const list = [
+    makeOefening({ id: 'vier', teams: [{ grootte: 2, formaties: [] }], aantal_neutralen: 2 }),
+    makeOefening({ id: 'acht', teams: [{ grootte: 4, formaties: [] }], aantal_neutralen: 4 }),
+    makeOefening({
+      id: 'twaalf',
+      teams: [
+        { grootte: 5, formaties: [] },
+        { grootte: 5, formaties: [] },
+      ],
+      aantal_neutralen: 2,
+    }),
+  ]
+
+  it('filtert exact zoals de oude exacte som', () => {
+    for (const o of list) {
+      const totaal = totaalAantalSpelers(o)
+      expect(matchesOefeningFilters(o, filters({ aantalMin: totaal, aantalMax: totaal }))).toBe(true)
+      expect(matchesOefeningFilters(o, filters({ aantalMin: totaal + 1 }))).toBe(false)
+      expect(matchesOefeningFilters(o, filters({ aantalMax: totaal - 1 }))).toBe(false)
+      expect(matchesOefeningFilters(o, filters({ bevatAantal: totaal }))).toBe(true)
+      expect(matchesOefeningFilters(o, filters({ bevatAantal: totaal + 1 }))).toBe(false)
+    }
+    expect(ids(filterOefeningen(list, filters({ aantalMin: 8 })))).toEqual(['acht', 'twaalf'])
+    expect(ids(filterOefeningen(list, filters({ aantalMax: 8 })))).toEqual(['vier', 'acht'])
+    expect(ids(filterOefeningen(list, filters({ aantalMin: 8, aantalMax: 8 })))).toEqual(['acht'])
+  })
+
+  it('behandelt aantalMin: 0 nog steeds als actief filter', () => {
+    expect(ids(filterOefeningen(list, filters({ aantalMin: 0 })))).toEqual([
+      'vier',
+      'acht',
+      'twaalf',
+    ])
+    const metNul = [...list, makeOefening({ id: 'nul', teams: [], aantal_neutralen: 0 })]
+    expect(ids(filterOefeningen(metNul, filters({ aantalMin: 0, aantalMax: 0 })))).toEqual(['nul'])
+  })
+})
+
 describe('filterOefeningen — duur', () => {
   const list = [
     makeOefening({ id: 'kort', duur_min: 10 }),
@@ -391,9 +532,12 @@ describe('EMPTY_OEFENING_FILTERS', () => {
       veldzone: null,
       aantalMin: null,
       aantalMax: null,
+      bevatAantal: null,
       duurMin: null,
       duurMax: null,
     })
+    // Expliciet: de "past bij aanwezigen"-chip staat standaard uit.
+    expect(EMPTY_OEFENING_FILTERS.bevatAantal).toBeNull()
   })
 
   it('levert de ongefilterde lijst op', () => {

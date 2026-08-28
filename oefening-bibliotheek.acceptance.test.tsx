@@ -25,6 +25,7 @@ import { nl } from '@/messages/nl'
 import type { OefeningInput } from '@/lib/oefening'
 import type { Oefening, TrainingOefeningWithData } from '@/lib/types'
 import { formationsForSize } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
 import OefeningEditor from '@/components/OefeningEditor'
 import OefeningPicker from '@/components/OefeningPicker'
@@ -108,9 +109,10 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {}): TrainingOefeningWithData {
+function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {}): TrainingOefeningMetBezetting {
   const { oefening, ...rest } = overrides
-  return {
+  const basis = makeOefening(oefening)
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team-1',
     event_id: 'e1',
@@ -120,9 +122,10 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening
     genest_in: null,
     spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefening(oefening),
+    oefeningen: basis,
     ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
 beforeEach(() => {
@@ -205,7 +208,7 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
     const onClose = vi.fn()
     render(
       <DictProvider dict={nl}>
-        <OefeningPicker eventId="e1" library={library} onClose={onClose} />
+        <OefeningPicker eventId="e1" library={library} onClose={onClose} aanwezigAantal={0} />
       </DictProvider>,
     )
     fireEvent.click(screen.getByText('Rondo 4v2'))
@@ -230,7 +233,7 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
     const onClose = vi.fn()
     render(
       <DictProvider dict={nl}>
-        <OefeningPicker eventId="e1" library={[]} onClose={onClose} />
+        <OefeningPicker eventId="e1" library={[]} onClose={onClose} aanwezigAantal={0} />
       </DictProvider>,
     )
     fireEvent.click(screen.getByText(nl.oefeningen.pickerCreateNew))

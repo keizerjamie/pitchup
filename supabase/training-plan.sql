@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS oefeningen (
   )),
   teams            JSONB NOT NULL DEFAULT '[]' CHECK (jsonb_array_length(teams) <= 6),
   aantal_neutralen SMALLINT NOT NULL DEFAULT 0 CHECK (aantal_neutralen BETWEEN 0 AND 30),
+  -- Bovengrens van een flexibel aantal neutralen (NULL = vast aantal) hoort bij
+  -- de elastische oefenvormen; de teamkant daarvan (grootteMax) leeft in de
+  -- JSONB-kolom `teams`. Bestaande installaties: draai
+  -- supabase/oefening-flexibel-aantal.sql.
   duur_min     SMALLINT,
   -- Optioneel tactiekbord (markers/materiaal/lijnen). NULL = geen tekening.
   -- Voor bestaande installaties: draai supabase/oefening-diagram.sql.
@@ -68,6 +72,11 @@ CREATE TABLE IF NOT EXISTS training_oefeningen (
   -- mag meerdere keren als aparte koppelingsrij aan één training hangen (eigen
   -- spelerindeling, stap_override en volgorde per rij). Bestaande installaties:
   -- draai supabase/oefening-meerdere-keren.sql.
+  --
+  -- `aantallen_override` (JSONB, NULL = geen override) legt de TRAINING-
+  -- specifieke bezetting van een flexibele oefening vast. Staat hier bewust
+  -- niet in de fresh install, net als spelerindeling/parallel_*: draai
+  -- supabase/oefening-flexibel-aantal.sql.
 );
 
 -- 6. Indexes

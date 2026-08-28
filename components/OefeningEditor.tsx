@@ -11,6 +11,7 @@ import {
 } from '@/lib/types'
 import { VALID_TEAM_SIZES, formatiesVoorTeam, basisFormatieDef, isFormatieGeldigVoorTeam } from '@/lib/formaties'
 import type { OefeningInput } from '@/lib/oefening'
+import { teamBereikLabel } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
 import DiagramEditor from '@/components/DiagramEditor'
 import { useDict } from '@/lib/i18n-context'
@@ -29,6 +30,10 @@ interface TeamRow {
   grootte: number | null
   formaties: string[]
   keeperInGrootte: boolean
+  // Bovengrens van een flexibel team (bereikVoorTeam, lib/oefening-bezetting.ts).
+  // null = vast/exact team. Nooit samen met een gekozen formatie — zie
+  // handleTeamSizeChange/selectTeamFormatie/setTeamGrootteMax.
+  grootteMax: number | null
 }
 
 interface Props {
@@ -58,7 +63,13 @@ function teamsToRows(teams: OefeningTeam[], categorie: OefeningCategorie): TeamR
     )
     const basis = basisFormatieDef({ grootte: t.grootte, formaties: geldig, keeperInGrootte })
     const formaties = basis ? [basis.key] : []
-    return { grootte: t.grootte, formaties, keeperInGrootte }
+    // Dit is exact de teamsToRows-valkuil (geheugen.md): de weergave leest
+    // grootteMax al genormaliseerd (basisFormatieDef/FormationField), maar
+    // zonder deze regel zou de editor-INITIALISATIE het bereik stilzwijgend
+    // laten vallen zodra de trainer een bestaande oefening opent en opslaat.
+    // Een rij met een (nog geldige) formatie krijgt nooit een bereik.
+    const grootteMax = geldig.length > 0 ? null : (t.grootteMax ?? null)
+    return { grootte: t.grootte, formaties, keeperInGrootte, grootteMax }
   })
 }
 
@@ -77,6 +88,9 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   const [veldzone, setVeldzone] = useState<Veldzone | null>(initial?.veldzone ?? null)
   const [teams, setTeams] = useState<TeamRow[]>(teamsToRows(initial?.teams ?? [], initialCategorie))
   const [aantalNeutralen, setAantalNeutralen] = useState<number>(initial?.aantal_neutralen ?? 0)
+  // Bovengrens van een flexibel aantal neutralen (supabase/oefening-flexibel-
+  // aantal.sql). null = vast aantal.
+  const [aantalNeutralenMax, setAantalNeutralenMax] = useState<number | null>(initial?.aantal_neutralen_max ?? null)
   const [diagram, setDiagram] = useState<Diagram | null>(initial?.diagram ?? null)
   const [showDiagramEditor, setShowDiagramEditor] = useState(false)
   // orientatie heeft (net als voorheen) geen eigen invoerveld in deze sheet;
@@ -86,14 +100,14 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   // Teams zoals ze meegaan naar het diagram: alleen rijen met een gekozen
   // grootte (zelfde filter als handleSubmit hieronder).
   const diagramTeams: OefeningTeam[] = teams
-    .filter((tm): tm is { grootte: number; formaties: string[]; keeperInGrootte: boolean } => tm.grootte !== null)
+    .filter((tm): tm is TeamRow & { grootte: number } => tm.grootte !== null)
     .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties, keeperInGrootte: tm.keeperInGrootte }))
 
   const catLabel = (key: string) => t.periodization.categories[key] ?? key
 
   function addTeam() {
     setTeams((prev) =>
-      prev.length >= MAX_TEAMS ? prev : [...prev, { grootte: null, formaties: [], keeperInGrootte: true }],
+      prev.length >= MAX_TEAMS ? prev : [...prev, { grootte: null, formaties: [], keeperInGrootte: true, grootteMax: null }],
     )
   }
 
@@ -110,7 +124,12 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
         newSize === null
           ? []
           : tm.formaties.filter((key) => isFormatieGeldigVoorTeam(key, { grootte: newSize, keeperInGrootte }, categorie))
-      return { grootte: newSize, formaties, keeperInGrootte }
+      // Stille-filter-precedent (zelfde als de formatieselectie hierboven):
+      // een bovengrens die onder de nieuwe grootte zou komen te liggen
+      // vervalt, net als een niet-meer-passende formatie.
+      const grootteMax =
+        newSize === null ? null : (tm.grootteMax !== null && tm.grootteMax >= newSize ? tm.grootteMax : null)
+      return { grootte: newSize, formaties, keeperInGrootte, grootteMax }
     }))
   }
 
@@ -120,8 +139,15 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
     setTeams((prev) => prev.map((tm, i) => {
       if (i !== index) return tm
       const formaties = tm.formaties.includes(key) ? [] : [key]
-      return { ...tm, formaties }
+      // Defensief (de UI disabled de chips al zodra grootteMax gezet is, zie
+      // de teamrij hieronder): een formatie en een bereik gaan nooit samen.
+      return { ...tm, formaties, grootteMax: formaties.length > 0 ? null : tm.grootteMax }
     }))
+  }
+
+  // Nieuw select "Tot en met": leeg (`''`) → vast/exact team.
+  function setTeamGrootteMax(index: number, value: number | null) {
+    setTeams((prev) => prev.map((tm, i) => (i === index ? { ...tm, grootteMax: value } : tm)))
   }
 
   // Keeper-schakelaar is per team: wijzigen van team A raakt team B niet.
@@ -159,9 +185,17 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
       orientatie,
       veldzone,
       teams: teams
-        .filter((tm): tm is { grootte: number; formaties: string[]; keeperInGrootte: boolean } => tm.grootte !== null)
-        .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties, keeperInGrootte: tm.keeperInGrootte })),
+        .filter((tm): tm is TeamRow & { grootte: number } => tm.grootte !== null)
+        .map((tm) => ({
+          grootte: tm.grootte,
+          formaties: tm.formaties,
+          keeperInGrootte: tm.keeperInGrootte,
+          // Spread-vorm (zelfde precedent als normalizeOefeningTeam/validateOefening):
+          // een exact team stuurt geen `grootteMax: null`-ruis mee.
+          ...(tm.grootteMax !== null ? { grootteMax: tm.grootteMax } : {}),
+        })),
       aantal_neutralen: aantalNeutralen,
+      aantal_neutralen_max: aantalNeutralenMax,
       diagram,
     }
     startTransition(async () => {
@@ -237,8 +271,8 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
             />
           </div>
 
-          {/* Duur + Aantal neutralen */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Duur + Aantal neutralen (+ bovengrens) */}
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.duration}</label>
               <input
@@ -261,6 +295,19 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                   setAantalNeutralen(clamped)
                 }}
                 className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink"
+              />
+            </div>
+            <div>
+              <label htmlFor="oefening-neutralen-max" className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.neutralsMaxLabel}</label>
+              <input
+                id="oefening-neutralen-max"
+                type="number" min={aantalNeutralen} max={30}
+                value={aantalNeutralenMax ?? ''}
+                // Eerst op '' testen, nooit `|| null` — 0 is een geldige
+                // bovengrens bij een basisaantal van 0 (falsy-zero-valkuil).
+                onChange={(e) => setAantalNeutralenMax(e.target.value === '' ? null : Number(e.target.value))}
+                placeholder={t.oefeningen.rangeNone}
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
               />
             </div>
           </div>
@@ -368,6 +415,27 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                           ))}
                         </select>
                       </div>
+                      <div className="flex-1 min-w-0">
+                        <label htmlFor={`team-size-max-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.teamSizeMax}</label>
+                        <select
+                          id={`team-size-max-${i}`}
+                          value={team.grootteMax ?? ''}
+                          disabled={team.grootte === null || team.formaties.length > 0}
+                          onChange={(e) => setTeamGrootteMax(i, e.target.value ? Number(e.target.value) : null)}
+                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface disabled:opacity-50"
+                        >
+                          <option value="">{t.oefeningen.rangeNone}</option>
+                          {team.grootte !== null && TEAM_SIZES.filter((n) => n >= (team.grootte as number)).map((n) => (
+                            <option key={n} value={n}>{n}</option>
+                          ))}
+                        </select>
+                        {/* Bereik-hint: legt uit wat dit veld doet, of waarom
+                            het (samen met de formatiechips hieronder) disabled
+                            staat — nooit de een de ander stilzwijgend wissen. */}
+                        <p className="text-[11px] text-faint mt-1">
+                          {team.formaties.length > 0 ? t.oefeningen.rangeFormationHint : t.oefeningen.rangeHint}
+                        </p>
+                      </div>
                       <button
                         type="button"
                         onClick={() => removeTeam(i)}
@@ -421,13 +489,15 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                           <div role="group" aria-label={t.oefeningen.formation} className="flex flex-wrap gap-2">
                             {formationOptions.map((f) => {
                               const selected = team.formaties.includes(f.key)
+                              const bereikActief = team.grootteMax !== null
                               return (
                                 <button
                                   key={f.key}
                                   type="button"
                                   aria-pressed={selected}
+                                  disabled={bereikActief}
                                   onClick={() => selectTeamFormatie(i, f.key)}
-                                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
+                                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[var(--border-soft)] ${
                                     selected
                                       ? 'bg-warning text-white border-warning'
                                       : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
@@ -450,10 +520,22 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                           </span>
                         )
                       )}
+                      {team.grootte !== null && team.grootteMax !== null && (
+                        <p className="text-[11px] text-faint mt-1">{t.oefeningen.rangeFormationHint}</p>
+                      )}
                     </div>
 
-                    {basis && (
-                      <FormationField positions={basis.positions} label={`${team.grootte} · ${basis.label}`} sizePx={110} />
+                    {/* Preview: bij een gekozen formatie de bekende
+                        `grootte · label`; bij een bereik (per definitie geen
+                        formatie) het bereik-label, zodat de trainer het ook
+                        hier terugziet — nu ook zonder formatie getoond zodra
+                        er een bereik is. */}
+                    {team.grootte !== null && (basis || team.grootteMax !== null) && (
+                      <FormationField
+                        positions={basis?.positions ?? []}
+                        label={`${teamBereikLabel({ grootte: team.grootte, formaties: team.formaties, keeperInGrootte: team.keeperInGrootte, grootteMax: team.grootteMax })}${basis ? ` · ${basis.label}` : ''}`}
+                        sizePx={110}
+                      />
                     )}
                   </div>
                 )

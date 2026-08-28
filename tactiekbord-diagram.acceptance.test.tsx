@@ -25,6 +25,7 @@ import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { OefeningInput } from '@/lib/oefening'
 import type { Diagram, Oefening, OefeningTeam, TrainingOefeningWithData, Veldzone } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import { generateDiagram, DIAGRAM_MAX_MARKERS, DIAGRAM_MAX_MATERIAAL, DIAGRAM_MAX_LIJNEN, DIAGRAM_MAX_PUNTEN } from '@/lib/diagram'
 import { validateOefening, oefeningRow } from '@/lib/oefening'
 import DiagramEditor from '@/components/DiagramEditor'
@@ -104,9 +105,10 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {}): TrainingOefeningWithData {
+function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {}): TrainingOefeningMetBezetting {
   const { oefening, ...rest } = overrides
-  return {
+  const basis = makeOefening(oefening)
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team-1',
     event_id: 'e1',
@@ -116,9 +118,10 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening
     genest_in: null,
     spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefening(oefening),
+    oefeningen: basis,
     ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
 // ── Pointer-helpers (zelfde aanpak als DiagramEditor.test.tsx: jsdom heeft

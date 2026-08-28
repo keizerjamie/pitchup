@@ -45,6 +45,7 @@ import { fr } from '@/messages/fr'
 import { es } from '@/messages/es'
 import type { Dict } from '@/messages/nl'
 import type { Oefening, OefeningCategorie, TrainingOefeningWithData } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
@@ -135,9 +136,10 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {}): TrainingOefeningWithData {
+function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {}): TrainingOefeningMetBezetting {
   const { oefening, ...rest } = overrides
-  return {
+  const basis = makeOefening(oefening)
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team-1',
     event_id: 'e1',
@@ -147,13 +149,14 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> & { oefening
     genest_in: null,
     spelerindeling: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefening(oefening),
+    oefeningen: basis,
     ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
 function renderPlan(
-  koppelingen: TrainingOefeningWithData[],
+  koppelingen: TrainingOefeningMetBezetting[],
   opts: { currentSteps?: Record<string, number | null>; hasNulmeting?: boolean; dict?: Dict } = {},
 ) {
   return render(

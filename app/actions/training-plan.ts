@@ -6,6 +6,8 @@ import { assertOwnEvent, assertOwnOefening, getOwnPlayerIds } from '@/lib/authz'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 import { validateSpelerindeling } from '@/lib/spelerindeling'
 import { validateParallelSpelers, assertGeenOverlap } from '@/lib/parallel-groep'
+import { valideerAantallenOverride, type BezettingBasis } from '@/lib/oefening-bezetting'
+import { normalizeOefeningTeams, type AantallenOverride } from '@/lib/types'
 import { joinedCategorie } from '@/lib/periodization'
 import { clampStapOverride } from '@/lib/periodization-stappen'
 import { genericError, logError } from '@/lib/errors'
@@ -386,6 +388,72 @@ export async function saveSpelerindeling(
     .eq('team_id', user.id)
 
   if (error) throw genericError('trainingPlan.saveSpelerindeling', error)
+  revalidatePath(`/events/${eventId}/training-plan`)
+}
+
+// Training-specifieke BEZETTING van één gekoppelde oefening opslaan: hoeveel
+// spelers er vandaag in elk (flexibel) team staan en hoeveel neutralen er zijn.
+// Delta-vorm — null per element betekent "gebruik de basisvorm", en `null` als
+// hele payload wist de override ("Terug naar basisvorm"). Raakt UITSLUITEND
+// training_oefeningen, nooit de bibliotheek-oefening `oefeningen`.
+//
+// De toegestane bereiken komen ALTIJD uit de GEJOINDE bibliotheek-oefening
+// binnen een op team_id gescopede select — nooit uit de client. Een waarde
+// buiten dat bereik levert geen fout op maar wordt geclampt (zelfde per-veld-
+// clamp-gedachte als updateKoppeling): twee tabbladen of een inmiddels
+// verkleind bereik horen geen foutmelding op te leveren.
+//
+// Argumentvolgorde bewust identiek aan saveSpelerindeling.
+export async function saveAantallenOverride(
+  koppelingId: string,
+  eventId: string,
+  override: AantallenOverride | null,
+): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  await assertOwnEvent(supabase, eventId, user.id)
+
+  // Koppeling ophalen + tenant/event-scopen, inclusief de grenzen van de
+  // gejoinde bibliotheek-oefening.
+  const { data: koppeling } = await supabase
+    .from('training_oefeningen')
+    .select('id, oefeningen(teams, aantal_neutralen, aantal_neutralen_max)')
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+    .maybeSingle()
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+
+  // De join levert (afhankelijk van de client-typing) een object óf een array —
+  // zelfde defensieve uitpakvorm als saveSpelerindeling.
+  const joined = (koppeling as { oefeningen?: unknown }).oefeningen
+  const oef = (Array.isArray(joined) ? joined[0] : joined) as
+    | { teams?: unknown; aantal_neutralen?: unknown; aantal_neutralen_max?: unknown }
+    | null
+    | undefined
+  const neutralenMax = oef?.aantal_neutralen_max
+
+  // normalizeOefeningTeams is hier niet optioneel: de ruwe JSONB kan legacy-vorm
+  // zijn, en zonder normalisatie wordt `grootteMax` niet gelezen en valt elk
+  // bereik terug op exact.
+  const basis: BezettingBasis = {
+    teams: normalizeOefeningTeams(oef?.teams),
+    aantal_neutralen: Number(oef?.aantal_neutralen) || 0,
+    aantal_neutralen_max: typeof neutralenMax === 'number' ? neutralenMax : null,
+  }
+
+  const clean = valideerAantallenOverride(override, basis)
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({ aantallen_override: clean })
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', user.id)
+
+  if (error) throw genericError('trainingPlan.saveAantallenOverride', error)
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 

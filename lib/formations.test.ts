@@ -143,6 +143,27 @@ describe('normalizeOefeningTeam (keeperInGrootte)', () => {
   })
 })
 
+describe('normalizeOefeningTeam (grootteMax)', () => {
+  it('leest een geldige bovengrens mee', () => {
+    expect(normalizeOefeningTeam({ grootte: 4, formaties: [], grootteMax: 6 }).grootteMax).toBe(6)
+  })
+
+  it('laat het veld WEG als er geen bereik is (geen null-ruis in de JSONB)', () => {
+    const zonder = normalizeOefeningTeam({ grootte: 4, formaties: [] })
+    expect(Object.keys(zonder).sort()).toEqual(['formaties', 'grootte', 'keeperInGrootte'])
+    const metNull = normalizeOefeningTeam({ grootte: 4, formaties: [], grootteMax: null })
+    expect(Object.keys(metNull).sort()).toEqual(['formaties', 'grootte', 'keeperInGrootte'])
+  })
+
+  it('gooit een bovengrens onder de grootte of niet-numerieke rommel weg (vormnormalisatie)', () => {
+    // Afwijzen bij het OPSLAAN is de taak van validateOefening; hier gaat het
+    // alleen om een leesbare vorm.
+    expect(normalizeOefeningTeam({ grootte: 4, grootteMax: 3 }).grootteMax).toBeUndefined()
+    expect(normalizeOefeningTeam({ grootte: 4, grootteMax: 'zes' }).grootteMax).toBeUndefined()
+    expect(normalizeOefeningTeam({ grootte: 4, grootteMax: 6.9 }).grootteMax).toBe(6)
+  })
+})
+
 describe('normalizeOefeningTeams', () => {
   it('normaliseert een gemengde legacy/nieuwe lijst', () => {
     expect(

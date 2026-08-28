@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
 import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
@@ -89,10 +90,18 @@ export default async function TrainingPlanPage({ params }: Props) {
   // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie};
   // normaliseer naar {grootte, formaties} vóórdat de UI de data ziet — zowel op
   // de gejoinde koppelingen als op de losse bibliotheeklijst.
-  const oefeningen = ((oefeningenResult.data ?? []) as unknown as TrainingOefeningWithData[]).map((k) => ({
-    ...k,
-    oefeningen: { ...k.oefeningen, teams: normalizeOefeningTeams(k.oefeningen?.teams) },
-  }))
+  //
+  // Hier wordt ook, ÉÉN keer, de effectieve bezetting berekend
+  // (concretiseerBezetting): basisvorm + eventuele training-specifieke
+  // override, geclampt tegen het ACTUELE bereik van de bibliotheek-oefening.
+  // `k.oefeningen.teams` blijft daarna de BASISVORM — nooit overschrijven; de
+  // effectieve groottes staan uitsluitend in `k.bezetting.teams`. Zo draaien
+  // alle consumers (FormationField-labels, TeamIndelingEditor, groepStatus,
+  // print) op precies dezelfde ene uitkomst.
+  const oefeningen: TrainingOefeningMetBezetting[] = ((oefeningenResult.data ?? []) as unknown as TrainingOefeningWithData[]).map((k) => {
+    const oefening = { ...k.oefeningen, teams: normalizeOefeningTeams(k.oefeningen?.teams) }
+    return { ...k, oefeningen: oefening, bezetting: concretiseerBezetting(oefening, k.aantallen_override ?? null) }
+  })
   const library: Oefening[] = (libraryResult.data ?? []).map((o) => ({
     ...o,
     teams: normalizeOefeningTeams(o.teams),

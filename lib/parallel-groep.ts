@@ -21,12 +21,17 @@ import type { OefeningTeam, ParallelSpelers, TrainingOefeningWithData } from '@/
 
 // Eén blok in het trainingsplan: óf één losse koppeling, óf een parallelle
 // groep met meerdere leden.
-export interface ParallelBlok {
+//
+// Generiek in het ledentype, met TrainingOefeningWithData als default: zo
+// blijven afgeleide velden die de leesgrens toevoegt (bv. `bezetting`,
+// TrainingOefeningMetBezetting in lib/oefening-bezetting.ts) behouden in plaats
+// van uit het type te vallen. Bestaande aanroepen wijzigen niet.
+export interface ParallelBlok<T extends TrainingOefeningWithData = TrainingOefeningWithData> {
   // Stabiele React-key: 'g:<groepId>' voor een groep, 'k:<koppelingId>' voor een
   // losse koppeling.
   key: string
   groepId: string | null
-  leden: TrainingOefeningWithData[]
+  leden: T[]
 }
 
 // Groepssleutel van één rij. Een koppeling zonder groep vormt zijn eigen blok.
@@ -42,11 +47,13 @@ function blokSleutel(rij: { id: string; parallel_groep_id?: string | null }): st
 // teruggegeven (groepId: null). Dat dekt het weeskind dat kan ontstaan als een
 // bibliotheek-oefening hard verwijderd wordt en de koppelrij via FK CASCADE
 // verdwijnt zonder dat de groepsopruiming van de server actions langskomt.
-export function blokkenVanKoppelingen(koppelingen: TrainingOefeningWithData[]): ParallelBlok[] {
+export function blokkenVanKoppelingen<T extends TrainingOefeningWithData>(
+  koppelingen: T[],
+): ParallelBlok<T>[] {
   const gesorteerd = sorteerKoppelingen(koppelingen)
 
-  const blokken: ParallelBlok[] = []
-  const perSleutel = new Map<string, ParallelBlok>()
+  const blokken: ParallelBlok<T>[] = []
+  const perSleutel = new Map<string, ParallelBlok<T>>()
 
   for (const koppeling of gesorteerd) {
     const sleutel = blokSleutel(koppeling)
@@ -55,7 +62,7 @@ export function blokkenVanKoppelingen(koppelingen: TrainingOefeningWithData[]): 
       bestaand.leden.push(koppeling)
       continue
     }
-    const blok: ParallelBlok = {
+    const blok: ParallelBlok<T> = {
       key: sleutel,
       groepId: koppeling.parallel_groep_id ?? null,
       leden: [koppeling],
@@ -77,7 +84,7 @@ export function blokkenVanKoppelingen(koppelingen: TrainingOefeningWithData[]): 
 
 // Deterministische sortering: volgorde → created_at → id. Leden van één groep
 // delen hun `volgorde`, dus created_at/id bepalen de volgorde binnen een blok.
-function sorteerKoppelingen(koppelingen: TrainingOefeningWithData[]): TrainingOefeningWithData[] {
+function sorteerKoppelingen<T extends TrainingOefeningWithData>(koppelingen: T[]): T[] {
   return [...koppelingen].sort(
     (a, b) =>
       (a.volgorde ?? 0) - (b.volgorde ?? 0) ||
@@ -215,6 +222,11 @@ export interface ParallelLid {
   id: string
   parallel_spelers?: ParallelSpelers | null
   oefeningen?: BenodigdAantalInput | null
+  // Effectieve bezetting van deze koppeling (concretiseerBezetting in
+  // lib/oefening-bezetting.ts). Aanwezig → leidend boven `oefeningen`: een
+  // training-specifieke bezetting bepaalt hoeveel spelers deze oefening vandaag
+  // nodig heeft. Afwezig → het bestaande gedrag, de basisvorm.
+  bezetting?: BenodigdAantalInput | null
 }
 
 export function groepStatus(params: {
@@ -231,7 +243,7 @@ export function groepStatus(params: {
     const spelers = Array.isArray(lid.parallel_spelers) ? lid.parallel_spelers : []
     for (const id of spelers) ingedeeld.add(id)
 
-    const benodigd = benodigdAantal(lid.oefeningen)
+    const benodigd = benodigdAantal(lid.bezetting ?? lid.oefeningen)
     const toegewezen = spelers.length
     perLid.push({
       koppelingId: lid.id,

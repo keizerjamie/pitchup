@@ -109,6 +109,16 @@ describe('blokkenVanKoppelingen', () => {
   it('geeft een lege lijst bij geen koppelingen', () => {
     expect(blokkenVanKoppelingen([])).toEqual([])
   })
+
+  it('behoudt afgeleide velden die de leesgrens toevoegt (generiek ledentype)', () => {
+    // De trainingsplan-pagina hangt per koppeling een `bezetting` aan. Zou
+    // blokkenVanKoppelingen dat wegtypen, dan viel de effectieve bezetting
+    // stilzwijgend uit de parallelle-groep-weergave.
+    const bezetting = { teams: [{ grootte: 3, formaties: [] }], aantal_neutralen: 0, aangepast: true }
+    const blokken = blokkenVanKoppelingen([{ ...makeKoppeling({ id: 'k1' }), bezetting }])
+    // Typetest: `.bezetting` moet zonder cast bereikbaar zijn op het lid.
+    expect(blokken[0].leden[0].bezetting).toBe(bezetting)
+  })
 })
 
 // ────────────────────────────────────────────────
@@ -282,6 +292,41 @@ describe('groepStatus', () => {
     expect(status.perLid[0]).toEqual({ koppelingId: 'k1', toegewezen: 1, benodigd: null, tekort: 0, overschot: 0 })
     // Zonder benodigd aantal blokkeert dit lid het "compleet"-oordeel niet.
     expect(status.compleet).toBe(true)
+  })
+
+  it('rekent met de effectieve bezetting zodra die is meegegeven', () => {
+    // Basisvorm 2v2 (4 spelers), maar deze training draait 3v3 (6 spelers).
+    const status = groepStatus({
+      leden: [
+        {
+          id: 'k1',
+          parallel_spelers: [P1, P2, P3, P4],
+          oefeningen: oefening4,
+          bezetting: { teams: [{ grootte: 3, formaties: [] }, { grootte: 3, formaties: [] }], aantal_neutralen: 0 },
+        },
+      ],
+      presentPlayerIds: [P1, P2, P3, P4],
+    })
+    expect(status.perLid[0].benodigd).toBe(6)
+    expect(status.perLid[0].tekort).toBe(2)
+    expect(status.compleet).toBe(false)
+  })
+
+  it('valt zonder bezetting terug op de basisvorm (bestaand gedrag)', () => {
+    const zonder = groepStatus({
+      leden: [{ id: 'k1', parallel_spelers: [P1, P2, P3, P4], oefeningen: oefening4 }],
+      presentPlayerIds: [P1, P2, P3, P4],
+    })
+    expect(zonder.perLid[0].benodigd).toBe(4)
+    expect(zonder.compleet).toBe(true)
+
+    // Ook een expliciete null-bezetting (kolom bestaat, geen override) volgt
+    // de basisvorm — `?? `, geen truthiness.
+    const metNull = groepStatus({
+      leden: [{ id: 'k1', parallel_spelers: [P1, P2, P3, P4], oefeningen: oefening4, bezetting: null }],
+      presentPlayerIds: [P1, P2, P3, P4],
+    })
+    expect(metNull.perLid[0].benodigd).toBe(4)
   })
 
   it('gaat om met een ontbrekende parallel_spelers-kolom (pre-migratie)', () => {

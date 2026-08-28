@@ -72,6 +72,27 @@ describe('kopieerKoppelingen', () => {
     expect(Object.keys(uit[0]).sort()).toEqual(['oefening_id', 'parallel_groep_id', 'stap_override', 'volgorde'])
   })
 
+  it('kopieert nooit aantallen_override — de kopie start op de basisvorm', () => {
+    // Zelfde regel als spelerindeling: de bezetting hoort bij de opkomst van
+    // díé training. De allowlist zorgt ervoor zonder aparte uitsluitingslogica.
+    const bron = [
+      {
+        oefening_id: 'o1',
+        volgorde: 0,
+        stap_override: null,
+        aantallen_override: { teams: [6, null], neutralen: 2 },
+      },
+    ] as unknown as BronKoppeling[]
+    const uit = kopieerKoppelingen(bron, 0, idFabriek())
+    expect(uit[0]).not.toHaveProperty('aantallen_override')
+    expect(Object.keys(uit[0]).sort()).toEqual([
+      'oefening_id',
+      'parallel_groep_id',
+      'stap_override',
+      'volgorde',
+    ])
+  })
+
   it('lege bron levert een lege lijst op, geen crash', () => {
     expect(kopieerKoppelingen([], 0, idFabriek())).toEqual([])
   })

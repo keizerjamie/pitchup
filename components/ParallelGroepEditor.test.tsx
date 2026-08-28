@@ -5,6 +5,7 @@ import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import ParallelGroepEditor from '@/components/ParallelGroepEditor'
 import type { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 
 vi.mock('@/app/actions/training-plan', () => ({
   saveParallelIndeling: vi.fn().mockResolvedValue(undefined),
@@ -87,8 +88,10 @@ function makeOefeningFixture(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function makeLid(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningWithData {
-  return {
+function makeLid(overrides: Partial<TrainingOefeningWithData> & { oefeningen?: Partial<Oefening> } = {}): TrainingOefeningMetBezetting {
+  const { oefeningen, ...rest } = overrides
+  const basis = { ...makeOefeningFixture(), ...oefeningen }
+  const lid: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team1',
     event_id: 'e1',
@@ -100,18 +103,19 @@ function makeLid(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOef
     parallel_groep_id: 'g1',
     parallel_spelers: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefeningFixture(),
-    ...overrides,
+    oefeningen: basis,
+    ...rest,
   }
+  return { ...lid, bezetting: concretiseerBezetting(lid.oefeningen, lid.aantallen_override ?? null) }
 }
 
-const twoLeden: TrainingOefeningWithData[] = [
+const twoLeden: TrainingOefeningMetBezetting[] = [
   makeLid({ id: 'k1', oefening_id: 'o1', oefeningen: makeOefeningFixture({ id: 'o1', naam: 'Oefening A' }) }),
   makeLid({ id: 'k2', oefening_id: 'o2', oefeningen: makeOefeningFixture({ id: 'o2', naam: 'Oefening B' }) }),
 ]
 
 function renderEditor(overrides: {
-  leden?: TrainingOefeningWithData[]
+  leden?: TrainingOefeningMetBezetting[]
   players?: Player[]
   presentPlayerIds?: string[]
 } = {}) {

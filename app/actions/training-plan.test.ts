@@ -4,6 +4,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import {
   addOefeningToTraining,
@@ -12,6 +13,8 @@ import {
   updateKoppeling,
   reorderKoppelingen,
   saveSpelerindeling,
+  saveAantallenOverride,
+  kopieerTrainingsplan,
   vormParallelGroep,
   voegToeAanParallelGroep,
   haalUitParallelGroep,
@@ -564,6 +567,167 @@ describe('saveSpelerindeling', () => {
     await expect(saveSpelerindeling('k1', 'e1', [['p1'], ['p2']]))
       .rejects.toThrow('Team bestaat niet in deze oefening')
     expect(m.calls.update).toHaveLength(0)
+  })
+})
+
+describe('saveAantallenOverride', () => {
+  // Bibliotheek-oefening 4v2 t/m 6v2, met 0 t/m 2 neutralen.
+  const flexibel = {
+    teams: [
+      { grootte: 4, formaties: [], grootteMax: 6 },
+      { grootte: 2, formaties: [] },
+    ],
+    aantal_neutralen: 0,
+    aantal_neutralen_max: 2,
+  }
+
+  function metOefening(oefeningen: unknown) {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: { id: 'k1', oefeningen }, error: null },
+      },
+    })
+  }
+
+  it('schrijft de delta alleen naar training_oefeningen, gescoped op id + event_id + team_id', async () => {
+    const m = metOefening(flexibel)
+    use(m)
+    await saveAantallenOverride('k1', 'e1', { teams: [5, null], neutralen: null })
+
+    expect(m.calls.update).toHaveLength(1)
+    expect(m.calls.update[0].table).toBe('training_oefeningen')
+    expect(m.calls.update[0].payload.aantallen_override).toEqual({ teams: [5, null], neutralen: null })
+    expect(m.calls.update.some((u) => u.table === 'oefeningen')).toBe(false)
+    expect(m.calls.update[0].eqs).toEqual([
+      { col: 'id', val: 'k1' },
+      { col: 'event_id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/training-plan')
+  })
+
+  it('leest de koppeling tenant- en event-gescoped, inclusief de grenzen van de gejoinde oefening', async () => {
+    const m = metOefening(flexibel)
+    use(m)
+    await saveAantallenOverride('k1', 'e1', { teams: [5, null], neutralen: null })
+
+    const sel = m.calls.select.find((s) => s.table === 'training_oefeningen')!
+    expect(String(sel.cols)).toContain('oefeningen(teams, aantal_neutralen, aantal_neutralen_max)')
+    expect(sel.eqs).toEqual([
+      { col: 'id', val: 'k1' },
+      { col: 'event_id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('clamt een waarde buiten het bereik van de gejoinde oefening (nooit de client geloven)', async () => {
+    const m = metOefening(flexibel)
+    use(m)
+    // Geknutselde call: 99 spelers in team 0, 99 neutralen.
+    await saveAantallenOverride('k1', 'e1', { teams: [99, 99], neutralen: 99 })
+    expect(m.calls.update[0].payload.aantallen_override).toEqual({ teams: [6, null], neutralen: 2 })
+  })
+
+  it('leest grootteMax ook uit legacy-JSONB (normalizeOefeningTeams op de join)', async () => {
+    // Legacy-vorm: `formatie` in plaats van `formaties`, geen keeperInGrootte.
+    const m = metOefening({
+      teams: [{ grootte: 4, formatie: null, grootteMax: 6 }],
+      aantal_neutralen: 0,
+    })
+    use(m)
+    await saveAantallenOverride('k1', 'e1', { teams: [6], neutralen: null })
+    expect(m.calls.update[0].payload.aantallen_override).toEqual({ teams: [6], neutralen: null })
+  })
+
+  it('wist de override met null (terug naar basisvorm)', async () => {
+    const m = metOefening(flexibel)
+    use(m)
+    await saveAantallenOverride('k1', 'e1', null)
+    expect(m.calls.update[0].payload.aantallen_override).toBeNull()
+  })
+
+  it('schrijft null zodra de bezetting gelijk is aan de basisvorm', async () => {
+    const m = metOefening(flexibel)
+    use(m)
+    await saveAantallenOverride('k1', 'e1', { teams: [4, 2], neutralen: 0 })
+    expect(m.calls.update[0].payload.aantallen_override).toBeNull()
+  })
+
+  it('gooit "Ongeldige bezetting" bij een verkeerde vorm, zonder write', async () => {
+    const m = metOefening(flexibel)
+    use(m)
+    await expect(saveAantallenOverride('k1', 'e1', ['x'] as never))
+      .rejects.toThrow('Ongeldige bezetting')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Niet ingelogd" zonder user', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+    await expect(saveAantallenOverride('k1', 'e1', null)).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Event niet gevonden" bij een event van een ander team', async () => {
+    const m = makeSupabase({ tables: { events: { data: null } } })
+    use(m)
+    await expect(saveAantallenOverride('k1', 'vreemd', null)).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('gooit "Koppeling niet gevonden" bij een koppeling van een ander event/team', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: null },
+      },
+    })
+    use(m)
+    await expect(saveAantallenOverride('vreemd', 'e1', { teams: [5], neutralen: null }))
+      .rejects.toThrow('Koppeling niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('geeft bij een DB-fout de generieke melding, nooit de rauwe tekst', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        training_oefeningen: { data: { id: 'k1', oefeningen: flexibel }, error: { code: '23514', message: 'violates check constraint "training_oefeningen_aantallen_override_object"' } },
+      },
+    })
+    use(m)
+    await expect(saveAantallenOverride('k1', 'e1', { teams: [5], neutralen: null }))
+      .rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    consoleError.mockRestore()
+  })
+})
+
+describe('kopieerTrainingsplan — aantallen_override komt niet mee', () => {
+  it('leest en schrijft de allowlist zonder aantallen_override', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e' } } },
+      queues: {
+        training_oefeningen: [
+          // 1) bronrijen, 2) hoogste volgorde in het doel, 3) insert-resultaat
+          { data: [{ oefening_id: 'o1', volgorde: 0, stap_override: null, parallel_groep_id: null }], error: null },
+          { data: null, error: null },
+          { error: null },
+        ],
+      },
+    })
+    use(m)
+    await kopieerTrainingsplan('doel', 'bron')
+
+    const sel = m.calls.select.find((s) => String(s.cols).includes('oefening_id'))!
+    expect(String(sel.cols)).not.toContain('aantallen_override')
+    expect(String(sel.cols)).not.toContain('spelerindeling')
+
+    const insert = m.calls.insert.find((i) => i.table === 'training_oefeningen')!
+    const rijen = insert.payload as unknown as Record<string, unknown>[]
+    expect(rijen[0]).not.toHaveProperty('aantallen_override')
+    expect(rijen[0]).not.toHaveProperty('spelerindeling')
   })
 })
 

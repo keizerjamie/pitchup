@@ -28,6 +28,8 @@ export interface OefeningInput {
   veldzone?: Veldzone | null
   teams: OefeningTeam[]
   aantal_neutralen: number
+  // Bovengrens van een flexibel aantal neutralen; null/afwezig = vast aantal.
+  aantal_neutralen_max?: number | null
   diagram?: Diagram | null
 }
 
@@ -42,6 +44,7 @@ export interface ValidatedOefening {
   veldzone: Veldzone | null
   teams: OefeningTeam[]
   aantal_neutralen: number
+  aantal_neutralen_max: number | null
   diagram: Diagram | null
 }
 
@@ -55,8 +58,8 @@ export function validateOefening(input: OefeningInput): ValidatedOefening {
   const rawTeams = Array.isArray(input.teams) ? input.teams.slice(0, 6) : []
   const teams: OefeningTeam[] = rawTeams.map((tm) => {
     // Dual-read + strip onbekende velden: behoud alleen {grootte, formaties,
-    // keeperInGrootte}. normalizeOefeningTeam forceert keeperInGrootte bij een
-    // 11-tal al naar true.
+    // keeperInGrootte} plus — hieronder, apart gevalideerd — grootteMax.
+    // normalizeOefeningTeam forceert keeperInGrootte bij een 11-tal al naar true.
     const { grootte, formaties, keeperInGrootte } = normalizeOefeningTeam(tm)
     if (!VALID_TEAM_SIZES.includes(grootte)) throw new Error('Ongeldige teamgrootte')
     // Single-select: hooguit één formatie per team, geen stille afkap.
@@ -70,10 +73,41 @@ export function validateOefening(input: OefeningInput): ValidatedOefening {
       if (!def) throw new Error('Formatie past niet bij teamgrootte')
       return def.key
     })
-    return { grootte, formaties: canoniek, keeperInGrootte }
+
+    // Bovengrens van een flexibel team. Bewust de RUWE waarde, niet die uit
+    // normalizeOefeningTeam: die normaliseert de VORM (en gooit een te lage
+    // grens stil weg), terwijl opslaan zo'n grens juist hoort te WEIGEREN —
+    // precies zoals `grootte` hierboven ook pas hier tegen VALID_TEAM_SIZES
+    // wordt afgezet.
+    const ruweMax = tm?.grootteMax
+    const grootteMax =
+      ruweMax === null || ruweMax === undefined ? null : Math.floor(Number(ruweMax))
+    if (grootteMax !== null) {
+      if (formaties.length > 0) throw new Error('Formatie kan niet samen met een spelersbereik')
+      if (!VALID_TEAM_SIZES.includes(grootteMax)) throw new Error('Ongeldige teamgrootte')
+      if (grootteMax < grootte) throw new Error('Bovengrens kleiner dan de teamgrootte')
+    }
+
+    // Spread, geen `grootteMax: null`: een exact team schrijft exact dezelfde
+    // JSONB weg als vóór deze feature.
+    return {
+      grootte,
+      formaties: canoniek,
+      keeperInGrootte,
+      ...(grootteMax !== null ? { grootteMax } : {}),
+    }
   })
 
   const aantal_neutralen = Math.max(0, Math.min(30, Math.floor(Number(input.aantal_neutralen) || 0)))
+  // `!== null && !== undefined`, nooit een truthy-check: 0 is een geldige
+  // bovengrens (bij een basis van 0 neutralen).
+  const aantal_neutralen_max =
+    input.aantal_neutralen_max === null || input.aantal_neutralen_max === undefined
+      ? null
+      : Math.max(0, Math.min(30, Math.floor(Number(input.aantal_neutralen_max) || 0)))
+  if (aantal_neutralen_max !== null && aantal_neutralen_max < aantal_neutralen) {
+    throw new Error('Bovengrens kleiner dan het aantal neutralen')
+  }
 
   return {
     naam,
@@ -89,6 +123,7 @@ export function validateOefening(input: OefeningInput): ValidatedOefening {
     veldzone: input.veldzone ?? null,
     teams,
     aantal_neutralen,
+    aantal_neutralen_max,
     // JSONB nooit ongefilterd doorzetten: normaliseer/clamp naar een veilige vorm
     // (of null). Stroomt via oefeningRow(...v) mee naar insert/update.
     diagram: validateDiagram(input.diagram),

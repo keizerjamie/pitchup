@@ -25,6 +25,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import OefeningPicker from '@/components/OefeningPicker'
 import { countCategoryOccurrences } from '@/lib/periodization'
@@ -157,8 +158,10 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningWithData {
-  return {
+function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): TrainingOefeningMetBezetting {
+  const { oefeningen, ...rest } = overrides
+  const basis = { ...makeOefening(), ...oefeningen }
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team-1',
     event_id: 'e1',
@@ -170,13 +173,14 @@ function makeKoppeling(overrides: Partial<TrainingOefeningWithData> = {}): Train
     parallel_groep_id: null,
     parallel_spelers: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefening(),
-    ...overrides,
+    oefeningen: basis,
+    ...rest,
   }
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
 function renderPlan(
-  koppelingen: TrainingOefeningWithData[],
+  koppelingen: TrainingOefeningMetBezetting[],
   opts: { library?: Oefening[]; players?: Player[]; presentPlayerIds?: string[] } = {},
 ) {
   return render(
@@ -236,7 +240,7 @@ describe('AC1 — nogmaals klikken op dezelfde oefening in de OefeningPicker', (
     const onClose = vi.fn()
     render(
       <DictProvider dict={nl}>
-        <OefeningPicker eventId="e1" library={[makeOefening({ id: 'oX', naam: 'Rondo' })]} onClose={onClose} />
+        <OefeningPicker eventId="e1" library={[makeOefening({ id: 'oX', naam: 'Rondo' })]} onClose={onClose} aanwezigAantal={0} />
       </DictProvider>,
     )
 
@@ -670,7 +674,7 @@ describe('AC11 — OefeningPicker markeert al-toegevoegde oefeningen niet', () =
     // een markering op te baseren.
     render(
       <DictProvider dict={nl}>
-        <OefeningPicker eventId="e1" library={[makeOefening({ id: 'oX', naam: 'Rondo' })]} onClose={vi.fn()} />
+        <OefeningPicker eventId="e1" library={[makeOefening({ id: 'oX', naam: 'Rondo' })]} onClose={vi.fn()} aanwezigAantal={0} />
       </DictProvider>,
     )
     const item = screen.getByText('Rondo').closest('button') as HTMLButtonElement

@@ -160,6 +160,10 @@ export interface OefeningTeam {
   // Bij grootte 11 altijd true. false = het team speelt zonder keeper, dus
   // `grootte` veldspelers en geen K-marker op de tekening.
   keeperInGrootte?: boolean
+  // Bovengrens van een flexibel team. Afwezig/null = exact team (bestaand
+  // gedrag). Alleen betekenisvol zonder formatie; bereikVoorTeam
+  // (lib/oefening-bezetting.ts) is de enige plek die dat semantisch afdwingt.
+  grootteMax?: number | null
 }
 
 // ────────────────────────────────────────────────
@@ -225,6 +229,11 @@ export interface Oefening {
   veldzone: Veldzone | null
   teams: OefeningTeam[]
   aantal_neutralen: number
+  // Bovengrens van een flexibel aantal neutralen (supabase/oefening-flexibel-
+  // aantal.sql). NULL = vast aantal. Optioneel getypeerd om dezelfde reden als
+  // parallel_groep_id hieronder: zolang de migratie in een omgeving niet
+  // gedraaid heeft levert de server `undefined`.
+  aantal_neutralen_max?: number | null
   diagram: Diagram | null
   created_at: string
 }
@@ -239,6 +248,17 @@ export type Spelerindeling = string[][]
 // toegewezen. Bewust geen string[][]: dit is géén teamindeling — een speler aan
 // een parallelle oefening toewijzen zet hem NIET in een team van die oefening.
 export type ParallelSpelers = string[]
+
+// Training-specifieke bezetting van één gekoppelde oefening. DELTA-vorm:
+// `teams[i]` hoort bij `oefeningen.teams[i]`; null = "gebruik de basisvorm".
+// Het AANTAL teams verandert nooit — spelerindeling[i] blijft aan teams[i]
+// gekoppeld. De grenzen zelf staan uitsluitend op de bibliotheek-oefening
+// (grootteMax / aantal_neutralen_max); clampen gebeurt bij het lezen
+// (concretiseerBezetting in lib/oefening-bezetting.ts).
+export interface AantallenOverride {
+  teams: (number | null)[]
+  neutralen: number | null
+}
 
 // Koppeling van een bibliotheek-oefening aan één training (event).
 export interface TrainingOefening {
@@ -260,6 +280,10 @@ export interface TrainingOefening {
   // dat af met `?? null` resp. `?? []`.
   parallel_groep_id?: string | null
   parallel_spelers?: ParallelSpelers
+  // Training-specifieke bezetting binnen het bereik van de bibliotheek-oefening
+  // (supabase/oefening-flexibel-aantal.sql). NULL/afwezig = geen override, dus
+  // de basisvorm. Om dezelfde reden optioneel getypeerd als parallel_*.
+  aantallen_override?: AantallenOverride | null
   created_at: string
 }
 
@@ -660,6 +684,7 @@ export function normalizeOefeningTeam(raw: unknown): OefeningTeam {
     formaties?: unknown
     formatie?: unknown
     keeperInGrootte?: unknown
+    grootteMax?: unknown
   }
   const grootte = Number(r.grootte)
   let keys: string[]
@@ -674,7 +699,28 @@ export function normalizeOefeningTeam(raw: unknown): OefeningTeam {
   // Een 11-tal telt de keeper altijd mee (gecureerde FORMATIONS-lijst).
   const keeperInGrootte =
     grootte === 11 ? true : typeof r.keeperInGrootte === 'boolean' ? r.keeperInGrootte : true
-  return { grootte, formaties: [...new Set(keys)], keeperInGrootte }
+  // Bovengrens van een flexibel team — VORMnormalisatie, geen semantiek: alleen
+  // een geheel getal dat niet onder `grootte` ligt overleeft. Of het bereik ook
+  // BETEKENIS heeft (geen formatie, binnen VALID_TEAM_SIZES) beslist
+  // bereikVoorTeam in lib/oefening-bezetting.ts; afwijzen bij opslaan doet
+  // validateOefening in lib/oefening.ts.
+  //
+  // Ontbreekt het veld, dan blijft het ook in de uitvoer ONTBREKEN (geen
+  // `grootteMax: null`-ruis). Zo levert een exacte oefening dezelfde JSONB en
+  // dezelfde genormaliseerde vorm op als vóór deze feature.
+  // `null` eerst afvangen: Number(null) is 0, en dat zou bij een los team
+  // (grootte 0) een zinloze grootteMax 0 opleveren.
+  const gm =
+    r.grootteMax === null || r.grootteMax === undefined
+      ? Number.NaN
+      : Math.floor(Number(r.grootteMax))
+  const grootteMax = Number.isFinite(gm) && gm >= grootte ? gm : null
+  return {
+    grootte,
+    formaties: [...new Set(keys)],
+    keeperInGrootte,
+    ...(grootteMax !== null ? { grootteMax } : {}),
+  }
 }
 
 export function normalizeOefeningTeams(raw: unknown): OefeningTeam[] {

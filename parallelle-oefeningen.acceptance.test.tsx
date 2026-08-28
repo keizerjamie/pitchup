@@ -25,6 +25,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
+import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import ParallelGroepEditor from '@/components/ParallelGroepEditor'
 
@@ -153,9 +154,10 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
 
 function makeKoppeling(
   overrides: Partial<TrainingOefeningWithData> & { oefening?: Partial<Oefening> } = {},
-): TrainingOefeningWithData {
+): TrainingOefeningMetBezetting {
   const { oefening, ...rest } = overrides
-  return {
+  const basis = makeOefening(oefening)
+  const koppeling: TrainingOefeningWithData = {
     id: 'k1',
     team_id: 'team-1',
     event_id: 'e1',
@@ -167,13 +169,18 @@ function makeKoppeling(
     parallel_groep_id: null,
     parallel_spelers: [],
     created_at: '2024-01-01T00:00:00Z',
-    oefeningen: makeOefening(oefening),
+    oefeningen: basis,
     ...rest,
   }
+  // Bewust op `koppeling.oefeningen` i.p.v. `basis`: dit bestand geeft
+  // overal de VOLLEDIGE oefening mee via de echte `oefeningen`-sleutel (niet
+  // via het `oefening`-gemakssleuteltje), die dan ná `oefeningen: basis`
+  // door de `...rest`-spread overschrijft.
+  return { ...koppeling, bezetting: concretiseerBezetting(koppeling.oefeningen, koppeling.aantallen_override ?? null) }
 }
 
 function renderPlan(
-  koppelingen: TrainingOefeningWithData[],
+  koppelingen: TrainingOefeningMetBezetting[],
   opts: { players?: Player[]; presentPlayerIds?: string[] } = {},
 ) {
   return render(
@@ -194,7 +201,7 @@ function renderPlan(
 }
 
 function renderGroup(
-  leden: TrainingOefeningWithData[],
+  leden: TrainingOefeningMetBezetting[],
   opts: { players?: Player[]; presentPlayerIds?: string[]; groepId?: string } = {},
 ) {
   return render(

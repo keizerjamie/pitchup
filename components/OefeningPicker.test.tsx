@@ -33,10 +33,21 @@ function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   }
 }
 
-function renderPicker(library: Oefening[], onClose = vi.fn(), presetCategorie?: OefeningCategorie) {
+function renderPicker(
+  library: Oefening[],
+  onClose = vi.fn(),
+  presetCategorie?: OefeningCategorie,
+  aanwezigAantal = 0,
+) {
   render(
     <DictProvider dict={nl}>
-      <OefeningPicker eventId="event-1" library={library} onClose={onClose} presetCategorie={presetCategorie} />
+      <OefeningPicker
+        eventId="event-1"
+        library={library}
+        onClose={onClose}
+        presetCategorie={presetCategorie}
+        aanwezigAantal={aanwezigAantal}
+      />
     </DictProvider>,
   )
   return { onClose }
@@ -267,5 +278,62 @@ describe('OefeningPicker', () => {
     expect(values).toEqual([
       '', 'links', 'midden', 'rechts', 'strafschopgebied_links', 'strafschopgebied_rechts',
     ])
+  })
+
+  // ────────────────────────────────────────────────────────────────
+  // "Past bij aanwezigen"-chip (eigenaarsbesluiten 3/4): verborgen bij N=0,
+  // filtert op interval-bevat-N zodra actief, sortering exact-eerst/smalst-
+  // eerst, en de vorm-badge op de rij bij een flexibele oefening.
+  // ────────────────────────────────────────────────────────────────
+  it('N=0: de "past bij aanwezigen"-chip wordt niet gerenderd', () => {
+    renderPicker([makeOefening()], vi.fn(), undefined, 0)
+    expect(screen.queryByText(/Past bij aanwezigen/)).not.toBeInTheDocument()
+  })
+
+  it('N>=1: de chip verschijnt, toggelt aria-pressed en filtert op bereik-bevat-N', () => {
+    renderPicker(
+      [
+        makeOefening({ id: 'o1', naam: 'Exact 6', teams: [{ grootte: 6, formaties: [] }] }),
+        makeOefening({ id: 'o2', naam: 'Flexibel 4-6', teams: [{ grootte: 4, formaties: [], grootteMax: 6 }] }),
+        makeOefening({ id: 'o3', naam: 'Exact 10', teams: [{ grootte: 10, formaties: [] }] }),
+      ],
+      vi.fn(),
+      undefined,
+      5,
+    )
+    const chip = screen.getByText(nl.oefeningen.fitsPresentChip.replace('{n}', '5'))
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(chip)
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByText('Exact 6')).not.toBeInTheDocument()
+    expect(screen.getByText('Flexibel 4-6')).toBeInTheDocument()
+    expect(screen.queryByText('Exact 10')).not.toBeInTheDocument()
+
+    fireEvent.click(chip)
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByText('Exact 6')).toBeInTheDocument()
+  })
+
+  it('sortering: exacte oefeningen vóór flexibele, en binnen de flexibele het smalste bereik eerst', () => {
+    renderPicker([
+      makeOefening({ id: 'o1', naam: 'Breed bereik', teams: [{ grootte: 4, formaties: [], grootteMax: 10 }] }),
+      makeOefening({ id: 'o2', naam: 'Exact', teams: [{ grootte: 6, formaties: [] }] }),
+      makeOefening({ id: 'o3', naam: 'Smal bereik', teams: [{ grootte: 5, formaties: [], grootteMax: 6 }] }),
+    ])
+    const namen = screen.getAllByRole('button', { name: /Breed bereik|Exact|Smal bereik/ }).map((el) => el.textContent)
+    expect(namen[0]).toContain('Exact')
+    expect(namen[1]).toContain('Smal bereik')
+    expect(namen[2]).toContain('Breed bereik')
+  })
+
+  it('vorm-badge "4v2–6v2" op de rij bij een flexibele oefening, geen badge bij een exacte oefening', () => {
+    renderPicker([
+      makeOefening({ id: 'o1', naam: 'Flexibel', teams: [{ grootte: 4, formaties: [], grootteMax: 6 }, { grootte: 2, formaties: [] }] }),
+      makeOefening({ id: 'o2', naam: 'Exact', teams: [{ grootte: 4, formaties: [] }] }),
+    ])
+    expect(screen.getByText('4v2–6v2')).toBeInTheDocument()
+    const exactRow = screen.getByText('Exact').closest('button')!
+    expect(exactRow.textContent).not.toMatch(/–/)
   })
 })
