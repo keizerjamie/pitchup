@@ -11,7 +11,15 @@ interface Props {
 }
 
 function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) {
-  const chip = tone === 'present' ? 'bg-primary-strong/10 text-primary-strong' : 'bg-surface-sunken text-muted'
+  // Aanwezig krijgt het groene statuspaneel-drietal (achtergrond/rand/tekst,
+  // in beide thema's op minimaal 4.5:1 nagerekend — zie de --panel-*-tokens in
+  // globals.css). Afwezig blijft bewust neutraal, maar krijgt nu wél een rand:
+  // met alleen `bg-surface-sunken` (#f6faf8) was de chip op het lichte thema
+  // vrijwel dezelfde kleur als de kaart eronder, dus geen zichtbare chip en
+  // nauwelijks verschil met een aanwezige speler.
+  const chip = tone === 'present'
+    ? 'bg-panel-green text-panel-green-ink border border-panel-green-edge'
+    : 'bg-surface-sunken text-muted border border-[var(--border-soft)]'
   const badge = tone === 'present' ? 'bg-primary text-white' : 'bg-[var(--track)] text-muted'
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-lg pl-1 pr-2.5 py-1 text-sm font-medium ${chip}`}>
@@ -82,10 +90,14 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
           )}
         </div>
 
+        {/* `text-brand` (#0d3d38) en `bg-brand-light` (#e6f4f2) zijn VASTE hexen
+            die niet met het thema meebewegen: op de donkere kaart was deze link
+            donker-op-donker en lichtte de hover-tint fel wit op. --brand-accent
+            en --surface-sunken zijn de themabare tegenhangers. */}
         <Link
           href={`/events/${eventId}`}
           transitionTypes={['nav-back']}
-          className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-soft)] text-sm font-medium text-brand hover:bg-brand-light/40 transition-colors"
+          className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-soft)] text-sm font-medium text-brand-accent hover:bg-surface-sunken transition-colors"
         >
           {t.event.editAttendance}
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

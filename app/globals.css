@@ -94,6 +94,10 @@
   --bg: #e5ede9;
   --bg-glow: #f0f6f3;
   --track: #eaf2ee;
+  /* Rand + inset-highlight van .glass-card. Zelfde waarden als de hexen die
+     eerder hard in die regel stonden, nu themabaar (zie het dark-blok). */
+  --glass-border: rgba(255, 255, 255, 0.82);
+  --glass-highlight: rgba(255, 255, 255, 0.95);
   --brand-btn: #0d3d38;
   --brand-accent: #107b38;
   /* Oranje accent voor "nog te doen"-acties (bv. analyse nog niet ingevuld).
@@ -176,6 +180,11 @@
   --bg: #06231f;
   --bg-glow: #0a332c;
   --track: rgba(255, 255, 255, 0.10);
+  /* Op donker moet de glasrand een subtiele lichtlijn zijn, geen witte omlijning;
+     de inset-highlight bijna weg — 0.95 wit gaf boven aan de kaart een felle
+     streep over het donkere oppervlak. */
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-highlight: rgba(255, 255, 255, 0.05);
   --brand-btn: #12883e;
   --brand-accent: #4ade80;
   --chip-green-fg: #4ade80;
@@ -347,11 +356,22 @@ body::after {
    near-solid: backdrop-filter on dozens of scrolling cards causes GPU jank
    on older phones, and the blur cost bought almost nothing visually. */
 .glass-card {
-  background: rgba(255, 255, 255, 0.78);
+  /* Stond hier als vaste rgba(255,255,255,0.78) met witte rand en witte
+     inset-highlight en was daarmee de ENIGE kaart in de app die niet met het
+     thema meebewoog (.surface-card doet dat via --surface). In dark mode bleef
+     dit vlak dus lichtgrijs oplichten terwijl --ink/--muted/--primary-strong
+     daar juist LICHT zijn: de aanwezig/afwezig-lijst op het trainingsplan
+     (AttendanceSummary, de enige gebruiker van deze klasse) stond
+     licht-op-licht rond 1.3:1 en was praktisch onleesbaar.
+
+     Nu afgeleid van --surface. In het lichte thema is --surface #ffffff, dus
+     color-mix(... 78%, transparent) levert exact dezelfde rgba(255,255,255,
+     0.78) als voorheen — licht blijft bit voor bit gelijk. */
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
   backdrop-filter: blur(10px) saturate(160%);
   -webkit-backdrop-filter: blur(10px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.82);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.06), 0 1px 0 rgba(255,255,255,0.95) inset;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06), 0 1px 0 var(--glass-highlight) inset;
 }
 
 .glass-card-raised {
