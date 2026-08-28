@@ -1,18 +1,17 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { saveLineup } from '@/app/actions/attendance'
-import { Player, LineupPosition, FORMATIONS, POSITION_ABBREVIATIONS } from '@/lib/types'
+import { Player, LineupPosition, FORMATIONS, POSITION_ABBREVIATIONS, POSITION_LABEL_MAP } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 import { emptyPlayerForm, isGeldigeRating, type PlayerForm } from '@/lib/lineup-form'
 import type { KitColors } from '@/lib/club-colors'
+import { useReducedMotion } from '@/lib/use-reduced-motion'
 
-const POSITION_LABEL_MAP: Record<string, string> = {
-  KP: 'Keeper', LV: 'Linksachter', MV: 'Centrale verdediger', RV: 'Rechtsachter',
-  LVB: 'Linksachter', RVB: 'Rechtsachter', DM: 'Defensieve middenvelder',
-  CM: 'Centrale middenvelder', LM: 'Linksmiddenvelder', RM: 'Rechtsmiddenvelder',
-  '10': 'Aanvallende middenvelder', LA: 'Linksbuiten', RA: 'Rechtsbuiten', SP: 'Spits',
-}
+// Hoe lang de inslag-state blijft staan. Moet minstens zo lang zijn als de
+// langste keyframe-animatie in app/globals.css (poppetje-schokgolf, 620ms),
+// anders verdwijnt de ring halverwege uit de DOM.
+const IMPACT_DUUR_MS = 700
 
 const POSITION_FALLBACKS: Record<string, string[]> = {
   'Keeper': [],
@@ -101,6 +100,25 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null)
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
+  const [formationOpen, setFormationOpen] = useState(false)
+
+  // "Inslag": het slot waar zojuist een speler in is gezet. `nonce` maakt elke
+  // plaatsing uniek, zodat twee keer achter elkaar hetzelfde slot vullen de
+  // animatie opnieuw start (via de key op het poppetje) in plaats van hem stil
+  // over te slaan.
+  const [impact, setImpact] = useState<{ slot: number; nonce: number } | null>(null)
+  const reducedMotion = useReducedMotion()
+
+  // Het opruimen van de inslag hangt aan de state zelf, niet aan een timer-ref
+  // in de klikhandler: elke nieuwe `impact` (ook dezelfde slot met een hogere
+  // nonce) ruimt de vorige timer op via de cleanup, en unmount doet dat ook.
+  // Een ref lezen/schrijven vanuit een handler die in de render-boom wordt
+  // doorgegeven is bovendien precies wat react-hooks/refs afkeurt.
+  useEffect(() => {
+    if (!impact) return
+    const id = setTimeout(() => setImpact(null), IMPACT_DUUR_MS)
+    return () => clearTimeout(id)
+  }, [impact])
 
   // Eén bron voor "mag deze speler meedoen": de bank, de spelerspopup en
   // autoFillLineup lezen allemaal deze set. Liepen die uiteen, dan zou de
@@ -111,16 +129,24 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
     setFormation(f)
     setPositions(FORMATIONS[f].positions.map((p) => ({ ...p, player_id: null })))
     setSelectedSlot(null)
+    setFormationOpen(false)
   }
 
   function assignPlayer(playerId: string | null) {
     if (selectedSlot === null) return
+    const slot = selectedSlot
     setPositions((prev) => prev.map((p, i) => {
-      if (i === selectedSlot) return { ...p, player_id: playerId }
+      if (i === slot) return { ...p, player_id: playerId }
       if (p.player_id === playerId && playerId !== null) return { ...p, player_id: null }
       return p
     }))
     setSelectedSlot(null)
+
+    // Alleen bij het NEERZETTEN van een speler, niet bij verwijderen — en nooit
+    // bij prefers-reduced-motion (zelfde afweging als GlobalFab/AppLauncher).
+    if (playerId !== null && !reducedMotion) {
+      setImpact((prev) => ({ slot, nonce: (prev?.nonce ?? 0) + 1 }))
+    }
   }
 
   function autoFillLineup() {
@@ -176,26 +202,46 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
     <div className="space-y-4">
       <div>
         <div className="flex items-center justify-between mb-2">
-          <label className="block text-[13px] font-bold text-muted">{t.lineup.formation}</label>
+          <label id="formatie-label" className="block text-[13px] font-bold text-muted">{t.lineup.formation}</label>
           <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition" style={{ background: 'var(--color-accent)' }}>
             <span className="ms text-[17px]">bolt</span>
             {t.lineup.autoLineup}
           </button>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {Object.keys(FORMATIONS).map((f) => {
-            const active = formation === f
-            return (
-              <button key={f} onClick={() => handleFormationChange(f)}
-                className="px-4 py-2 rounded-[10px] text-[13px] font-bold transition-colors"
-                style={active
-                  ? { background: 'var(--color-brand)', color: '#fff' }
-                  : { background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}>
-                {f}
-              </button>
-            )
-          })}
-        </div>
+        {/* Uitklapbare kiezer: met 15 formaties is een open chiprij een muur.
+            Dicht toont hij alleen de actieve formatie; open het volledige
+            raster. `aria-labelledby` wijst naar het bestaande "Formatie"-label,
+            zodat er geen nieuwe vertaalsleutel voor nodig is. */}
+        <button
+          type="button"
+          id="formatie-kiezer"
+          aria-labelledby="formatie-label formatie-kiezer"
+          aria-expanded={formationOpen}
+          onClick={() => setFormationOpen((open) => !open)}
+          className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-[14px] font-bold text-ink bg-surface transition-colors"
+          style={{ border: '1px solid var(--border-soft)' }}
+        >
+          <span>{FORMATIONS[formation]?.label ?? formation}</span>
+          <span className={`ms text-[20px] text-muted transition-transform duration-200 ${formationOpen ? 'rotate-180' : ''}`}>
+            expand_more
+          </span>
+        </button>
+        {formationOpen && (
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {Object.keys(FORMATIONS).map((f) => {
+              const active = formation === f
+              return (
+                <button key={f} onClick={() => handleFormationChange(f)}
+                  className="px-3 py-2 rounded-[10px] text-[13px] font-bold transition-colors text-center"
+                  style={active
+                    ? { background: 'var(--color-brand)', color: '#fff' }
+                    : { background: 'var(--surface)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}>
+                  {FORMATIONS[f].label}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Pitch */}
@@ -252,6 +298,12 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
             // (resolveKitColors) en levert diezelfde gradient een effen shirt.
             // De geselecteerde slot houdt zijn amberkleur — dat is de
             // selectie-indicator, geen tenue.
+            // Inslag-animatie: alleen op het slot waar zojuist iemand in is
+            // gezet. `nonce` in de key laat React het poppetje opnieuw
+            // aankoppelen, wat de CSS-animatie van voren af aan start — anders
+            // zou twee keer hetzelfde slot vullen de tweede keer niets doen.
+            const isImpact = impact?.slot === i
+            const impactKey = isImpact ? `slag-${impact.nonce}` : 'rust'
             const wearsKit = hasPlayer && !isSelected && kit !== null
             const kitStyle: React.CSSProperties | undefined = wearsKit && kit
               ? {
@@ -269,7 +321,38 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
                 className={`absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 transition duration-150 ${isSelected ? 'scale-110' : ''}`}
                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, zIndex: 10 }}
               >
+                {/* Schokgolf: twee ringen die vanuit het poppetje naar buiten
+                    slaan, de tweede net later voor diepte. Puur decoratief, dus
+                    aria-hidden en pointer-events uit — de knop eronder moet
+                    aanklikbaar blijven. `top: 18px` is het midden van het
+                    36px-poppetje, dat als eerste kind bovenaan de kolom staat. */}
+                {isImpact && (
+                  <>
+                    <span
+                      key={`ring-a-${impact.nonce}`}
+                      data-testid="poppetje-schokgolf"
+                      aria-hidden
+                      className="absolute left-1/2 w-9 h-9 rounded-full pointer-events-none"
+                      style={{
+                        top: 18, transform: 'translate(-50%, -50%)',
+                        border: '3px solid rgba(255,255,255,0.95)',
+                        animation: 'poppetje-schokgolf 620ms cubic-bezier(0.16,1,0.3,1) forwards',
+                      }}
+                    />
+                    <span
+                      key={`ring-b-${impact.nonce}`}
+                      aria-hidden
+                      className="absolute left-1/2 w-9 h-9 rounded-full pointer-events-none"
+                      style={{
+                        top: 18, transform: 'translate(-50%, -50%)',
+                        border: `2px solid ${kit?.left ?? 'rgba(255,255,255,0.8)'}`,
+                        animation: 'poppetje-schokgolf 620ms 110ms cubic-bezier(0.16,1,0.3,1) forwards',
+                      }}
+                    />
+                  </>
+                )}
                 <div
+                  key={`cirkel-${impactKey}`}
                   data-testid={hasPlayer && !isSelected ? (wearsKit ? 'speler-poppetje-tenue' : 'speler-poppetje-wit') : undefined}
                   className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition duration-150 ${
                     isSelected
@@ -280,11 +363,16 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
                           : 'bg-white text-[#0d3d38] shadow-[0_2px_8px_rgba(0,0,0,0.35),0_0_0_2px_rgba(255,255,255,0.9)]'
                         : 'bg-white/10 text-white/50 border border-dashed border-white/35'
                   }`}
-                  style={kitStyle}
+                  style={isImpact
+                    ? { ...kitStyle, animation: 'poppetje-inslag 520ms cubic-bezier(0.22,1.2,0.36,1) both' }
+                    : kitStyle}
                 >
                   {hasPlayer ? displayNum : <span className="text-base leading-none">+</span>}
                 </div>
-                <div className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-center max-w-[60px] truncate leading-tight ${hasPlayer ? 'bg-black/45 text-white' : 'bg-black/20 text-white/55'}`}>
+                <div
+                  key={`naam-${impactKey}`}
+                  style={isImpact ? { animation: 'poppetje-naam 420ms 140ms ease-out both' } : undefined}
+                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md text-center max-w-[60px] truncate leading-tight ${hasPlayer ? 'bg-black/45 text-white' : 'bg-black/20 text-white/55'}`}>
                   {hasPlayer ? getPlayerName(pos.player_id) : pos.position_label}
                 </div>
               </button>

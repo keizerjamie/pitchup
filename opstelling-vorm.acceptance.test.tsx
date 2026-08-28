@@ -122,6 +122,24 @@ let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // LineupBuilder gebruikt useReducedMotion (lib/use-reduced-motion.ts) voor de
+  // inslag-animatie; jsdom kent window.matchMedia niet standaard. Zelfde stub
+  // als components/PlayerList.test.tsx. `matches: false` = geen
+  // reduced-motion-voorkeur, dus de animatiepaden draaien gewoon mee.
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
   // Stil gehouden (mockImplementation) zodat de testoutput niet vervuilt,
   // maar wél opgevraagd kan worden — nodig voor het Faalpad-blok, dat moet
   // bewijzen dat er NOOIT een ruwe PostgREST-foutmelding in de logs belandt.

@@ -34,7 +34,7 @@ import { nl } from '@/messages/nl'
 import type { OefeningInput } from '@/lib/oefening'
 import { validateOefening } from '@/lib/oefening'
 import type { Oefening, OefeningCategorie } from '@/lib/types'
-import { formationsForSize, OEFENING_CATEGORIES } from '@/lib/types'
+import { FORMATIONS, formationsForSize, OEFENING_CATEGORIES } from '@/lib/types'
 import { formatiesVoorTeam, VALID_TEAM_SIZES } from '@/lib/formaties'
 import OefeningEditor from '@/components/OefeningEditor'
 
@@ -247,8 +247,18 @@ describe('AC4 — grootte 11 blijft de bestaande, categorie-onafhankelijke curat
     fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
     fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '11' } })
 
+    // Het criterium is "exact de gecureerde FORMATIONS-lijst, niet de
+    // generator". Dat stond hier als letterlijke vijftal; die lijst is
+    // inmiddels naar 15 formaties gegroeid en zou bij elke uitbreiding rotten
+    // zonder dat het criterium verandert. Nu relationeel vastgelegd, met een
+    // spotcheck die de generator per definitie niet kan halen: die produceert
+    // uitsluitend "V-M-A"-keys (lib/formaties.ts, formatieKey), dus een
+    // variantnaam met een achtervoegsel bewijst dat de curated lijst wint.
     const verwacht = formationsForSize(11).map((f) => f.label)
-    expect(verwacht).toEqual(['4-2-3-1', '4-3-3', '4-4-2', '3-4-3', '5-3-2'].sort((a, b) => a.localeCompare(b, 'nl')))
+    expect(verwacht).toEqual(
+      Object.values(FORMATIONS).map((f) => f.label).sort((a, b) => a.localeCompare(b, 'nl')),
+    )
+    expect(verwacht).toContain('4-3-3 (controleur)')
 
     let group = screen.getByRole('group', { name: nl.oefeningen.formation })
     expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(verwacht)

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
@@ -9,6 +9,27 @@ import LineupBuilder from '@/components/LineupBuilder'
 vi.mock('@/app/actions/attendance', () => ({
   saveLineup: vi.fn().mockResolvedValue(undefined),
 }))
+
+beforeEach(() => {
+  // LineupBuilder gebruikt useReducedMotion (lib/use-reduced-motion.ts) voor de
+  // inslag-animatie bij het plaatsen van een speler; jsdom kent
+  // window.matchMedia niet standaard. Zelfde stub als
+  // components/PlayerList.test.tsx.
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+})
 
 function player(overrides: Partial<Player> = {}): Player {
   return {

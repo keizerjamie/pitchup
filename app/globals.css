@@ -528,6 +528,45 @@ body::after {
    het :root[data-theme='dark']-blok hierboven staan om bij gelijke
    selector-specificiteit te winnen wanneer dark mode actief is.
 ───────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────
+   Inslag-animatie in de opstellingsbouwer
+   (components/LineupBuilder.tsx, zie IMPACT_DUUR_MS)
+───────────────────────────────────────────────── */
+
+/* Het poppetje ploft op zijn positie: klein en doorzichtig binnen, ver
+   doorschieten, terugveren, uitdempen. De overshoot naar 1.3 is wat het
+   "inslag" laat voelen; zonder de tweede, kleinere stuiter oogt het mechanisch. */
+@keyframes poppetje-inslag {
+  0%   { opacity: 0; transform: scale(0.25); }
+  40%  { opacity: 1; transform: scale(1.30); }
+  62%  { transform: scale(0.90); }
+  80%  { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
+
+/* Schokgolf-ring die vanuit het poppetje naar buiten slaat en vervaagt. Wordt
+   twee keer gebruikt (wit + clubkleur, de tweede met 110ms vertraging). */
+@keyframes poppetje-schokgolf {
+  0%   { opacity: 0.9; transform: translate(-50%, -50%) scale(0.55); }
+  100% { opacity: 0;   transform: translate(-50%, -50%) scale(2.8); }
+}
+
+/* Het naamplaatje schuift onder het poppetje vandaan omhoog, net ná de inslag. */
+@keyframes poppetje-naam {
+  0%   { opacity: 0; transform: translateY(7px) scale(0.94); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Tweede vangnet naast de useReducedMotion-check in LineupBuilder: draait de
+   animaties dood mocht matchMedia onbeschikbaar zijn (oudere webviews). */
+@media (prefers-reduced-motion: reduce) {
+  [style*="poppetje-inslag"],
+  [style*="poppetje-schokgolf"],
+  [style*="poppetje-naam"] {
+    animation: none !important;
+  }
+}
+
 @media print {
   @page { size: A4; margin: 12mm; }
 

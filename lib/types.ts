@@ -418,6 +418,32 @@ export const POSITION_COLORS: Record<string, string> = {
   'Spits': 'bg-red-100 text-red-800',
 }
 
+// Slotlabel → de volwaardige positienaam waarop een speler wordt gescoord.
+// Woonde eerder in components/LineupBuilder.tsx; hier verhuisd zodat
+// lib/formations.test.ts kan bewaken dat elke formatie uitsluitend labels
+// gebruikt die hierin voorkomen. Een label dat hier ontbreekt levert een lege
+// `preferredPos` op, waarna getFitScore voor iedereen 0 teruggeeft — geen
+// aanbeveling, geen auto-opstelling, en geen enkele foutmelding.
+export const POSITION_LABEL_MAP: Record<string, string> = {
+  KP: 'Keeper', LV: 'Linksachter', MV: 'Centrale verdediger', RV: 'Rechtsachter',
+  LVB: 'Linksachter', RVB: 'Rechtsachter', DM: 'Defensieve middenvelder',
+  CM: 'Centrale middenvelder', LM: 'Linksmiddenvelder', RM: 'Rechtsmiddenvelder',
+  '10': 'Aanvallende middenvelder', LA: 'Linksbuiten', RA: 'Rechtsbuiten', SP: 'Spits',
+}
+
+// Gecureerde 11-tal-formaties. Sleutel = wat er in `lineups.formation` en in
+// `oefeningen.teams[].formatie` wordt opgeslagen; `label` is wat de kiezer toont.
+// De volgorde hieronder is de volgorde in de formatiekiezer van de
+// opstellingsbouwer (gegroepeerd op verdedigingslinie: 4, dan 3, dan 5); de
+// oefeningen-editor sorteert dezelfde lijst alfabetisch via formationsForSize.
+//
+// Twee harde regels, bewaakt door lib/formations.test.ts:
+//   • Elk `position_label` moet in POSITION_LABEL_MAP staan. Een onbekend label
+//     laat getFitScore voor iedereen 0 teruggeven: geen aanbeveling, geen
+//     auto-opstelling voor dat slot — en dat faalt nergens luid.
+//   • `position_number` is per formatie 1 t/m 11 zonder duplicaat: het NUMMER is
+//     wat op een bezet poppetje staat (displayNum in LineupBuilder), niet het
+//     rugnummer van de speler, dus twee gelijke nummers zijn niet te lezen.
 export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupPosition, 'player_id'>[] }> = {
   '4-3-3': {
     label: '4-3-3',
@@ -433,6 +459,54 @@ export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupP
       { x: 20, y: 22, position_label: 'LA', position_number: 11 },
       { x: 50, y: 18, position_label: 'SP', position_number: 9 },
       { x: 80, y: 22, position_label: 'RA', position_number: 7 },
+    ],
+  },
+  '4-3-3 (controleur)': {
+    label: '4-3-3 (controleur)',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 70, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 70, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 70, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 70, position_label: 'RV', position_number: 2 },
+      { x: 50, y: 58, position_label: 'DM', position_number: 6 },
+      { x: 32, y: 44, position_label: 'CM', position_number: 8 },
+      { x: 68, y: 44, position_label: 'CM', position_number: 10 },
+      { x: 20, y: 20, position_label: 'LA', position_number: 11 },
+      { x: 50, y: 16, position_label: 'SP', position_number: 9 },
+      { x: 80, y: 20, position_label: 'RA', position_number: 7 },
+    ],
+  },
+  '4-3-3 (dubbele 6)': {
+    label: '4-3-3 (dubbele 6)',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 72, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 72, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 72, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 72, position_label: 'RV', position_number: 2 },
+      { x: 35, y: 57, position_label: 'DM', position_number: 6 },
+      { x: 65, y: 57, position_label: 'DM', position_number: 8 },
+      { x: 50, y: 38, position_label: '10', position_number: 10 },
+      { x: 18, y: 20, position_label: 'LA', position_number: 11 },
+      { x: 50, y: 15, position_label: 'SP', position_number: 9 },
+      { x: 82, y: 20, position_label: 'RA', position_number: 7 },
+    ],
+  },
+  '4-3-3 (valse 9)': {
+    label: '4-3-3 (valse 9)',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 70, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 70, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 70, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 70, position_label: 'RV', position_number: 2 },
+      { x: 25, y: 48, position_label: 'LM', position_number: 6 },
+      { x: 50, y: 48, position_label: 'CM', position_number: 8 },
+      { x: 75, y: 48, position_label: 'RM', position_number: 10 },
+      { x: 14, y: 17, position_label: 'LA', position_number: 11 },
+      { x: 50, y: 32, position_label: 'SP', position_number: 9 },
+      { x: 86, y: 17, position_label: 'RA', position_number: 7 },
     ],
   },
   '4-4-2': {
@@ -451,6 +525,22 @@ export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupP
       { x: 65, y: 18, position_label: 'SP', position_number: 9 },
     ],
   },
+  '4-4-2 (ruit)': {
+    label: '4-4-2 (ruit)',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 70, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 70, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 70, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 70, position_label: 'RV', position_number: 2 },
+      { x: 50, y: 58, position_label: 'DM', position_number: 6 },
+      { x: 22, y: 45, position_label: 'LM', position_number: 8 },
+      { x: 78, y: 45, position_label: 'RM', position_number: 7 },
+      { x: 50, y: 33, position_label: '10', position_number: 10 },
+      { x: 36, y: 16, position_label: 'SP', position_number: 9 },
+      { x: 64, y: 16, position_label: 'SP', position_number: 11 },
+    ],
+  },
   '4-2-3-1': {
     label: '4-2-3-1',
     positions: [
@@ -465,6 +555,54 @@ export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupP
       { x: 50, y: 33, position_label: '10', position_number: 10 },
       { x: 85, y: 33, position_label: 'RA', position_number: 7 },
       { x: 50, y: 14, position_label: 'SP', position_number: 9 },
+    ],
+  },
+  '4-1-4-1': {
+    label: '4-1-4-1',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 72, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 72, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 72, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 72, position_label: 'RV', position_number: 2 },
+      { x: 50, y: 58, position_label: 'DM', position_number: 6 },
+      { x: 14, y: 42, position_label: 'LM', position_number: 11 },
+      { x: 38, y: 42, position_label: 'CM', position_number: 8 },
+      { x: 62, y: 42, position_label: 'CM', position_number: 10 },
+      { x: 86, y: 42, position_label: 'RM', position_number: 7 },
+      { x: 50, y: 16, position_label: 'SP', position_number: 9 },
+    ],
+  },
+  '4-5-1': {
+    label: '4-5-1',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 72, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 72, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 72, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 72, position_label: 'RV', position_number: 2 },
+      { x: 12, y: 45, position_label: 'LM', position_number: 11 },
+      { x: 33, y: 47, position_label: 'CM', position_number: 8 },
+      { x: 50, y: 55, position_label: 'DM', position_number: 6 },
+      { x: 67, y: 47, position_label: 'CM', position_number: 10 },
+      { x: 88, y: 45, position_label: 'RM', position_number: 7 },
+      { x: 50, y: 18, position_label: 'SP', position_number: 9 },
+    ],
+  },
+  '4-2-2-2': {
+    label: '4-2-2-2',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 15, y: 72, position_label: 'LV', position_number: 3 },
+      { x: 38, y: 72, position_label: 'MV', position_number: 5 },
+      { x: 62, y: 72, position_label: 'MV', position_number: 4 },
+      { x: 85, y: 72, position_label: 'RV', position_number: 2 },
+      { x: 33, y: 57, position_label: 'DM', position_number: 6 },
+      { x: 67, y: 57, position_label: 'DM', position_number: 8 },
+      { x: 25, y: 36, position_label: '10', position_number: 10 },
+      { x: 75, y: 36, position_label: '10', position_number: 7 },
+      { x: 38, y: 16, position_label: 'SP', position_number: 9 },
+      { x: 62, y: 16, position_label: 'SP', position_number: 11 },
     ],
   },
   '3-4-3': {
@@ -483,6 +621,38 @@ export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupP
       { x: 80, y: 20, position_label: 'RA', position_number: 7 },
     ],
   },
+  '3-5-2': {
+    label: '3-5-2',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 25, y: 70, position_label: 'MV', position_number: 5 },
+      { x: 50, y: 70, position_label: 'MV', position_number: 4 },
+      { x: 75, y: 70, position_label: 'MV', position_number: 6 },
+      { x: 10, y: 48, position_label: 'LVB', position_number: 3 },
+      { x: 33, y: 45, position_label: 'CM', position_number: 10 },
+      { x: 50, y: 58, position_label: 'DM', position_number: 8 },
+      { x: 67, y: 45, position_label: 'CM', position_number: 7 },
+      { x: 90, y: 48, position_label: 'RVB', position_number: 2 },
+      { x: 38, y: 18, position_label: 'SP', position_number: 9 },
+      { x: 62, y: 18, position_label: 'SP', position_number: 11 },
+    ],
+  },
+  '3-4-2-1': {
+    label: '3-4-2-1',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 25, y: 70, position_label: 'MV', position_number: 5 },
+      { x: 50, y: 70, position_label: 'MV', position_number: 4 },
+      { x: 75, y: 70, position_label: 'MV', position_number: 6 },
+      { x: 12, y: 48, position_label: 'LM', position_number: 3 },
+      { x: 38, y: 50, position_label: 'CM', position_number: 8 },
+      { x: 62, y: 50, position_label: 'CM', position_number: 10 },
+      { x: 88, y: 48, position_label: 'RM', position_number: 2 },
+      { x: 32, y: 30, position_label: '10', position_number: 11 },
+      { x: 68, y: 30, position_label: '10', position_number: 7 },
+      { x: 50, y: 15, position_label: 'SP', position_number: 9 },
+    ],
+  },
   '5-3-2': {
     label: '5-3-2',
     positions: [
@@ -497,6 +667,22 @@ export const FORMATIONS: Record<string, { label: string; positions: Omit<LineupP
       { x: 75, y: 45, position_label: 'RM', position_number: 7 },
       { x: 35, y: 20, position_label: 'SP', position_number: 10 },
       { x: 65, y: 20, position_label: 'SP', position_number: 9 },
+    ],
+  },
+  '5-4-1': {
+    label: '5-4-1',
+    positions: [
+      { x: 50, y: 90, position_label: 'KP', position_number: 1 },
+      { x: 10, y: 66, position_label: 'LVB', position_number: 3 },
+      { x: 28, y: 68, position_label: 'LV', position_number: 5 },
+      { x: 50, y: 68, position_label: 'MV', position_number: 4 },
+      { x: 72, y: 68, position_label: 'RV', position_number: 6 },
+      { x: 90, y: 66, position_label: 'RVB', position_number: 2 },
+      { x: 18, y: 45, position_label: 'LM', position_number: 11 },
+      { x: 40, y: 45, position_label: 'CM', position_number: 8 },
+      { x: 60, y: 45, position_label: 'CM', position_number: 10 },
+      { x: 82, y: 45, position_label: 'RM', position_number: 7 },
+      { x: 50, y: 17, position_label: 'SP', position_number: 9 },
     ],
   },
 }
