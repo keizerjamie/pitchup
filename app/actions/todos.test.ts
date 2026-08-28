@@ -96,6 +96,19 @@ describe('markTaskDone', () => {
     await expect(markTaskDone('e1', 'onzin' as 'lineup')).rejects.toThrow('Ongeldige taak')
   })
 
+  it('schrijft squad en lineup als twee losse taken weg', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await markTaskDone('e1', 'squad')
+    await markTaskDone('e1', 'lineup')
+
+    expect(m.calls.upsert.map((u) => u.payload)).toEqual([
+      { team_id: 'team-1', event_id: 'e1', task_type: 'squad' },
+      { team_id: 'team-1', event_id: 'e1', task_type: 'lineup' },
+    ])
+  })
+
   it('weigert zonder ingelogde gebruiker', async () => {
     use(makeSupabase({ user: null }))
     await expect(markTaskDone('e1', 'lineup')).rejects.toThrow('Niet ingelogd')

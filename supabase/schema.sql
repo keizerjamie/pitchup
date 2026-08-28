@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS task_overrides (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   team_id UUID NOT NULL,
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  task_type TEXT NOT NULL CHECK (task_type IN ('lineup','analysis','training_plan')),
+  task_type TEXT NOT NULL CHECK (task_type IN ('squad','lineup','analysis','training_plan')),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE (team_id, event_id, task_type)
 );

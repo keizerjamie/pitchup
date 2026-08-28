@@ -19,22 +19,23 @@ import {
 
 // ── constanten ──────────────────────────────────────────────────────────────
 
-test('TASK_TYPES is exact lineup/analysis/training_plan', () => {
-  assert.deepEqual(TASK_TYPES, ['lineup', 'analysis', 'training_plan'])
+test('TASK_TYPES is exact squad/lineup/analysis/training_plan', () => {
+  assert.deepEqual(TASK_TYPES, ['squad', 'lineup', 'analysis', 'training_plan'])
   assert.equal(FORWARD, 7)
   assert.equal(RETENTION, 7)
 })
 
 // ── isValidTaskType ─────────────────────────────────────────────────────────
 
-test('isValidTaskType accepteert exact de drie types', () => {
+test('isValidTaskType accepteert exact de vier types', () => {
+  assert.equal(isValidTaskType('squad'), true)
   assert.equal(isValidTaskType('lineup'), true)
   assert.equal(isValidTaskType('analysis'), true)
   assert.equal(isValidTaskType('training_plan'), true)
 })
 
 test('isValidTaskType weigert alles wat niet exact matcht', () => {
-  for (const bad of ['lineup ', ' lineup', 'Lineup', 'LINEUP', '', null, undefined, 42, 'training']) {
+  for (const bad of ['lineup ', ' lineup', 'Lineup', 'LINEUP', 'squad ', 'Squad', 'match_squad', '', null, undefined, 42, 'training']) {
     assert.equal(isValidTaskType(bad), false, `${String(bad)} geweigerd`)
   }
 })
@@ -143,7 +144,22 @@ test('isTaskVisible: open analyse deadline verder dan +7 → toch zichtbaar (nev
   )
 })
 
-// ── isTaskVisible: open lineup/training ─────────────────────────────────────
+// ── isTaskVisible: open squad/lineup/training ───────────────────────────────
+
+test('isTaskVisible: squad volgt hetzelfde forward-venster als lineup', () => {
+  assert.equal(
+    isTaskVisible({ taskType: 'squad', done: false, daysUntilEvent: 3, daysUntilDeadline: 0 }),
+    true,
+  )
+  assert.equal(
+    isTaskVisible({ taskType: 'squad', done: false, daysUntilEvent: -1, daysUntilDeadline: 0 }),
+    false,
+  )
+  assert.equal(
+    isTaskVisible({ taskType: 'squad', done: false, daysUntilEvent: 8, daysUntilDeadline: 0 }),
+    false,
+  )
+})
 
 test('isTaskVisible: open opstelling over 3 dagen → zichtbaar', () => {
   assert.equal(

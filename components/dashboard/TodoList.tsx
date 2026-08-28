@@ -6,7 +6,7 @@ import { markTaskDone, reopenTask } from '@/app/actions/todos'
 import { useDict } from '@/lib/i18n-context'
 import { daysUntil, formatDate } from '@/lib/utils'
 
-export type TaskType = 'lineup' | 'analysis' | 'training_plan'
+export type TaskType = 'squad' | 'lineup' | 'analysis' | 'training_plan'
 
 export interface TodoItem {
   eventId: string
@@ -20,13 +20,14 @@ export interface TodoItem {
 
 // Route per taak-type — zelfde paden als de ActionCard-hrefs op de event-detailpagina.
 const TASK_HREF: Record<TaskType, string> = {
+  squad: 'squad',
   lineup: 'lineup',
   analysis: 'analysis',
   training_plan: 'training-plan',
 }
 
-// Server-gesorteerde To-do-lijst: open opstellingen, wedstrijdanalyses en
-// trainingsplannen. Checkbox = optimistisch (lokale manual-state), auto-done
+// Server-gesorteerde To-do-lijst: open wedstrijdselecties, opstellingen,
+// wedstrijdanalyses en trainingsplannen. Checkbox = optimistisch (lokale manual-state), auto-done
 // taken blijven altijd aangevinkt (ook na "reopen" — bewust, zie brief).
 export default function TodoList({ items }: { items: TodoItem[] }) {
   const t = useDict()
@@ -48,6 +49,7 @@ export default function TodoList({ items }: { items: TodoItem[] }) {
   }
 
   const label: Record<TaskType, string> = {
+    squad: t.todo.taskSquad,
     lineup: t.todo.taskLineup,
     analysis: t.todo.taskAnalysis,
     training_plan: t.todo.taskTraining,

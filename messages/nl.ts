@@ -79,7 +79,8 @@ export const nl = {
   todo: {
     title: 'To-do',
     empty: 'Geen taken deze week',
-    taskLineup: 'Wedstrijdselectie en opstelling maken',
+    taskSquad: 'Wedstrijdselectie maken',
+    taskLineup: 'Opstelling maken',
     taskAnalysis: 'Wedstrijdanalyse invullen',
     taskTraining: 'Training maken',
     overdue: 'Te laat',

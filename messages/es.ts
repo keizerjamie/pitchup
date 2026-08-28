@@ -68,7 +68,8 @@ export const es: Dict = {
   todo: {
     title: 'Tareas',
     empty: 'No hay tareas esta semana',
-    taskLineup: 'Preparar la convocatoria y la alineación',
+    taskSquad: 'Preparar la convocatoria',
+    taskLineup: 'Crear la alineación',
     taskAnalysis: 'Completar el análisis del partido',
     taskTraining: 'Crear el entrenamiento',
     overdue: 'Atrasado',

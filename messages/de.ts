@@ -68,7 +68,8 @@ export const de: Dict = {
   todo: {
     title: 'Aufgaben',
     empty: 'Keine Aufgaben diese Woche',
-    taskLineup: 'Kader und Aufstellung erstellen',
+    taskSquad: 'Kader nominieren',
+    taskLineup: 'Aufstellung erstellen',
     taskAnalysis: 'Spielanalyse ausfüllen',
     taskTraining: 'Training erstellen',
     overdue: 'Überfällig',

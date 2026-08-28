@@ -6,15 +6,17 @@
 // een representatief scenario en rijgt de ECHTE beslislogica van
 // lib/todos.mjs en lib/match-analysis.mjs aan elkaar via `buildTodoItems`,
 // een testharnas dat regel-voor-regel dezelfde opbouw volgt als de
-// productiecode in app/page.tsx (regels ±155-203): voor elk kandidaat-event
-// een 'lineup'/'analysis'-taak (match) of 'training_plan'-taak (training),
+// productiecode in app/page.tsx (buildTodoItems-lus in `Home`): voor elk
+// kandidaat-event een 'squad'/'lineup'/'analysis'-taak (match) of
+// 'training_plan'-taak (training),
 // zichtbaarheid via isTaskVisible, sortering via sortTasks. `buildTodoItems`
 // zelf bevat GEEN nieuwe beslislogica — elke beslissing (is de taak af? is
 // hij zichtbaar? wat is de deadline? in welke volgorde?) komt uit de echte,
 // geïmporteerde functies.
 //
-// De labels ('Wedstrijdselectie en opstelling maken', 'Wedstrijdanalyse
-// invullen', 'Training maken') komen 1-op-1 uit messages/nl.ts:63-65 en
+// De labels ('Wedstrijdselectie maken', 'Opstelling maken', 'Wedstrijdanalyse
+// invullen', 'Training maken') komen 1-op-1 uit het `todo`-blok in
+// messages/nl.ts en
 // worden in components/dashboard/TodoList.tsx door taskType geselecteerd
 // (regel 50-54); die statische koppeling is met de hand geverifieerd en
 // wordt hieronder per test aangehaald — dit bestand test zelf op taskType,
@@ -55,7 +57,7 @@ function addDaysFixed(dateStr, n) {
 
 /**
  * Testharnas: bouwt de zichtbare, gesorteerde To-do-lijst op precies dezelfde
- * manier als app/page.tsx (regels ±155-203), maar met in-memory events i.p.v.
+ * manier als de To-do-lus in app/page.tsx, maar met in-memory events i.p.v.
  * Supabase-rijen. Elke beslissing wordt gedelegeerd aan de echte exports.
  */
 function buildTodoItems(events, { trainingDates = [], manualSet = new Set() } = {}, today = TODAY) {
@@ -63,6 +65,28 @@ function buildTodoItems(events, { trainingDates = [], manualSet = new Set() } = 
 
   for (const e of events) {
     if (e.type === 'match') {
+      const squadAuto = !!e.squadExists
+      const squadManual = manualSet.has(`${e.id}:squad`)
+      const squadEffective = effectiveDone(squadAuto, squadManual)
+      if (
+        isTaskVisible({
+          taskType: 'squad',
+          done: squadEffective,
+          daysUntilEvent: daysUntilFixed(e.date, today),
+          daysUntilDeadline: 0,
+        })
+      ) {
+        rawTasks.push({
+          eventId: e.id,
+          taskType: 'squad',
+          deadline: e.date,
+          eventDate: e.date,
+          auto: squadAuto,
+          manual: squadManual,
+          effective: squadEffective,
+        })
+      }
+
       const lineupAuto = !!e.lineupExists
       const lineupManual = manualSet.has(`${e.id}:lineup`)
       const lineupEffective = effectiveDone(lineupAuto, lineupManual)
@@ -148,8 +172,8 @@ function findTask(items, eventId, taskType) {
 // Taken & deadlines
 // ═══════════════════════════════════════════════════════════════════════════
 
-// AC1: Wedstrijd in venster → taak "Wedstrijdselectie en opstelling maken"
-// (taskType 'lineup', label messages/nl.ts:63), deadline = wedstrijddag.
+// AC1: Wedstrijd in venster → taak "Opstelling maken"
+// (taskType 'lineup', label `todo.taskLineup` in messages/nl.ts), deadline = wedstrijddag.
 test('AC1: wedstrijd deze week → open lineup-taak met deadline = wedstrijddag', () => {
   const matchDate = addDaysFixed(TODAY, 3)
   const items = buildTodoItems([
@@ -365,20 +389,62 @@ test('AC11: open taken eerst (oplopend op deadline), daarna afgevinkte taken (op
   const items = buildTodoItems([
     { id: 'o1', type: 'training', date: addDaysFixed(TODAY, 5), doelstelling: null, oefCount: 0 }, // open, laat
     { id: 'o2', type: 'training', date: addDaysFixed(TODAY, 1), doelstelling: null, oefCount: 0 }, // open, vroeg
-    { id: 'd1', type: 'match', date: addDaysFixed(TODAY, -3), lineupExists: true }, // done, vroege deadline
-    { id: 'd2', type: 'match', date: addDaysFixed(TODAY, 2), lineupExists: true }, // done, latere deadline
+    { id: 'd1', type: 'match', date: addDaysFixed(TODAY, -3), squadExists: true, lineupExists: true }, // done, vroege deadline
+    { id: 'd2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupExists: true }, // done, latere deadline
   ])
-  const lineupsAndTrainings = items.filter((i) => i.taskType !== 'analysis')
+  // Alleen de opstellings- en trainingstaken: deze test gaat over open-vóór-
+  // afgevinkt en deadline-volgorde, niet over de selectie/opstelling-splitsing
+  // (die heeft een eigen test hieronder).
+  const lineupsAndTrainings = items.filter((i) => i.taskType === 'lineup' || i.taskType === 'training_plan')
   const order = lineupsAndTrainings.map((i) => i.eventId)
   assert.deepEqual(order, ['o2', 'o1', 'd1', 'd2'])
 })
 
+// Wedstrijdselectie en opstelling zijn twee losse taken met dezelfde deadline
+// (de wedstrijddag). De selectie komt eerst — dat is de werkvolgorde: je roept
+// eerst spelers op en stelt daarna op.
+test('selectie en opstelling zijn twee aparte taken; selectie staat bóven de opstelling', () => {
+  const items = buildTodoItems([
+    { id: 'm1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupExists: false },
+  ])
+  const perEvent = items.filter((i) => i.eventId === 'm1' && i.taskType !== 'analysis')
+  assert.deepEqual(perEvent.map((i) => i.taskType), ['squad', 'lineup'])
+  assert.equal(perEvent[0].deadline, perEvent[1].deadline, 'beide hebben de wedstrijddag als deadline')
+})
+
+// Elk van de twee taken heeft zijn eigen 'auto klaar'-bron: match_squad-rijen
+// voor de selectie, een lineups-rij voor de opstelling. Ze vinken elkaar niet af.
+test('selectie en opstelling vinken elkaar niet af', () => {
+  const alleenSelectie = buildTodoItems([
+    { id: 's1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupExists: false },
+  ])
+  assert.equal(findTask(alleenSelectie, 's1', 'squad').effective, true)
+  assert.equal(findTask(alleenSelectie, 's1', 'lineup').effective, false)
+
+  const alleenOpstelling = buildTodoItems([
+    { id: 's2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupExists: true },
+  ])
+  assert.equal(findTask(alleenOpstelling, 's2', 'squad').effective, false)
+  assert.equal(findTask(alleenOpstelling, 's2', 'lineup').effective, true)
+})
+
+// Handmatig afvinken is ook per taak gescheiden: een 'lineup'-override laat de
+// selectietaak open staan.
+test('een handmatige override op de opstelling raakt de selectietaak niet', () => {
+  const items = buildTodoItems(
+    [{ id: 'h1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupExists: false }],
+    { manualSet: new Set(['h1:lineup']) },
+  )
+  assert.equal(findTask(items, 'h1', 'lineup').effective, true)
+  assert.equal(findTask(items, 'h1', 'squad').effective, false)
+})
+
 // AC12: Geen limiet op aantal taken; meerdere events → volledige set taken
-// per event (match → 2 taken, training → 1 taak).
+// per event (match → 3 taken, training → 1 taak).
 test('AC12: geen limiet — meerdere events leveren hun volledige takenset op', () => {
   const events = []
   // 6 wedstrijden, elk al gespeeld (binnen de retentie) én auto-afgerond op
-  // beide taken, zodat lineup + analysis allebei betrouwbaar zichtbaar zijn
+  // alle drie de taken, zodat squad + lineup + analysis betrouwbaar zichtbaar zijn
   // (de timing-grenzen van open taken worden al door AC14-AC16 gedekt; AC12
   // gaat specifiek over "geen limiet + volledige set per event").
   for (let i = 0; i < 6; i++) {
@@ -386,6 +452,7 @@ test('AC12: geen limiet — meerdere events leveren hun volledige takenset op', 
       id: `match-${i}`,
       type: 'match',
       date: addDaysFixed(TODAY, -i),
+      squadExists: true,
       lineupExists: true,
       goals_for: 1,
       goals_against: 0,
@@ -395,9 +462,10 @@ test('AC12: geen limiet — meerdere events leveren hun volledige takenset op', 
     events.push({ id: `training-${i}`, type: 'training', date: addDaysFixed(TODAY, i), doelstelling: null, oefCount: 0 })
   }
   const items = buildTodoItems(events)
-  // 6 wedstrijden × 2 taken (lineup + analysis) + 6 trainingen × 1 taak = 18
-  assert.equal(items.length, 18)
+  // 6 wedstrijden × 3 taken (squad + lineup + analysis) + 6 trainingen × 1 taak = 24
+  assert.equal(items.length, 24)
   for (let i = 0; i < 6; i++) {
+    assert.ok(findTask(items, `match-${i}`, 'squad'), `squad voor match-${i} ontbreekt`)
     assert.ok(findTask(items, `match-${i}`, 'lineup'), `lineup voor match-${i} ontbreekt`)
     assert.ok(findTask(items, `match-${i}`, 'analysis'), `analysis voor match-${i} ontbreekt`)
     assert.ok(findTask(items, `training-${i}`, 'training_plan'), `training_plan voor training-${i} ontbreekt`)

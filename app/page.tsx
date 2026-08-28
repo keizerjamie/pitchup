@@ -146,7 +146,7 @@ export default async function DashboardPage() {
   const attendancePct = guestPlayerError || totalPresent + totalAbsent === 0
     ? null
     : Math.round((totalPresent / (totalPresent + totalAbsent)) * 100)
-  // ── To-do (open opstelling/analyse/trainingsplan-taken) ──
+  // ── To-do (open selectie/opstelling/analyse/trainingsplan-taken) ──
   const todoCandidates: FootballEvent[] = todoCandidateEvents ?? []
   const trainingDates: string[] = (trainingDateRows ?? []).map((r: { date: string }) => r.date)
   const matchCandidateIds = todoCandidates.filter((e) => e.type === 'match').map((e) => e.id)
@@ -154,12 +154,16 @@ export default async function DashboardPage() {
   const allCandidateIds = todoCandidates.map((e) => e.id)
 
   const [
+    { data: squadRows },
     { data: lineupRows },
     { data: matchRatingRows },
     { data: matchEventRows },
     { data: oefeningRows },
     { data: overrideRows },
   ] = await Promise.all([
+    matchCandidateIds.length > 0
+      ? supabase.from('match_squad').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
       ? supabase.from('lineups').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
@@ -177,6 +181,9 @@ export default async function DashboardPage() {
       : Promise.resolve({ data: [] }),
   ])
 
+  // De aanwezigheid van minstens één match_squad-rij ÍS de selectie — zelfde
+  // done-criterium als de selectie-ActionCard op de event-detailpagina.
+  const squadSet = new Set<string>((squadRows ?? []).map((r: { event_id: string }) => r.event_id))
   const lineupSet = new Set<string>((lineupRows ?? []).map((r: { event_id: string }) => r.event_id))
   const manualSet = new Set<string>(
     (overrideRows ?? []).map((r: { event_id: string; task_type: string }) => `${r.event_id}:${r.task_type}`)
@@ -204,6 +211,18 @@ export default async function DashboardPage() {
 
   for (const e of todoCandidates) {
     if (e.type === 'match') {
+      // Selectie vóór opstelling: bij een gelijke deadline houdt de stabiele
+      // sort (sortTasks) deze volgorde aan, en dat is ook de werkvolgorde.
+      const squadAuto = squadSet.has(e.id)
+      const squadManual = manualSet.has(`${e.id}:squad`)
+      const squadEffective = effectiveDone(squadAuto, squadManual)
+      if (isTaskVisible({ taskType: 'squad', done: squadEffective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: 0 })) {
+        rawTasks.push({
+          eventId: e.id, taskType: 'squad', opponent: e.opponent, deadline: e.date, eventDate: e.date,
+          auto: squadAuto, manual: squadManual, effective: squadEffective,
+        })
+      }
+
       const lineupAuto = lineupSet.has(e.id)
       const lineupManual = manualSet.has(`${e.id}:lineup`)
       const lineupEffective = effectiveDone(lineupAuto, lineupManual)

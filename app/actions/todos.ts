@@ -6,9 +6,9 @@ import { assertOwnEvent } from '@/lib/authz'
 import { isValidTaskType } from '@/lib/todos.mjs'
 import { genericError } from '@/lib/errors'
 
-type TaskType = 'lineup' | 'analysis' | 'training_plan'
+type TaskType = 'squad' | 'lineup' | 'analysis' | 'training_plan'
 
-// Vinkt een taak (lineup/analysis/training_plan) voor een event handmatig af.
+// Vinkt een taak (squad/lineup/analysis/training_plan) voor een event handmatig af.
 // Idempotent: onConflict laat een bestaande rij ongemoeid.
 export async function markTaskDone(eventId: string, taskType: TaskType): Promise<void> {
   const supabase = await createClient()
