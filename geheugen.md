@@ -2318,3 +2318,38 @@ overgenomen). Ontwerp-aanbeveling gearchiveerd als artifact "Elastische oefenvor
   `saveAantallenOverride` doet het wél goed).
 - Werkelijke print-hoogte van het nieuwe `·`-segment alleen handmatig te beoordelen
   (structureel geen extra regel; jsdom kent geen `@media print`).
+
+## Fix: aanwezigheidskolom trainingsplan onleesbaar in dark mode (2026-08-28, commit `0a21690`, live)
+Klacht van de eigenaar: op "Training maken" niet kunnen zien wie aanwezig/afwezig is —
+"het lettertype heeft bijna dezelfde kleur als de achtergrond".
+
+### Oorzaak
+`.glass-card` (`app/globals.css`) had een **hardgecodeerde** `rgba(255,255,255,0.78)` met
+witte rand en witte inset-highlight, zonder dark-variant. Het was daarmee de enige kaart in
+de app die niet met het thema meebewoog — `.surface-card` doet dat wél via `--surface`. Enige
+gebruiker van de klasse is `AttendanceSummary`. In dark mode bleef dat vlak dus lichtgrijs
+oplichten terwijl `--ink`/`--muted`/`--primary-strong` daar juist LICHT zijn: kop 1.41:1,
+aanwezig 1.05:1, afwezig 1.21:1, positiekopjes 1.61:1. Licht thema was altijd in orde.
+
+### Fix
+- `.glass-card` afgeleid van `--surface` via `color-mix(in srgb, var(--surface) 78%,
+  transparent)`, plus nieuwe tokens `--glass-border` / `--glass-highlight` in beide
+  `:root`-blokken. **Licht blijft bit voor bit gelijk** (`--surface` is daar `#ffffff`, dus
+  de color-mix levert exact dezelfde rgba); dark gaat naar 5.08–11.59:1.
+- Afwezig-chip had alleen `bg-surface-sunken` (`#f6faf8`) — op het lichte thema vrijwel de
+  kaartkleur zelf, dus geen zichtbare chip en nauwelijks verschil met aanwezig. Aanwezig
+  gebruikt nu het `panel-green`-drietal (bg/edge/ink), afwezig blijft neutraal mét rand.
+- "Aanwezigheid bewerken" stond op `text-brand` (`#0d3d38`) + `hover:bg-brand-light`
+  (`#e6f4f2`) — **vaste hexen uit het `@theme`-blok die niet met het thema meebewegen**.
+  Nu `text-brand-accent` + `hover:bg-surface-sunken`.
+
+### Lessen
+- **De contrast-eis in de kop van `globals.css` dekt alleen de `:root`-tokens, niet de vaste
+  hexen in `@theme`** (`--color-brand`, `--color-brand-light`, `--color-accent`). Wie die als
+  tekst of vlak gebruikt op een oppervlak dat wél meebeweegt, bouwt stil een dark-mode-bug.
+  Themabare tegenhangers: `--brand-accent`, `--surface-sunken`, `--accent-strong`.
+- **Zoek dit soort fouten niet in de tekstkleur maar in de achtergrond eronder.** Alle
+  tekstkleuren op deze kaart waren al AA-nagerekend; het vlak was de afwijking.
+- `.glass-card-raised` is dode CSS (nergens gebruikt) — niet aangeraakt, losse opruimtaak.
+- Het `@media print`-blok hoefde niet mee: `.print-attendance-col` zet achtergrond, rand en
+  schaduw daar al met `!important` uit.
