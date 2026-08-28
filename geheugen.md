@@ -2547,3 +2547,84 @@ de poppetjes op het veld waren altijd wit, en de bank toonde élke actieve spele
   alle aanwezige + afwezige spelers — die lopen niet mee met de wedstrijdselectie. Niet gevraagd.
 - Niet in de browser geverifieerd: de pagina zit achter de Supabase-login. Wel bewezen via de
   echte serverpagina in jsdom, plus `npm run build` (de Next/Turbopack-compiler).
+
+## Opstelling: 15 formaties, uitklapbare kiezer, inslag-animatie (2026-08-28, commit `ccdb6ec`, live)
+Direct gebouwd (geen feature-factory-keten). **Geen backend**: geen migratie, tabel of server
+action — `lineups.formation` en `oefeningen.teams[].formatie` zijn tekstvelden, dus nieuwe
+formatiesleutels zijn puur additief en vergen geen backfill.
+
+### Catalogus 5 → 15 (`lib/types.ts`, `FORMATIONS`)
+- Nieuw: drie 4-3-3-varianten (`4-3-3 (controleur)` punt naar achter, `4-3-3 (dubbele 6)` punt
+  naar voren met een 10, `4-3-3 (valse 9)` spits laag + vleugels hoog en breed), plus
+  `4-4-2 (ruit)`, `4-1-4-1`, `4-5-1`, `4-2-2-2`, `3-5-2`, `3-4-2-1`, `5-4-1`.
+- **Sleutel = label = wat er wordt opgeslagen.** Sleutels met spaties/haakjes zijn veilig:
+  `lib/formaties.ts` doet voor een 11-tal een membership-check op key/label
+  (`isFormatieGeldigVoorTeam`) en parseert de sleutel NIET — alleen de generator voor kleinere
+  teams maakt "V-M-A"-keys.
+- **Bewust gedeeld met de oefeningen-editor.** `FORMATIONS_11` is afgeleid van `FORMATIONS`, dus
+  `formationsForSize(11)` erft elke toevoeging. Eén bron van waarheid; het alternatief (aparte
+  lijst voor de opstelling) splitst de catalogus in tweeën.
+- **`POSITION_LABEL_MAP` verhuisd** van `components/LineupBuilder.tsx` naar `lib/types.ts` en
+  geëxporteerd, zodat een test kan bewaken dat elke formatie alleen bekende labels gebruikt.
+  Waarom dat ertoe doet: een onbekend label geeft een lege `preferredPos`, waarna `getFitScore`
+  voor iedereen 0 teruggeeft — geen aanbeveling, geen auto-opstelling voor dat slot, en geen
+  enkele foutmelding.
+- **Rugnummers zijn per formatie 1 t/m 11 zonder duplicaat.** Het nummer op een bezet poppetje is
+  `position_number` (de formatie), niet het rugnummer van de speler — twee gelijke nummers zijn
+  op het veld niet uit elkaar te houden.
+- Bewaakt in `lib/formations.test.ts` (nieuw blok "FORMATIONS — vorm van elke gecureerde
+  11-tal-formatie"): 11 posities, precies één KP, nummers 1-11 uniek, labels in de map,
+  coördinaten binnen 0-100 × 0-90, label === key.
+
+### Uitklapbare formatiekiezer (`components/LineupBuilder.tsx`)
+- Vijftien chips open is een muur; dicht toont de kiezer alleen de actieve formatie, open een
+  `grid-cols-2 sm:grid-cols-3`-raster. Kiezen sluit het paneel.
+- **Geen nieuwe vertaalsleutels**: de knop hangt via `aria-labelledby="formatie-label
+  formatie-kiezer"` aan het bestaande "Formatie"-label.
+- Nog steeds waar: van formatie wisselen leegt de hele opstelling (`handleFormationChange`). Met
+  15 formaties wissel je vaker, dus dit is een reëel ergernispunt — bewust niet opgelost, de
+  eigenaar is erover geïnformeerd.
+
+### Inslag-animatie
+- `assignPlayer` zet `impact = { slot, nonce }` — alleen bij NEERZETTEN (`playerId !== null`),
+  nooit bij verwijderen, en nooit bij `useReducedMotion()`.
+- **`nonce` in de React-`key` van het poppetje** is wat de animatie opnieuw laat starten; zonder
+  die remount doet twee keer hetzelfde slot vullen de tweede keer niets.
+- **Opruimen via `useEffect([impact])`, niet via een timer-ref in de handler.** De eerste versie
+  gebruikte een `useRef` + `clearTimeout` in `assignPlayer`; `react-hooks/refs` keurt dat af
+  ("Passing a ref to a function may read its value during render") en de effect-variant ruimt
+  bovendien vanzelf op bij unmount én bij elke nieuwe nonce.
+- Keyframes (`poppetje-inslag`, `poppetje-schokgolf`, `poppetje-naam`) staan in
+  `app/globals.css` **vóór** het `@media print`-blok — dat moet het laatste blok blijven.
+  `IMPACT_DUUR_MS = 700` moet ≥ de langste keyframe (schokgolf 620ms) zijn.
+- Twee ringen: wit, en 110ms later één in `kit.left` (de clubkleur). `aria-hidden` +
+  `pointer-events: none`, anders vangen ze de tik op de knop eronder.
+
+### Tests
+- Nieuw: `opstelling-formaties-inslag.acceptance.test.tsx` (9 tests) tegen de echte serverpagina.
+- **`window.matchMedia`-stub is nu vereist in elk testbestand dat LineupBuilder rendert**
+  (`LineupBuilder.test.tsx`, `opstelling-vorm.acceptance.test.tsx`,
+  `opstelling-clubkleuren-bank.acceptance.test.tsx`, het nieuwe bestand). jsdom kent die API niet;
+  zonder stub faalt élke render met "window.matchMedia is not a function". Bewust de bestaande
+  projectconventie gevolgd (lokale stub per bestand, zoals `components/PlayerList.test.tsx`) in
+  plaats van een globale stub in `vitest.setup.ts` of een defensieve tak in de hook.
+- **Nepklok moet AAN staan vóór de klik** die de inslag triggert: een timer die met de echte klok
+  is gepland loopt niet mee met `vi.advanceTimersByTime`.
+- Twee bestaande tests zijn van een bevroren lijst naar een relationele assertie gebracht
+  (`lib/formations.test.ts`, `oefening-formatie-catalogus.acceptance.test.tsx`): ze pinden de vijf
+  keys letterlijk vast terwijl het criterium ("exact de curated FORMATIONS-lijst, niet de
+  generator") niet veranderde. Nu: `FORMATIONS_BY_TEAM_SIZE[11] === Object.keys(FORMATIONS)` plus
+  een spotcheck op een variantnaam die de generator per definitie niet kan produceren.
+
+### Verificatiemethode: coördinaten renderen i.p.v. beoordelen op gevoel
+Vijftien nieuwe formaties met de hand ingetypte x/y — geen test ziet "dit staat lelijk". Alle
+formaties zijn uit de ECHTE `FORMATIONS` naar een SVG-overzicht gerenderd (wegwerp-vitest-bestand
+dat HTML wegschrijft, screenshot via de aanwezige Playwright-dependency) en bekeken. **Les: het
+veld is 100×140, niet vierkant** — de eerste render gebruikte een vierkante viewBox en liet
+verticale afstanden ~40% te klein lijken, waardoor 3-5-2 ten onrechte als "overlap" oogde. y moet
+met 1.4 geschaald worden om te kloppen met wat de app tekent.
+
+### Niet geverifieerd
+De animatie in de draaiende app: die pagina zit achter de Supabase-login. Wel bewezen dat de drie
+keyframes in de productie-CSS-bundel staan (`.next/static/chunks/*.css`) en dat de tests dekken
+wánneer de app de animatie aanzet; de beweging zelf is declaratieve CSS die jsdom niet meet.
