@@ -91,7 +91,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import InzichtenPage from '@/app/inzichten/page'
-import QuickActions from '@/components/dashboard/QuickActions'
+import AppLauncher from '@/components/AppLauncher'
 import { getSpelerRatingReeks } from '@/app/actions/inzichten'
 
 const TEAM = 'team-1'
@@ -1165,16 +1165,38 @@ describe('basis-toegankelijkheid op paginaniveau', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC1/AC2 — toegang via de dashboardtegel
+// AC1/AC2 — toegang via de tegel
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC1/AC2 — toegang via dashboardtegel', () => {
-  it('AC2: QuickActions (dashboard "/") bevat een tegel naar /inzichten, analoog aan de bestaande tegel naar /periodisering', () => {
-    render(<DictProvider dict={nl}><QuickActions t={nl} /></DictProvider>)
+describe('AC1/AC2 — toegang via de tegel', () => {
+  it('AC2: de app-launcher in de mobiele navigatiebalk bevat een tegel naar /inzichten, analoog aan de bestaande tegel naar /periodisering', () => {
+    // De tegel zat tot 2026-08-28 in QuickActions op het dashboard; die sectie
+    // is vervangen door deze launcher (components/AppLauncher.tsx), bereikbaar
+    // via de "Meer"-tab vanaf élk scherm. Het criterium — er is één tik naar
+    // /inzichten, naast /periodisering — is ongewijzigd.
+    //
+    // AppLauncher gebruikt useReducedMotion (lib/use-reduced-motion.ts) voor
+    // de open-animatie; jsdom kent window.matchMedia niet standaard. Zelfde
+    // stub als components/PlayerList.test.tsx.
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    })
+    render(<DictProvider dict={nl}><AppLauncher open onClose={() => {}} /></DictProvider>)
     // De tegel-<a> bevat ook een icoon-ligature-span; de accessible name is
     // dus "monitoring Periodisering" i.p.v. exact het label, vandaar
     // getByText (op het label-span) + closest('a') i.p.v. getByRole('link').
-    const periodiseringLink = screen.getByText(nl.home.qaPeriodization).closest('a')
-    const inzichtenLink = screen.getByText(nl.home.qaInsights).closest('a')
+    const periodiseringLink = screen.getByText(nl.nav.periodization).closest('a')
+    const inzichtenLink = screen.getByText(nl.nav.insights).closest('a')
     expect(periodiseringLink).toHaveAttribute('href', '/periodisering')
     expect(inzichtenLink).toHaveAttribute('href', '/inzichten')
   })

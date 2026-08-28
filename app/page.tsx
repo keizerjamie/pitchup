@@ -10,7 +10,6 @@ import StatCard from '@/components/dashboard/StatCard'
 import NextMatch from '@/components/dashboard/NextMatch'
 import TodoList, { TaskType, TodoItem } from '@/components/dashboard/TodoList'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
-import QuickActions from '@/components/dashboard/QuickActions'
 import SetupNulmeting from '@/components/dashboard/SetupNulmeting'
 import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import ChartBarIcon from '@/components/icons/ChartBarIcon'
@@ -419,7 +418,6 @@ export default async function DashboardPage() {
 
         <div className="flex flex-col gap-4 min-w-0">
           <Availability items={availabilityItems} t={t} />
-          <QuickActions t={t} />
         </div>
       </div>
     </div>

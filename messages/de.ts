@@ -5,6 +5,8 @@ export const de: Dict = {
   browserLocale: 'de-DE',
   nav: {
     back: 'Zurück',
+    more: 'Mehr',
+    moreTitle: 'Alle Bereiche',
     periodization: 'Periodisierung', insights: 'Einblicke', dashboard: 'Startseite', players: 'Spieler', calendar: 'Kalender', settings: 'Einstellungen', oefeningen: 'Übungen' },
   dashboard: {
     title: 'Startseite', activePlayers: 'aktive Spieler', addTraining: '+ Training', addMatch: '+ Spiel',
@@ -52,13 +54,6 @@ export const de: Dict = {
     formUnknown: 'Kein Ergebnis',
     availability: 'Verfügbarkeit',
     seeAll: 'Alle',
-    quickActions: 'Schnellaktionen',
-    qaNewEvent: 'Neues Event',
-    qaAddPlayer: 'Spieler',
-    qaCalendar: 'Kalender',
-    qaPeriodization: 'Periodisierung',
-    qaOefeningen: 'Übungen',
-    qaInsights: 'Einblicke',
     themeToggle: 'Thema wechseln',
     themeLight: 'Hell',
     themeDark: 'Dunkel',
