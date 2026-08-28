@@ -5,6 +5,7 @@ import { saveLineup } from '@/app/actions/attendance'
 import { Player, LineupPosition, FORMATIONS, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 import { emptyPlayerForm, isGeldigeRating, type PlayerForm } from '@/lib/lineup-form'
+import type { KitColors } from '@/lib/club-colors'
 
 const POSITION_LABEL_MAP: Record<string, string> = {
   KP: 'Keeper', LV: 'Linksachter', MV: 'Centrale verdediger', RV: 'Rechtsachter',
@@ -48,7 +49,18 @@ function getFitScore(player: Player, preferredPos: string): number {
 interface Props {
   eventId: string
   players: Player[]
-  presentPlayerIds?: string[]
+  // Wie voor DEZE wedstrijd inzetbaar is: de wedstrijdselectie (match_squad)
+  // zodra die gekozen is, anders de aanwezige spelers. De pagina beslist welke
+  // van de twee — dit component kent het onderscheid bewust niet, het krijgt
+  // één afgeronde lijst. Bepaalt zowel de bank als de keuzelijst per positie
+  // als de pool van "automatisch opstellen". Ontbreekt de prop, dan is
+  // iedereen inzetbaar (het gedrag van vóór deze wijziging).
+  eligiblePlayerIds?: string[]
+  // Clubtenue voor de bezette poppetjes; null = geen clubkleur gekozen, dan
+  // blijven ze wit. Serverzijdig geresolved (lib/club-colors.ts,
+  // resolveKitColors), zodat dit component nooit hoeft te beslissen wat
+  // "niet ingesteld" betekent.
+  kit?: KitColors | null
   initialFormation?: string
   initialPositions?: LineupPosition[]
   // Verplicht: enige bron voor ranking én auto-opstellen (zie rankScore
@@ -56,7 +68,7 @@ interface Props {
   playerForm: Record<string, PlayerForm>
 }
 
-export default function LineupBuilder({ eventId, players, presentPlayerIds, initialFormation = '4-3-3', initialPositions, playerForm }: Props) {
+export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit = null, initialFormation = '4-3-3', initialPositions, playerForm }: Props) {
   const t = useDict()
 
   // Eén gedeelde kwaliteitsfunctie voor ranking én auto-opstellen, zodat de
@@ -90,6 +102,11 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
 
+  // Eén bron voor "mag deze speler meedoen": de bank, de spelerspopup en
+  // autoFillLineup lezen allemaal deze set. Liepen die uiteen, dan zou de
+  // popup iemand kunnen aanbieden die niet op de bank staat.
+  const eligibleIds = new Set(eligiblePlayerIds ?? players.map((p) => p.id))
+
   function handleFormationChange(f: string) {
     setFormation(f)
     setPositions(FORMATIONS[f].positions.map((p) => ({ ...p, player_id: null })))
@@ -107,8 +124,7 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
   }
 
   function autoFillLineup() {
-    const presentIds = new Set(presentPlayerIds ?? players.map((p) => p.id))
-    const pool = players.filter((p) => presentIds.has(p.id))
+    const pool = players.filter((p) => eligibleIds.has(p.id))
     const formationSlots = FORMATIONS[formation].positions
 
     const used = new Set<string>()
@@ -137,7 +153,10 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
   }
 
   const assignedPlayerIds = new Set(positions.map((p) => p.player_id).filter(Boolean))
-  const availablePlayers = players.filter((p) => !assignedPlayerIds.has(p.id))
+  // Al opgestelde spelers blijven hoe dan ook op het veld staan (en houden hun
+  // naam via getPlayerName), ook als ze buiten de selectie vallen — een
+  // opgeslagen opstelling mag nooit stilzwijgend leeglopen.
+  const availablePlayers = players.filter((p) => eligibleIds.has(p.id) && !assignedPlayerIds.has(p.id))
 
   function handleSave() {
     startTransition(async () => {
@@ -227,6 +246,22 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
             const isSelected = selectedSlot === i
             const hasPlayer = !!pos.player_id
             const displayNum = pos.position_number ?? pos.position_label
+            // Clubtenue: linkerhelft primair, rechterhelft secundair. De harde
+            // stops op 50% geven een scherpe deling in plaats van een verloop;
+            // bij één gekozen clubkleur zijn beide helften gelijk
+            // (resolveKitColors) en levert diezelfde gradient een effen shirt.
+            // De geselecteerde slot houdt zijn amberkleur — dat is de
+            // selectie-indicator, geen tenue.
+            const wearsKit = hasPlayer && !isSelected && kit !== null
+            const kitStyle: React.CSSProperties | undefined = wearsKit && kit
+              ? {
+                  background: `linear-gradient(90deg, ${kit.left} 0 50%, ${kit.right} 50% 100%)`,
+                  color: kit.ink,
+                  // Zelfde schaduw + witte rand als het oude witte poppetje,
+                  // zodat een donker tenue niet wegvalt tegen het veldgroen.
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.35), 0 0 0 2px rgba(255,255,255,0.9)',
+                }
+              : undefined
             return (
               <button
                 key={i}
@@ -235,13 +270,17 @@ export default function LineupBuilder({ eventId, players, presentPlayerIds, init
                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, zIndex: 10 }}
               >
                 <div
+                  data-testid={hasPlayer && !isSelected ? (wearsKit ? 'speler-poppetje-tenue' : 'speler-poppetje-wit') : undefined}
                   className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition duration-150 ${
                     isSelected
                       ? 'bg-amber-400 text-amber-950 shadow-[0_0_0_3px_rgba(251,191,36,0.5),0_2px_8px_rgba(0,0,0,0.4)]'
                       : hasPlayer
-                        ? 'bg-white text-[#0d3d38] shadow-[0_2px_8px_rgba(0,0,0,0.35),0_0_0_2px_rgba(255,255,255,0.9)]'
+                        ? wearsKit
+                          ? ''
+                          : 'bg-white text-[#0d3d38] shadow-[0_2px_8px_rgba(0,0,0,0.35),0_0_0_2px_rgba(255,255,255,0.9)]'
                         : 'bg-white/10 text-white/50 border border-dashed border-white/35'
                   }`}
+                  style={kitStyle}
                 >
                   {hasPlayer ? displayNum : <span className="text-base leading-none">+</span>}
                 </div>

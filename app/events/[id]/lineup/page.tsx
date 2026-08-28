@@ -7,6 +7,7 @@ import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
 import { isDateString } from '@/lib/season-dates'
 import { buildPlayerForms, FORM_MATCH_HORIZON } from '@/lib/lineup-form'
+import { CLUB_COLOR_KEYS, resolveKitColors } from '@/lib/club-colors'
 import type { FormMatchRow, FormRatingRow } from '@/lib/lineup-form'
 
 interface Props {
@@ -19,10 +20,17 @@ export default async function LineupPage({ params }: Props) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: event }, { data: attendance }, { data: lineup }] = await Promise.all([
+  const [{ data: event }, { data: attendance }, { data: lineup }, { data: squad }, { data: settingsRows }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
     supabase.from('lineups').select('*').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
+    // De wedstrijdselectie: de aanwezigheid van een rij ís de selectie
+    // (app/actions/match-squad.ts). Nul rijen = nog niet gekozen.
+    supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', user.id),
+    // Alleen de twee kleursleutels — nooit een open select op settings, waar
+    // ook team_logo_url en season_start in leven.
+    supabase.from('settings').select('key, value').eq('team_id', user.id)
+      .in('key', [CLUB_COLOR_KEYS.primary, CLUB_COLOR_KEYS.secondary]),
   ])
 
   if (!event || event.type !== 'match') notFound()
@@ -30,6 +38,23 @@ export default async function LineupPage({ params }: Props) {
   const presentPlayerIds = new Set(
     (attendance ?? []).filter((a) => a.status === 'present').map((a) => a.player_id)
   )
+
+  // Wie mag er voor deze wedstrijd op de bank en in de spelerspopup staan?
+  // Is de wedstrijdselectie bepaald, dan uitsluitend die spelers; zolang dat
+  // niet zo is, de aanwezige spelers. Beide sets zijn al team-gescoped
+  // opgehaald, dus dit filter voegt geen nieuw isolatie-oppervlak toe — het is
+  // puur zichtbaarheid, net als `selectable` op de squad-pagina.
+  const squadPlayerIds = new Set((squad ?? []).map((s) => s.player_id))
+  const eligiblePlayerIds = squadPlayerIds.size > 0 ? squadPlayerIds : presentPlayerIds
+
+  // Clubkleuren serverzijdig geresolved tot een kant-en-klaar tenue (of null =
+  // nog geen clubkleur gekozen, dan blijven de poppetjes wit). Bewust
+  // resolveKitColors en NIET resolveClubColors: die laatste vult een
+  // niet-ingestelde kleur met de fallback, waardoor elk team zonder
+  // clubkleuren donkergroene poppetjes zou krijgen.
+  const settingsMap: Record<string, string> = {}
+  for (const row of settingsRows ?? []) settingsMap[row.key] = row.value
+  const kit = resolveKitColors(settingsMap)
 
   // Signalering, GEEN gedragswijziging: `events.date` is DATE NOT NULL
   // (supabase/schema.sql), dus een niet-parseerbare peildatum hoort niet te
@@ -115,9 +140,13 @@ export default async function LineupPage({ params }: Props) {
     before: event.date,
   })
 
+  // Inzetbare spelers eerst — dat is de volgorde waarin de bank en de
+  // spelerspopup ze tonen. `players` blijft de VOLLEDIGE lijst: hij dient ook
+  // als namenregister voor een al opgestelde speler die buiten de selectie
+  // valt (getPlayerName in LineupBuilder).
   const sortedPlayers = [
-    ...players.filter((p) => presentPlayerIds.has(p.id)),
-    ...players.filter((p) => !presentPlayerIds.has(p.id)),
+    ...players.filter((p) => eligiblePlayerIds.has(p.id)),
+    ...players.filter((p) => !eligiblePlayerIds.has(p.id)),
   ]
 
   const presentPlayers = players.filter((p) => presentPlayerIds.has(p.id))
@@ -186,7 +215,8 @@ export default async function LineupPage({ params }: Props) {
           <LineupBuilder
             eventId={id}
             players={sortedPlayers}
-            presentPlayerIds={[...presentPlayerIds]}
+            eligiblePlayerIds={[...eligiblePlayerIds]}
+            kit={kit}
             playerForm={playerForm}
             initialFormation={lineup?.formation}
             initialPositions={lineup?.positions}

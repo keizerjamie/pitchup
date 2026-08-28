@@ -359,6 +359,12 @@ function makeSupabaseMock(opts: {
   attendance?: Row[]
   lineups?: Row[]
   ratings?: Row[]
+  // Wedstrijdselectie en clubkleuren: de pagina bevraagt deze twee tabellen
+  // sinds de bank/poppetjes-wijziging. Standaard leeg = geen selectie gekozen
+  // en geen clubkleur ingesteld, precies de uitgangssituatie van de tests
+  // hieronder (bank = de aanwezige spelers, poppetjes wit).
+  matchSquad?: Row[]
+  settings?: Row[]
   onVormLimit?: (n: number) => void
   // Faalpad-dekking: laat de vorm-venster-query resp. de match_ratings-query
   // op een echte DB-fout stuiten ({ data: null, error }), zonder de rest van
@@ -376,6 +382,8 @@ function makeSupabaseMock(opts: {
   const attendanceFactory = tableFactory(opts.attendance ?? [])
   const lineupsFactory = tableFactory(opts.lineups ?? [])
   const ratingsFactory = tableFactory(opts.ratings ?? [], { error: opts.ratingsError })
+  const matchSquadFactory = tableFactory(opts.matchSquad ?? [])
+  const settingsFactory = tableFactory(opts.settings ?? [])
   return {
     auth: { getUser: async () => ({ data: { user } }) },
     from: (table: string) => {
@@ -384,6 +392,8 @@ function makeSupabaseMock(opts: {
       if (table === 'attendance') return attendanceFactory()
       if (table === 'lineups') return lineupsFactory()
       if (table === 'match_ratings') return ratingsFactory()
+      if (table === 'match_squad') return matchSquadFactory()
+      if (table === 'settings') return settingsFactory()
       throw new Error(`Onverwachte tabel in test: ${table}`)
     },
   }

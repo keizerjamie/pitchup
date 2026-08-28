@@ -7,6 +7,9 @@ import {
   normalizeHexColor,
   readableAccentOnWhite,
   resolveClubColors,
+  KIT_INK_LIGHT,
+  readableInkOn,
+  resolveKitColors,
 } from '@/lib/club-colors'
 
 describe('CLUB_COLOR_KEYS / CLUB_COLOR_FALLBACK', () => {
@@ -222,5 +225,73 @@ describe('readableAccentOnWhite', () => {
   it('valt op de primaire fallbackkleur terug bij onparseerbare invoer', () => {
     expect(readableAccentOnWhite('kapot')).toBe(CLUB_COLOR_FALLBACK.primary)
     expect(readableAccentOnWhite('')).toBe(CLUB_COLOR_FALLBACK.primary)
+  })
+})
+
+describe('readableInkOn — tekstkleur op het tenue', () => {
+  it('kiest wit op een donkere kleur', () => {
+    expect(readableInkOn(['#000000'])).toBe(KIT_INK_LIGHT)
+    expect(readableInkOn(['#1a3a8f'])).toBe(KIT_INK_LIGHT)
+  })
+
+  it('kiest de donkere ink op een lichte kleur', () => {
+    expect(readableInkOn(['#ffffff'])).toBe(READABLE_INK_DARK)
+    expect(readableInkOn(['#ffe600'])).toBe(READABLE_INK_DARK)
+  })
+
+  it('rekent met de SLECHTSTE helft, niet met het gemiddelde', () => {
+    // Het cijfer staat midden op het poppetje en raakt beide helften. Zwart +
+    // geel: wit leest prima op zwart maar niet op geel, dus de donkere ink
+    // wint — een gemiddelde zou hier wit kiezen en het cijfer op de gele helft
+    // onleesbaar maken.
+    expect(readableInkOn(['#000000', '#ffe600'])).toBe(READABLE_INK_DARK)
+  })
+})
+
+describe('resolveKitColors — clubtenue voor de opstellingsbouwer', () => {
+  it('geeft null zolang geen enkele clubkleur is gekozen (poppetjes blijven wit)', () => {
+    expect(resolveKitColors({})).toBeNull()
+    // Andere settings-rijen tellen niet mee.
+    expect(resolveKitColors({ team_name: 'FC Test', team_logo_url: 'https://x/y.png' })).toBeNull()
+  })
+
+  it('gebruikt NIET de fallbackkleuren wanneer er niets is ingesteld', () => {
+    // Regressie: resolveClubColors zou hier het donkergroene fallbacktenue
+    // teruggeven; dat is precies wat resolveKitColors moet vermijden.
+    expect(resolveKitColors({})).not.toEqual(
+      expect.objectContaining({ left: CLUB_COLOR_FALLBACK.primary }),
+    )
+  })
+
+  it('deelt het poppetje bij twee gekozen kleuren: links primair, rechts secundair', () => {
+    expect(
+      resolveKitColors({
+        [CLUB_COLOR_KEYS.primary]: '#ff0000',
+        [CLUB_COLOR_KEYS.secondary]: '#0000ff',
+      }),
+    ).toEqual({ left: '#ff0000', right: '#0000ff', ink: KIT_INK_LIGHT })
+  })
+
+  it('maakt een effen shirt wanneer maar één kleur is gekozen', () => {
+    expect(resolveKitColors({ [CLUB_COLOR_KEYS.primary]: '#ff0000' }))
+      .toEqual({ left: '#ff0000', right: '#ff0000', ink: KIT_INK_LIGHT })
+    expect(resolveKitColors({ [CLUB_COLOR_KEYS.secondary]: '#ff0000' }))
+      .toEqual({ left: '#ff0000', right: '#ff0000', ink: KIT_INK_LIGHT })
+  })
+
+  it('normaliseert de opgeslagen waarde (3-cijferige hex, hoofdletters)', () => {
+    expect(resolveKitColors({ [CLUB_COLOR_KEYS.primary]: 'ABC' }))
+      .toEqual({ left: '#aabbcc', right: '#aabbcc', ink: READABLE_INK_DARK })
+  })
+
+  it('behandelt een onparseerbare waarde als niet-ingesteld', () => {
+    // Handmatige DB-edit: de kapotte kleur mag nooit als CSS doorlekken.
+    expect(resolveKitColors({ [CLUB_COLOR_KEYS.primary]: 'kapot' })).toBeNull()
+    expect(
+      resolveKitColors({
+        [CLUB_COLOR_KEYS.primary]: 'kapot',
+        [CLUB_COLOR_KEYS.secondary]: '#0000ff',
+      }),
+    ).toEqual({ left: '#0000ff', right: '#0000ff', ink: KIT_INK_LIGHT })
   })
 })

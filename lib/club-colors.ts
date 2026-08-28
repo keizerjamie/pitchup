@@ -101,3 +101,65 @@ export function readableAccentOnWhite(color: string): string {
   const contrastOpWit = 1.05 / (l + 0.05)
   return contrastOpWit >= 3 ? norm : READABLE_INK_DARK
 }
+
+// ── Tenuekleuren voor de opstellingsbouwer ──────────────────────────────────
+// De poppetjes op het veld (components/LineupBuilder.tsx) waren altijd wit.
+// Ze dragen nu het clubtenue: linkerhelft primair, rechterhelft secundair —
+// zoals een gedeeld clubshirt.
+//
+// Bewust NIET resolveClubColors() hergebruiken: die vult een niet-ingestelde
+// kleur altijd met CLUB_COLOR_FALLBACK, wat hier zou betekenen dat elk team
+// zonder clubkleuren ineens donkergroene poppetjes krijgt. De eis is
+// uitdrukkelijk "zodra clubkleuren gekozen zijn"; de afwezigheid van beide
+// rijen moet dus zichtbaar blijven als het oude wit. Vandaar `null` i.p.v. een
+// fallback-tenue — de fallback woont in de component, als het bestaande wit.
+//
+// Is er maar één kleur gekozen, dan zijn beide helften die kleur (een effen
+// shirt). De alternatieve keuze — de andere helft op CLUB_COLOR_FALLBACK —
+// zou een kleur tonen die de coach nooit heeft gekozen.
+
+// Lichte tekstkleur op een donker tenue. Puur wit, zodat het rugnummer op een
+// donkere clubkleur even hard leest als op het oude witte poppetje.
+export const KIT_INK_LIGHT = '#ffffff'
+
+export type KitColors = {
+  /** Linkerhelft van het poppetje: de primaire clubkleur. */
+  left: string
+  /** Rechterhelft: de secundaire clubkleur (of dezelfde bij één gekozen kleur). */
+  right: string
+  /** Rugnummer-/letterkleur, gekozen op contrast tegen BEIDE helften. */
+  ink: string
+}
+
+// WCAG-contrastverhouding tussen twee relatieve luminanties (1:1 t/m 21:1).
+function contrastRatio(l1: number, l2: number): number {
+  const hoog = Math.max(l1, l2)
+  const laag = Math.min(l1, l2)
+  return (hoog + 0.05) / (laag + 0.05)
+}
+
+// Kiest wit of de donkere app-ink als tekstkleur bovenop een reeks
+// achtergrondkleuren. Het cijfer staat midden op het poppetje en raakt dus
+// BEIDE helften; daarom telt per kandidaat het SLECHTSTE contrast van de twee,
+// niet het gemiddelde. Bij gelijkspel wint wit — dat is de bestaande look op
+// het donkergroene veld.
+export function readableInkOn(colors: string[]): string {
+  const luminanties = colors.map(relativeLuminance)
+  const witste = Math.min(...luminanties.map((l) => contrastRatio(1, l)))
+  const donkerste = Math.min(
+    ...luminanties.map((l) => contrastRatio(relativeLuminance(READABLE_INK_DARK), l)),
+  )
+  return witste >= donkerste ? KIT_INK_LIGHT : READABLE_INK_DARK
+}
+
+// Zet de (team-gescopede) settings-map om in een tenue, of null wanneer er nog
+// geen enkele clubkleur is gekozen.
+export function resolveKitColors(settings: Record<string, string>): KitColors | null {
+  const primary = normalizeHexColor(settings[CLUB_COLOR_KEYS.primary])
+  const secondary = normalizeHexColor(settings[CLUB_COLOR_KEYS.secondary])
+  if (!primary && !secondary) return null
+
+  const left = primary ?? secondary as string
+  const right = secondary ?? primary as string
+  return { left, right, ink: readableInkOn([left, right]) }
+}
