@@ -2248,3 +2248,73 @@ Aanleiding: "namen links compacter, blokken moderner, makkelijker op 1 kantje".
 - **Stale-.next-valkuil, nieuwe variant**: na het verwijderen van een
   tijdelijke route faalt `tsc` op `.next/dev/types/validator.ts` die nog naar
   de verdwenen pagina verwijst — `rm -rf .next` en opnieuw draaien.
+
+## Feature: Elastische oefenvormen — flexibel spelersaantal per oefening (2026-08-28, commit `c19f13f`, live)
+Eén bibliotheek-oefening dekt een bereik (4v2 t/m 6v2) i.p.v. één vaste bezetting; exacte
+vormen (4v4+4) bleven byte-voor-byte ongewijzigd. Gebouwd via de volledige feature-factory-
+keten na een onderzoekstraject (o.a. KNVB Rinus bleek intern `playersMinimum`/`playersMaximum`
+te gebruiken — één record per oefenvorm met bereik, nooit een record per stand; dat model is
+overgenomen). Ontwerp-aanbeveling gearchiveerd als artifact "Elastische oefenvormen".
+
+### Datamodel
+- **`OefeningTeam.grootteMax?`** in de bestaande `teams`-JSONB (dual-read, géén migratie):
+  `grootte` = basisvorm én ondergrens; veld **afwezig** = exact team. `validateOefening`
+  schrijft hem met spread-omit, dus een exact team schrijft byte-identieke JSONB als voorheen.
+- **`oefeningen.aantal_neutralen_max SMALLINT NULL`** en
+  **`training_oefeningen.aantallen_override JSONB NULL`** (delta-vorm
+  `{"teams":[5,null],"neutralen":null}`, `null`-element = basisvorm, kolom NULL = geen
+  override; bewust nullable zónder default). Migratie: `supabase/oefening-flexibel-aantal.sql`
+  (gedraaid vóór de push — verplicht, anders faalt elke oefening-save omdat
+  `ValidatedOefening` de kolom altijd meeschrijft).
+- **Kopiëren**: `aantallen_override` staat bewust NIET in de allowlist van
+  `kopieerTrainingsplan` (zelfde regel als `spelerindeling` — bezetting is opkomst-gebonden).
+
+### Kernpatroon: één concretiseer-grens
+- **`lib/oefening-bezetting.ts`** (puur, client-veilig; importeert alleen types+formaties):
+  `concretiseerBezetting` = clamp-on-read (precedent `clampStapOverride`), `suggestBezetting`
+  (round-robin over flexibele teams in indexvolgorde, neutralen als laatste; alleen
+  stepper-startwaarde), `valideerAantallenOverride` (server clamt, weigert niet; normaliseert
+  naar delta; alles-null → kolom wissen = "Terug naar basisvorm" gratis), vorm-labels
+  (`bereikLabelVoor(Bereik)` is de ENIGE en-dash-formatter) en `sorteerOpPassendheid`.
+- **`bereikVoorTeam` is de enige plek waar "formatie ⇒ exact" semantisch wordt afgedwongen**
+  én het vangnet voor flexibel→exact: een exact team is een punt-bereik, dus een oude
+  override clamt stil terug naar de basisvorm (eigenaarsbesluit — geen blokkade van
+  bibliotheek-edits). Keerzijde (bewust, zelfde als `stap_override`): verruimt de trainer
+  het bereik later weer, dan komt de oude override terug in beeld.
+- **Twee-bronnen-regel**: `k.oefeningen.teams` = ALTIJD de basisvorm; de effectieve groottes
+  staan uitsluitend in `k.bezetting` (één berekening op de leesgrens,
+  `app/events/[id]/training-plan/page.tsx`). De validator ving precies hier de enige
+  belangrijke bevinding: de neutralen-badge op de trainingsplan-kaart las nog `o.
+  aantal_neutralen`. Elke nieuwe weergaveplek in trainingscontext moet uit `k.bezetting`
+  eten — en de aangepast-check per team doen (`!Object.is(tm.grootte, o.teams[i]?.grootte)`),
+  niet via de koppeling-brede `bezetting.aangepast`-vlag (die wordt ook true door neutralen).
+- **Weergave vóór opslaan volgt de basisvorm**; alleen de steppers tonen de suggestie
+  (+ "nog niet vastgelegd"-hint). Een opgeslagen override herrekent NOOIT bij gewijzigde
+  aanwezigheid. Geen `generateDiagram` in de read-only weergave — de FormationField-fallback
+  krijgt de effectieve groottes; een handmatig diagram toont de basisvorm + badge.
+- Filter = interval-overlap + `bevatAantal`; chip "past bij aanwezigen (N)" en sortering
+  (exact eerst, smalst eerst) zitten alléén in de picker. `totaalAantalSpelers` heeft geen
+  productie-aanroeper meer maar blijft bewust geëxporteerd.
+
+### Lessen (nieuw opgedaan)
+- **Een normalisatiefunctie mag een nieuw optioneel veld nooit als `null` toevoegen aan
+  bestaande vormen** — spread-omit (`...(x !== null ? { x } : {})`) houdt JSONB én bestaande
+  `toEqual`-tests byte-identiek.
+- **Normaliseren ≠ valideren**: `normalizeOefeningTeam` gooit een ongeldige `grootteMax` stil
+  weg, dus `validateOefening` moet de RUWE waarde lezen om de foutmelding überhaupt te kunnen
+  gooien — wie uit de genormaliseerde waarde leest bouwt een onbereikbare foutmelding.
+- **`Number(null) === 0`** — de omgekeerde falsy-zero-val: eerst `=== null || === undefined`
+  testen vóór `Number()`, anders wordt "geen waarde" stil "0".
+- **`Object.is` i.p.v. `!==`** waar `NaN` een mogelijke uitkomst is, anders meldt corrupte
+  JSONB eeuwig "afwijkend".
+- **Rollback-kanttekening**: oude code stript `grootteMax` bij een save (dual-read
+  construeert alleen bekende velden) — venster verwaarloosbaar bij één ontwikkelaar.
+
+### Bewust geaccepteerd
+- `text-white` op `var(--color-accent)` (2.49:1) bij `TeamIndelingEditor` en `LineupBuilder`
+  is bestaande contrast-schuld; de nieuwe BezettingStepper-knop gebruikt wél
+  `--color-accent-strong` (4.52:1). Opruimen van de oude knoppen is een losse taak.
+- `saveSpelerindeling` mist nog `.eq('event_id')` op zijn eind-update (pre-existing;
+  `saveAantallenOverride` doet het wél goed).
+- Werkelijke print-hoogte van het nieuwe `·`-segment alleen handmatig te beoordelen
+  (structureel geen extra regel; jsdom kent geen `@media print`).
