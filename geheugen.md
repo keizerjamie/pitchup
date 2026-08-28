@@ -2402,3 +2402,91 @@ afvinken, en een `lineup`-override die de selectietaak open laat staan.
 De kopcommentaren in `todos.acceptance.test.mjs` verwezen naar `app/page.tsx` "regels
 ±155-203" en `messages/nl.ts:63-65` — allebei al verschoven en dus stil fout. Vervangen door
 symboolverwijzingen (de To-do-lus in `Home`, het `todo`-blok in `messages/nl.ts`).
+
+---
+
+## Feature: app-launcher in de mobiele navigatiebalk, Snelle acties weg (2026-08-28, commit `90ee7e3`, live)
+De "Snelle acties"-kaart op het dashboard is verwijderd (`components/dashboard/QuickActions.tsx`
+bestaat niet meer) en vervangen door een launcher achter een **"Meer"-tab** in de mobiele
+navigatiebalk. Aanleiding van de eigenaar: die snelkoppelingen waren alleen vanaf de hoofdpagina
+bereikbaar; ze horen vanaf élk scherm te werken.
+
+### Eindvorm (na één bijstelling door de eigenaar)
+- **Balk = alleen de basis**: Hoofdpagina, Spelers, Kalender, Meer. Vier slots.
+- **Achter "Meer"**: Oefeningen, Periodisering, Inzichten, **Instellingen**.
+- Eerste ronde stond Instellingen nog als eigen tab (vijf slots); de eigenaar wilde expliciet
+  dat alleen basisfunctionaliteit in de balk blijft en "de rest" achter Meer gaat.
+- Paneel is een **2×2-grid**. Bij `grid-cols-4` wordt elke tegel ~74px en past "Periodisering"
+  (11px-label) er niet in — zelfde soort rommelige rij waar het commentaar in de oude
+  QuickActions al voor waarschuwde.
+
+### Icoon-subset-gotcha, vierde/vijfde keer — nu vóóraf gevangen
+`apps`, `grid_view`, `widgets` én `more_horiz` zitten **geen van alle** in de gesubsette
+`public/fonts/material-symbols-rounded.woff2`. Vooraf gecontroleerd tegen de GSUB-ligatuurtabel
+(python3 + fontTools, Extension-lookups type 7) in plaats van achteraf visueel ontdekt — de
+werkwijze uit de eerdere icoon-inventaris werkt dus, mits je hem draait vóór je bouwt. Opgelost
+met `components/icons/AppsIcon.tsx` (inline SVG, 2×2 afgeronde vierkanten). De vier tegeliconen
+(`sports_soccer`, `monitoring`, `scoreboard`, `settings`) zitten er wél in, ook geverifieerd.
+De subset telt in totaal 57 ligaturen.
+
+### `--z-modal` en niet `--z-sheet` — bewuste afwijking van het PlayerList-sheetpatroon
+Het paneel zweeft vlak boven de balk, precies waar de FAB (`--z-fab`, 80) hangt. Op `--z-sheet`
+(70) prikt de plusknop dwars door het paneel heen. De z-ladder in `app/globals.css` merkt
+`--z-modal` (90) expliciet aan als "de laag die álles dekt, ook de FAB" — dus die. Gemeten in de
+draaiende app: scrim 90 vs FAB 80, FAB netjes gedekt.
+**Let op:** `components/PlayerList.tsx` heeft ditzelfde probleem wél nog (bottom sheet op
+`--z-sheet` op een pagina mét FAB). Niet aangeraakt, buiten scope, maar het staat er.
+
+### Animatie zonder mount-timing: `visibility` i.p.v. (un)mounten
+Eerste opzet was het GlobalFab-patroon (`rendered`/`visible`-state + `setTimeout` rond
+`CLOSE_MS`). Dat **werd door lint afgekeurd**: `react-hooks/set-state-in-effect` verbiedt
+synchrone `setState` in een effect-body. Herschreven naar één altijd-gemonteerd portal-element
+dat op `visibility` schakelt:
+- open én sluiten animeren, zonder enige mount-timing;
+- `visibility: hidden` houdt de tegels dicht buiten de tabvolgorde én de toegankelijkheidsboom
+  (geverifieerd: `read_page` toont de drie/vier tegel-links alleen als het paneel open is);
+- `transition: visibility 0s linear ${CLOSE_MS}ms` bij sluiten, zodat het element pas ná de
+  fade-out onbereikbaar wordt.
+Zelfde lint-regel raakte ook "sluit de launcher bij routewissel": opgelost met de
+React-render-time-aanpassing (`if (launcherPath !== pathname) { … }`), niet met een effect.
+
+### Eén lijst, twee gebruikers
+`AppLauncher.tsx` **exporteert** `LAUNCHER_ITEMS`; `Navigation.tsx` importeert die om te bepalen
+of "Meer" de actieve tab is. Zonder dat markeerde de balk niets zodra je op `/settings`,
+`/oefeningen`, `/periodisering` of `/inzichten` stond — dat gat bestond al vanaf de eerste ronde
+en is meteen meegenomen. De pil schuift nu naar het "Meer"-slot op die routes.
+
+### Tablabels: `min-w-0` + `truncate`
+Bij vijf slots (de tussenversie) werd een slot 70px op 375px. Opgemeten in de browser: op
+**375px en 360px past alles in alle vijf de talen**, maar op **320px** liepen `Einstellungen` (de)
+en `Configuración` (es) over hun buurtab heen — het zijn enkele woorden, dus ze wrappen niet,
+ze overlappen. Opgelost met `min-w-0` op de tab en `max-w-full truncate` op het label.
+`leading-none` moest daarbij naar `leading-[1.2]`: `truncate` zet `overflow-hidden`, en bij een
+regelhoogte van precies 1em knipt dat de staarten van g/p eraf. De balk staat inmiddels weer op
+vier slots, maar het vangnet blijft staan voor langere labels/talen.
+
+### Verificatiemethode: meten i.p.v. screenshots interpreteren
+De browser-pane kapte onderaan-verankerde elementen structureel af (rapporteerde het viewport
+als 477×1033 terwijl 375 was ingesteld), dus de screenshots waren onbetrouwbaar voor alles wat
+aan de onderkant hangt. Posities zijn daarom via `getBoundingClientRect()` gemeten:
+paneel 616–748, balk begint op 766 → 18px ruimte ertussen, volledig in beeld. **Les: bij bottom
+chrome is een DOM-meting bewijs, een screenshot hooguit een indruk.**
+
+### Vertaalsleutels
+`home.quickActions` + de zes `qa*`-sleutels zijn uit **alle vijf** de talen verwijderd (nergens
+meer gebruikt); `nav.more` en `nav.moreTitle` toegevoegd. De/es/fr houden hun compacte
+één-regel-vorm binnen `nav`.
+
+### Testaanpassing
+`inzichten.acceptance.test.tsx` AC2 toetste "dashboardtegel naar /inzichten" via QuickActions.
+Het criterium (één tik naar `/inzichten`, naast `/periodisering`) is ongewijzigd en wordt nu op
+`AppLauncher` getoetst. De test heeft een lokale `window.matchMedia`-stub nodig (`useReducedMotion`),
+zelfde stub als `components/PlayerList.test.tsx`.
+
+### Bewust geaccepteerd
+- Op 320px worden `Einstellungen`/`Configuración` afgekapt met ellipsis. Nederlands past op elke
+  breedte voluit; het alternatief was overlappende labels.
+- Het paneel verplaatst de focus niet naar binnen bij openen (Escape en achtergrond-tik werken
+  wel). Zelfde niveau als `GlobalFab`.
+- Desktop is ongewijzigd: de sidebar (`SidebarNav.tsx`) houdt alle zeven onderdelen, dus daar is
+  met het verdwijnen van Snelle acties niets onbereikbaar geworden.
