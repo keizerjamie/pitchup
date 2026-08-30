@@ -26,7 +26,7 @@ Gebouwd via de feature-factory-keten (researcher → story → PM → backend �
 - **`oefeningen`** = herbruikbare **bibliotheektabel** (los van een training), analoog aan `players`. Kolommen o.a.: `naam`, `beschrijving`, `categorie`, `duur_min`, `breedte_m`/`lengte_m`, `orientatie`, `veldzone`, `teams JSONB` (lijst `{grootte, formatie|null}`, max 6), `aantal_neutralen SMALLINT` (0..30), `diagram JSONB` (nullable; NULL = geen opgeslagen tekening → auto-genereren).
 - **`training_oefeningen`** = koppeltabel training↔oefening (analoog aan `attendance`): `event_id`, `oefening_id` (**sinds 2026-08-20 bewust géén UNIQUE meer** — dezelfde oefening mag meerdere keren in één training, zie feature onderaan), plus de **training-specifieke** velden `volgorde`, `stap_override`, `genest_in` (self-FK). Deze horen bij de koppeling, niet bij de bibliotheek-oefening (anders lekt een wijziging door naar andere trainingen).
 - **Live gekoppeld:** een wijziging aan een bibliotheek-oefening werkt overal door (geen snapshot). `updateOefening` revalideert `/oefeningen` én elke gekoppelde training-plan-pagina.
-- **Periodisering** (`lib/periodization.ts`) telt via een join over `training_oefeningen → oefeningen(categorie)`; `hasMeting`/`cycleWeeks` bepalen of een categorie meetelt in de stap-berekening. Dit was het grootste migratierisico — semantiek is bewust identiek gehouden.
+- **Periodisering** (`lib/periodization.ts`) telt via een join over `training_oefeningen → oefeningen(categorie)`; `hasMeting`/`cycleWeeks` bepalen of een categorie meetelt in de stap-berekening. Dit was het grootste migratierisico — semantiek is bewust identiek gehouden. **Sinds 2026-08-30 rekent de stap-telling per onderdeel vanaf de eigen nulmeting-datum** (tabel `categorie_metingen`, niet meer één gedeelde nulmeting) — zie de sectie "Nulmeting per periodiseringsonderdeel" onderaan.
 
 ### Categorieën (`PERIODIZATION_CATEGORIES` in `lib/types.ts`)
 - Meting-categorieën (`hasMeting:true`): partijen_groot/midden/klein, sprints_weinig_rust, sprints_veel_rust.
@@ -2711,3 +2711,75 @@ titels `OefeningLibrary`/trainingsplan → `font-display`; aria-labels op icon-o
   geen collisie). `cat.color` kan pas weg als die twee ook mee — maar de 6 `panel-*`-tokens dekken de
   10 categorie-hues niet zonder categorieën visueel te laten samenvallen. Vereist eerst een dark-safe
   **10-kleuren categoriepalet** (nieuwe tokens) als eigen ontwerpstap.
+
+## Nulmeting per periodiseringsonderdeel (2026-08-30, commit `84e2543`)
+Aanleiding: "een nulmeting vindt niet plaats op 1 moment — week 1 partijen groot, week 3
+midden, week 5 klein; sprints pas na de steigerungs; laat per onderdeel zien waar je staat."
+Gebouwd via de feature-factory-keten met beide goedkeuringspauzes; migratie door de eigenaar
+gedraaid vóór de push (die volgorde is verplicht: nieuwe code zonder tabel breekt, tabel naast
+oude code is onschadelijk).
+
+### Datamodel
+- **`categorie_metingen`**: één rij = één meting van één onderdeel op één datum. `UNIQUE
+  (team_id, categorie, datum)` — team_id vóóraan (zelfde afweging als kop `lib/authz.ts`),
+  tegelijk idempotentie-sleutel én tie-break-eliminator ("hoogste datum" is altijd uniek).
+  `datum` is een kale `DATE`; RLS identiek aan de rest. **Geen `event_id`** — een meting is
+  geen agenda-item meer; de oude kunstgreep (meting-event onder water) is verwijderd.
+- **Legacy blijft bewust staan**: tabel `metingen`, bestaande meting-events en
+  `MetingEditor`/`saveMeting`/`MetingSteps`/`clampSteps`. LET OP: dat pad is losgekoppeld —
+  een stap wijzigen via een oud meting-event doet niéts meer met de periodisering.
+  Opvolgtaak: `MetingEditor` alleen-lezen maken.
+- Migratie `supabase/nulmeting-per-onderdeel.sql` is her-draaibaar (team-brede
+  `NOT EXISTS`-guard + `ON CONFLICT DO NOTHING`); backfill zet de oude alles-in-één
+  nulmeting om naar 5 rijen (oude gedeelde datum, eigen oude stap, notitie naar alle vijf).
+  Rollback = `DROP TABLE categorie_metingen` (oude data blijft).
+
+### Kernregels (bewuste besluiten van de eigenaar)
+- **Actueel = hoogste datum** per onderdeel (niet invoervolgorde), met peildatum-exclusief:
+  dashboard//periodisering `addDays(todayLocal(),1)`, trainingsplanpagina `event.date`.
+- **Cyclusanker = vroegste datum onder de actuele metingen** — altijd afgeleid, nooit
+  opgeslagen. Hermeting met latere datum verschuift niets; datumcorrectie van de
+  anker-meting werkt door.
+- **Stap-telling per onderdeel**: `N + floor(k/2)` met k = trainingen strikt ná de éigen
+  meetdatum (training op exact de meetdatum telt niet).
+- **Alleen de nieuwste meting per onderdeel is bewerkbaar/verwijderbaar** — dubbel
+  afgedwongen: server (`assertNieuwsteMeting`) én UI (knoppen alleen op rij 0).
+- **Toekomstige meetdatum toegestaan**: telt pas mee vanaf die datum, maar is wél meteen
+  corrigeerbaar (bewerk-guard kijkt naar MAX(datum) over álle rijen — zo zit een vertypte
+  "2027" nooit vast).
+- **Ankerverschuiving tijdens een hermetingsronde is geaccepteerd**: hermeet je onderdeel
+  voor onderdeel (winterstop), dan schuift het anker pas mee als de vroegste actuele datum
+  verandert. `hermetingStand` toont een uitleg-hint op /periodisering zodra de spreiding
+  tussen vroegste en laatste actuele meting > 42 dagen is (strikt; bij exact 42 is
+  `cycleWeekFor` weer week 1, dus coherent).
+- `MEETBARE_CATEGORIES` (lib/types.ts) is bewust alleen server-side in gebruik; de UI
+  filtert zelf op `hasMeting` omdat hij de volledige categorie-objecten nodig heeft.
+  Zelfde predicaat, dus geen divergentierisico.
+
+### Herbruikbaar faserings-recept (backend → frontend → opruimronde)
+Signatuurwijziging van een gedeelde lib-functie over twee bouwlanes heen zónder rode
+checks tussendoor: geef de functie meteen zijn definitieve naam en zet de oude vorm ernaast
+als TypeScript-overload met een legacy-tak (discriminatie op niet-overlappende sleutelruimte:
+`'partijen_groot_stap' in arg`); frontend zet de aanroepen om; een derde backend-ronde
+schrapt de overload. Nooit hernoemen, geen lane raakt de laag van de ander.
+
+### Valkuilen/lessen uit deze sessie
+- **Een delete-pad zonder try/catch + zichtbare foutmelding glipte door álle groene checks**
+  (28 action-tests, 35 acceptance-tests): de tests riepen de server action rechtstreeks aan
+  maar niemand klikte op de verwijderknop. Les: UI-schrijfpaden ook via de echte knop testen,
+  en de foutbalk moet staan waar de gebruiker op dat moment kijkt (verwijderen gebeurt búiten
+  de sheet → eigen `deleteError`-state per categorieblok, gereset bij toggle/openNew/openEdit).
+- **`cycleWeekFor` had jarenlang `new Date(str+'T00:00:00')`** — DST-valkuil die
+  `lib/season-dates.ts` al documenteerde. Nieuwe datum-arithmetiek in dit project altijd via
+  `toUtcMs`/`isDateString` (season-dates); datums vergelijken als 'YYYY-MM-DD'-strings.
+- **Delta/kop/knoptekst uit één bron** (`actueel[cat.key]`), niet `geschiedenis[0]` — die
+  twee lopen uiteen zodra er een toekomstige meetdatum bestaat.
+- Labels met `htmlFor`/`id` koppelen maakt `getByLabelText` mogelijk — robuustere tests én
+  screenreader-winst in één moeite.
+- `dashboard-vorm.acceptance.test.tsx` pinde de oude SetupNulmeting-kaart; vervangen mét
+  reden in commentaar (conventie), niet stilzwijgend.
+
+### Openstaande opvolgtaken
+- `MetingEditor` alleen-lezen maken (of uitfaseren) — losgekoppeld legacy-pad.
+- `app/actions/events.ts` heeft een eigen, zwakkere `DATE_RE` (derde kopie naast
+  season-dates): `'2026-02-30'` passeert `createEvent`. Consolideren op `isDateString`.
