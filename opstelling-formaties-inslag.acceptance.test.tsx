@@ -81,12 +81,24 @@ function tableFactory(rows: Row[]) {
   }
 }
 
+function speler(id: string, naam: string, positie: string, nummer: number): Row {
+  return {
+    id, team_id: TEAM, name: naam, position: positie, secondary_positions: [],
+    jersey_number: nummer, active: true, injured: false, type: 'regular', rating: 7,
+    created_at: '2024-01-01T00:00:00Z',
+  }
+}
+
+// Elf spelers, allemaal aanwezig. Anna en Bram hebben een eigen naam omdat de
+// tests hierboven op /Anna/ en /Bram/ zoeken; de rest vult alleen het veld.
 const SPELERS: Row[] = [
-  { id: 'p1', team_id: TEAM, name: 'Anna Keeper', position: 'Keeper', secondary_positions: [], jersey_number: 1, active: true, injured: false, type: 'regular', rating: 7, created_at: '2024-01-01T00:00:00Z' },
-  { id: 'p2', team_id: TEAM, name: 'Bram Midden', position: 'Centrale middenvelder', secondary_positions: [], jersey_number: 6, active: true, injured: false, type: 'regular', rating: 7, created_at: '2024-01-01T00:00:00Z' },
+  speler('p1', 'Anna Keeper', 'Keeper', 1),
+  speler('p2', 'Bram Midden', 'Centrale middenvelder', 6),
+  ...Array.from({ length: 9 }, (_, i) =>
+    speler(`p${i + 3}`, `Veldspeler${i + 3}`, 'Centrale middenvelder', i + 10)),
 ]
 
-function makeSupabaseMock() {
+function makeSupabaseMock(opts: { lineups?: Row[] } = {}) {
   const factories: Record<string, () => unknown> = {
     events: tableFactory([{
       id: EVENT_ID, team_id: TEAM, type: 'match', date: '2026-08-10', time: null, location: null,
@@ -94,11 +106,10 @@ function makeSupabaseMock() {
       doelstelling: null, goals_for: null, goals_against: null, created_at: '2026-08-01T10:00:00Z',
     }]),
     players: tableFactory(SPELERS),
-    attendance: tableFactory([
-      { event_id: EVENT_ID, team_id: TEAM, player_id: 'p1', status: 'present' },
-      { event_id: EVENT_ID, team_id: TEAM, player_id: 'p2', status: 'present' },
-    ]),
-    lineups: tableFactory([]),
+    attendance: tableFactory(SPELERS.map((p) => ({
+      event_id: EVENT_ID, team_id: TEAM, player_id: p.id, status: 'present',
+    }))),
+    lineups: tableFactory(opts.lineups ?? []),
     match_squad: tableFactory([]),
     settings: tableFactory([]),
     match_ratings: tableFactory([]),
@@ -113,9 +124,9 @@ function makeSupabaseMock() {
   }
 }
 
-async function renderLineupPage() {
+async function renderLineupPage(opts: { lineups?: Row[] } = {}) {
   vi.mocked(createClient).mockResolvedValue(
-    makeSupabaseMock() as unknown as Awaited<ReturnType<typeof createClient>>,
+    makeSupabaseMock(opts) as unknown as Awaited<ReturnType<typeof createClient>>,
   )
   const el = await LineupPage({ params: Promise.resolve({ id: EVENT_ID }) })
   return render(<DictProvider dict={nl}>{el}</DictProvider>)
@@ -292,5 +303,100 @@ describe('Inslag — een speler wordt in zijn positie gezet', () => {
     expect(poppetje.style.animation).toBe('')
     // De speler staat er gewoon: de animatie is versiering, geen voorwaarde.
     expect(screen.getByRole('button', { name: /Bram/ })).toBeInTheDocument()
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// 3. Spelers verhuizen mee bij een formatiewissel
+// ────────────────────────────────────────────────────────────────────────────
+
+// Opstelling met beide spelers erin: Anna op de keeper, Bram op de CM van het
+// standaard 4-3-3. De verhuislogica zelf is uitputtend getest in
+// lib/lineup-verhuizing.test.ts; hier gaat het om de koppeling met de UI.
+function opstellingMetTwee(): Row {
+  return {
+    id: 'l1', event_id: EVENT_ID, team_id: TEAM, formation: '4-3-3', notes: null,
+    created_at: '2026-08-05T10:00:00Z',
+    positions: FORMATIONS['4-3-3'].positions.map((p) => ({
+      ...p,
+      player_id: p.position_label === 'KP' ? 'p1' : p.position_label === 'CM' ? 'p2' : null,
+    })),
+  }
+}
+
+// Alle elf slots van het standaard 4-3-3 bezet met p1..p11, in bronvolgorde.
+function volledigeOpstelling(): Row {
+  return {
+    id: 'l1', event_id: EVENT_ID, team_id: TEAM, formation: '4-3-3', notes: null,
+    created_at: '2026-08-05T10:00:00Z',
+    positions: FORMATIONS['4-3-3'].positions.map((p, i) => ({ ...p, player_id: `p${i + 1}` })),
+  }
+}
+
+describe('Formatiewissel — spelers verhuizen mee', () => {
+  it('houdt beide spelers op het veld in plaats van de opstelling leeg te gooien', async () => {
+    await renderLineupPage({ lineups: [opstellingMetTwee()] })
+
+    expect(screen.getByRole('button', { name: /Anna/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Bram/ })).toBeInTheDocument()
+
+    kiesFormatie('4-3-3 (controleur)')
+
+    // Vóór deze wijziging stonden ze na de wissel allebei op de bank.
+    expect(screen.getByRole('button', { name: /Anna/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Bram/ })).toBeInTheDocument()
+    // En er zijn nog steeds negen lege slots, dus niemand is gedupliceerd.
+    expect(screen.getAllByText('+')).toHaveLength(9)
+  })
+
+  it('houdt de keeper in het doel, ook bij een wissel naar een 5-backsysteem', async () => {
+    await renderLineupPage({ lineups: [opstellingMetTwee()] })
+
+    kiesFormatie('5-4-1')
+
+    // Het KP-slot staat op x=50, y=90; daar hoort Anna te staan.
+    const keeperKnop = screen.getByRole('button', { name: /Anna/ })
+    expect(keeperKnop.style.left).toBe('50%')
+    expect(keeperKnop.style.top).toBe('90%')
+  })
+
+  it('meldt het wanneer iemand geen vergelijkbaar slot heeft', async () => {
+    // Met een VOLLE opstelling gaan de slots pas echt om elkaar concurreren.
+    // 4-3-3 → 3-5-2 laat precies één speler over: de vleugelspitsen hebben in
+    // een 3-5-2 geen tegenhanger. Met een half lege opstelling is er altijd wel
+    // ergens plek en zou deze test niets bewijzen.
+    await renderLineupPage({ lineups: [volledigeOpstelling()] })
+    kiesFormatie('3-5-2')
+
+    expect(screen.getByText(nl.lineup.movedToBench.replace('{n}', '1'))).toBeInTheDocument()
+  })
+
+  it('meldt niets wanneer iedereen meeverhuist', async () => {
+    await renderLineupPage({ lineups: [opstellingMetTwee()] })
+
+    kiesFormatie('4-4-2')
+
+    expect(screen.queryByText(/pasten niet in deze formatie/)).toBeNull()
+  })
+
+  it('laat de melding verdwijnen zodra de coach zelf weer iemand plaatst', async () => {
+    await renderLineupPage({ lineups: [volledigeOpstelling()] })
+    kiesFormatie('3-5-2')
+    expect(screen.getByText(nl.lineup.movedToBench.replace('{n}', '1'))).toBeInTheDocument()
+
+    // Het lege slot dat overbleef toont zijn positielabel; de bezette slots
+    // tonen een spelersnaam. Er is er precies één vrij.
+    const leegSlot = screen.getAllByText('+')
+    expect(leegSlot).toHaveLength(1)
+    fireEvent.click(leegSlot[0])
+    // De speler die op de bank belandde is de enige beschikbare keuze. De
+    // popup-rijen dragen een eigen testid: zonder dat zijn ze niet te
+    // onderscheiden van de poppetjes op het veld, die ook <button> met een
+    // spelersnaam zijn.
+    const rijen = screen.getAllByTestId('popup-speler')
+    expect(rijen).toHaveLength(1)
+    fireEvent.click(rijen[0])
+
+    expect(screen.queryByText(/pasten niet in deze formatie/)).toBeNull()
   })
 })

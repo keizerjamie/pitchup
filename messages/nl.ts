@@ -501,6 +501,7 @@ export const nl = {
     removePlayer: 'Verwijder speler',
     allAssigned: 'Alle spelers zijn al ingedeeld',
     bench: 'Bank / reserve',
+    movedToBench: '{n} speler(s) pasten niet in deze formatie en staan nu op de bank.',
     save: 'Opstelling opslaan',
     saving: 'Opslaan...',
     saved: '✓ Opgeslagen!',

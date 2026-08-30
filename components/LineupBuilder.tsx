@@ -2,31 +2,17 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { saveLineup } from '@/app/actions/attendance'
-import { Player, LineupPosition, FORMATIONS, POSITION_ABBREVIATIONS, POSITION_LABEL_MAP } from '@/lib/types'
+import { Player, LineupPosition, FORMATIONS, POSITION_ABBREVIATIONS, POSITION_LABEL_MAP, POSITION_FALLBACKS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 import { emptyPlayerForm, isGeldigeRating, type PlayerForm } from '@/lib/lineup-form'
 import type { KitColors } from '@/lib/club-colors'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
+import { verhuisOpstelling } from '@/lib/lineup-verhuizing'
 
 // Hoe lang de inslag-state blijft staan. Moet minstens zo lang zijn als de
 // langste keyframe-animatie in app/globals.css (poppetje-schokgolf, 620ms),
 // anders verdwijnt de ring halverwege uit de DOM.
 const IMPACT_DUUR_MS = 700
-
-const POSITION_FALLBACKS: Record<string, string[]> = {
-  'Keeper': [],
-  'Linksachter': ['Centrale verdediger', 'Rechtsachter', 'Defensieve middenvelder', 'Linksmiddenvelder'],
-  'Centrale verdediger': ['Linksachter', 'Rechtsachter', 'Defensieve middenvelder'],
-  'Rechtsachter': ['Centrale verdediger', 'Linksachter', 'Defensieve middenvelder', 'Rechtsmiddenvelder'],
-  'Defensieve middenvelder': ['Centrale middenvelder', 'Centrale verdediger', 'Linksachter', 'Rechtsachter'],
-  'Centrale middenvelder': ['Defensieve middenvelder', 'Aanvallende middenvelder', 'Linksmiddenvelder', 'Rechtsmiddenvelder'],
-  'Linksmiddenvelder': ['Centrale middenvelder', 'Linksbuiten', 'Linksachter'],
-  'Rechtsmiddenvelder': ['Centrale middenvelder', 'Rechtsbuiten', 'Rechtsachter'],
-  'Aanvallende middenvelder': ['Centrale middenvelder', 'Spits', 'Linksbuiten', 'Rechtsbuiten'],
-  'Linksbuiten': ['Linksmiddenvelder', 'Spits', 'Aanvallende middenvelder', 'Rechtsbuiten'],
-  'Rechtsbuiten': ['Rechtsmiddenvelder', 'Spits', 'Aanvallende middenvelder', 'Linksbuiten'],
-  'Spits': ['Aanvallende middenvelder', 'Linksbuiten', 'Rechtsbuiten'],
-}
 
 function getFitScore(player: Player, preferredPos: string): number {
   const isKeeperSlot = preferredPos === 'Keeper'
@@ -101,6 +87,9 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
   const [formationOpen, setFormationOpen] = useState(false)
+  // Aantal spelers dat bij de laatste formatiewissel geen vergelijkbaar slot
+  // had. Alleen om het te MELDEN — nooit stilzwijgend iemand van het veld halen.
+  const [naarBankCount, setNaarBankCount] = useState(0)
 
   // "Inslag": het slot waar zojuist een speler in is gezet. `nonce` maakt elke
   // plaatsing uniek, zodat twee keer achter elkaar hetzelfde slot vullen de
@@ -126,8 +115,13 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   const eligibleIds = new Set(eligiblePlayerIds ?? players.map((p) => p.id))
 
   function handleFormationChange(f: string) {
+    // Spelers verhuizen mee naar het best vergelijkbare slot; wie nergens past
+    // valt terug op de bank (en wordt gemeld). Vroeger gooide een wissel de
+    // hele opstelling leeg.
+    const { posities, naarBank } = verhuisOpstelling(positions, FORMATIONS[f].positions)
     setFormation(f)
-    setPositions(FORMATIONS[f].positions.map((p) => ({ ...p, player_id: null })))
+    setPositions(posities)
+    setNaarBankCount(naarBank.length)
     setSelectedSlot(null)
     setFormationOpen(false)
   }
@@ -141,6 +135,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
       return p
     }))
     setSelectedSlot(null)
+    setNaarBankCount(0)
 
     // Alleen bij het NEERZETTEN van een speler, niet bij verwijderen — en nooit
     // bij prefers-reduced-motion (zelfde afweging als GlobalFab/AppLauncher).
@@ -241,6 +236,11 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
               )
             })}
           </div>
+        )}
+        {naarBankCount > 0 && (
+          <p className="mt-2 text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
+            {t.lineup.movedToBench.replace('{n}', String(naarBankCount))}
+          </p>
         )}
       </div>
 
@@ -444,6 +444,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
               return (
               <button
                 key={p.id}
+                data-testid="popup-speler"
                 onClick={() => assignPlayer(p.id)}
                 style={{
                   width: '100%', display: 'flex', alignItems: 'center', gap: 8,

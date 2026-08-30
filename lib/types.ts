@@ -431,6 +431,31 @@ export const POSITION_LABEL_MAP: Record<string, string> = {
   '10': 'Aanvallende middenvelder', LA: 'Linksbuiten', RA: 'Rechtsbuiten', SP: 'Spits',
 }
 
+// Per positie: welke ándere posities die plek redelijk kunnen invullen, van
+// best naar slechtst. Woonde eerder in components/LineupBuilder.tsx (waar
+// getFitScore hem gebruikt); hier verhuisd omdat lib/lineup-verhuizing.ts hem
+// óók nodig heeft om te bepalen of een speler bij een formatiewissel kan
+// meeverhuizen. Eén tabel, twee lezers — anders lopen "wie past hier" en
+// "waarheen verhuist die" uit elkaar.
+//
+// 'Keeper' heeft bewust een LEGE lijst: een keeper vervangt niemand en niemand
+// vervangt hem. Dat is wat een keeperslot absoluut maakt in beide lezers.
+export const POSITION_FALLBACKS: Record<string, string[]> = {
+  'Keeper': [],
+  'Linksachter': ['Centrale verdediger', 'Rechtsachter', 'Defensieve middenvelder', 'Linksmiddenvelder'],
+  'Centrale verdediger': ['Linksachter', 'Rechtsachter', 'Defensieve middenvelder'],
+  'Rechtsachter': ['Centrale verdediger', 'Linksachter', 'Defensieve middenvelder', 'Rechtsmiddenvelder'],
+  'Defensieve middenvelder': ['Centrale middenvelder', 'Centrale verdediger', 'Linksachter', 'Rechtsachter'],
+  'Centrale middenvelder': ['Defensieve middenvelder', 'Aanvallende middenvelder', 'Linksmiddenvelder', 'Rechtsmiddenvelder'],
+  'Linksmiddenvelder': ['Centrale middenvelder', 'Linksbuiten', 'Linksachter'],
+  'Rechtsmiddenvelder': ['Centrale middenvelder', 'Rechtsbuiten', 'Rechtsachter'],
+  'Aanvallende middenvelder': ['Centrale middenvelder', 'Spits', 'Linksbuiten', 'Rechtsbuiten'],
+  'Linksbuiten': ['Linksmiddenvelder', 'Spits', 'Aanvallende middenvelder', 'Rechtsbuiten'],
+  'Rechtsbuiten': ['Rechtsmiddenvelder', 'Spits', 'Aanvallende middenvelder', 'Linksbuiten'],
+  'Spits': ['Aanvallende middenvelder', 'Linksbuiten', 'Rechtsbuiten'],
+}
+
+
 // Gecureerde 11-tal-formaties. Sleutel = wat er in `lineups.formation` en in
 // `oefeningen.teams[].formatie` wordt opgeslagen; `label` is wat de kiezer toont.
 // De volgorde hieronder is de volgorde in de formatiekiezer van de

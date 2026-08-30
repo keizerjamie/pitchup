@@ -359,6 +359,7 @@ export const fr: Dict = {
     absentSection: 'Absents / inconnus', formation: 'Formation', autoLineup: 'Composition auto',
     choosePlayer: 'Choisir un joueur pour', removePlayer: 'Retirer le joueur',
     allAssigned: 'Tous les joueurs sont déjà placés', bench: 'Banc / réserve',
+    movedToBench: "{n} joueur(s) n'entraient pas dans cette formation et sont maintenant sur le banc.",
     save: 'Enregistrer la composition', saving: 'Enregistrement...', saved: '✓ Enregistré !',
   },
   matchSquad: {

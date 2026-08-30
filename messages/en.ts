@@ -464,6 +464,7 @@ export const en: Dict = {
     removePlayer: 'Remove player',
     allAssigned: 'All players already assigned',
     bench: 'Bench / reserve',
+    movedToBench: '{n} player(s) did not fit this formation and are now on the bench.',
     save: 'Save lineup',
     saving: 'Saving...',
     saved: '✓ Saved!',

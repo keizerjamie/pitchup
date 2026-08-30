@@ -359,6 +359,7 @@ export const es: Dict = {
     absentSection: 'No presentes / desconocidos', formation: 'Formación', autoLineup: 'Alineación automática',
     choosePlayer: 'Elegir jugador para', removePlayer: 'Quitar jugador',
     allAssigned: 'Todos los jugadores ya asignados', bench: 'Banquillo / reservas',
+    movedToBench: '{n} jugador(es) no encajaban en esta formación y ahora están en el banquillo.',
     save: 'Guardar alineación', saving: 'Guardando...', saved: '✓ Guardado!',
   },
   matchSquad: {
