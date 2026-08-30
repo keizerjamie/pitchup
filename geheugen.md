@@ -2684,3 +2684,30 @@ matrix-uitdraai over alle 225 paren om de ondergrens te bepalen vóórdat die al
 vastgelegd. **Les: meet de eigenschap eerst, verzin de assertiedrempel niet.** De eerste
 testverwachting ("alle 4-backsystemen houden 11 spelers") was te optimistisch en zou een
 correcte implementatie hebben afgekeurd.
+
+## Design-consistentie-pass (token/i18n/iconografie) — commit 4954c7a
+Audit over alle pagina's + componenten; alleen veilige, conventie-conforme fixes (typecheck/lint/
+2550 tests groen). Losse hardcoded kleuren → bestaande tokens (o.a. bottom-nav inset-highlight,
+`border-l-orange-500`→`border-l-warning`, `border-white/50`→`--border-soft`, PlayerList `#dc2626`→
+`--chip-red-fg`, settings radio-accents). `GlobalFab`-createmenu is nu thema-bewust gemaakt
+(`var(--surface)`-glas + `--glass-border/--glass-highlight` + `--ink/--faint`), net als `.glass-card`.
+Hardcoded UI-strings → dict: `vs`→`t.lineup.vsLabel`, plus 5 **nieuwe** keys in alle 5 talen —
+`event.locationPlaceholder`, `event.opponentPlaceholder`, `lineup.recommended`,
+`settings.deleteAccountError` (vervangt óók een rauwe `err.message` naar de client), `nav.accountFallback`.
+Iconografie → Material Symbols (back-chevrons, meting-`◆`→`straighten`, toggle-`▾▸`, settings-`✓`);
+titels `OefeningLibrary`/trainingsplan → `font-display`; aria-labels op icon-only knoppen.
+
+### Openstaande dark-mode-punten (bewust NIET in deze commit — vereisen visuele dark-mode-check)
+- **Speler-picker-popup in `LineupBuilder`** (`cardStyle`, rond regel 415) is een **altijd-lichte**
+  glaskaart (`rgba(250,250,253,0.90)` + hardcoded donkere teksten `#111827`/`#374151`/`#9ca3af` +
+  `rgba(0,0,0,…)`-randen). Themet niet mee; in dark mode blijft het een wit kaartje. Los een losse
+  kleur daar NIET op (bv. `#b45309`→token) — dat geeft fel-amber op wit. Juiste fix = de héle popup
+  thema-bewust maken zoals `GlobalFab` nu is. Zelfde valkuil geldt voor élke portal-overlay met
+  inline-styles.
+- **Categoriekleuren `PERIODIZATION_CATEGORIES[].color`** (`lib/types.ts`) zijn 10 hardcoded pastel-
+  tints (`bg-*-100 text-*-800`) die niet met dark mode meebewegen. Nog gebruikt door
+  `TrainingPlanEditor.tsx:381` en `OefeningLibrary.tsx:72` (`catColor`). `MetingEditor` is over op een
+  lokale `CATEGORY_BADGE` panel-token-map (de 5 meting-categorieën → panel-red/orange/amber/blue/purple,
+  geen collisie). `cat.color` kan pas weg als die twee ook mee — maar de 6 `panel-*`-tokens dekken de
+  10 categorie-hues niet zonder categorieën visueel te laten samenvallen. Vereist eerst een dark-safe
+  **10-kleuren categoriepalet** (nieuwe tokens) als eigen ontwerpstap.
