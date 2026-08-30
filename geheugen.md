@@ -2628,3 +2628,59 @@ met 1.4 geschaald worden om te kloppen met wat de app tekent.
 De animatie in de draaiende app: die pagina zit achter de Supabase-login. Wel bewezen dat de drie
 keyframes in de productie-CSS-bundel staan (`.next/static/chunks/*.css`) en dat de tests dekken
 wánneer de app de animatie aanzet; de beweging zelf is declaratieve CSS die jsdom niet meet.
+
+## Opstelling: spelers verhuizen mee bij een formatiewissel (2026-08-28, commit `b35302c`, live)
+Direct gebouwd. **Geen backend**: puur clientlogica op de al geladen opstelling.
+
+### Waarom slot-naar-slot en niet speler-naar-positie
+`lib/lineup-verhuizing.ts` vergelijkt het **OUDE slot met het NIEUWE slot**, bewust niet de
+speler met de positie. Er ligt al een `getFitScore` (in `LineupBuilder.tsx`, voor Auto-opstelling)
+die kijkt naar de voorkeurspositie van de speler — die hergebruiken zou de opstelling
+**heropbouwen** in plaats van behouden: een spits die de coach expres op links-midden zette, zou
+bij elke wissel terugspringen naar de spits. Meeverhuizen = vasthouden wat de coach bedacht heeft.
+
+### De keeper blijft staan zonder aparte uitzondering
+`POSITION_FALLBACKS['Keeper']` is leeg **én** `'Keeper'` komt in geen enkele andere fallbacklijst
+voor. Daardoor matcht een keeperslot alleen een ander keeperslot, in beide richtingen. Niet
+kapotmaken door ooit 'Keeper' aan een fallbacklijst toe te voegen.
+
+### Drie implementaties — de eerste twee zijn verworpen, en waarom
+Dit is de kern van deze feature; de redenering staat ook bij de functie zelf.
+1. **Greedy** (sorteer alle paren op kwaliteit, loop ze af). Faalde meteen op de meest
+   alledaagse wissel, `4-3-3 → 4-3-3 (controleur)`: de CM pakte een CM-slot, de LM het tweede,
+   de RM hield niets over — terwijl het DM-slot leeg bleef waar de CM prima had gepast.
+2. **Maximale bipartiete koppeling (Kuhn).** Loste het aantal op maar maximaliseert *uitsluitend*
+   het aantal: dezelfde wissel plaatste alle elf door de hele verdediging een plek op te schuiven
+   (linkshalf → linksachter, rechtsback → middenveld). Formeel correct, voor een coach onbruikbaar.
+   **Les: "niemand kwijtraken" en "iedereen op een logische plek" zijn twee verschillende
+   doelen; een algoritme dat alleen het eerste optimaliseert produceert onzin.**
+3. **Hongaarse methode** (e-maxx-variant met potentialen, O(n³), n ≤ 11). Kostenformulering
+   `-(PLAATSINGSBONUS + affiniteit) + afstand / AFSTAND_DEMPING`, met `PLAATSINGSBONUS = 1000`
+   zodat het aantal élk affiniteitsverschil domineert, en de afstand (max ~0,017) nooit een
+   affiniteitsstap (min 0,1) kan overstemmen maar wél spiegelbeeldige slots uit elkaar houdt.
+   Verboden paren krijgen kosten 0 (duurder dan elke toegestane koppeling) en worden ná afloop
+   weggegooid — anders zou een keeper op de spitspositie kunnen belanden.
+
+### Uitkomst
+Over alle 225 formatieparen blijven er **minimaal 10 van de 11** spelers staan; die ene uitval is
+telkens een echte voetbalconsequentie (twee spitsen → één spits, of een vleugelverdediger zonder
+tegenhanger). Nieuwe i18n-sleutel `lineup.movedToBench` (alle vijf talen) meldt het aantal, in
+dezelfde amber-stijl als `TeamIndelingEditor`. De melding verdwijnt zodra de coach zelf weer
+iemand plaatst of weghaalt (`setNaarBankCount(0)` in `assignPlayer`).
+
+### Bijvangst
+- **`POSITION_FALLBACKS` verhuisd** van `LineupBuilder.tsx` naar `lib/types.ts` en geëxporteerd:
+  één tabel, twee lezers (`getFitScore` en `slotAffiniteit`). Zouden die uiteenlopen, dan zouden
+  "wie past hier" en "waarheen verhuist die" verschillende antwoorden geven.
+- **`data-testid="popup-speler"` op de popup-rijen.** De popup-rijen én de poppetjes op het veld
+  zijn allebei `<button>` met een spelersnaam erin; `getByRole('button', { name: /Naam/ })` is dus
+  dubbelzinnig zodra iemand op het veld staat. Elke toekomstige test die een speler uit de popup
+  moet kiezen, moet dit testid gebruiken.
+
+### Verificatiemethode
+Zelfde aanpak als bij de formaties: vier veelvoorkomende wissels vóór/ná gerenderd uit de ECHTE
+`verhuisOpstelling` (wegwerp-vitest-bestand → HTML → Playwright-screenshot), plus een
+matrix-uitdraai over alle 225 paren om de ondergrens te bepalen vóórdat die als test werd
+vastgelegd. **Les: meet de eigenschap eerst, verzin de assertiedrempel niet.** De eerste
+testverwachting ("alle 4-backsystemen houden 11 spelers") was te optimistisch en zou een
+correcte implementatie hebben afgekeurd.
