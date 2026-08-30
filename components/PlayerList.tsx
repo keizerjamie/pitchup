@@ -180,10 +180,11 @@ export default function PlayerList({ active, inactive }: Props) {
           </div>
           <Link
             href="/players/new"
+            aria-label={t.players.add}
             className="h-[42px] rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0"
             style={{ background: 'var(--primary)' }}
           >
-            <span className="ms text-[19px]">person_add</span>
+            <span className="ms text-[19px]" aria-hidden="true">person_add</span>
             <span className="hidden sm:inline">{t.players.add}</span>
           </Link>
         </div>
@@ -298,7 +299,7 @@ export default function PlayerList({ active, inactive }: Props) {
                     className="w-[38px] h-[38px] rounded-xl flex items-center justify-center flex-shrink-0"
                     style={
                       action.tone === 'danger'
-                        ? { background: 'rgba(220,38,38,0.12)', color: '#dc2626' }
+                        ? { background: 'rgba(220,38,38,0.12)', color: 'var(--chip-red-fg)' }
                         : { background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--brand-accent)' }
                     }
                   >

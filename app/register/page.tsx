@@ -28,21 +28,21 @@ export default function RegisterPage() {
           )}
 
           <div>
-            <label className="block text-white/70 text-sm font-medium mb-1.5">{t.auth.teamName}</label>
+            <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.teamName}</label>
             <input name="team_name" type="text" required
               className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.teamNamePlaceholder} />
           </div>
 
           <div>
-            <label className="block text-white/70 text-sm font-medium mb-1.5">{t.auth.email}</label>
+            <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.email}</label>
             <input name="email" type="email" required autoComplete="email"
               className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.emailPlaceholder} />
           </div>
 
           <div>
-            <label className="block text-white/70 text-sm font-medium mb-1.5">{t.auth.password}</label>
+            <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.password}</label>
             <input name="password" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH}
               className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.passwordMinLength} />

@@ -99,7 +99,7 @@ export default function NulmetingManager({ history }: Props) {
       {/* History */}
       {hasHistory && (
         <div className="surface-card rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/50">
+          <div className="px-5 py-4 border-b border-[var(--border-soft)]">
             <h2 className="font-semibold text-ink">{t.periodization.history}</h2>
           </div>
           <div className="divide-y divide-[var(--border-soft)]">

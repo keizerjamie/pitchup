@@ -64,9 +64,7 @@ export default function BulkMatchesPage() {
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
       <div className="flex items-center gap-3 mb-6">
         <BackButton fallback="/events" className="text-faint hover:text-ink">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
         </BackButton>
         <h1 className="text-2xl font-bold text-ink">{t.event.bulk.title}</h1>
       </div>

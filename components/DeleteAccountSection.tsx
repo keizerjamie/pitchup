@@ -23,7 +23,7 @@ export default function DeleteAccountSection() {
       } catch (err) {
         // redirect() throws internally on success; only real failures surface here
         if (err instanceof Error && err.message.includes('NEXT_REDIRECT')) return
-        setError(err instanceof Error ? err.message : 'Verwijderen mislukt')
+        setError(t.settings.deleteAccountError)
       }
     })
   }
@@ -74,7 +74,7 @@ export default function DeleteAccountSection() {
                 type="button"
                 onClick={handleDelete}
                 disabled={!armed || isPending}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-danger hover:bg-danger active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-danger hover:bg-danger/90 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isPending ? t.settings.deleting : t.settings.deleteConfirmFinal}
               </button>

@@ -42,9 +42,7 @@ function NewEventForm() {
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
       <div className="flex items-center gap-3 mb-6">
         <BackButton fallback="/events" className="text-faint hover:text-ink">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
         </BackButton>
         <h1 className="text-2xl font-bold text-ink">{t.event.newTitle}</h1>
       </div>
@@ -86,7 +84,7 @@ function NewEventForm() {
             <label className="block text-sm font-semibold text-muted mb-1.5">
               {t.event.location} <span className="text-faint font-normal">({t.event.optional})</span>
             </label>
-            <input name="location" type="text" placeholder="Sportpark de Meent"
+            <input name="location" type="text" placeholder={t.event.locationPlaceholder}
               className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder-faint" />
           </div>
 
@@ -94,7 +92,7 @@ function NewEventForm() {
             <>
               <div>
                 <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.opponent}</label>
-                <input name="opponent" type="text" required placeholder="FC Voorbeeld"
+                <input name="opponent" type="text" required placeholder={t.event.opponentPlaceholder}
                   className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-event-match focus:ring-2 focus:ring-event-match/30 text-ink placeholder-faint" />
               </div>
 

@@ -123,12 +123,12 @@ export default function GlobalFab() {
           right: 16,
           zIndex: 'var(--z-sheet)',
           minWidth: 238,
-          background: 'rgba(248,248,252,0.78)',
+          background: 'color-mix(in srgb, var(--surface) 78%, transparent)',
           backdropFilter: 'blur(40px) saturate(180%) brightness(1.06)',
           WebkitBackdropFilter: 'blur(40px) saturate(180%) brightness(1.06)',
-          border: '1px solid rgba(255,255,255,0.92)',
+          border: '1px solid var(--glass-border)',
           borderRadius: 20,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.20), 0 2px 0 rgba(255,255,255,0.95) inset',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.20), 0 2px 0 var(--glass-highlight) inset',
           transformOrigin: 'bottom right',
           transform: reduceMotion ? 'none' : visible ? 'scale(1) translateY(0)' : 'scale(0.92) translateY(12px)',
           opacity: visible ? 1 : 0,
@@ -145,8 +145,8 @@ export default function GlobalFab() {
         }} />
 
         {/* Section label */}
-        <div style={{ padding: '11px 16px 9px', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+        <div style={{ padding: '11px 16px 9px', borderBottom: '1px solid var(--border-soft)' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--faint)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
             {t.fab.title}
           </span>
         </div>
@@ -163,7 +163,7 @@ export default function GlobalFab() {
               alignItems: 'center',
               gap: 13,
               padding: '13px 16px',
-              borderBottom: i < items.length - 1 ? '1px solid rgba(0,0,0,0.055)' : undefined,
+              borderBottom: i < items.length - 1 ? '1px solid var(--border-soft)' : undefined,
               position: 'relative',
               zIndex: 1,
               textDecoration: 'none',
@@ -184,10 +184,10 @@ export default function GlobalFab() {
             }}>
               {item.icon}
             </div>
-            <span style={{ fontSize: 15, fontWeight: 600, color: '#1e293b', flex: 1 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', flex: 1 }}>
               {item.label}
             </span>
-            <span style={{ color: 'rgba(0,0,0,0.22)', lineHeight: 0 }}>
+            <span style={{ color: 'var(--faint)', lineHeight: 0 }}>
               <ChevronRight />
             </span>
           </Link>

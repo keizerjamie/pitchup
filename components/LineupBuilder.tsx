@@ -492,7 +492,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
                   {recommended && (
                     <>
                       <div style={{ fontSize: 9, fontWeight: 700, color: '#b45309', letterSpacing: '0.07em', padding: '5px 12px 2px', textTransform: 'uppercase' }}>
-                        ★ Aanbevolen
+                        ★ {t.lineup.recommended}
                       </div>
                       {row(recommended, true)}
                     </>

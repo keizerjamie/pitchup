@@ -97,7 +97,7 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="text-xl font-bold text-ink">{t.oefeningen.libraryTitle}</h1>
+        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.oefeningen.libraryTitle}</h1>
         <div className="flex items-center gap-2">
           <input
             value={filters.query}
@@ -397,7 +397,7 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                       type="button"
                       onClick={() => handleDelete(o.id)}
                       disabled={isPending}
-                      className="text-xs font-semibold text-white bg-danger hover:bg-danger rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
+                      className="text-xs font-semibold text-white bg-danger hover:bg-danger/90 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50"
                     >
                       {t.oefeningen.deleteButton}
                     </button>

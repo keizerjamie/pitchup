@@ -115,7 +115,7 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
           <label className="block text-sm font-semibold text-muted mb-1.5">
             {t.schedule.location} <span className="text-faint font-normal">({t.schedule.optional})</span>
           </label>
-          <input name="training_location" type="text" defaultValue={initialLocation} placeholder="Sportpark de Meent"
+          <input name="training_location" type="text" defaultValue={initialLocation} placeholder={t.event.locationPlaceholder}
             className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink placeholder:text-faint text-sm" />
         </div>
       </div>

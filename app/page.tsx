@@ -291,7 +291,7 @@ export default async function DashboardPage() {
   const heroStats = heroEvent ? statsFor(heroEvent.id) : { present: 0, absent: 0, total: 0 }
   const heroIsMatch = heroEvent?.type === 'match'
   const heroTitle = !heroEvent ? '' : heroIsMatch
-    ? `${teamName ? `${teamName} ` : ''}vs ${heroEvent.opponent ?? '?'}`
+    ? `${teamName ? `${teamName} ` : ''}${t.lineup.vsLabel} ${heroEvent.opponent ?? '?'}`
     : t.event.training
 
   return (

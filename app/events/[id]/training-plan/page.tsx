@@ -187,14 +187,12 @@ export default async function TrainingPlanPage({ params }: Props) {
 
       <div className="flex items-center gap-3 print:border-b-2 print:pb-[1mm] print-club-border">
         <BackButton fallback={`/events/${id}`} className="print:hidden text-faint hover:text-ink flex-shrink-0">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
+          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
         </BackButton>
         <div className="min-w-0 flex-1 print:flex print:items-baseline print:gap-2">
           {/* .print-accent-text / .print-poster-meta bestaan alleen in het
               @media print-blok en raken de schermweergave dus niet. */}
-          <h1 className="text-xl font-bold text-ink print:text-[10px] print:uppercase print:tracking-[0.18em] print-accent-text">{t.event.trainingPlan}</h1>
+          <h1 className="font-display text-[22px] lg:text-[26px] font-bold text-ink print:text-[10px] print:uppercase print:tracking-[0.18em] print-accent-text">{t.event.trainingPlan}</h1>
           <p className="text-sm text-muted print:text-[10px] print:font-bold print-poster-meta">{formatDateLong(event.date, t.browserLocale)}</p>
         </div>
         {/* Print-only: teamnaam + clublogo rechts in de kopregel — dezelfde

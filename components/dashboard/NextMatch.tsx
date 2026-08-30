@@ -30,7 +30,7 @@ export default function NextMatch({ match, t }: { match: FootballEvent | null; t
       <div
         className={`font-display text-[20px] font-bold leading-tight truncate ${match ? 'text-ink' : 'text-faint'}`}
       >
-        {match ? `vs ${match.opponent ?? '?'}` : '—'}
+        {match ? `${t.lineup.vsLabel} ${match.opponent ?? '?'}` : '—'}
       </div>
       <span className="text-[11.5px] font-semibold text-faint truncate">{sub}</span>
     </Link>

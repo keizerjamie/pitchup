@@ -8,8 +8,8 @@ import ThemeToggle from '@/components/ThemeToggle'
 
 // Prettify the email local-part into a display name + initials for the
 // user chip. We only store the email, so this is the best honest label.
-function personFromEmail(email: string | null): { name: string; initials: string } {
-  if (!email) return { name: 'Account', initials: '👤' }
+function personFromEmail(email: string | null, fallback: string): { name: string; initials: string | null } {
+  if (!email) return { name: fallback, initials: null }
   const local = email.split('@')[0]
   const words = local.split(/[.\-_]+/).filter(Boolean)
   const name = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') || local
@@ -28,7 +28,7 @@ export default function SidebarNav({
 }) {
   const pathname = usePathname()
   const t = useDict()
-  const { name, initials } = personFromEmail(userEmail)
+  const { name, initials } = personFromEmail(userEmail, t.nav.accountFallback)
 
   const items = [
     { href: '/',              label: t.nav.dashboard,     icon: 'space_dashboard' },
@@ -79,7 +79,7 @@ export default function SidebarNav({
             style={{ background: 'var(--primary)' }}
             aria-hidden="true"
           >
-            {initials}
+            {initials ?? <span className="ms text-[18px]">person</span>}
           </div>
           <div className="flex flex-col leading-tight flex-1 min-w-0">
             <span className="text-[13.5px] font-bold text-ink truncate">{name}</span>

@@ -80,7 +80,7 @@ export default function TodoList({ items }: { items: TodoItem[] }) {
           const key = `${item.eventId}:${item.taskType}`
           const checked = item.auto || manual[key]
           const overdue = !checked && daysUntil(item.deadline) < 0
-          const context = item.opponent ? `vs ${item.opponent}` : t.event.training
+          const context = item.opponent ? `${t.lineup.vsLabel} ${item.opponent}` : t.event.training
 
           return (
             <div

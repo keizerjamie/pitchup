@@ -7,6 +7,7 @@ export const es: Dict = {
     back: 'Atrás',
     more: 'Más',
     moreTitle: 'Todas las secciones',
+    accountFallback: 'Cuenta',
     periodization: 'Periodización', insights: 'Estadísticas', dashboard: 'Inicio', players: 'Jugadores', calendar: 'Calendario', settings: 'Configuración', oefeningen: 'Ejercicios' },
   dashboard: {
     title: 'Inicio', activePlayers: 'jugadores activos', addTraining: '+ Entrenamiento', addMatch: '+ Partido',
@@ -82,7 +83,7 @@ export const es: Dict = {
     editAttendance: 'Editar asistencia',
     newTitle: 'Nuevo evento', training: 'Entrenamiento', match: 'Partido', date: 'Fecha',
     time: 'Hora', location: 'Lugar', optional: 'opcional', opponent: 'Rival',
-    matchType: 'Tipo de partido', homeAway: 'Casa/Fuera', home: '🏠 Casa', away: '🚌 Fuera',
+    matchType: 'Tipo de partido', locationPlaceholder: 'Polideportivo municipal', opponentPlaceholder: 'FC Ejemplo', homeAway: 'Casa/Fuera', home: '🏠 Casa', away: '🚌 Fuera',
     gatherTime: 'Hora de concentración',
     notes: 'Notas', notesTrainingPlaceholder: 'Ej. foco en el pase, entrenamiento porteros aparte',
     notesMatchPlaceholder: 'Ej. partido importante, ¡traer camisetas!',
@@ -355,7 +356,7 @@ export const es: Dict = {
     ] as [string, string, string, string, string],
   },
   lineup: {
-    title: 'Alineación', vsLabel: 'vs', presentCount: 'presentes', presentSection: 'Presentes',
+    title: 'Alineación', vsLabel: 'vs', recommended: 'Recomendado', presentCount: 'presentes', presentSection: 'Presentes',
     absentSection: 'No presentes / desconocidos', formation: 'Formación', autoLineup: 'Alineación automática',
     choosePlayer: 'Elegir jugador para', removePlayer: 'Quitar jugador',
     allAssigned: 'Todos los jugadores ya asignados', bench: 'Banquillo / reservas',
@@ -469,6 +470,7 @@ export const es: Dict = {
     deleteAccountTitle: 'Eliminar equipo y cuenta',
     deleteAccountHint: 'Elimina tu equipo, todos los jugadores, eventos, asistencia, alineaciones y tu cuenta. Esto no se puede deshacer.',
     deleteAccountButton: 'Eliminar mi equipo y cuenta',
+    deleteAccountError: 'No se pudo eliminar. Inténtalo de nuevo.',
     deleteConfirmPrompt: 'Escribe ELIMINAR para confirmar',
     deleteConfirmWord: 'ELIMINAR',
     deleteConfirmFinal: 'Eliminar permanentemente',

@@ -7,6 +7,7 @@ export const fr: Dict = {
     back: 'Retour',
     more: 'Plus',
     moreTitle: 'Toutes les sections',
+    accountFallback: 'Compte',
     periodization: 'Périodisation', insights: 'Statistiques', dashboard: 'Accueil', players: 'Joueurs', calendar: 'Calendrier', settings: 'Paramètres', oefeningen: 'Exercices' },
   dashboard: {
     title: 'Accueil', activePlayers: 'joueurs actifs', addTraining: '+ Entraînement', addMatch: '+ Match',
@@ -82,7 +83,7 @@ export const fr: Dict = {
     editAttendance: 'Modifier les présences',
     newTitle: 'Nouvel événement', training: 'Entraînement', match: 'Match', date: 'Date',
     time: 'Heure', location: 'Lieu', optional: 'optionnel', opponent: 'Adversaire',
-    matchType: 'Type de match', homeAway: 'Dom./Ext.', home: '🏠 Domicile', away: '🚌 Extérieur',
+    matchType: 'Type de match', locationPlaceholder: 'Stade municipal', opponentPlaceholder: 'FC Exemple', homeAway: 'Dom./Ext.', home: '🏠 Domicile', away: '🚌 Extérieur',
     gatherTime: 'Heure de rassemblement',
     notes: 'Notes', notesTrainingPlaceholder: 'Ex. focus sur les passes, entraînement gardien à part',
     notesMatchPlaceholder: 'Ex. match important, apporter les maillots !',
@@ -355,7 +356,7 @@ export const fr: Dict = {
     ] as [string, string, string, string, string],
   },
   lineup: {
-    title: 'Composition', vsLabel: 'vs', presentCount: 'présents', presentSection: 'Présents',
+    title: 'Composition', vsLabel: 'vs', recommended: 'Recommandé', presentCount: 'présents', presentSection: 'Présents',
     absentSection: 'Absents / inconnus', formation: 'Formation', autoLineup: 'Composition auto',
     choosePlayer: 'Choisir un joueur pour', removePlayer: 'Retirer le joueur',
     allAssigned: 'Tous les joueurs sont déjà placés', bench: 'Banc / réserve',
@@ -469,6 +470,7 @@ export const fr: Dict = {
     deleteAccountTitle: 'Supprimer l\'équipe et le compte',
     deleteAccountHint: 'Supprime votre équipe, tous les joueurs, événements, présences, compositions et votre compte. Cette action est irréversible.',
     deleteAccountButton: 'Supprimer mon équipe et mon compte',
+    deleteAccountError: 'Échec de la suppression. Veuillez réessayer.',
     deleteConfirmPrompt: 'Tapez SUPPRIMER pour confirmer',
     deleteConfirmWord: 'SUPPRIMER',
     deleteConfirmFinal: 'Supprimer définitivement',

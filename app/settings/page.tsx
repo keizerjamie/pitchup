@@ -94,17 +94,17 @@ export default async function SettingsPage() {
               <p className="text-[13.5px] font-medium text-muted -mt-1">{t.settings.attendanceQuestion}</p>
               <div className="flex flex-col gap-3">
                 <label className={radioLabel}>
-                  <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-green-600" />
+                  <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-[var(--primary)]" />
                   <div>
                     <div className="font-bold text-ink flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">✓</span>
+                      <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center"><span className="ms text-[15px]" aria-hidden="true">check</span></span>
                       {t.settings.everyonePresent}
                     </div>
                     <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
                   </div>
                 </label>
                 <label className={radioLabel}>
-                  <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-gray-600" />
+                  <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-[var(--faint)]" />
                   <div>
                     <div className="font-bold text-ink flex items-center gap-2">
                       <span className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold" style={{ background: 'var(--faint)' }}>?</span>

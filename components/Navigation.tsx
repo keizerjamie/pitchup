@@ -66,7 +66,7 @@ export default function Navigation() {
         <div
           className="relative rounded-2xl overflow-hidden bg-surface"
           style={{
-            boxShadow: '0 8px 32px -12px rgba(10,46,42,0.28), 0 1px 0 rgba(255,255,255,0.9) inset',
+            boxShadow: '0 8px 32px -12px rgba(10,46,42,0.28), 0 1px 0 var(--glass-highlight) inset',
             border: '1px solid var(--border-soft)',
           }}
         >

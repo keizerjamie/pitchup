@@ -12,6 +12,16 @@ interface Props {
 
 const METING_CATEGORIES = PERIODIZATION_CATEGORIES.filter(c => c.hasMeting)
 
+// Thema-bewuste badge-kleuren per meting-categorie (i.p.v. de hardcoded
+// bg-*-100/text-*-800-tints uit cat.color, die niet met dark mode meebewegen).
+const CATEGORY_BADGE: Record<string, string> = {
+  partijen_groot: 'bg-panel-red text-panel-red-ink',
+  partijen_midden: 'bg-panel-orange text-panel-orange-ink',
+  partijen_klein: 'bg-panel-amber text-panel-amber-ink',
+  sprints_weinig_rust: 'bg-panel-blue text-panel-blue-ink',
+  sprints_veel_rust: 'bg-panel-purple text-panel-purple-ink',
+}
+
 export default function MetingEditor({ eventId, initialMeting }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
@@ -65,8 +75,8 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
           return (
             <div key={cat.key} className="p-4 flex items-center gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-ink text-sm">{cat.label}</div>
-                <div className="text-xs text-faint mt-0.5">max {cat.maxStap} stappen</div>
+                <div className="font-semibold text-ink text-sm">{t.periodization.categories[cat.key] ?? cat.label}</div>
+                <div className="text-xs text-faint mt-0.5">{t.periodization.maxSteps.replace('{n}', String(cat.maxStap))}</div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -93,7 +103,7 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
                 >
                   +
                 </button>
-                <span className={`text-xs font-medium px-2 py-1 rounded-full min-w-0 ${cat.color}`}>
+                <span className={`text-xs font-medium px-2 py-1 rounded-full min-w-0 ${CATEGORY_BADGE[cat.key] ?? ''}`}>
                   {t.periodization.step} {currentStep}
                 </span>
               </div>

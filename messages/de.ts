@@ -7,6 +7,7 @@ export const de: Dict = {
     back: 'Zurück',
     more: 'Mehr',
     moreTitle: 'Alle Bereiche',
+    accountFallback: 'Konto',
     periodization: 'Periodisierung', insights: 'Einblicke', dashboard: 'Startseite', players: 'Spieler', calendar: 'Kalender', settings: 'Einstellungen', oefeningen: 'Übungen' },
   dashboard: {
     title: 'Startseite', activePlayers: 'aktive Spieler', addTraining: '+ Training', addMatch: '+ Spiel',
@@ -80,7 +81,7 @@ export const de: Dict = {
   event: {
     editAttendance: 'Anwesenheit ändern',
     newTitle: 'Neues Event', training: 'Training', match: 'Spiel', date: 'Datum', time: 'Uhrzeit',
-    location: 'Ort', optional: 'optional', opponent: 'Gegner', matchType: 'Spieltyp',
+    location: 'Ort', optional: 'optional', opponent: 'Gegner', matchType: 'Spieltyp', locationPlaceholder: 'Sportpark Mitte', opponentPlaceholder: 'FC Beispiel',
     homeAway: 'Heim/Auswärts', home: '🏠 Heim', away: '🚌 Auswärts', notes: 'Notizen',
     gatherTime: 'Sammelzeit',
     notesTrainingPlaceholder: 'z.B. Fokus aufs Passen, separates Torwarttraining',
@@ -354,7 +355,7 @@ export const de: Dict = {
     ] as [string, string, string, string, string],
   },
   lineup: {
-    title: 'Aufstellung', vsLabel: 'vs', presentCount: 'anwesend', presentSection: 'Anwesend',
+    title: 'Aufstellung', vsLabel: 'vs', recommended: 'Empfohlen', presentCount: 'anwesend', presentSection: 'Anwesend',
     absentSection: 'Nicht anwesend / unbekannt', formation: 'Formation', autoLineup: 'Auto-Aufstellung',
     choosePlayer: 'Spieler wählen für', removePlayer: 'Spieler entfernen',
     allAssigned: 'Alle Spieler bereits eingeteilt', bench: 'Bank / Reserve',
@@ -468,6 +469,7 @@ export const de: Dict = {
     deleteAccountTitle: 'Team und Konto löschen',
     deleteAccountHint: 'Löscht dein Team, alle Spieler, Termine, Anwesenheit, Aufstellungen und dein Konto. Das kann nicht rückgängig gemacht werden.',
     deleteAccountButton: 'Mein Team und Konto löschen',
+    deleteAccountError: 'Löschen fehlgeschlagen. Bitte versuche es erneut.',
     deleteConfirmPrompt: 'Tippe LÖSCHEN zum Bestätigen',
     deleteConfirmWord: 'LÖSCHEN',
     deleteConfirmFinal: 'Endgültig löschen',

@@ -101,9 +101,9 @@ export default function CalendarView({ events, attendanceMap }: Props) {
               <UploadIcon className="w-[19px] h-[19px]" />
               <span>{t.event.bulk.fabLabel}</span>
             </Link>
-            <Link href="/events/new"
+            <Link href="/events/new" aria-label={t.home.newEvent}
               className="h-10 rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0" style={{ background: 'var(--primary)' }}>
-              <span className="ms text-[19px]">add</span>
+              <span className="ms text-[19px]" aria-hidden="true">add</span>
               <span className="hidden sm:inline">{t.home.newEvent}</span>
             </Link>
           </div>

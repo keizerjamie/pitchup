@@ -550,7 +550,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
               onClick={() => setShowDiagramEditor((v) => !v)}
               className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
             >
-              {showDiagramEditor ? `▾ ${t.oefeningen.diagramToggle}` : `▸ ${t.oefeningen.diagramToggle}`}
+              <span className="ms text-[18px] align-middle mr-1" aria-hidden="true">{showDiagramEditor ? 'expand_more' : 'chevron_right'}</span>{t.oefeningen.diagramToggle}
             </button>
             {showDiagramEditor && (
               <div className="mt-3">

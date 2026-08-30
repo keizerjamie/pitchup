@@ -337,7 +337,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
       {/* Cycle-week suggestion */}
       {suggestion && suggestion.items.length > 0 && (
-        <div className="print:hidden bg-surface rounded-r-2xl border border-warning/30 border-l-[3px] border-l-orange-500 p-4">
+        <div className="print:hidden bg-surface rounded-r-2xl border border-warning/30 border-l-[3px] border-l-warning p-4">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-panel-orange-ink uppercase tracking-wide">
               {t.periodization.suggestTitle}

@@ -75,7 +75,7 @@ export default async function EventDetailPage({ params }: Props) {
           <BackButton fallback="/events">{backIcon}</BackButton>
           <div className="flex-1 min-w-0">
             <h1 className="font-display text-[22px] font-bold text-ink flex items-center gap-2">
-              <span style={{ color: '#8b5cf6' }}>◆</span>{t.event.meting}
+              <span className="ms text-[22px] text-panel-purple-ink" aria-hidden="true">straighten</span>{t.event.meting}
             </h1>
             <p className="text-[13px] font-semibold text-faint capitalize">{formatDateLong(event.date, t.browserLocale)}</p>
           </div>
