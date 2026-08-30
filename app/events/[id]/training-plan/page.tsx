@@ -1,8 +1,8 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams } from '@/lib/types'
+import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
-import { cycleWeekFor, countCategoryOccurrences, computeCurrentSteps, dueCategories } from '@/lib/periodization'
+import { cycleWeekFor, actueleMetingen, ankerDatum, getTrainingLog, dueCategories } from '@/lib/periodization'
 import { formatDateLong } from '@/lib/utils'
 import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
 import BackButton from '@/components/BackButton'
@@ -59,33 +59,24 @@ export default async function TrainingPlanPage({ params }: Props) {
   const teamName = settingsMap['team_name']?.trim() || null
   const teamLogoUrl = settingsMap['team_logo_url'] || null
 
-  // ── Find latest meting event before this training ──
-  const { data: metingEvents } = await supabase
-    .from('events')
-    .select('id, date')
-    .eq('team_id', user.id)
-    .eq('type', 'meting')
-    .lt('date', event.date)
-    .order('date', { ascending: false })
-    .limit(1)
-
-  const latestMetingEvent = metingEvents?.[0] ?? null
-
-  // ── Load meting step data (parallel with exercises) ──
+  // ── Load category-metingen + exercises (parallel) ──
   // De bibliotheek-lijst (los van deze training) wordt hier ook geladen — niet
   // omdat de koppeling-query verandert, maar omdat OefeningPicker een
   // "kies uit bibliotheek"-lijst nodig heeft die de bestaande koppeling-query
   // niet levert (die geeft alleen al-gekoppelde oefeningen).
-  const [metingResult, oefeningenResult, libraryResult] = await Promise.all([
-    latestMetingEvent
-      ? supabase.from('metingen').select('*').eq('event_id', latestMetingEvent.id).eq('team_id', user.id).single()
-      : Promise.resolve({ data: null }),
+  const [categorieMetingenResult, oefeningenResult, libraryResult] = await Promise.all([
+    supabase.from('categorie_metingen').select('*').eq('team_id', user.id)
+      .order('datum', { ascending: false }).order('created_at', { ascending: false }),
     supabase.from('training_oefeningen').select('*, oefeningen(*)').eq('event_id', id).eq('team_id', user.id)
       .order('volgorde').order('created_at', { ascending: true }).order('id', { ascending: true }),
     supabase.from('oefeningen').select('*').eq('team_id', user.id).order('naam'),
   ])
 
-  const latestMeting = metingResult.data
+  const metingen: CategorieMeting[] = categorieMetingenResult.data ?? []
+  // Peildatum EXCLUSIEF = de datum van DEZE training (strikt vóór — AC 18,
+  // edge 11): een meting op de trainingsdag zelf telt nog niet mee.
+  const actueel = actueleMetingen(metingen, event.date)
+  const anker = ankerDatum(actueel)
   // Koppelingen aan deze training, elk met de gejoinde bibliotheek-oefening.
   // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie};
   // normaliseer naar {grootte, formaties} vóórdat de UI de data ziet — zowel op
@@ -155,13 +146,13 @@ export default async function TrainingPlanPage({ params }: Props) {
     .slice(0, 5)
 
   // ── Current steps per category, as of this training's date ──
-  const occurrences = latestMetingEvent
-    ? await countCategoryOccurrences(supabase, user.id, latestMetingEvent.date, event.date)
-    : {}
-  const currentSteps = computeCurrentSteps(latestMeting, occurrences)
+  // Eén rekenpad voor stap + cyclusweek (AC 17/18): getTrainingLog telt per
+  // onderdeel de trainingen sinds zijn EIGEN meetdatum en levert currentSteps
+  // meteen mee; alleen currentSteps wordt op deze pagina gebruikt.
+  const { currentSteps } = await getTrainingLog(supabase, user.id, actueel, event.date)
 
   // ── Cycle-week suggestion: which categories are due this week ──
-  const cycleWeek = latestMetingEvent ? cycleWeekFor(latestMetingEvent.date, event.date) : null
+  const cycleWeek = anker !== null ? cycleWeekFor(anker, event.date) : null
   const suggestion = cycleWeek !== null
     ? {
         week: cycleWeek,
@@ -235,7 +226,7 @@ export default async function TrainingPlanPage({ params }: Props) {
             initialOefeningen={oefeningen}
             library={library}
             currentSteps={currentSteps}
-            hasNulmeting={!!latestMeting}
+            hasNulmeting={Object.keys(actueel).length > 0}
             suggestion={suggestion}
             players={activePlayers}
             presentPlayerIds={Array.from(presentIds)}

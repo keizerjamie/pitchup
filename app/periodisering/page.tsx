@@ -1,8 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { PERIODIZATION_CATEGORIES, MetingData } from '@/lib/types'
-import { cycleWeekFor, computeCurrentSteps, getTrainingLog, dueCategories, TrainingLogEntry, LastDoneEntry, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
+import { PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
+import { actueleMetingen, ankerDatum, hermetingStand, cycleWeekFor, computeCurrentSteps, getTrainingLog, dueCategories, TrainingLogEntry, LastDoneEntry, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
 import { addDays, formatDate, formatDateLong, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import NulmetingManager from '@/components/NulmetingManager'
@@ -21,40 +21,33 @@ export default async function PeriodizationPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: metingEvents } = await supabase
-    .from('events')
-    .select('id, date')
+  const { data: categorieMetingenRows } = await supabase
+    .from('categorie_metingen')
+    .select('*')
     .eq('team_id', user.id)
-    .eq('type', 'meting')
-    .order('date', { ascending: false })
+    .order('datum', { ascending: false })
+    .order('created_at', { ascending: false })
 
-  const events = metingEvents ?? []
-  const eventIds = events.map((e) => e.id)
-
-  const { data: metingRows } = eventIds.length > 0
-    ? await supabase.from('metingen').select('*').in('event_id', eventIds).eq('team_id', user.id)
-    : { data: [] }
-
-  const metingByEvent = new Map<string, MetingData>()
-  for (const m of metingRows ?? []) metingByEvent.set(m.event_id, m)
-
-  const latestEvent = events.find((e) => metingByEvent.has(e.id)) ?? null
-  const latestMeting = latestEvent ? metingByEvent.get(latestEvent.id)! : null
-
+  const metingen: CategorieMeting[] = categorieMetingenRows ?? []
   const today = todayLocal()
-  let currentSteps: Record<string, number | null> = {}
+  // Peildatum EXCLUSIEF = morgen: een meting van vandaag telt al mee (AC 13).
+  const actueel = actueleMetingen(metingen, addDays(today, 1))
+  const anker = ankerDatum(actueel)
+  const hermeting = hermetingStand(actueel)
+
+  let currentSteps: Record<string, number | null> = computeCurrentSteps(actueel, {})
   let cycleWeek: number | null = null
   let trainingLog: TrainingLogEntry[] = []
   let lastByCategory: Record<string, LastDoneEntry> = {}
 
-  if (latestEvent && latestMeting) {
-    const { log, lastByCategory: last, occurrences } = await getTrainingLog(
-      supabase, user.id, latestMeting, latestEvent.date, addDays(today, 1),
+  if (anker !== null) {
+    const { log, lastByCategory: last, currentSteps: steps } = await getTrainingLog(
+      supabase, user.id, actueel, addDays(today, 1),
     )
     trainingLog = log.slice(0, 6)
     lastByCategory = last
-    currentSteps = computeCurrentSteps(latestMeting, occurrences)
-    cycleWeek = cycleWeekFor(latestEvent.date, today)
+    currentSteps = steps
+    cycleWeek = cycleWeekFor(anker, today)
   }
 
   // ── Vooruitblik: de eerstvolgende training ─────────────────────────
@@ -79,30 +72,12 @@ export default async function PeriodizationPage() {
 
   // Cyclusweek van díé training (niet van vandaag): een training van volgende
   // week valt in een andere week van de zes en heeft dus andere categorieën
-  // aan de beurt. Zonder nulmeting is er geen cyclus en dus geen advies.
+  // aan de beurt. Zonder anker is er geen cyclus en dus geen advies.
   const volgendeWeek =
-    volgendeTraining && latestEvent && latestMeting
-      ? cycleWeekFor(latestEvent.date, volgendeTraining.date)
+    volgendeTraining && anker !== null
+      ? cycleWeekFor(anker, volgendeTraining.date)
       : null
   const volgendeDue = volgendeWeek !== null ? dueCategories(volgendeWeek) : []
-
-  const history = events
-    .filter((e) => metingByEvent.has(e.id))
-    .map((e) => {
-      const m = metingByEvent.get(e.id)!
-      return {
-        eventId: e.id,
-        date: e.date,
-        notes: m.notes,
-        steps: {
-          partijen_groot_stap: m.partijen_groot_stap,
-          partijen_midden_stap: m.partijen_midden_stap,
-          partijen_klein_stap: m.partijen_klein_stap,
-          sprints_weinig_rust_stap: m.sprints_weinig_rust_stap,
-          sprints_veel_rust_stap: m.sprints_veel_rust_stap,
-        },
-      }
-    })
 
   const metingCategories = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
 
@@ -175,7 +150,7 @@ export default async function PeriodizationPage() {
         <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.periodization.pageSubtitle}</p>
       </div>
 
-      {latestEvent && latestMeting ? (
+      {anker !== null ? (
         <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start flex flex-col gap-5">
           <div className="flex flex-col gap-5">
             {volgendeTrainingKaart}
@@ -185,10 +160,27 @@ export default async function PeriodizationPage() {
                 <div className="text-[11px] font-extrabold tracking-[.1em] uppercase" style={{ color: '#4ade80' }}>{t.periodization.cycleTitle}</div>
                 <div className="font-display text-[30px] font-bold mt-1.5">{t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</div>
                 <div className="text-[13.5px] font-semibold mt-1" style={{ color: '#9fd8cd' }}>
-                  {t.periodization.nulmetingLabel}: {formatDate(latestEvent.date, t.browserLocale)}
+                  {t.periodization.cycleStart}: {formatDate(anker, t.browserLocale)}
                 </div>
                 <div className="h-2 rounded-full overflow-hidden mt-3.5" style={{ background: 'rgba(255,255,255,.14)' }}>
                   <div className="h-full rounded-full" style={{ width: `${Math.round((cycleWeek / CYCLE_LENGTH_WEEKS) * 100)}%`, background: '#4ade80' }} />
+                </div>
+              </div>
+            )}
+
+            {/* Hermetings-hint (addendum §A3): puur presentatie, geen eigen
+                animatie — server component, alleen zichtbaar zolang niet alle
+                gemeten onderdelen binnen één cyclus (opnieuw) gemeten zijn. */}
+            {hermeting.actief && (
+              <div className="bg-panel-amber border border-panel-amber-edge rounded-xl p-3 flex items-start gap-3">
+                <span className="ms text-[20px]" aria-hidden="true">update</span>
+                <div>
+                  <p className="text-sm font-semibold text-panel-amber-ink">
+                    {t.periodization.remeasureHintTitle
+                      .replace('{n}', String(hermeting.hermeten))
+                      .replace('{m}', String(hermeting.gemeten))}
+                  </p>
+                  <p className="text-xs mt-0.5 text-panel-amber-ink">{t.periodization.remeasureHintBody}</p>
                 </div>
               </div>
             )}
@@ -200,6 +192,23 @@ export default async function PeriodizationPage() {
               </div>
               <div className="px-5 py-4 flex flex-col gap-4">
                 {metingCategories.map((cat) => {
+                  // Niet-gemeten variant (AC 11, backend-contract lastByCategory):
+                  // lege track — GEEN meter op 0% — met –/max en de vaste
+                  // eerste cyclusweek van dit onderdeel, i.p.v. "Laatst gedaan".
+                  if (!actueel[cat.key]) {
+                    return (
+                      <div key={cat.key}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[13.5px] font-bold text-ink">{t.periodization.categories[cat.key] ?? cat.label}</span>
+                          <span className="text-xs font-semibold text-faint">–/{cat.maxStap}</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--track)' }} />
+                        <p className="text-xs mt-1 text-faint">
+                          {t.periodization.dueInWeek.replace('{n}', String(cat.cycleWeeks[0]))}
+                        </p>
+                      </div>
+                    )
+                  }
                   const step = currentSteps[cat.key]
                   const pct = step !== null && step !== undefined ? Math.min(100, Math.round((step / cat.maxStap) * 100)) : 0
                   const last = lastByCategory[cat.key]
@@ -258,7 +267,7 @@ export default async function PeriodizationPage() {
             </div>
           </div>
 
-          <NulmetingManager history={history} />
+          <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} />
         </div>
       ) : (
         <div className="max-w-lg w-full mx-auto flex flex-col gap-5">
@@ -268,7 +277,7 @@ export default async function PeriodizationPage() {
             <p className="text-ink font-bold">{t.periodization.noMeting}</p>
             <p className="text-faint text-sm">{t.periodization.noMetingHint}</p>
           </div>
-          <NulmetingManager history={[]} />
+          <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} />
         </div>
       )}
     </div>

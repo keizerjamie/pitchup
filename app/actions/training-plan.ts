@@ -14,8 +14,12 @@ import { genericError, logError } from '@/lib/errors'
 import { kopieerKoppelingen, type BronKoppeling } from '@/lib/kopieer-trainingsplan'
 
 // ────────────────────────────────────────────────
-// Meting
+// Meting (legacy: losse meting-event via MetingEditor)
 // ────────────────────────────────────────────────
+// De nulmeting van de periodisering loopt sinds de per-onderdeel-migratie via
+// app/actions/periodisering.ts. Wat hieronder staat hoort bij het oude,
+// event-gebonden meting-scherm (components/MetingEditor.tsx, bereikbaar vanaf
+// app/events/[id]/page.tsx) en blijft bewust staan.
 
 export interface MetingSteps {
   partijen_groot_stap: number
@@ -54,75 +58,6 @@ export async function saveMeting(eventId: string, steps: MetingSteps, notes: str
 
   if (error) throw genericError('trainingPlan.saveMeting', error)
   revalidatePath(`/events/${eventId}`)
-  revalidatePath('/periodisering')
-}
-
-// ────────────────────────────────────────────────
-// Nulmeting (periodisering page) — stored as a meting event under the hood
-// so existing step calculations and history keep working without a migration.
-// ────────────────────────────────────────────────
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-
-export async function saveNulmeting(input: {
-  eventId?: string
-  date: string
-  steps: MetingSteps
-  notes: string | null
-}) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
-
-  if (!DATE_RE.test(input.date)) throw new Error('Ongeldige datum')
-
-  let eventId = input.eventId ?? null
-
-  if (eventId) {
-    const { data: event } = await supabase
-      .from('events').select('id').eq('id', eventId).eq('team_id', user.id).eq('type', 'meting').single()
-    if (!event) throw new Error('Nulmeting niet gevonden')
-
-    const { error } = await supabase
-      .from('events')
-      .update({ date: input.date })
-      .eq('id', eventId)
-      .eq('team_id', user.id)
-    if (error) throw genericError('trainingPlan.saveNulmeting.event', error)
-  } else {
-    const { data: created, error } = await supabase
-      .from('events')
-      .insert({ type: 'meting', date: input.date, team_id: user.id })
-      .select('id')
-      .single()
-    if (error) throw genericError('trainingPlan.saveNulmeting.createEvent', error)
-    eventId = created.id
-  }
-
-  const { error: metingError } = await supabase.from('metingen').upsert({
-    event_id: eventId,
-    team_id: user.id,
-    ...clampSteps(input.steps),
-    notes: input.notes?.slice(0, 1000) ?? null,
-  }, { onConflict: 'event_id' })
-
-  if (metingError) throw genericError('trainingPlan.saveNulmeting.meting', metingError)
-  revalidatePath('/periodisering')
-}
-
-export async function deleteNulmeting(eventId: string) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
-
-  const { error } = await supabase
-    .from('events')
-    .delete()
-    .eq('id', eventId)
-    .eq('team_id', user.id)
-    .eq('type', 'meting')
-
-  if (error) throw genericError('trainingPlan.deleteNulmeting', error)
   revalidatePath('/periodisering')
 }
 

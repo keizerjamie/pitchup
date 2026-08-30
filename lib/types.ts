@@ -130,6 +130,15 @@ export const PERIODIZATION_CATEGORIES: {
   { key: 'overig',              label: 'Overig',              maxStap: 99, color: 'bg-gray-100 text-gray-700',    cycleWeeks: [],    hasMeting: false },
 ]
 
+// De vijf onderdelen die een eigen nulmeting kennen (hasMeting). Eén bron van
+// waarheid voor de whitelist in saveCategorieMeting, de statuslijst en het
+// invoerscherm — afgeleid van PERIODIZATION_CATEGORIES, zodat er geen tweede
+// lijst kan gaan afwijken. De CHECK-constraint op categorie_metingen
+// (supabase/nulmeting-per-onderdeel.sql) is een bewuste duplicatie hiervan.
+export const MEETBARE_CATEGORIES: OefeningCategorie[] = PERIODIZATION_CATEGORIES
+  .filter((c) => c.hasMeting)
+  .map((c) => c.key)
+
 // Verzwaren en herhalen: step = N + floor(k/2)
 // N = nulmeting step, k = # times this category appeared in training since nulmeting
 export function berekenStap(nulmetingStap: number, k: number): number {
@@ -145,6 +154,21 @@ export interface MetingData {
   partijen_klein_stap: number
   sprints_weinig_rust_stap: number
   sprints_veel_rust_stap: number
+  notes: string | null
+  created_at: string
+}
+
+// Eén meting van ÉÉN periodiseringsonderdeel op ÉÉN datum (tabel
+// categorie_metingen). Meerdere rijen per onderdeel vormen de geschiedenis; de
+// rij met de hoogste `datum` is de actuele meting die de stap-telling voedt.
+// `datum` is een kale kalenderdatum 'YYYY-MM-DD' (net als events.date) en wordt
+// overal als string vergeleken — lexicografisch is daar chronologisch.
+export interface CategorieMeting {
+  id: string
+  team_id: string
+  categorie: string
+  datum: string
+  stap: number
   notes: string | null
   created_at: string
 }

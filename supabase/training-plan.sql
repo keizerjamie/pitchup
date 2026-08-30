@@ -25,6 +25,31 @@ CREATE TABLE IF NOT EXISTS metingen (
   created_at   TIMESTAMPTZ DEFAULT now()
 );
 
+-- 3b. Nulmeting PER ONDERDEEL: één rij = één meting van één onderdeel op één
+--     datum, met geschiedenis. Vervangt de alles-in-één nulmeting hierboven
+--     (`metingen` blijft staan voor de legacy MetingEditor). Voor bestaande
+--     installaties: draai supabase/nulmeting-per-onderdeel.sql (migratie +
+--     backfill van de oude gedeelde nulmeting naar vijf rijen).
+CREATE TABLE IF NOT EXISTS categorie_metingen (
+  id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id    UUID NOT NULL,
+  -- Bewuste duplicatie van MEETBARE_CATEGORIES (lib/types.ts): de app-laag is
+  -- de bron van waarheid, deze CHECK is het vangnet in de database.
+  categorie  TEXT NOT NULL CHECK (categorie IN (
+    'partijen_groot','partijen_midden','partijen_klein',
+    'sprints_weinig_rust','sprints_veel_rust'
+  )),
+  -- Kale kalenderdatum, net als events.date.
+  datum      DATE NOT NULL,
+  -- Ruim vangnet; het categorie-specifieke maximum wordt in de app-laag
+  -- geclampt (clampStapOverride in lib/periodization-stappen.ts).
+  stap       SMALLINT NOT NULL CHECK (stap BETWEEN 1 AND 99),
+  notes      TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  -- Idempotentie-sleutel én tie-break-eliminator ("hoogste datum" is uniek).
+  UNIQUE (team_id, categorie, datum)
+);
+
 -- 4. Oefening-BIBLIOTHEEK (event-onafhankelijk). De koppeling aan een training
 --    loopt via training_oefeningen (zie 5). Voor bestaande installaties: draai
 --    supabase/oefening-bibliotheek.sql (migratie + backfill).
@@ -90,6 +115,12 @@ CREATE INDEX IF NOT EXISTS idx_training_oefeningen_team ON training_oefeningen(t
 ALTER TABLE metingen ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "metingen: own team only"
   ON metingen FOR ALL
+  USING (team_id = auth.uid())
+  WITH CHECK (team_id = auth.uid());
+
+ALTER TABLE categorie_metingen ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "categorie_metingen: own team only"
+  ON categorie_metingen FOR ALL
   USING (team_id = auth.uid())
   WITH CHECK (team_id = auth.uid());
 

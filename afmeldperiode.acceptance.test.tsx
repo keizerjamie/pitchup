@@ -57,7 +57,7 @@ import { markAbsentForPeriod, revokeAbsencePeriod, updateAttendance } from '@/ap
 import { createEvent } from '@/app/actions/events'
 import { generateSeasonTrainings } from '@/app/actions/settings'
 import { markInjured, markRecovered } from '@/app/actions/players'
-import { saveNulmeting } from '@/app/actions/training-plan'
+import { saveCategorieMeting } from '@/app/actions/periodisering'
 import MatchSquadPage from '@/app/events/[id]/squad/page'
 
 beforeEach(() => {
@@ -1291,26 +1291,35 @@ describe('Criterium 8 — alleen actieve spelers krijgen een rij, ook als het om
   })
 })
 
-describe('Criterium 9 — meting-events krijgen nooit attendance-rijen, ook niet voor geblesseerde spelers', () => {
-  it('saveNulmeting (de enige plek die meting-events aanmaakt) schrijft geen enkele attendance-rij weg, ook niet voor een geblesseerde speler', async () => {
+// Dit criterium ging over meting-EVENTS: die kregen nooit attendance-rijen,
+// omdat een meting geen bijeenkomst is. Sinds de nulmeting per onderdeel in
+// haar eigen tabel `categorie_metingen` leeft, maakt geen enkele code nog een
+// meting-event aan — het criterium wordt daarmee sterker in plaats van
+// overbodig: een nulmeting mag helemáál geen agenda- of aanwezigheidsspoor
+// achterlaten. Dezelfde bewijslast, tegen de nieuwe server action.
+describe('Criterium 9 — een nulmeting laat nooit een agenda- of aanwezigheidsspoor achter, ook niet bij geblesseerde spelers', () => {
+  it('saveCategorieMeting schrijft geen enkele events- of attendance-rij weg, ook niet voor een geblesseerde speler', async () => {
     const x = playerRow({ id: 'px', injured: true })
     const db = makeDb({ players: [x] })
     useDb(db)
 
-    await saveNulmeting({
-      date: '2026-08-20',
-      steps: {
-        partijen_groot_stap: 5,
-        partijen_midden_stap: 5,
-        partijen_klein_stap: 5,
-        sprints_weinig_rust_stap: 5,
-        sprints_veel_rust_stap: 5,
-      },
+    await saveCategorieMeting({
+      categorie: 'partijen_groot',
+      datum: '2026-08-20',
+      stap: 5,
       notes: null,
     })
 
-    const metingEvent = db.tables.events.find((e) => e.type === 'meting')
-    expect(metingEvent).toBeDefined()
+    // De meting staat in haar eigen tabel, op het eigen team...
+    expect(db.tables.categorie_metingen).toHaveLength(1)
+    expect(db.tables.categorie_metingen[0]).toMatchObject({
+      team_id: TEAM,
+      categorie: 'partijen_groot',
+      datum: '2026-08-20',
+      stap: 5,
+    })
+    // ...en raakt de agenda noch de aanwezigheid.
+    expect(db.tables.events ?? []).toHaveLength(0)
     expect(db.tables.attendance ?? []).toHaveLength(0)
   })
 })

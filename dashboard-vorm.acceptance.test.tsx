@@ -248,7 +248,7 @@ function makeSupabaseMock(opts: {
   players?: Row[]
   teamName?: string | null
   vormQueryReturnsError?: boolean
-  metingen?: Row[]
+  categorieMetingen?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const eventsFactory = opts.vormQueryReturnsError
@@ -258,7 +258,7 @@ function makeSupabaseMock(opts: {
   const settingsFactory = tableFactory(
     opts.teamName ? [{ team_id: TEAM, key: 'team_name', value: opts.teamName }] : [],
   )
-  const metingenFactory = tableFactory(opts.metingen ?? [])
+  const categorieMetingenFactory = tableFactory(opts.categorieMetingen ?? [])
   const emptyFactory = tableFactory([]) // attendance/lineups/match_ratings/match_events/training_oefeningen/task_overrides
   return {
     auth: { getUser: async () => ({ data: { user } }) },
@@ -266,7 +266,7 @@ function makeSupabaseMock(opts: {
       if (table === 'events') return eventsFactory()
       if (table === 'players') return playersFactory()
       if (table === 'settings') return settingsFactory()
-      if (table === 'metingen') return metingenFactory()
+      if (table === 'categorie_metingen') return categorieMetingenFactory()
       return emptyFactory()
     },
   }
@@ -278,7 +278,7 @@ async function renderDashboard(opts: {
   players?: Row[]
   teamName?: string | null
   vormQueryReturnsError?: boolean
-  metingen?: Row[]
+  categorieMetingen?: Row[]
 } = {}) {
   vi.mocked(createClient).mockResolvedValue(
     makeSupabaseMock(opts) as unknown as Awaited<ReturnType<typeof createClient>>,
@@ -839,29 +839,79 @@ describe('i18n-dekking — statForm en formEmpty in alle 5 dictionaries', () => 
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Setup-kaart: periodisering staat uit zolang er geen nulmeting is
+// Periodisering-statuskaart (vervangt de vroegere alles-of-niets setup-kaart)
 //
-// De trainingsplanner en de periodiseringspagina waarschuwen hier al voor,
-// maar dat zijn plekken die je pas bereikt als je al aan het plannen bent.
-// Het dashboard is de enige plek waar je hoe dan ook langskomt.
+// VERVANGING, REDEN: de drie tests hieronder pinden vroeger het "alles-of-
+// niets"-gedrag van SetupNulmeting (verschijnt zonder nulmeting, verdwijnt
+// zodra er één bestaat). Sinds "Nulmeting per periodiseringsonderdeel" is die
+// kaart vervangen door PeriodiseringStatus: een PERMANENTE kaart die per
+// onderdeel "gemeten" of "nog te meten, week X" toont, gevoed door
+// `categorie_metingen` i.p.v. de oude `metingen`-telling. De kaart verdwijnt
+// dus nooit meer — vandaar nieuwe tests i.p.v. het aanpassen van de oude.
+// De derde test ("telt alleen eigen team") is qua CRITERIUM ongewijzigd
+// gebleven (tenant-isolatie), alleen in de nieuwe vorm: een rij van een ander
+// team zet geen onderdeel op "gemeten".
 // ═══════════════════════════════════════════════════════════════════════
-describe('setup-kaart nulmeting', () => {
-  it('zonder nulmeting staat de kaart op het dashboard, met een link naar /periodisering', async () => {
-    await renderDashboard({ metingen: [] })
-    expect(screen.getByText(nl.home.setupNulmetingTitle)).toBeInTheDocument()
-    const cta = screen.getByText(nl.home.setupNulmetingCta)
-    expect(cta.closest('a')).toHaveAttribute('href', '/periodisering')
+function periodiseringCard(): HTMLElement {
+  const label = screen.getByText(nl.home.periodizationTitle)
+  const card = label.closest('.surface-card')
+  if (!card) throw new Error('Periodisering-kaart niet gevonden')
+  return card as HTMLElement
+}
+
+describe('Periodisering-statuskaart op het dashboard', () => {
+  it('zonder categorie_metingen toont de kaart alle vijf onderdelen als "nog te meten" met hun vaste week, plus de Steigerungs-regel', async () => {
+    await renderDashboard({ categorieMetingen: [] })
+    const card = periodiseringCard()
+
+    const verwacht: [string, number][] = [
+      ['partijen_groot', 1],
+      ['partijen_midden', 3],
+      ['partijen_klein', 5],
+      ['sprints_weinig_rust', 3],
+      ['sprints_veel_rust', 5],
+    ]
+    for (const [key, week] of verwacht) {
+      const row = within(card).getByText(nl.periodization.categories[key]).closest('a')
+      expect(row).not.toBeNull()
+      expect(row).toHaveTextContent(nl.home.periodizationToMeasure)
+      expect(row).toHaveTextContent(nl.home.periodizationDueWeek.replace('{n}', String(week)))
+      expect(row).toHaveAttribute('href', '/periodisering')
+    }
+
+    expect(
+      within(card).getByText(nl.home.periodizationSteigerungs.replace('{a}', '1').replace('{b}', '2')),
+    ).toBeInTheDocument()
+
+    // De vroegere alles-of-niets-kaart bestaat niet meer.
+    expect(screen.queryByText('Periodisering staat nog uit')).toBeNull()
   })
 
-  it('zodra er één nulmeting is, verdwijnt de kaart — zonder wegklik-status', async () => {
-    await renderDashboard({ metingen: [{ team_id: TEAM, event_id: 'm1' }] })
-    expect(screen.queryByText(nl.home.setupNulmetingTitle)).toBeNull()
+  it('met een gemeten onderdeel toont de kaart "Gemeten" met de actuele stap, als platte rij zonder link', async () => {
+    await renderDashboard({
+      categorieMetingen: [
+        { id: 'm1', team_id: TEAM, categorie: 'partijen_groot', datum: addDaysFixed(TODAY, -10), stap: 5, notes: null, created_at: '2026-07-01T10:00:00Z' },
+      ],
+    })
+    const card = periodiseringCard()
+    const row = within(card).getByText(nl.periodization.categories.partijen_groot).closest('div')
+    expect(row).not.toBeNull()
+    expect(row).toHaveTextContent(nl.home.periodizationMeasured)
+    expect(row).toHaveTextContent('5')
+    expect(row?.closest('a')).toBeNull()
+
+    // De overige vier onderdelen staan nog gewoon op "nog te meten".
+    expect(within(card).getAllByText(nl.home.periodizationToMeasure)).toHaveLength(4)
   })
 
-  it('de kaart telt alleen nulmetingen van het eigen team', async () => {
-    // Een meting van een ander team mag de kaart niet wegdrukken; de query is
-    // op team_id gescoped, deze test bewijst dat de scoping ook echt werkt.
-    await renderDashboard({ metingen: [{ team_id: 'ander-team', event_id: 'm9' }] })
-    expect(screen.getByText(nl.home.setupNulmetingTitle)).toBeInTheDocument()
+  it('telt alleen eigen team: een meting van een ander team zet geen onderdeel op "gemeten"', async () => {
+    await renderDashboard({
+      categorieMetingen: [
+        { id: 'm1', team_id: 'ander-team', categorie: 'partijen_groot', datum: addDaysFixed(TODAY, -10), stap: 5, notes: null, created_at: '2026-07-01T10:00:00Z' },
+      ],
+    })
+    const card = periodiseringCard()
+    expect(within(card).getAllByText(nl.home.periodizationToMeasure)).toHaveLength(5)
+    expect(within(card).queryByText(nl.home.periodizationMeasured)).toBeNull()
   })
 })

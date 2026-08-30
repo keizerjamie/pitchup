@@ -11,7 +11,10 @@ import { isTimeString } from '@/lib/utils'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
 
-// 'meting' events worden alleen nog via saveNulmeting (periodisering) aangemaakt
+// Er maakt geen enkele code nog 'meting'-events aan: de nulmeting van de
+// periodisering leeft sinds de per-onderdeel-migratie in de eigen tabel
+// categorie_metingen (app/actions/periodisering.ts). Bestaande meting-events
+// blijven staan en zijn nog leesbaar via het legacy meting-scherm.
 const VALID_EVENT_TYPES: EventType[] = ['training', 'match']
 const VALID_MATCH_TYPES: MatchType[] = ['friendly', 'league', 'cup']
 const VALID_HOME_AWAY: HomeAway[] = ['home', 'away']

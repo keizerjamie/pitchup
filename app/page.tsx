@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS } from '@/lib/types'
+import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS, PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
+import { actueleMetingen, onderdeelStatus, getTrainingLog, computeCurrentSteps } from '@/lib/periodization'
 import { addDays, daysUntil, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
@@ -10,7 +11,7 @@ import StatCard from '@/components/dashboard/StatCard'
 import NextMatch from '@/components/dashboard/NextMatch'
 import TodoList, { TaskType, TodoItem } from '@/components/dashboard/TodoList'
 import Availability, { AvailabilityItem } from '@/components/dashboard/Availability'
-import SetupNulmeting from '@/components/dashboard/SetupNulmeting'
+import PeriodiseringStatus from '@/components/dashboard/PeriodiseringStatus'
 import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
@@ -36,14 +37,6 @@ export default async function DashboardPage() {
 
   const today = todayLocal()
   const windowEnd = addDays(today, FORWARD)
-
-  // Bestaat er al een nulmeting? Alleen het BESTAAN telt hier, niet de inhoud
-  // — vandaar `head: true` met een count in plaats van de rijen ophalen.
-  const { count: nulmetingCount } = await supabase
-    .from('metingen')
-    .select('event_id', { count: 'exact', head: true })
-    .eq('team_id', user.id)
-  const heeftNulmeting = (nulmetingCount ?? 0) > 0
   const fetchStart = addDays(today, -FETCH_HORIZON_DAYS)
 
   const [
@@ -54,6 +47,7 @@ export default async function DashboardPage() {
     { data: trainingDateRows },
     { data: recentMatchRows },
     { data: guestPlayerRows, error: guestPlayerError },
+    { data: categorieMetingenRows },
   ] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
     supabase.from('players').select('id, name, position, jersey_number, injured, type').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
@@ -82,9 +76,26 @@ export default async function DashboardPage() {
     // aankomende events, ook die van inactief geworden spelers, en dat gedrag
     // blijft ongewijzigd.
     supabase.from('players').select('id').eq('team_id', user.id).eq('type', 'guest'),
+    // Periodisering per onderdeel (vervangt de vroegere alles-of-niets
+    // count-query op `metingen`). Team-gescoped, nieuwste eerst — zelfde vorm
+    // als backend-samenvatting §"Voor fase 2 relevant".
+    supabase.from('categorie_metingen').select('*').eq('team_id', user.id)
+      .order('datum', { ascending: false }).order('created_at', { ascending: false }),
   ])
 
   const teamName = teamNameRow?.value?.trim() || null
+
+  // ── Periodisering: status per onderdeel ──────────────────────────
+  // Peildatum EXCLUSIEF = morgen: een meting van vandaag telt al mee (AC 13).
+  // Leeg ⇒ geen enkel onderdeel heeft een actuele meting; getTrainingLog
+  // hieronder doet dan zelf geen enkele query (D3, backend-contract) en elk
+  // onderdeel toont "nog te meten" — precies het gedrag voor een nieuw team.
+  const categorieMetingen: CategorieMeting[] = categorieMetingenRows ?? []
+  const actueel = actueleMetingen(categorieMetingen, addDays(today, 1))
+  const heeftActueleMeting = Object.keys(actueel).length > 0
+  const steigerungsCat = PERIODIZATION_CATEGORIES.find((c) => c.key === 'steigerungs')
+  const steigerungsWeken: [number, number] = [steigerungsCat?.cycleWeeks[0] ?? 1, steigerungsCat?.cycleWeeks[1] ?? 2]
+
   const upcoming: FootballEvent[] = upcomingEvents ?? []
   const players = playerRows ?? []
   const squadSize = players.length
@@ -159,6 +170,7 @@ export default async function DashboardPage() {
     { data: matchEventRows },
     { data: oefeningRows },
     { data: overrideRows },
+    trainingLogResult,
   ] = await Promise.all([
     matchCandidateIds.length > 0
       ? supabase.from('match_squad').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
@@ -178,7 +190,16 @@ export default async function DashboardPage() {
     allCandidateIds.length > 0
       ? supabase.from('task_overrides').select('event_id, task_type').eq('team_id', user.id).in('event_id', allCandidateIds)
       : Promise.resolve({ data: [] }),
+    // Periodisering: alleen echt bevragen zolang er iets te bevragen valt —
+    // getTrainingLog zelf doet ook al geen query zonder actuele meting, maar
+    // de guard hier maakt dat expliciet (D3: 0 extra round-trips voor een
+    // team zonder nulmetingen), consistent met de guards hierboven.
+    heeftActueleMeting
+      ? getTrainingLog(supabase, user.id, actueel, addDays(today, 1))
+      : Promise.resolve({ log: [], lastByCategory: {}, occurrences: {}, currentSteps: computeCurrentSteps(actueel, {}) }),
   ])
+
+  const periodiseringItems = onderdeelStatus(actueel, trainingLogResult.currentSteps)
 
   // De aanwezigheid van minstens één match_squad-rij ÍS de selectie — zelfde
   // done-criterium als de selectie-ActionCard op de event-detailpagina.
@@ -345,7 +366,7 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {!heeftNulmeting && <SetupNulmeting t={t} />}
+      <PeriodiseringStatus t={t} items={periodiseringItems} steigerungsWeken={steigerungsWeken} />
 
       {/* Beslissing-eerst-volgorde (mobiel én desktop dezelfde DOM-volgorde):
           eerst de open taken, dan pas de kengetallen — het dashboard is een
