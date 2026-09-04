@@ -883,6 +883,37 @@ body::after {
     break-inside: avoid;
   }
 
+  /* ── Telefoon-fix: iOS Safari pagineert print tegen de SCHERM-viewport ──
+     Desktopbrowsers leggen de printpagina uit op papierbreedte (A4 − 2×12mm
+     ≈ 703 CSS-px) — daar past het vel ruim (gemeten: 228mm van 273mm bij 18
+     spelers). iOS Safari (window.print() op de telefoon) layout de pagina
+     echter tegen de TOESTEL-viewport (~375-440px) en schaalt dat resultaat
+     op naar de papierbreedte: alles drukt ~1,8× groter af en hetzelfde vel
+     wordt 439mm = 2 pagina's (gemeten onder het 390px-viewportmodel).
+     Zelfde familie-quirk als de eerdere 100vh-bug (zie het kopcommentaar
+     bij .print-poster hierboven): iOS rekent paged media tegen de
+     schermviewport, niet tegen het papier.
+
+     De `zoom` compenseert precies dat: bij zoom 0.55 layout een
+     375-440px-viewport als 682-800px, waarmee het vel zijn
+     desktop-layoutbreedte (de max-w-2xl-wrapper = 672px past er weer in)
+     én zijn desktop-inhoudsbudget terugkrijgt — de telefoon-PDF wordt
+     vrijwel identiek aan de laptop-PDF (gemeten: 220mm bij 390px). `zoom`
+     schaalt de layout zélf (anders dan transform) en pagineert dus correct
+     mee.
+
+     De query matcht uitsluitend de telefoon-situatie: desktop-printviewports
+     zijn ≥703px (staand A4) en iPads ≥744px, dus die blijven ongemoeid — en
+     zou iOS print ooit óók op papierbreedte gaan uitleggen, dan matcht de
+     query vanzelf niet meer en is deze regel een no-op. Bewust GEEN
+     height/overflow-klem: het één-pagina-resultaat blijft uit het
+     inhoudsbudget komen (test "Eén-A4-opzet van het teamsheet" in
+     wedstrijdselectie-pdf.acceptance.test.tsx bewaakt dat, en de test
+     "Telefoon-fix" aldaar pint deze zoom-regel). */
+  @media (max-width: 600px) {
+    .print-poster { zoom: 0.55; }
+  }
+
   /* ── Seizoensrapport (components/inzichten/SeizoensrapportPrint.tsx) ───
      Bewust een DOCUMENT, geen poster: dit blok gebruikt géén named page en
      houdt dus de gewone 12mm-marge van de `@page`-regel bovenaan dit blok.

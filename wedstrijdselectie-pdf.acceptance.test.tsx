@@ -782,4 +782,28 @@ describe('Eén-A4-opzet van het teamsheet (clean document)', () => {
     expect(posterBlock).not.toMatch(/overflow\s*:/)
     expect(posterBlock).toMatch(/background:\s*#ffffff/)
   })
+
+  // Telefoon-fix (2026-09-04): iOS Safari layout de printpagina tegen de
+  // TOESTEL-viewport (~375-440px) en schaalt die op naar de papierbreedte,
+  // waardoor hetzelfde vel dat op desktop 228mm meet daar 439mm (= 2
+  // pagina's) werd — gemeld door de eigenaar met 18 spelers. De zoom
+  // compenseert dat exact (zie het CSS-commentaar bij de regel zelf). De
+  // factor 0.55 staat hier letterlijk gepind (zelfde conventie als de
+  // C1-breedtepins in afdrukken-trainingsplan.acceptance.test.tsx): wie hem
+  // hertuned, meet opnieuw en beweegt deze test bewust mee.
+  it('telefoon-fix: binnen een max-width-600px-query (en alléén daarbinnen) krijgt .print-poster zoom 0.55, zodat de telefoon-PDF het desktop-inhoudsbudget terugkrijgt', () => {
+    const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
+    // De regel bestaat, genest in precies deze viewportquery — desktop- en
+    // iPad-printviewports (≥703px resp. ≥744px) blijven erbuiten.
+    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)\s*\{\s*\.print-poster\s*\{\s*zoom:\s*0\.55;?\s*\}/)
+    // En de query staat ín het @media print-blok: vóór de query hoort een
+    // @media print-opening te staan. (Een losse, altijd-actieve zoom zou de
+    // SCHERMweergave of de desktop-print mee verkleinen.)
+    const queryIndex = css.indexOf('@media (max-width: 600px)')
+    expect(css.lastIndexOf('@media print', queryIndex)).toBeGreaterThan(-1)
+    // Buiten die query komt `zoom:` nergens anders in de print-CSS voor —
+    // de basisregel van .print-poster blijft zoom-vrij (desktop ongemoeid).
+    const zonderQueryBlok = css.replace(/@media\s*\(max-width:\s*600px\)\s*\{\s*\.print-poster\s*\{\s*zoom:\s*0\.55;?\s*\}\s*\}/, '')
+    expect(zonderQueryBlok.slice(zonderQueryBlok.indexOf('@media print'))).not.toMatch(/zoom\s*:/)
+  })
 })
