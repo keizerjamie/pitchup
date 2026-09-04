@@ -784,26 +784,33 @@ describe('Eén-A4-opzet van het teamsheet (clean document)', () => {
   })
 
   // Telefoon-fix (2026-09-04): iOS Safari layout de printpagina tegen de
-  // TOESTEL-viewport (~375-440px) en schaalt die op naar de papierbreedte,
-  // waardoor hetzelfde vel dat op desktop 228mm meet daar 439mm (= 2
-  // pagina's) werd — gemeld door de eigenaar met 18 spelers. De zoom
-  // compenseert dat exact (zie het CSS-commentaar bij de regel zelf). De
-  // factor 0.55 staat hier letterlijk gepind (zelfde conventie als de
-  // C1-breedtepins in afdrukken-trainingsplan.acceptance.test.tsx): wie hem
+  // TOESTEL-viewport (~375-440px) en drukt 1 CSS-px af als 1 punt (72dpi),
+  // zonder opschalen naar de papierbreedte — daardoor werd hetzelfde vel dat
+  // op desktop 228mm meet daar 2 pagina's (gemeld door de eigenaar met 18
+  // spelers). De fix geeft de body de desktop-layoutbreedte terug (703px =
+  // 186mm bij 96dpi) en compenseert de dpi-verhouding met zoom 0.75
+  // (= 72/96): extern 527pt = exact de papierbreedte, elke letter op
+  // dezelfde fysieke maat als vanaf de laptop. Een kale verkleinende zoom
+  // zónder breedteherstel (eerste poging, 0.55) drukte alles ~25% kleiner
+  // en smaller af dan de laptop — expliciet afgekeurd door de eigenaar.
+  // Beide waarden staan hier letterlijk gepind (zelfde conventie als de
+  // C1-breedtepins in afdrukken-trainingsplan.acceptance.test.tsx): wie ze
   // hertuned, meet opnieuw en beweegt deze test bewust mee.
-  it('telefoon-fix: binnen een max-width-600px-query (en alléén daarbinnen) krijgt .print-poster zoom 0.55, zodat de telefoon-PDF het desktop-inhoudsbudget terugkrijgt', () => {
+  it('telefoon-fix: binnen een max-width-600px-query (en alléén daarbinnen) krijgt de wedstrijdselectie-body width 703px + zoom 0.75, zodat de telefoon-PDF de laptop-uitdraai exact reproduceert', () => {
     const css = readFileSync(path.join(__dirname, 'app', 'globals.css'), 'utf-8')
-    // De regel bestaat, genest in precies deze viewportquery — desktop- en
-    // iPad-printviewports (≥703px resp. ≥744px) blijven erbuiten.
-    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)\s*\{\s*\.print-poster\s*\{\s*zoom:\s*0\.55;?\s*\}/)
+    // De regel bestaat, genest in precies deze viewportquery, gescoped op
+    // de wedstrijdselectie-pagina (body:has) — desktop- en iPad-
+    // printviewports (≥703px resp. ≥744px) blijven erbuiten, en de andere
+    // printvellen (trainingsplan, seizoensrapport) blijven ongemoeid.
+    expect(css).toMatch(/@media\s*\(max-width:\s*600px\)\s*\{\s*body:has\(\.print-poster\)\s*\{\s*width:\s*703px;\s*zoom:\s*0\.75;?\s*\}/)
     // En de query staat ín het @media print-blok: vóór de query hoort een
-    // @media print-opening te staan. (Een losse, altijd-actieve zoom zou de
-    // SCHERMweergave of de desktop-print mee verkleinen.)
+    // @media print-opening te staan. (Een losse, altijd-actieve regel zou
+    // de SCHERMweergave mee schalen.)
     const queryIndex = css.indexOf('@media (max-width: 600px)')
     expect(css.lastIndexOf('@media print', queryIndex)).toBeGreaterThan(-1)
     // Buiten die query komt `zoom:` nergens anders in de print-CSS voor —
-    // de basisregel van .print-poster blijft zoom-vrij (desktop ongemoeid).
-    const zonderQueryBlok = css.replace(/@media\s*\(max-width:\s*600px\)\s*\{\s*\.print-poster\s*\{\s*zoom:\s*0\.55;?\s*\}\s*\}/, '')
+    // .print-poster zelf en de desktop-print blijven zoom-vrij.
+    const zonderQueryBlok = css.replace(/@media\s*\(max-width:\s*600px\)\s*\{\s*body:has\(\.print-poster\)\s*\{\s*width:\s*703px;\s*zoom:\s*0\.75;?\s*\}\s*\}/, '')
     expect(zonderQueryBlok.slice(zonderQueryBlok.indexOf('@media print'))).not.toMatch(/zoom\s*:/)
   })
 })

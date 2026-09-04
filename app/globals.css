@@ -883,35 +883,45 @@ body::after {
     break-inside: avoid;
   }
 
-  /* ── Telefoon-fix: iOS Safari pagineert print tegen de SCHERM-viewport ──
+  /* ── Telefoon-fix: iOS Safari print = toestel-viewport op 72dpi ─────────
      Desktopbrowsers leggen de printpagina uit op papierbreedte (A4 − 2×12mm
-     ≈ 703 CSS-px) — daar past het vel ruim (gemeten: 228mm van 273mm bij 18
-     spelers). iOS Safari (window.print() op de telefoon) layout de pagina
-     echter tegen de TOESTEL-viewport (~375-440px) en schaalt dat resultaat
-     op naar de papierbreedte: alles drukt ~1,8× groter af en hetzelfde vel
-     wordt 439mm = 2 pagina's (gemeten onder het 390px-viewportmodel).
-     Zelfde familie-quirk als de eerdere 100vh-bug (zie het kopcommentaar
-     bij .print-poster hierboven): iOS rekent paged media tegen de
-     schermviewport, niet tegen het papier.
+     = 186mm ≈ 703 CSS-px bij 96dpi) — daar past het vel ruim (gemeten:
+     228mm van 273mm bij 18 spelers). iOS Safari (window.print() op de
+     telefoon) doet twee dingen anders: het layout de pagina tegen de
+     TOESTEL-viewport (~375-440px) én het drukt 1 CSS-px af als 1 punt
+     (72dpi), zónder de inhoud op te schalen naar de papierbreedte (krimpen
+     doet het wél wanneer de inhoud bréder is dan het papier — zo printen
+     niet-responsieve desktop-sites er leesbaar). Gevolg: het verticale
+     A4-budget is op de telefoon maar 273mm ≈ 774px i.p.v. ~1032px, en
+     hetzelfde vel werd daar 2 pagina's (eigenaar, 18 spelers). Een kale
+     verkleinende zoom (eerste poging, 0.55) loste de paginering op, maar
+     drukte alles ~25% kleiner én smaller af dan de laptop ("heel erg op
+     elkaar gedrukt" — eigenaar): verkleinen zonder de layoutbreedte te
+     herstellen kán de laptop-uitdraai niet reproduceren.
 
-     De `zoom` compenseert precies dat: bij zoom 0.55 layout een
-     375-440px-viewport als 682-800px, waarmee het vel zijn
-     desktop-layoutbreedte (de max-w-2xl-wrapper = 672px past er weer in)
-     én zijn desktop-inhoudsbudget terugkrijgt — de telefoon-PDF wordt
-     vrijwel identiek aan de laptop-PDF (gemeten: 220mm bij 390px). `zoom`
-     schaalt de layout zélf (anders dan transform) en pagineert dus correct
-     mee.
+     De exacte compensatie: geef de pagina de desktop-layoutbreedte terug
+     (width: 703px — dezelfde 186mm-containing-block als op de laptop, dus
+     de max-w-2xl-wrapper centreert identiek) en vang de dpi-verhouding met
+     zoom 0.75 (= letterlijk 72/96). Extern wordt de body dan 703 × 0.75 =
+     527pt = 186,0mm — precies de papierbreedte — en elke letter drukt op
+     dezelfde fysieke maat als vanaf de laptop (10.5pt blijft 10.5pt), met
+     identieke paginering (gemeten onder dit model: 228mm, gelijk aan
+     desktop). `zoom` schaalt de layout zélf (anders dan transform) en
+     pagineert dus mee. De body mag hier breder zijn dan de viewport: er
+     staat bewust nergens overflow-x op html/body, en print rendert de
+     volledige documentbreedte.
 
-     De query matcht uitsluitend de telefoon-situatie: desktop-printviewports
-     zijn ≥703px (staand A4) en iPads ≥744px, dus die blijven ongemoeid — en
-     zou iOS print ooit óók op papierbreedte gaan uitleggen, dan matcht de
-     query vanzelf niet meer en is deze regel een no-op. Bewust GEEN
-     height/overflow-klem: het één-pagina-resultaat blijft uit het
-     inhoudsbudget komen (test "Eén-A4-opzet van het teamsheet" in
-     wedstrijdselectie-pdf.acceptance.test.tsx bewaakt dat, en de test
-     "Telefoon-fix" aldaar pint deze zoom-regel). */
+     Gescoped op body:has(.print-poster): alleen de wedstrijdselectie-
+     pagina, want alleen MatchSquadPrintList draagt die rootklasse. De
+     query matcht uitsluitend telefoons: desktop-printviewports zijn ≥703px
+     (staand A4) en iPads ≥744px, dus die blijven ongemoeid — en layout iOS
+     print ooit alsnog op papierbreedte, dan matcht de query vanzelf niet
+     meer en is de regel een no-op. Bewust GEEN height/overflow-klem: het
+     één-pagina-resultaat blijft uit het inhoudsbudget komen (test
+     "Eén-A4-opzet van het teamsheet" bewaakt dat; de test "telefoon-fix"
+     in wedstrijdselectie-pdf.acceptance.test.tsx pint deze regel). */
   @media (max-width: 600px) {
-    .print-poster { zoom: 0.55; }
+    body:has(.print-poster) { width: 703px; zoom: 0.75; }
   }
 
   /* ── Seizoensrapport (components/inzichten/SeizoensrapportPrint.tsx) ───
