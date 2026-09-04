@@ -2783,3 +2783,46 @@ schrapt de overload. Nooit hernoemen, geen lane raakt de laag van de ander.
 - `MetingEditor` alleen-lezen maken (of uitfaseren) — losgekoppeld legacy-pad.
 - `app/actions/events.ts` heeft een eigen, zwakkere `DATE_RE` (derde kopie naast
   season-dates): `'2026-02-30'` passeert `createEvent`. Consolideren op `isDateString`.
+
+## Wedstrijdselectie-PDF: telefoon-fix — iOS layout print tegen de schermviewport (2026-09-04)
+Klacht van de eigenaar: dezelfde selectie (18 spelers) is op de laptop 1 pagina,
+maar vanaf de telefoon 2. Direct gefixt (geen feature-factory-keten; puur print-CSS).
+
+### Oorzaak (gemeten, niet gegokt)
+Desktopbrowsers leggen de printpagina uit op PAPIERbreedte (A4 − 2×12mm ≈ 703
+CSS-px); iOS Safari layout `window.print()` echter tegen de TOESTEL-viewport
+(~375–440px) en schaalt dat resultaat op naar de papierbreedte — alles drukt
+~1,8× groter af en het verticale budget per A4 krimpt navenant. Dit is hetzelfde
+schermviewport-model dat eerder de `100vh`-bug op iOS verklaarde (posterronde).
+Gemeten via het bestaande meetrecept (wegwerp-vitest-render → `@tailwindcss/cli`
+→ Playwright `emulateMedia('print')`, met de viewportbreedte als engine-model):
+desktopmodel 703px = 228mm van 273mm budget (past); telefoonmodel 390px = 439mm
+(1,61 pagina — exact de klacht); 430px = 392mm.
+
+### Fix
+- `@media (max-width: 600px) { .print-poster { zoom: 0.55; } }` genest in het
+  `@media print`-blok (`app/globals.css`). `zoom` schaalt de layout zélf (anders
+  dan `transform`) en pagineert dus correct mee: een 375–440px-viewport layout
+  weer als 682–800px → de `max-w-2xl`-wrapper (672px) past er weer in en de
+  telefoon-PDF wordt vrijwel identiek aan de laptop-PDF. Gemeten ná de fix:
+  234mm (390px) / 212mm (430px) — past; desktop ongewijzigd 228mm.
+- Drempel 600px raakt uitsluitend telefoons: desktop-printviewports zijn ≥703px
+  (staand A4), iPads ≥744px. Layout iOS print ooit alsnog op papierbreedte, dan
+  matcht de query vanzelf niet meer en is de regel een no-op.
+- Bewust géén height/overflow-klem (de les uit de posterronde blijft staan: het
+  één-pagina-resultaat komt uit het inhoudsbudget) en gescoped op `.print-poster`
+  — die rootklasse wordt alléén door `MatchSquadPrintList.tsx` gedragen (het
+  trainingsplan gebruikt uitsluitend de sub-klassen `print-poster-topbar`/`-meta`).
+- Regressietest in `wedstrijdselectie-pdf.acceptance.test.tsx` ("telefoon-fix"):
+  pint query + factor letterlijk (C1-conventie: wie 0.55 hertuned, meet opnieuw
+  en beweegt de test bewust mee) én bewaakt dat er buiten de query geen enkele
+  `zoom:` in de print-CSS staat (een altijd-actieve zoom zou desktop verkleinen).
+
+### Nog open / bewust gelaten
+- Trainingsplan-print en seizoensrapport hebben vanaf de telefoon vermoedelijk
+  dezelfde quirk (zelfde `@media print`-blok, geen zoom) — buiten de scope van
+  deze melding gelaten. Dezelfde one-liner is daar herbruikbaar, maar meet eerst
+  hun inhoudsbudget onder het telefoonmodel (het trainingsplan mag juist wél
+  meerdere pagina's beslaan, dus daar is de afweging anders).
+- De echte iPhone-uitdraai blijft de definitieve check: Playwright is Chromium;
+  het telefoonmodel simuleert iOS' viewportgedrag, niet iOS zelf.
