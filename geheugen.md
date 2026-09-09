@@ -2835,3 +2835,61 @@ echte iPhone afgekeurd ("past, maar heel erg op elkaar gedrukt").
   72dpi-model.
 - Playwright blijft Chromium: het 72dpi-model is een gevalideerde proxy (voorspelde de
   eigenaar-feedback), geen iOS-engine — de echte iPhone-uitdraai is de eindcontrole.
+
+## Cyclusweek handmatig instellen + gedeeld ChevronIcon (2026-09-09, commit `22bf804`)
+Aanleiding: "ik zit in week 6 maar de app zegt week 2 — je kunt niet altijd nulmetingen
+uitvoeren". Plus: "EXPAND_MORE" stond als tekst op /periodisering. Gebouwd via de
+feature-factory-keten met beide goedkeuringspauzes; geen migratie nodig.
+
+### Datamodel
+- **Eén rij in `settings`**, key `cyclus_week_correctie`, waarde `'<week>|<YYYY-MM-DD>|<anker of leeg>'`
+  (bv. `6|2026-09-08|2026-08-01`). Geen rij = automatisch. Geen DDL; alleen commentaar in
+  `supabase/settings.sql`. Parse/serialize wonen in `lib/periodization.ts`
+  (`parseCyclusCorrectie`/`serializeCyclusCorrectie`) — één plek voor lees- én schrijfkant.
+- Derde segment = **snapshot van het afgeleide anker** op het moment van instellen (peildatum
+  morgen). Zonder die snapshot is "het anker is veranderd" niet te evalueren, want het echte
+  anker wordt nergens opgeslagen (die regel staat nog steeds).
+
+### Kernregels (bewuste besluiten van de eigenaar)
+- **Correctie raakt alleen de getoonde cyclusweek** (/periodisering hoofdkaart + vooruitblik)
+  en `dueCategories` op de trainingsplanner. Stap-telling per onderdeel (`getTrainingLog`/
+  `computeCurrentSteps`), `hermetingStand` en het dashboard zijn ongewijzigd.
+- **Eenmalige zet "vandaag week N"**: `effectieveCyclusWeek` rekent een virtueel anker terug
+  (`datum − (N−1)×7 dagen` via `toUtcMs`/`fromUtcMs`) en geeft dat aan het bestaande
+  `cycleWeekFor` — één telroutine, DST-veilig, rolt na week 6 vanzelf door naar week 1.
+  Datums vóór de correctiedatum blijven op het afgeleide anker.
+- **Vervalregel op leestijd** (`actieveCorrectie`): snapshot ≠ huidig afgeleid anker ⇒
+  correctie geldt niet. Verandert het anker later terug naar de snapshot, dan **herleeft**
+  de correctie (read-time-model; `saveCategorieMeting`/`deleteCategorieMeting` zijn niet
+  aangeraakt). Gevolg: een vervallen correctie blijft onzichtbaar in `settings` staan —
+  "Terug naar automatisch" is alleen zichtbaar bij een actíeve correctie. Bewust
+  geaccepteerd.
+- **Vervalcheck altijd tegen het vandaag-anker** (peildatum morgen), óók op de
+  trainingsplanner die zelf `event.date` als peildatum gebruikt — anders kan dezelfde
+  correctie op de ene pagina actief en op de andere vervallen zijn.
+- Correctie mag zonder enige nulmeting; `cycleWeek` staat daarom op /periodisering bewust
+  **buiten** het `if (anker !== null)`-blok en `formatDate(anker)` is gegate.
+- Server actions `saveCyclusWeekCorrectie(week)`/`deleteCyclusWeekCorrectie()` gooien vaste
+  strings (`'Niet ingelogd'`, `'Ongeldige cyclusweek'`, generiek); delete filtert op
+  `team_id` ÉN `key`. `revalidatePath('/events/[id]/training-plan', 'page')` — bij een
+  dynamisch segment is het `type`-argument verplicht (stil geen revalidatie zonder).
+
+### Icoonfont-gotcha, zesde keer — nu structureel opgelost voor chevrons
+`expand_more` en `expand_less` zitten **niet** in de 57-ligaturen-subset. Nieuw gedeeld
+`components/icons/ChevronIcon.tsx` (inline SVG, `open`-prop roteert 180° met
+`transition-transform`) vervangt ze in `NulmetingManager`, `OefeningEditor` en
+`LineupBuilder`. In `OefeningEditor` wijst de dichte staat nu naar beneden i.p.v. naar rechts
+(bewust: één icoon op alle plekken). Gebruik dit component voor elke nieuwe uit-/inklapper.
+
+### Lessen
+- **Brief-letterlijkheid vs. bestaande tests**: de brief zei "titelregel wordt een flex-rij met
+  rechts de knop", maar `nulmeting-per-onderdeel.acceptance.test.tsx` leest de ankerdatum via
+  `getByText(cycleTitle).parentElement`. Oplossing: titel+week+subregel als linkerkolom, knop
+  als rechterkolom (visueel gelijk). Bij JSX-herindeling: eerst kijken welke tests op
+  `parentElement` navigeren.
+- Faalpad "ongeldige week" is via de UI niet te reproduceren (zes vaste radio-knoppen); getest
+  tegen de server action als publieke buitenkant, plus een test dat de sheet exact 6 opties
+  toont. Een placeholder-test (`expect(true)`) is door de validator afgekeurd en vervangen.
+- Visuele browsercheck van het chevron (licht/donker) is **niet** gedaan: dev-server zat achter
+  de login. Structureel risico is weg (SVG kan niet als tekst renderen); uitlijning/grootte
+  bij de eerste keer openen even bekijken.
