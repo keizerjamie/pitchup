@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PERIODIZATION_CATEGORIES, berekenStap, type CategorieMeting } from '@/lib/types'
-import { toUtcMs } from '@/lib/season-dates'
+import { fromUtcMs, isDateString, toUtcMs } from '@/lib/season-dates'
 
 export const CYCLE_LENGTH_WEEKS = 6
 
@@ -33,6 +33,109 @@ export function cycleWeekFor(nulmetingDate: string, onDate: string): number {
 // Categories scheduled for the given cycle week ('overig' has no schedule).
 export function dueCategories(cycleWeek: number) {
   return PERIODIZATION_CATEGORIES.filter((c) => c.cycleWeeks.includes(cycleWeek))
+}
+
+// ────────────────────────────────────────────────
+// Handmatige cyclusweek-correctie
+// ────────────────────────────────────────────────
+// De cyclusweek wordt normaal AFGELEID uit de vroegste actuele meting
+// (ankerDatum). Loopt de praktijk uit de pas met dat anker, dan mag de trainer
+// één keer zeggen: "vandaag zitten we in week N". Vanaf die dag telt de cyclus
+// gewoon door — na week 6 volgt weer week 1. Er is dus géén vaste verschuiving
+// die zich per cyclus herhaalt.
+//
+// De correctie leeft als één rij in de bestaande settings-tabel; parsen en
+// serialiseren staan hier (en niet in de action) zodat lees- en schrijfkant
+// niet uit elkaar kunnen lopen — een 'use server'-bestand mag alleen async
+// functies exporteren.
+export const CYCLUS_CORRECTIE_KEY = 'cyclus_week_correctie'
+
+export interface CyclusCorrectie {
+  // 1..CYCLE_LENGTH_WEEKS — de week waarin het team op `datum` zat.
+  week: number
+  // 'YYYY-MM-DD' — de dag waarop de trainer de week zette.
+  datum: string
+  // Het AFGELEIDE anker (peildatum morgen) op het moment van de correctie, of
+  // null als er toen geen enkele meting was. Snapshot voor de vervalregel in
+  // actieveCorrectie.
+  ankerBijCorrectie: string | null
+}
+
+// Alleen cijfers: weigert '3.5', ' 6', '+6', '06.0' en 'abc' vóór Number() er
+// stilzwijgend iets van maakt.
+const WEEK_RE = /^\d+$/
+
+// settings.value → correctie, of null bij afwezig/ongeldig. Fail-safe: een
+// waarde die we niet kunnen vertrouwen betekent "geen correctie", nooit een
+// gokwaarde. Vorm: '<week>|<YYYY-MM-DD>|<anker of leeg>'.
+export function parseCyclusCorrectie(value: string | null | undefined): CyclusCorrectie | null {
+  if (typeof value !== 'string') return null
+  const delen = value.split('|')
+  if (delen.length !== 3) return null
+  const [weekDeel, datum, ankerDeel] = delen
+  if (!WEEK_RE.test(weekDeel)) return null
+  const week = Number(weekDeel)
+  if (week < 1 || week > CYCLE_LENGTH_WEEKS) return null
+  // isDateString weigert ook 2026-02-30, die Date stilzwijgend doorrolt.
+  if (!isDateString(datum)) return null
+  if (ankerDeel !== '' && !isDateString(ankerDeel)) return null
+  return { week, datum, ankerBijCorrectie: ankerDeel === '' ? null : ankerDeel }
+}
+
+// correctie → settings.value. Exacte spiegel van parseCyclusCorrectie; een leeg
+// derde segment is "geen enkele meting", niet "onbekend".
+export function serializeCyclusCorrectie(correctie: CyclusCorrectie): string {
+  return `${correctie.week}|${correctie.datum}|${correctie.ankerBijCorrectie ?? ''}`
+}
+
+// Vervalregel: de correctie geldt zolang het afgeleide anker nog hetzelfde is
+// als de snapshot die bij het instellen is meegeschreven. Verzet een nieuwe,
+// gewijzigde of verwijderde meting het anker, dan vervalt de correctie en telt
+// het anker weer. Keert het anker later terug naar de snapshot, dan herleeft de
+// correctie — dit is bewust een read-time-model, er wordt nooit opgeruimd.
+//
+// `vandaagAnker` is ALTIJD het anker met peildatum = morgen, óók wanneer de
+// aanroeper (de trainingsplanner) zelf op een andere peildatum rekent.
+// actueleMetingen is peildatum-afhankelijk; één canonieke peildatum voor deze
+// check sluit uit dat twee pagina's het oneens worden over "vervallen of niet".
+//
+// Beide null (nooit gemeten, en nog steeds niet) telt als gelijk: een correctie
+// zonder enige nulmeting blijft actief.
+export function actieveCorrectie(
+  correctie: CyclusCorrectie | null,
+  vandaagAnker: string | null,
+): CyclusCorrectie | null {
+  if (correctie === null) return null
+  return correctie.ankerBijCorrectie === vandaagAnker ? correctie : null
+}
+
+// De cyclusweek die een pagina moet tonen voor `onDate`.
+//
+// `actieveCorrectie` is de UITKOMST van de functie hierboven (dus al door de
+// vervalregel gehaald); `anker` is het afgeleide anker van DIE pagina, met haar
+// eigen peildatum.
+//
+// Een actieve correctie wordt uitgedrukt als een VIRTUEEL anker: de dag waarop
+// week 1 begon als `datum` in week N viel. Daarna is het gewoon cycleWeekFor,
+// dus de doorrol na week 6 en de modulo over maanden komen gratis mee. Datums
+// vóór de correctiedatum blijven op het afgeleide anker: de correctie zegt iets
+// over vandaag en de toekomst, niet over het verleden.
+export function effectieveCyclusWeek(input: {
+  anker: string | null
+  actieveCorrectie: CyclusCorrectie | null
+  onDate: string
+}): number | null {
+  const correctie = input.actieveCorrectie
+  // Kale kalenderdatums: lexicografisch = chronologisch, geen Date nodig.
+  if (correctie !== null && input.onDate >= correctie.datum) {
+    const correctieMs = toUtcMs(correctie.datum)
+    // Ongeldige opgeslagen datum ⇒ behandel de correctie als afwezig.
+    if (correctieMs !== null) {
+      const virtueelAnker = fromUtcMs(correctieMs - (correctie.week - 1) * 7 * 86_400_000)
+      return cycleWeekFor(virtueelAnker, input.onDate)
+    }
+  }
+  return input.anker === null ? null : cycleWeekFor(input.anker, input.onDate)
 }
 
 // ────────────────────────────────────────────────

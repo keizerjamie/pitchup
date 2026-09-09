@@ -6,6 +6,7 @@ import { actueleMetingen, metingenPerCategorie } from '@/lib/periodization'
 import { saveCategorieMeting, deleteCategorieMeting } from '@/app/actions/periodisering'
 import { formatDate, todayLocal } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
+import ChevronIcon from '@/components/icons/ChevronIcon'
 
 const METING_CATEGORIES = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
 
@@ -199,9 +200,7 @@ export default function NulmetingManager({ metingen, peildatumExclusief }: Props
                   <span className="text-[13px] font-bold text-ink">
                     {t.periodization.historyForCategory.replace('{n}', String(geschiedenis.length))}
                   </span>
-                  <span className="ms text-[18px] text-faint" aria-hidden="true">
-                    {expanded ? 'expand_less' : 'expand_more'}
-                  </span>
+                  <ChevronIcon open={expanded} className="w-[18px] h-[18px] text-faint flex-shrink-0" />
                 </button>
 
                 {expanded && (

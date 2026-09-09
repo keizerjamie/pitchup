@@ -8,6 +8,7 @@ import { emptyPlayerForm, isGeldigeRating, type PlayerForm } from '@/lib/lineup-
 import type { KitColors } from '@/lib/club-colors'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
 import { verhuisOpstelling } from '@/lib/lineup-verhuizing'
+import ChevronIcon from '@/components/icons/ChevronIcon'
 
 // Hoe lang de inslag-state blijft staan. Moet minstens zo lang zijn als de
 // langste keyframe-animatie in app/globals.css (poppetje-schokgolf, 620ms),
@@ -217,9 +218,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
           style={{ border: '1px solid var(--border-soft)' }}
         >
           <span>{FORMATIONS[formation]?.label ?? formation}</span>
-          <span className={`ms text-[20px] text-muted transition-transform duration-200 ${formationOpen ? 'rotate-180' : ''}`}>
-            expand_more
-          </span>
+          <ChevronIcon open={formationOpen} className="w-5 h-5 text-muted" />
         </button>
         {formationOpen && (
           <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">

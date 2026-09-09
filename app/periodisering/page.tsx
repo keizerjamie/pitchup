@@ -2,10 +2,11 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
-import { actueleMetingen, ankerDatum, hermetingStand, cycleWeekFor, computeCurrentSteps, getTrainingLog, dueCategories, TrainingLogEntry, LastDoneEntry, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
+import { actueleMetingen, ankerDatum, hermetingStand, computeCurrentSteps, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY, TrainingLogEntry, LastDoneEntry, CyclusCorrectie, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
 import { addDays, formatDate, formatDateLong, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import NulmetingManager from '@/components/NulmetingManager'
+import CyclusWeekCorrectie from '@/components/CyclusWeekCorrectie'
 
 // Solid bar colors matching each category's badge tint
 const BAR_COLORS: Record<string, string> = {
@@ -21,12 +22,22 @@ export default async function PeriodizationPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: categorieMetingenRows } = await supabase
-    .from('categorie_metingen')
-    .select('*')
-    .eq('team_id', user.id)
-    .order('datum', { ascending: false })
-    .order('created_at', { ascending: false })
+  // De correctie-rij loopt in dezelfde ronde mee als de metingen: één extra
+  // rij, geen extra roundtrip. Beide team-gescoped.
+  const [{ data: categorieMetingenRows }, { data: correctieRow }] = await Promise.all([
+    supabase
+      .from('categorie_metingen')
+      .select('*')
+      .eq('team_id', user.id)
+      .order('datum', { ascending: false })
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('settings')
+      .select('value')
+      .eq('team_id', user.id)
+      .eq('key', CYCLUS_CORRECTIE_KEY)
+      .maybeSingle(),
+  ])
 
   const metingen: CategorieMeting[] = categorieMetingenRows ?? []
   const today = todayLocal()
@@ -35,8 +46,16 @@ export default async function PeriodizationPage() {
   const anker = ankerDatum(actueel)
   const hermeting = hermetingStand(actueel)
 
+  // Handmatig gezette cyclusweek, of null als er geen is óf als hij vervallen
+  // is doordat het afgeleide anker sindsdien verschoof (actieveCorrectie in
+  // lib/periodization.ts). `anker` is hier al op peildatum morgen berekend —
+  // precies de canonieke peildatum die de vervalcheck verlangt.
+  const correctie: CyclusCorrectie | null = actieveCorrectie(
+    parseCyclusCorrectie(correctieRow?.value),
+    anker,
+  )
+
   let currentSteps: Record<string, number | null> = computeCurrentSteps(actueel, {})
-  let cycleWeek: number | null = null
   let trainingLog: TrainingLogEntry[] = []
   let lastByCategory: Record<string, LastDoneEntry> = {}
 
@@ -47,8 +66,16 @@ export default async function PeriodizationPage() {
     trainingLog = log.slice(0, 6)
     lastByCategory = last
     currentSteps = steps
-    cycleWeek = cycleWeekFor(anker, today)
   }
+
+  // BEWUST buiten het `anker !== null`-blok hierboven: een correctie mag ook
+  // zonder ook maar één nulmeting een lopende cyclusweek opleveren (AC 5). De
+  // stap- en logberekening hierboven blijft wél aan het anker gebonden.
+  const cycleWeek: number | null = effectieveCyclusWeek({
+    anker,
+    actieveCorrectie: correctie,
+    onDate: today,
+  })
 
   // ── Vooruitblik: de eerstvolgende training ─────────────────────────
   // De pagina keek uitsluitend terug (huidige stap, log van gedane
@@ -72,11 +99,11 @@ export default async function PeriodizationPage() {
 
   // Cyclusweek van díé training (niet van vandaag): een training van volgende
   // week valt in een andere week van de zes en heeft dus andere categorieën
-  // aan de beurt. Zonder anker is er geen cyclus en dus geen advies.
-  const volgendeWeek =
-    volgendeTraining && anker !== null
-      ? cycleWeekFor(anker, volgendeTraining.date)
-      : null
+  // aan de beurt. Zonder anker én zonder correctie is er geen cyclus en dus
+  // geen advies — effectieveCyclusWeek geeft dan null.
+  const volgendeWeek = volgendeTraining
+    ? effectieveCyclusWeek({ anker, actieveCorrectie: correctie, onDate: volgendeTraining.date })
+    : null
   const volgendeDue = volgendeWeek !== null ? dueCategories(volgendeWeek) : []
 
   const metingCategories = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
@@ -143,6 +170,50 @@ export default async function PeriodizationPage() {
             </div>
   )
 
+  // Cyclus-kaart als eigen const (naast volgendeTrainingKaart hierboven): ze
+  // moet op twee plekken kunnen verschijnen — in de anker-tak én in de
+  // lege-staat-tak (AC 5, een correctie mag ook zonder nulmeting een lopende
+  // week tonen). `null` zodra er geen enkele effectieve week is; de
+  // lege-staat-tak gebruikt die `null`-uitkomst om te beslissen of de
+  // "Week aanpassen"-trigger daar zelf moet verschijnen.
+  //
+  // Let op DOM-vorm: titel, weeknummer én subregel blijven SAMEN in de
+  // linkerkolom (géén aparte flex-rij om alleen de titel) — de bestaande,
+  // ongewijzigde test nulmeting-per-onderdeel.acceptance.test.tsx zoekt via
+  // `getByText(cycleTitle).parentElement` en verwacht daar de ankerdatum in
+  // terug te vinden (AC14/15/16, edge 8). Zou de titel alleen zelf in de
+  // flex-rij zitten, dan valt de ankerdatum buiten dat `parentElement` en
+  // breekt die test stil.
+  const cyclusKaart = cycleWeek !== null ? (
+    <div className="rounded-2xl p-5 text-white" style={{ background: 'linear-gradient(135deg,#0a2e2a,#14655c)' }}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-extrabold tracking-[.1em] uppercase" style={{ color: '#4ade80' }}>{t.periodization.cycleTitle}</div>
+          <div className="font-display text-[30px] font-bold mt-1.5">{t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</div>
+          {correctie !== null ? (
+            <div className="text-[13.5px] font-semibold mt-1" style={{ color: '#9fd8cd' }}>
+              {t.periodization.manualWeekSince.replace('{date}', formatDate(correctie.datum, t.browserLocale))}
+            </div>
+          ) : (
+            anker !== null && (
+              <div className="text-[13.5px] font-semibold mt-1" style={{ color: '#9fd8cd' }}>
+                {t.periodization.cycleStart}: {formatDate(anker, t.browserLocale)}
+              </div>
+            )
+          )}
+        </div>
+        <CyclusWeekCorrectie
+          huidigeWeek={cycleWeek}
+          heeftCorrectie={correctie !== null}
+          triggerClassName="text-xs font-bold text-white px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors active:scale-[0.97] flex-shrink-0"
+        />
+      </div>
+      <div className="h-2 rounded-full overflow-hidden mt-3.5" style={{ background: 'rgba(255,255,255,.14)' }}>
+        <div className="h-full rounded-full" style={{ width: `${Math.round((cycleWeek / CYCLE_LENGTH_WEEKS) * 100)}%`, background: '#4ade80' }} />
+      </div>
+    </div>
+  ) : null
+
   return (
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <div>
@@ -155,18 +226,7 @@ export default async function PeriodizationPage() {
           <div className="flex flex-col gap-5">
             {volgendeTrainingKaart}
             {/* Current cycle phase */}
-            {cycleWeek !== null && (
-              <div className="rounded-2xl p-5 text-white" style={{ background: 'linear-gradient(135deg,#0a2e2a,#14655c)' }}>
-                <div className="text-[11px] font-extrabold tracking-[.1em] uppercase" style={{ color: '#4ade80' }}>{t.periodization.cycleTitle}</div>
-                <div className="font-display text-[30px] font-bold mt-1.5">{t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</div>
-                <div className="text-[13.5px] font-semibold mt-1" style={{ color: '#9fd8cd' }}>
-                  {t.periodization.cycleStart}: {formatDate(anker, t.browserLocale)}
-                </div>
-                <div className="h-2 rounded-full overflow-hidden mt-3.5" style={{ background: 'rgba(255,255,255,.14)' }}>
-                  <div className="h-full rounded-full" style={{ width: `${Math.round((cycleWeek / CYCLE_LENGTH_WEEKS) * 100)}%`, background: '#4ade80' }} />
-                </div>
-              </div>
-            )}
+            {cyclusKaart}
 
             {/* Hermetings-hint (addendum §A3): puur presentatie, geen eigen
                 animatie — server component, alleen zichtbaar zolang niet alle
@@ -272,10 +332,18 @@ export default async function PeriodizationPage() {
       ) : (
         <div className="max-w-lg w-full mx-auto flex flex-col gap-5">
           {volgendeTrainingKaart}
+          {cyclusKaart}
           <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
             <span className="ms text-[40px] text-faint">monitoring</span>
             <p className="text-ink font-bold">{t.periodization.noMeting}</p>
             <p className="text-faint text-sm">{t.periodization.noMetingHint}</p>
+            {cyclusKaart === null && (
+              <CyclusWeekCorrectie
+                huidigeWeek={cycleWeek}
+                heeftCorrectie={correctie !== null}
+                triggerClassName="text-xs font-bold text-white px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-dark transition active:scale-[0.97]"
+              />
+            )}
           </div>
           <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} />
         </div>

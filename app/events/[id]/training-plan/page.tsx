@@ -2,8 +2,8 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
-import { cycleWeekFor, actueleMetingen, ankerDatum, getTrainingLog, dueCategories } from '@/lib/periodization'
-import { formatDateLong } from '@/lib/utils'
+import { actueleMetingen, ankerDatum, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
+import { addDays, formatDateLong, todayLocal } from '@/lib/utils'
 import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
 import BackButton from '@/components/BackButton'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
@@ -40,7 +40,7 @@ export default async function TrainingPlanPage({ params }: Props) {
       .order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
     supabase.from('settings').select('key, value').eq('team_id', user.id)
-      .in('key', ['team_color_primary', 'team_color_secondary', 'team_name', 'team_logo_url']),
+      .in('key', ['team_color_primary', 'team_color_secondary', 'team_name', 'team_logo_url', CYCLUS_CORRECTIE_KEY]),
   ])
   const activePlayers: Player[] = playersData ?? []
   const presentIds = new Set((attendanceData ?? []).filter((a) => a.status === 'present').map((a) => a.player_id))
@@ -77,6 +77,20 @@ export default async function TrainingPlanPage({ params }: Props) {
   // edge 11): een meting op de trainingsdag zelf telt nog niet mee.
   const actueel = actueleMetingen(metingen, event.date)
   const anker = ankerDatum(actueel)
+  // Handmatig gezette cyclusweek (settings-rij uit de batch hierboven, dus geen
+  // extra roundtrip). De vervalregel meet ALTIJD tegen het vandaag-anker —
+  // peildatum morgen, net als op /periodisering — en nooit tegen `anker`
+  // hierboven, dat op de trainingsdatum peilt. Eén canonieke peildatum houdt
+  // beide pagina's het eens over "vervallen of niet"; zie actieveCorrectie in
+  // lib/periodization.ts. Het extra rekenwerk gebeurt alleen als er echt een
+  // correctie is opgeslagen.
+  const opgeslagenCorrectie = parseCyclusCorrectie(settingsMap[CYCLUS_CORRECTIE_KEY])
+  const correctie = opgeslagenCorrectie === null
+    ? null
+    : actieveCorrectie(
+        opgeslagenCorrectie,
+        ankerDatum(actueleMetingen(metingen, addDays(todayLocal(), 1))),
+      )
   // Koppelingen aan deze training, elk met de gejoinde bibliotheek-oefening.
   // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie};
   // normaliseer naar {grootte, formaties} vóórdat de UI de data ziet — zowel op
@@ -152,7 +166,9 @@ export default async function TrainingPlanPage({ params }: Props) {
   const { currentSteps } = await getTrainingLog(supabase, user.id, actueel, event.date)
 
   // ── Cycle-week suggestion: which categories are due this week ──
-  const cycleWeek = anker !== null ? cycleWeekFor(anker, event.date) : null
+  // Een training vóór de correctiedatum blijft op het afgeleide anker; vanaf de
+  // correctiedatum telt de gecorrigeerde cyclus door (na week 6 weer week 1).
+  const cycleWeek = effectieveCyclusWeek({ anker, actieveCorrectie: correctie, onDate: event.date })
   const suggestion = cycleWeek !== null
     ? {
         week: cycleWeek,

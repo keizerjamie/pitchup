@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
@@ -6,7 +6,12 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
-import { saveCategorieMeting, deleteCategorieMeting } from '@/app/actions/periodisering'
+import {
+  saveCategorieMeting,
+  deleteCategorieMeting,
+  saveCyclusWeekCorrectie,
+  deleteCyclusWeekCorrectie,
+} from '@/app/actions/periodisering'
 
 type TableResult = { data?: unknown; error?: unknown }
 
@@ -421,6 +426,196 @@ describe('deleteCategorieMeting', () => {
     const m = teVerwijderen({ schrijf: { error: { code: '42501', message: 'permission denied' } } })
     use(m)
     await expect(deleteCategorieMeting('m1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    consoleError.mockRestore()
+  })
+})
+
+// ────────────────────────────────────────────────
+// Handmatige cyclusweek-correctie
+// ────────────────────────────────────────────────
+// De correctie leeft in de settings-tabel. Het harnas hierboven kent die tabel
+// al (onbekende tabellen krijgen een lege factory), dus alleen de klok moet
+// vast: de action schrijft todayLocal() als correctiedatum mee.
+
+const VANDAAG = '2026-09-08'
+
+// Lokale middernacht + 12 uur, zodat todayLocal() in elke tijdzone 2026-09-08
+// oplevert.
+function zetKlokVast() {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(2026, 8, 8, 12, 0, 0))
+}
+
+// Twee metingen van dit team; de vroegste (2026-08-01) is het afgeleide anker.
+function metMetingen(rijen: unknown[] = [
+  { id: 'm1', categorie: 'partijen_groot', datum: '2026-08-01', stap: 5, notes: null },
+  { id: 'm2', categorie: 'partijen_klein', datum: '2026-08-20', stap: 3, notes: null },
+], settings: TableResult = { error: null }) {
+  return makeSupabase({
+    tables: { categorie_metingen: { data: rijen }, settings },
+  })
+}
+
+describe('saveCyclusWeekCorrectie', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('schrijft één settings-rij met de idempotentie-sleutel en de ankersnapshot', async () => {
+    zetKlokVast()
+    const m = metMetingen()
+    use(m)
+    await saveCyclusWeekCorrectie(6)
+
+    expect(m.calls.upsert).toHaveLength(1)
+    expect(m.calls.upsert[0].table).toBe('settings')
+    expect(m.calls.upsert[0].payload).toEqual({
+      team_id: 'team-1',
+      key: 'cyclus_week_correctie',
+      value: `6|${VANDAAG}|2026-08-01`,
+    })
+    expect(m.calls.upsert[0].onConflict).toBe('team_id,key')
+  })
+
+  it('schrijft een leeg derde segment als er nog geen enkele meting is (AC 5)', async () => {
+    zetKlokVast()
+    const m = metMetingen([])
+    use(m)
+    await saveCyclusWeekCorrectie(6)
+    expect(m.calls.upsert[0].payload.value).toBe(`6|${VANDAAG}|`)
+  })
+
+  it('negeert voor de ankersnapshot een meting van na vandaag', async () => {
+    // Peildatum EXCLUSIEF = morgen: een meting van 2099 hoort nog niet bij het
+    // anker, een meting van vandaag wél.
+    zetKlokVast()
+    const m = metMetingen([
+      { id: 'm1', categorie: 'partijen_groot', datum: '2099-01-01', stap: 5, notes: null },
+      { id: 'm2', categorie: 'partijen_klein', datum: VANDAAG, stap: 3, notes: null },
+    ])
+    use(m)
+    await saveCyclusWeekCorrectie(4)
+    expect(m.calls.upsert[0].payload.value).toBe(`4|${VANDAAG}|${VANDAAG}`)
+  })
+
+  it('leest de ankersnapshot team-gescoped', async () => {
+    zetKlokVast()
+    const m = metMetingen()
+    use(m)
+    await saveCyclusWeekCorrectie(6)
+    expect(m.calls.eq).toContainEqual({ table: 'categorie_metingen', col: 'team_id', val: 'team-1' })
+  })
+
+  it('negeert een gemanipuleerde payload: team_id komt altijd uit de sessie', async () => {
+    zetKlokVast()
+    const m = metMetingen()
+    use(m)
+    await saveCyclusWeekCorrectie(6)
+    expect(m.calls.upsert[0].payload.team_id).toBe('team-1')
+    expect(m.calls.upsert[0].payload.key).toBe('cyclus_week_correctie')
+  })
+
+  it('vernieuwt /periodisering en de trainingsplanner, niet het dashboard', async () => {
+    zetKlokVast()
+    use(metMetingen())
+    await saveCyclusWeekCorrectie(6)
+    expect(revalidatePath).toHaveBeenCalledWith('/periodisering')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/[id]/training-plan', 'page')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/')
+  })
+
+  it('accepteert de randweken 1 en 6', async () => {
+    for (const week of [1, 6]) {
+      zetKlokVast()
+      const m = metMetingen()
+      use(m)
+      await saveCyclusWeekCorrectie(week)
+      expect(m.calls.upsert[0].payload.value).toBe(`${week}|${VANDAAG}|2026-08-01`)
+      vi.useRealTimers()
+    }
+  })
+
+  it('weigert een week buiten 1..6 of een niet-geheel getal, zonder te schrijven (AC 6/7)', async () => {
+    for (const week of [0, 7, 3.5, NaN, Infinity, -1]) {
+      const m = metMetingen()
+      use(m)
+      await expect(saveCyclusWeekCorrectie(week)).rejects.toThrow('Ongeldige cyclusweek')
+      expect(m.calls.upsert).toHaveLength(0)
+    }
+  })
+
+  it('weigert niet-numerieke invoer zonder te schrijven (AC 7)', async () => {
+    for (const week of ['3.5', '', 'abc', null, undefined]) {
+      const m = metMetingen()
+      use(m)
+      await expect(saveCyclusWeekCorrectie(week as never)).rejects.toThrow('Ongeldige cyclusweek')
+      expect(m.calls.upsert).toHaveLength(0)
+    }
+  })
+
+  it('gooit "Niet ingelogd" zonder user, zonder te schrijven (AC 8)', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+    await expect(saveCyclusWeekCorrectie(6)).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('geeft bij een DB-fout de generieke melding, nooit de ruwe fout', async () => {
+    zetKlokVast()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = metMetingen(undefined, { error: { code: '42501', message: 'permission denied for table settings' } })
+    use(m)
+    await expect(saveCyclusWeekCorrectie(6)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    consoleError.mockRestore()
+  })
+
+  it('levert bij twee correcties op dezelfde dag twee upserts met dezelfde sleutel op (edge)', async () => {
+    zetKlokVast()
+    const m = metMetingen()
+    use(m)
+    await saveCyclusWeekCorrectie(6)
+    await saveCyclusWeekCorrectie(2)
+    expect(m.calls.upsert).toHaveLength(2)
+    expect(m.calls.upsert.map((u) => u.onConflict)).toEqual(['team_id,key', 'team_id,key'])
+    expect(m.calls.upsert[1].payload.value).toBe(`2|${VANDAAG}|2026-08-01`)
+  })
+})
+
+describe('deleteCyclusWeekCorrectie', () => {
+  it('verwijdert de rij met zowel team_id als key als filter', async () => {
+    const m = makeSupabase({ tables: { settings: { error: null } } })
+    use(m)
+    await deleteCyclusWeekCorrectie()
+
+    expect(m.calls.delete).toHaveLength(1)
+    expect(m.calls.delete[0].table).toBe('settings')
+    // Zonder de key-filter zou dit álle settings van het team wissen.
+    expect(m.calls.delete[0].eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'key', val: 'cyclus_week_correctie' },
+    ])
+  })
+
+  it('vernieuwt /periodisering en de trainingsplanner, niet het dashboard', async () => {
+    use(makeSupabase({ tables: { settings: { error: null } } }))
+    await deleteCyclusWeekCorrectie()
+    expect(revalidatePath).toHaveBeenCalledWith('/periodisering')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/[id]/training-plan', 'page')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/')
+  })
+
+  it('gooit "Niet ingelogd" zonder user, zonder delete', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+    await expect(deleteCyclusWeekCorrectie()).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.delete).toHaveLength(0)
+  })
+
+  it('geeft bij een DB-fout de generieke melding', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = makeSupabase({ tables: { settings: { error: { code: '42501', message: 'permission denied' } } } })
+    use(m)
+    await expect(deleteCyclusWeekCorrectie()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
     consoleError.mockRestore()
   })
 })

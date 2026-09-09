@@ -15,6 +15,7 @@ import { teamBereikLabel } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
 import DiagramEditor from '@/components/DiagramEditor'
 import { useDict } from '@/lib/i18n-context'
+import ChevronIcon from '@/components/icons/ChevronIcon'
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
 const TEAM_SIZES = VALID_TEAM_SIZES
@@ -550,7 +551,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
               onClick={() => setShowDiagramEditor((v) => !v)}
               className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
             >
-              <span className="ms text-[18px] align-middle mr-1" aria-hidden="true">{showDiagramEditor ? 'expand_more' : 'chevron_right'}</span>{t.oefeningen.diagramToggle}
+              <ChevronIcon open={showDiagramEditor} className="w-[18px] h-[18px] inline-block align-middle mr-1" />{t.oefeningen.diagramToggle}
             </button>
             {showDiagramEditor && (
               <div className="mt-3">

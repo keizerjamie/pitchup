@@ -2,9 +2,17 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { MEETBARE_CATEGORIES, type OefeningCategorie } from '@/lib/types'
+import { MEETBARE_CATEGORIES, type CategorieMeting, type OefeningCategorie } from '@/lib/types'
 import { clampStapOverride } from '@/lib/periodization-stappen'
+import {
+  CYCLE_LENGTH_WEEKS,
+  CYCLUS_CORRECTIE_KEY,
+  actueleMetingen,
+  ankerDatum,
+  serializeCyclusCorrectie,
+} from '@/lib/periodization'
 import { isDateString } from '@/lib/season-dates'
+import { addDays, todayLocal } from '@/lib/utils'
 import { genericError } from '@/lib/errors'
 
 // ────────────────────────────────────────────────
@@ -167,4 +175,85 @@ export async function deleteCategorieMeting(id: string): Promise<void> {
 
   revalidatePath('/periodisering')
   revalidatePath('/')
+}
+
+// ────────────────────────────────────────────────
+// Handmatige cyclusweek-correctie
+// ────────────────────────────────────────────────
+// Eén rij in de bestaande settings-tabel (key CYCLUS_CORRECTIE_KEY), geen
+// nieuwe tabel en geen migratie. De vorm van `value` en de vervalregel wonen in
+// lib/periodization.ts (serializeCyclusCorrectie / actieveCorrectie), zodat
+// deze schrijfkant en de leeskant van de pagina's niet uit elkaar lopen.
+//
+// saveCategorieMeting/deleteCategorieMeting hierboven blijven bewust
+// ongewijzigd: een gewijzigd anker laat de correctie vervallen op LEESTIJD, er
+// wordt niets opgeruimd.
+
+// "Vandaag zit het team in week N" vastleggen. Idempotent: (team_id, key) is de
+// primaire sleutel, dus een dubbele submit levert één rij op en de laatste
+// correctie van de dag wint.
+export async function saveCyclusWeekCorrectie(week: number): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  // Weigert ook 3.5, NaN, Infinity en '6' als string: de cyclus telt zes hele
+  // weken en alles daarbuiten zou stil een verkeerde week opleveren.
+  if (!Number.isInteger(week) || week < 1 || week > CYCLE_LENGTH_WEEKS) {
+    throw new Error('Ongeldige cyclusweek')
+  }
+
+  const vandaag = todayLocal()
+
+  // Ankersnapshot: het AFGELEIDE anker op dit moment, met dezelfde peildatum
+  // (morgen) als /periodisering gebruikt. Verschuift dat anker later, dan
+  // vervalt de correctie — zie actieveCorrectie in lib/periodization.ts.
+  // Team-gescoped, net als elke andere query in dit bestand.
+  const { data: metingRijen } = await supabase
+    .from('categorie_metingen')
+    .select('id, categorie, datum, stap, notes')
+    .eq('team_id', user.id)
+
+  const anker = ankerDatum(
+    actueleMetingen((metingRijen ?? []) as CategorieMeting[], addDays(vandaag, 1)),
+  )
+
+  // team_id komt uit de sessie en de key is een servergedefinieerde constante:
+  // de client stuurt alleen het weeknummer.
+  const { error } = await supabase.from('settings').upsert(
+    {
+      team_id: user.id,
+      key: CYCLUS_CORRECTIE_KEY,
+      value: serializeCyclusCorrectie({ week, datum: vandaag, ankerBijCorrectie: anker }),
+    },
+    { onConflict: 'team_id,key' },
+  )
+  if (error) throw genericError('periodisering.saveCyclusWeekCorrectie', error)
+
+  revalidatePath('/periodisering')
+  // Dynamisch segment ⇒ route-patroon + type 'page' (revalidatePath(path, type),
+  // node_modules/next/dist/docs/01-app/03-api-reference/04-functions/revalidatePath.md).
+  // Bewust niet '/': het dashboard toont de cyclusweek niet.
+  revalidatePath('/events/[id]/training-plan', 'page')
+}
+
+// Terug naar automatisch: de rij weghalen, want afwezigheid ís "niet ingesteld"
+// (zelfde conventie als de clubkleuren). Een niet-bestaande rij verwijderen is
+// geen fout.
+export async function deleteCyclusWeekCorrectie(): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  // Beide filters zijn verplicht: zonder .eq('key', ...) zou dit álle settings
+  // van het team wissen (les uit resetTeamColor).
+  const { error } = await supabase
+    .from('settings')
+    .delete()
+    .eq('team_id', user.id)
+    .eq('key', CYCLUS_CORRECTIE_KEY)
+  if (error) throw genericError('periodisering.deleteCyclusWeekCorrectie', error)
+
+  revalidatePath('/periodisering')
+  revalidatePath('/events/[id]/training-plan', 'page')
 }

@@ -10,7 +10,13 @@ import {
   hermetingStand,
   computeCurrentSteps,
   cycleWeekFor,
+  parseCyclusCorrectie,
+  serializeCyclusCorrectie,
+  actieveCorrectie,
+  effectieveCyclusWeek,
+  CYCLUS_CORRECTIE_KEY,
   type ActueleMeting,
+  type CyclusCorrectie,
 } from '@/lib/periodization'
 import { berekenStap, type CategorieMeting } from '@/lib/types'
 
@@ -470,5 +476,194 @@ describe('hermetingStand', () => {
     }
     // En minstens één scenario zet hem écht aan (anders bewijst de lus niets).
     expect(scenarios.some((a) => hermetingStand(a).actief)).toBe(true)
+  })
+})
+
+// ────────────────────────────────────────────────
+// Handmatige cyclusweek-correctie
+// ────────────────────────────────────────────────
+
+// Alle datums hieronder zijn kale kalenderdatums; de correctiedatum heet
+// consequent D.
+const D = '2026-09-08'
+
+function correctie(week: number, datum = D, ankerBijCorrectie: string | null = '2026-08-01'): CyclusCorrectie {
+  return { week, datum, ankerBijCorrectie }
+}
+
+describe('CYCLUS_CORRECTIE_KEY', () => {
+  it('is de settings-key die de action schrijft en de pagina leest', () => {
+    // Vastgepind: verandert deze string, dan verliezen bestaande teams stil hun
+    // correctie zonder dat er ergens iets rood wordt.
+    expect(CYCLUS_CORRECTIE_KEY).toBe('cyclus_week_correctie')
+  })
+})
+
+describe('parseCyclusCorrectie / serializeCyclusCorrectie', () => {
+  it('doet een roundtrip mét ankersnapshot', () => {
+    const c = correctie(6)
+    const waarde = serializeCyclusCorrectie(c)
+    expect(waarde).toBe('6|2026-09-08|2026-08-01')
+    expect(parseCyclusCorrectie(waarde)).toEqual(c)
+  })
+
+  it('doet een roundtrip zonder ankersnapshot (leeg derde segment ⇒ null)', () => {
+    const c = correctie(3, D, null)
+    const waarde = serializeCyclusCorrectie(c)
+    expect(waarde).toBe('3|2026-09-08|')
+    expect(parseCyclusCorrectie(waarde)).toEqual({ week: 3, datum: D, ankerBijCorrectie: null })
+  })
+
+  it('accepteert de randweken 1 en 6', () => {
+    expect(parseCyclusCorrectie('1|2026-09-08|')?.week).toBe(1)
+    expect(parseCyclusCorrectie('6|2026-09-08|')?.week).toBe(6)
+  })
+
+  it('geeft null bij afwezige, lege of onvolledige waarden', () => {
+    expect(parseCyclusCorrectie(null)).toBeNull()
+    expect(parseCyclusCorrectie(undefined)).toBeNull()
+    expect(parseCyclusCorrectie('')).toBeNull()
+    expect(parseCyclusCorrectie('6|2026-09-08')).toBeNull() // derde segment ontbreekt
+    expect(parseCyclusCorrectie('6|2026-09-08||')).toBeNull() // segment te veel
+  })
+
+  it('geeft null bij een week buiten 1..6 of een niet-geheel getal', () => {
+    for (const waarde of ['0|2026-09-08|', '7|2026-09-08|', '3.5|2026-09-08|', 'abc|2026-09-08|', '-1|2026-09-08|', ' 6|2026-09-08|']) {
+      expect(parseCyclusCorrectie(waarde)).toBeNull()
+    }
+  })
+
+  it('geeft null bij een ongeldige correctiedatum of ankersnapshot', () => {
+    expect(parseCyclusCorrectie('6|2026-02-30|')).toBeNull()
+    expect(parseCyclusCorrectie('6|gisteren|')).toBeNull()
+    expect(parseCyclusCorrectie('6|2026-09-08|nonsens')).toBeNull()
+    expect(parseCyclusCorrectie('6|2026-09-08|2026-02-30')).toBeNull()
+  })
+})
+
+describe('actieveCorrectie', () => {
+  it('houdt de correctie zolang het afgeleide anker gelijk is aan de snapshot', () => {
+    const c = correctie(6)
+    expect(actieveCorrectie(c, '2026-08-01')).toEqual(c)
+  })
+
+  it('houdt de correctie als er toen én nu geen enkele meting is (AC 5, regel 13)', () => {
+    const c = correctie(6, D, null)
+    expect(actieveCorrectie(c, null)).toEqual(c)
+  })
+
+  it('laat de correctie vervallen zodra het afgeleide anker verschuift (regel 12)', () => {
+    expect(actieveCorrectie(correctie(6), '2026-07-20')).toBeNull()
+  })
+
+  it('laat de correctie vervallen als er nu wél een anker is en toen niet', () => {
+    expect(actieveCorrectie(correctie(6, D, null), '2026-08-01')).toBeNull()
+  })
+
+  it('laat de correctie vervallen als het anker helemaal verdween', () => {
+    expect(actieveCorrectie(correctie(6), null)).toBeNull()
+  })
+
+  it('geeft null zonder correctie', () => {
+    expect(actieveCorrectie(null, '2026-08-01')).toBeNull()
+    expect(actieveCorrectie(null, null)).toBeNull()
+  })
+
+  it('herleeft als het anker terugkeert naar de snapshot (read-time-model)', () => {
+    const c = correctie(6)
+    expect(actieveCorrectie(c, '2026-07-20')).toBeNull()
+    expect(actieveCorrectie(c, '2026-08-01')).toEqual(c)
+  })
+})
+
+describe('effectieveCyclusWeek', () => {
+  const anker = '2026-08-31' // afgeleid anker: op D (2026-09-08) week 2
+
+  it('toont op de correctiedag zelf de ingestelde week (AC 1)', () => {
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: correctie(6), onDate: D })).toBe(6)
+  })
+
+  it('houdt die week de hele week vast en rolt na week 6 door naar week 1 (AC 2)', () => {
+    const c = correctie(6)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-09-14' })).toBe(6) // D+6
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-09-15' })).toBe(1) // D+7
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-09-22' })).toBe(2) // D+14
+  })
+
+  it('rolt over een hele cyclus heen terug naar dezelfde week (43 dagen, edge)', () => {
+    // D+42 = zes volle weken later ⇒ weer week 1; D+43 zit nog in diezelfde week.
+    const c = correctie(1)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-10-20' })).toBe(1) // D+42
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-10-21' })).toBe(1) // D+43
+  })
+
+  it('blijft maanden later modulo-correct doortellen', () => {
+    const c = correctie(3)
+    // D + 182 dagen = 26 weken = precies vier-en-een-derde cyclus: 26 % 6 = 2
+    // weken verder dan week 3 ⇒ week 5.
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2027-03-09' })).toBe(5)
+  })
+
+  it('geeft een lopende week zonder enige nulmeting (AC 5, regel 13)', () => {
+    const c = correctie(4, D, null)
+    expect(effectieveCyclusWeek({ anker: null, actieveCorrectie: c, onDate: D })).toBe(4)
+    expect(effectieveCyclusWeek({ anker: null, actieveCorrectie: c, onDate: '2026-09-15' })).toBe(5)
+  })
+
+  it('valt vóór de correctiedatum terug op het afgeleide anker (regel 11)', () => {
+    const c = correctie(6)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-09-07' })).toBe(
+      cycleWeekFor(anker, '2026-09-07'),
+    )
+    expect(effectieveCyclusWeek({ anker: null, actieveCorrectie: c, onDate: '2026-09-07' })).toBeNull()
+  })
+
+  it('geldt op de correctiedatum zelf, niet pas de dag erna (edge)', () => {
+    const c = correctie(6)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: D })).toBe(6)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-09-07' })).toBe(2)
+  })
+
+  it('verandert de week niet als de correctie gelijk is aan de al berekende week (edge)', () => {
+    // Op D geeft het anker week 2; corrigeren naar 2 laat de uitkomst gelijk.
+    const c = correctie(2)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: D })).toBe(2)
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: c, onDate: '2026-09-15' })).toBe(
+      cycleWeekFor(anker, '2026-09-15'),
+    )
+  })
+
+  it('is zonder correctie identiek aan cycleWeekFor op het anker (regressie)', () => {
+    for (const onDate of ['2026-08-31', '2026-09-08', '2026-10-12', '2027-01-01']) {
+      expect(effectieveCyclusWeek({ anker, actieveCorrectie: null, onDate })).toBe(
+        cycleWeekFor(anker, onDate),
+      )
+    }
+  })
+
+  it('geeft null zonder anker en zonder correctie', () => {
+    expect(effectieveCyclusWeek({ anker: null, actieveCorrectie: null, onDate: D })).toBeNull()
+  })
+
+  it('negeert een correctie met een onmogelijke opgeslagen datum en valt terug op het anker', () => {
+    // parseCyclusCorrectie houdt zo'n waarde normaal tegen; deze tak is het
+    // vangnet als een rij ooit langs een andere weg binnenkomt.
+    const kapot = { week: 6, datum: '2026-02-30', ankerBijCorrectie: null } as CyclusCorrectie
+    expect(effectieveCyclusWeek({ anker, actieveCorrectie: kapot, onDate: D })).toBe(
+      cycleWeekFor(anker, D),
+    )
+  })
+
+  it('telt een week over de zomertijdovergang heen als één volle week', () => {
+    // Spiegel van de cycleWeekFor-regressie: het virtuele anker mag niet via
+    // lokale Date-parsing een dag verschuiven.
+    const oorspronkelijkeTz = process.env.TZ
+    process.env.TZ = 'Europe/Amsterdam'
+    try {
+      const c = correctie(3, '2026-03-25', null)
+      expect(effectieveCyclusWeek({ anker: null, actieveCorrectie: c, onDate: '2026-04-01' })).toBe(4)
+    } finally {
+      process.env.TZ = oorspronkelijkeTz
+    }
   })
 })
