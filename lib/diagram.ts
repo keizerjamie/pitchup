@@ -78,6 +78,24 @@ function looseZone(N: number, i: number): { yLo: number; yHi: number } {
   return { yLo: i * bandH + marge, yHi: (i + 1) * bandH - marge }
 }
 
+// Twee teams MET formatie: elk team wordt in de eigen helft samengedrukt, met
+// de aanvalslinie vlak bij de middenlijn (y=70) en de keeper bij de doellijn.
+// Team 1 is daarna het spiegelbeeld (y'=140−y, x'=100−x). Vóór deze
+// compressie stonden beide teams over de volle veldlengte en liepen de linies
+// door elkaar — dat leest niet als een partijvorm. De ruimte tussen de twee
+// aanvalslinies (y≈62 en y≈78) laat de neutralen op de middenlijn vrij staan.
+const TWEE_TEAMS_HELFT_Y_LO = 62
+const TWEE_TEAMS_HELFT_Y_HI = 135
+
+// Verdeelt `grootte` losse spelers over rijen van maximaal `maxPerRow`, zo
+// gelijk mogelijk (5 → 3+2, 10 → 4+3+3, nooit 4+1). Geeft per rij het aantal.
+function verdeelRijen(grootte: number, maxPerRow: number): number[] {
+  const nRows = Math.max(1, Math.ceil(grootte / maxPerRow))
+  const basis = Math.floor(grootte / nRows)
+  const extra = grootte % nRows
+  return Array.from({ length: nRows }, (_, r) => basis + (r < extra ? 1 : 0))
+}
+
 export function generateDiagram(
   teams: OefeningTeam[],
   aantalNeutralen: number,
@@ -125,12 +143,14 @@ export function generateDiagram(
           // Eén team: comprimeer naar de eigen (onder)helft.
           y = 70 + (baseY / 140) * 70
         } else if (N === 2) {
+          // Beide teams in de eigen helft (zie TWEE_TEAMS_HELFT_Y_*).
+          const eigenHelft = TWEE_TEAMS_HELFT_Y_LO + (baseY / 140) * (TWEE_TEAMS_HELFT_Y_HI - TWEE_TEAMS_HELFT_Y_LO)
           if (i === 0) {
             // Team 0 = basis, onderin.
-            y = baseY
+            y = eigenHelft
           } else {
             // Team 1 = gespiegeld naar de overkant.
-            y = 140 - baseY
+            y = 140 - eigenHelft
             x = 100 - baseX
           }
         } else {
@@ -152,23 +172,29 @@ export function generateDiagram(
     } else {
       // ── Team ZONDER formatie: los rij/grid binnen de zone van het team ──
       // Alle spelers rol 'speler', geen keeper-aanduiding, geen positielabel.
-      const { yLo, yHi } = looseZone(N, i)
+      // Bij 2 teams wordt team 1 net als een formatie-team gespiegeld vanuit
+      // de zone van team 0 (looseZone(2,1) is exact het spiegelbeeld van
+      // looseZone(2,0)), zodat de grootste rij bij beide teams aan dezelfde
+      // kant (bij de middenlijn) staat.
+      const spiegel = N === 2 && i === 1
+      const { yLo, yHi } = looseZone(N, spiegel ? 0 : i)
       const xLo = 8
       const xHi = 92
-      const perRow = Math.min(grootte, 4)
-      const nRows = Math.ceil(grootte / perRow)
+      const rijen = verdeelRijen(grootte, 4)
+      const nRows = rijen.length
 
-      for (let j = 0; j < grootte; j++) {
-        const row = Math.floor(j / perRow)
-        const col = j % perRow
-        // Aantal spelers in déze rij (laatste rij kan korter zijn) → gecentreerd.
-        const rowCount = row === nRows - 1 ? grootte - perRow * (nRows - 1) : perRow
-        const x = xLo + ((col + 1) / (rowCount + 1)) * (xHi - xLo)
-        const y = nRows === 1 ? (yLo + yHi) / 2 : yLo + (row / (nRows - 1)) * (yHi - yLo)
-
-        const biased = applyVeldzone(x, y, veldzone)
-        markers.push({ x: clampX(biased.x), y: clampY(biased.y), teamIndex: i, rol: 'speler' })
-      }
+      rijen.forEach((rowCount, row) => {
+        // Rijen staan gelijkmatig verdeeld BINNEN de zone (nooit op de rand
+        // yLo/yHi zelf): zo staat niemand op de doellijn of de middenlijn.
+        const rijY = yLo + ((row + 1) / (nRows + 1)) * (yHi - yLo)
+        for (let col = 0; col < rowCount; col++) {
+          const rijX = xLo + ((col + 1) / (rowCount + 1)) * (xHi - xLo)
+          const x = spiegel ? 100 - rijX : rijX
+          const y = spiegel ? 140 - rijY : rijY
+          const biased = applyVeldzone(x, y, veldzone)
+          markers.push({ x: clampX(biased.x), y: clampY(biased.y), teamIndex: i, rol: 'speler' })
+        }
+      })
     }
   })
 

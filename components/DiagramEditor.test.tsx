@@ -362,3 +362,32 @@ describe('DiagramEditor — opnieuw genereren', () => {
     expect(onChange).toHaveBeenCalledWith(generateDiagram(teams, 2, 'links'))
   })
 })
+
+describe('DiagramEditor — autoSync / onRegenerate (aangestuurd door OefeningEditor)', () => {
+  it('autoSync: toont de uitleg en géén "Opnieuw genereren"-knop (de tekening volgt de teams al vanzelf)', () => {
+    const value: Diagram = { markers: [], materiaal: [], lijnen: [] }
+    render(
+      <DictProvider dict={nl}>
+        <DiagramEditor value={value} teams={noTeams} aantalNeutralen={0} veldzone={null} onChange={vi.fn()} autoSync />
+      </DictProvider>,
+    )
+    expect(screen.queryByText(nl.oefeningen.regenerate)).not.toBeInTheDocument()
+    expect(screen.getByTestId('diagram-auto-hint')).toHaveTextContent(nl.oefeningen.diagramAutoHint)
+  })
+
+  it('onRegenerate: bevestigen roept onRegenerate aan in plaats van onChange met een momentopname', () => {
+    const value: Diagram = { markers: [], materiaal: [{ type: 'pion', x: 1, y: 1 }], lijnen: [] }
+    const onChange = vi.fn()
+    const onRegenerate = vi.fn()
+    render(
+      <DictProvider dict={nl}>
+        <DiagramEditor value={value} teams={noTeams} aantalNeutralen={0} veldzone={null} onChange={onChange} onRegenerate={onRegenerate} />
+      </DictProvider>,
+    )
+    fireEvent.click(screen.getByText(nl.oefeningen.regenerate))
+    fireEvent.click(screen.getByText(nl.oefeningen.regenerateConfirmButton))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.queryByText(nl.oefeningen.regenerateConfirm)).not.toBeInTheDocument()
+  })
+})

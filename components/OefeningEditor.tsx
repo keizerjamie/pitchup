@@ -14,12 +14,58 @@ import type { OefeningInput } from '@/lib/oefening'
 import { teamBereikLabel } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
 import DiagramEditor from '@/components/DiagramEditor'
+import DiagramView from '@/components/DiagramView'
+import { markerFill } from '@/components/DiagramElements'
+import { generateDiagram } from '@/lib/diagram'
 import { useDict } from '@/lib/i18n-context'
 import ChevronIcon from '@/components/icons/ChevronIcon'
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
 const TEAM_SIZES = VALID_TEAM_SIZES
 const MAX_TEAMS = 6
+
+// Volgorde-onafhankelijke serialisatie: JSONB bewaart de sleutelvolgorde van
+// een object niet, dus een tekening die uit de database terugkomt heeft een
+// andere sleutelvolgorde dan wat generateDiagram net heeft gebouwd. `undefined`
+// wordt overgeslagen, net als bij JSON.stringify.
+function stableStringify(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`
+  if (v !== null && typeof v === 'object') {
+    const entries = Object.entries(v as Record<string, unknown>)
+      .filter(([, val]) => val !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, val]) => `${JSON.stringify(k)}:${stableStringify(val)}`).join(',')}}`
+  }
+  return JSON.stringify(v) ?? 'null'
+}
+
+// Vingerafdruk van de invoer waaruit een tekening gegenereerd wordt. Wordt
+// vergeleken om te weten of een handmatig aangepaste tekening nog bij de
+// huidige teams/neutralen/veldzone hoort.
+function diagramSignature(teams: OefeningTeam[], aantalNeutralen: number, veldzone: Veldzone | null): string {
+  return stableStringify({ teams, aantalNeutralen, veldzone })
+}
+
+// generateDiagram is puur en deterministisch: een opgeslagen tekening die
+// exact gelijk is aan wat de generator voor de opgeslagen oefening oplevert,
+// is nooit met de hand aangepast en mag de teams dus gewoon blijven volgen.
+// (Een tekening van een oudere generator-versie matcht niet en telt dan als
+// handmatig — dat is de veilige kant: die wordt nooit stilzwijgend overschreven.)
+function isAutoDiagram(oefening: Oefening): boolean {
+  if (!oefening.diagram) return false
+  return (
+    stableStringify(oefening.diagram) ===
+    stableStringify(generateDiagram(oefening.teams, oefening.aantal_neutralen, oefening.veldzone))
+  )
+}
+
+// Teams zoals ze meegaan naar de tekening: alleen rijen met een gekozen
+// grootte (zelfde filter als handleSubmit).
+function rowsToDiagramTeams(rows: TeamRow[]): OefeningTeam[] {
+  return rows
+    .filter((tm): tm is TeamRow & { grootte: number } => tm.grootte !== null)
+    .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties, keeperInGrootte: tm.keeperInGrootte }))
+}
 
 // Team-rij tijdens het bewerken: grootte mag tijdelijk leeg (null) zijn
 // zolang de gebruiker nog geen keuze heeft gemaakt. Alleen rijen met een
@@ -87,22 +133,67 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   const [breedteM, setBreedteM] = useState<number | null>(initial?.breedte_m ?? null)
   const [lengteM, setLengteM] = useState<number | null>(initial?.lengte_m ?? null)
   const [veldzone, setVeldzone] = useState<Veldzone | null>(initial?.veldzone ?? null)
-  const [teams, setTeams] = useState<TeamRow[]>(teamsToRows(initial?.teams ?? [], initialCategorie))
+  const [teams, setTeams] = useState<TeamRow[]>(() => teamsToRows(initial?.teams ?? [], initialCategorie))
   const [aantalNeutralen, setAantalNeutralen] = useState<number>(initial?.aantal_neutralen ?? 0)
   // Bovengrens van een flexibel aantal neutralen (supabase/oefening-flexibel-
   // aantal.sql). null = vast aantal.
   const [aantalNeutralenMax, setAantalNeutralenMax] = useState<number | null>(initial?.aantal_neutralen_max ?? null)
-  const [diagram, setDiagram] = useState<Diagram | null>(initial?.diagram ?? null)
   const [showDiagramEditor, setShowDiagramEditor] = useState(false)
+
+  // ── Tekening: twee standen ─────────────────────────────────────────────────
+  // Automatisch (handmatigDiagram === null): de tekening wordt bij elke render
+  //   opnieuw uit de huidige teams/neutralen/veldzone gegenereerd en loopt dus
+  //   nooit achter — ook niet als de trainer de sectie opent vóórdat de teams
+  //   goed staan (de oude bron van verkeerde tekeningen).
+  // Handmatig (handmatigDiagram !== null): de trainer heeft gesleept/geplaatst;
+  //   die tekening wordt bewaard. Wijzigen de teams daarna, dan verschijnt een
+  //   melding met één knop om terug te vallen op de automatische stand.
+  const [initialIsAuto] = useState(() => (initial ? isAutoDiagram(initial) : false))
+  const [handmatigDiagram, setHandmatigDiagram] = useState<Diagram | null>(() =>
+    initialIsAuto ? null : (initial?.diagram ?? null),
+  )
+  // Vingerafdruk van de invoer op het moment van de laatste handmatige
+  // aanpassing; wijkt de huidige vingerafdruk af, dan loopt de tekening achter.
+  const [handmatigBasis, setHandmatigBasis] = useState<string | null>(() =>
+    initial?.diagram && !initialIsAuto
+      ? diagramSignature(rowsToDiagramTeams(teamsToRows(initial.teams, initialCategorie)), initial.aantal_neutralen, initial.veldzone)
+      : null,
+  )
+  // Heeft deze oefening een tekening? Opgeslagen tekening, of de trainer heeft
+  // de sectie geopend. Zonder tekening blijft `diagram` null (de weergaven
+  // vallen dan terug op de formatievelden per team, ook bij flexibele aantallen).
+  const [tekeningActief, setTekeningActief] = useState(() => !!initial?.diagram)
   // orientatie heeft (net als voorheen) geen eigen invoerveld in deze sheet;
   // bestaande waarde wordt bij bewerken behouden i.p.v. stilzwijgend gereset.
   const orientatie = initial?.orientatie ?? 'vrij'
 
-  // Teams zoals ze meegaan naar het diagram: alleen rijen met een gekozen
-  // grootte (zelfde filter als handleSubmit hieronder).
-  const diagramTeams: OefeningTeam[] = teams
-    .filter((tm): tm is TeamRow & { grootte: number } => tm.grootte !== null)
-    .map((tm) => ({ grootte: tm.grootte, formaties: tm.formaties, keeperInGrootte: tm.keeperInGrootte }))
+  const diagramTeams = rowsToDiagramTeams(teams)
+  const signature = diagramSignature(diagramTeams, aantalNeutralen, veldzone)
+  const isHandmatig = handmatigDiagram !== null
+  const tekeningVerouderd = isHandmatig && handmatigBasis !== signature
+  // De tekening zoals hij getoond én opgeslagen wordt.
+  const effectiefDiagram: Diagram | null = isHandmatig
+    ? handmatigDiagram
+    : tekeningActief
+      ? generateDiagram(diagramTeams, aantalNeutralen, veldzone)
+      : null
+
+  function handleDiagramChange(d: Diagram) {
+    setHandmatigDiagram(d)
+    // Elke handmatige aanpassing geldt als "past bij de teams van nu".
+    setHandmatigBasis(signature)
+  }
+
+  function handleDiagramRegenerate() {
+    setHandmatigDiagram(null)
+    setHandmatigBasis(null)
+    setTekeningActief(true)
+  }
+
+  function toggleDiagramEditor() {
+    setShowDiagramEditor((v) => !v)
+    setTekeningActief(true)
+  }
 
   const catLabel = (key: string) => t.periodization.categories[key] ?? key
 
@@ -197,7 +288,7 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
         })),
       aantal_neutralen: aantalNeutralen,
       aantal_neutralen_max: aantalNeutralenMax,
-      diagram,
+      diagram: effectiefDiagram,
     }
     startTransition(async () => {
       try {
@@ -371,19 +462,11 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
             </div>
           </div>
 
-          {/* Teams — dynamische lijst */}
+          {/* Teams — dynamische lijst. De toevoegknop staat ONDER de lijst
+              (waar het nieuwe team verschijnt) en is groot genoeg om op
+              mobiel niet te missen. */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-semibold text-muted">{t.oefeningen.teamsSection}</label>
-              <button
-                type="button"
-                onClick={addTeam}
-                disabled={teams.length >= MAX_TEAMS}
-                className="text-xs font-semibold text-warning-text hover:text-panel-orange-ink disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {t.oefeningen.addTeam}
-              </button>
-            </div>
+            <label className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.teamsSection}</label>
 
             {teams.length === 0 && (
               <p className="text-xs text-faint">{t.oefeningen.noTeamsHint}</p>
@@ -401,7 +484,30 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                     : null
                 return (
                   <div key={i} className="rounded-xl border border-[var(--border-soft)] p-3 space-y-2">
-                    <div className="flex items-end gap-2">
+                    {/* Kop: "Team n" met de kleur die dit team in de tekening
+                        krijgt (markerFill), zodat team en tekening aan elkaar
+                        te koppelen zijn. Verwijderknop rechts in de kop. */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                        <span
+                          aria-hidden="true"
+                          className="inline-block w-3 h-3 rounded-full border border-[#111827]/40"
+                          style={{ background: markerFill('speler', i) }}
+                        />
+                        {t.oefeningen.teamLabel.replace('{n}', String(i + 1))}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeTeam(i)}
+                        aria-label={t.oefeningen.removeTeamAria}
+                        className="flex-shrink-0 w-9 h-9 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="flex items-start gap-2">
                       <div className="flex-1 min-w-0">
                         <label htmlFor={`team-size-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.teamSize}</label>
                         <select
@@ -437,16 +543,6 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                           {team.formaties.length > 0 ? t.oefeningen.rangeFormationHint : t.oefeningen.rangeHint}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeTeam(i)}
-                        aria-label={t.oefeningen.removeTeamAria}
-                        className="flex-shrink-0 w-9 h-9 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
                     </div>
 
                     {/* Keeper-schakelaar per team — verborgen bij een 11-tal
@@ -542,26 +638,82 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
                 )
               })}
             </div>
-          </div>
 
-          {/* Tekening — achter een toggle zodat de sheet op mobiel kort blijft */}
-          <div>
             <button
               type="button"
-              onClick={() => setShowDiagramEditor((v) => !v)}
-              className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
+              onClick={addTeam}
+              disabled={teams.length >= MAX_TEAMS}
+              className="mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/60 text-sm font-semibold text-warning-text hover:border-warning hover:bg-panel-orange transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-warning/60"
             >
-              <ChevronIcon open={showDiagramEditor} className="w-[18px] h-[18px] inline-block align-middle mr-1" />{t.oefeningen.diagramToggle}
+              {t.oefeningen.addTeam}
             </button>
+            {teams.length >= MAX_TEAMS && (
+              <p className="text-[11px] text-faint mt-1 text-center">{t.oefeningen.maxTeamsHint.replace('{n}', String(MAX_TEAMS))}</p>
+            )}
+          </div>
+
+          {/* Tekening — achter een toggle zodat de sheet op mobiel kort blijft.
+              Zie het commentaar bij handmatigDiagram voor de twee standen. */}
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={toggleDiagramEditor}
+                className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
+              >
+                <ChevronIcon open={showDiagramEditor} className="w-[18px] h-[18px] inline-block align-middle mr-1" />{t.oefeningen.diagramToggle}
+              </button>
+              {tekeningActief && (
+                <span
+                  data-testid="diagram-mode-badge"
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                    isHandmatig ? 'bg-panel-orange text-panel-orange-ink' : 'bg-surface-sunken text-muted'
+                  }`}
+                >
+                  {isHandmatig ? t.oefeningen.diagramManualBadge : t.oefeningen.diagramAutoBadge}
+                </span>
+              )}
+            </div>
+
+            {/* Handmatige tekening loopt achter op de teams: altijd zichtbaar,
+                ook als de sectie dicht is — anders slaat de trainer een
+                verouderde tekening op zonder het te merken. */}
+            {tekeningVerouderd && (
+              <div role="status" className="mt-3 rounded-xl border border-warning/30 bg-panel-orange p-3 space-y-2">
+                <p className="text-sm text-panel-orange-ink">{t.oefeningen.diagramStale}</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleDiagramRegenerate}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{ background: 'var(--color-accent-strong)' }}
+                  >
+                    {t.oefeningen.diagramStaleAction}
+                  </button>
+                  <span className="text-[11px] text-panel-orange-ink">{t.oefeningen.diagramStaleWarning}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Dichtgeklapt maar wél een tekening: kleine preview, zodat de
+                trainer ziet wat er opgeslagen wordt. */}
+            {!showDiagramEditor && effectiefDiagram && (
+              <button type="button" onClick={toggleDiagramEditor} className="mt-3 block rounded-lg" aria-label={t.oefeningen.diagramSection}>
+                <DiagramView diagram={effectiefDiagram} sizePx={120} />
+              </button>
+            )}
+
             {showDiagramEditor && (
               <div className="mt-3">
                 <label className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.diagramSection}</label>
                 <DiagramEditor
-                  value={diagram}
+                  value={effectiefDiagram}
                   teams={diagramTeams}
                   aantalNeutralen={aantalNeutralen}
                   veldzone={veldzone}
-                  onChange={setDiagram}
+                  onChange={handleDiagramChange}
+                  autoSync={!isHandmatig}
+                  onRegenerate={handleDiagramRegenerate}
                 />
               </div>
             )}

@@ -33,6 +33,18 @@ interface Props {
   aantalNeutralen: number
   veldzone: Veldzone | null
   onChange: (diagram: Diagram) => void
+  /**
+   * De aanroeper houdt de tekening zelf in sync met de teams (OefeningEditor:
+   * zolang er niet handmatig is getekend). Dan is "Opnieuw genereren" zinloos
+   * en toont de editor in plaats daarvan een korte uitleg.
+   */
+  autoSync?: boolean
+  /**
+   * Aangeroepen bij een bevestigde "Opnieuw genereren" in plaats van zelf
+   * generateDiagram → onChange te doen. Laat de aanroeper terugvallen op zijn
+   * automatische stand (OefeningEditor) i.p.v. een momentopname op te slaan.
+   */
+  onRegenerate?: () => void
 }
 
 const EMPTY_DIAGRAM: Diagram = { markers: [], materiaal: [], lijnen: [] }
@@ -47,7 +59,7 @@ function clamp(v: number, lo: number, hi: number): number {
 // genereren — ze zijn geen vereiste om spelers op het bord te zetten. Werkt
 // met muis én touch via Pointer Events (setPointerCapture, zodat move/up bij
 // het gesleepte element blijven ook als de cursor buiten de vorm komt).
-export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone, onChange }: Props) {
+export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone, onChange, autoSync = false, onRegenerate }: Props) {
   const t = useDict()
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -205,7 +217,8 @@ export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone,
   }
 
   function handleRegenerate() {
-    onChange(generateDiagram(teams, aantalNeutralen, veldzone))
+    if (onRegenerate) onRegenerate()
+    else onChange(generateDiagram(teams, aantalNeutralen, veldzone))
     setRegenerateConfirm(false)
   }
 
@@ -392,9 +405,13 @@ export default function DiagramEditor({ value, teams, aantalNeutralen, veldzone,
         </div>
       </div>
 
-      {/* Opnieuw genereren — inline bevestiging (patroon OefeningLibrary) */}
+      {/* Opnieuw genereren — inline bevestiging (patroon OefeningLibrary).
+          In autoSync-stand volgt de tekening de teams al vanzelf: dan alleen
+          de uitleg, geen knop. */}
       <div>
-        {!regenerateConfirm ? (
+        {autoSync ? (
+          <p className="text-xs text-muted" data-testid="diagram-auto-hint">{t.oefeningen.diagramAutoHint}</p>
+        ) : !regenerateConfirm ? (
           <button type="button" onClick={() => setRegenerateConfirm(true)} className="text-xs font-semibold text-warning-text hover:text-panel-orange-ink transition-colors">
             {t.oefeningen.regenerate}
           </button>

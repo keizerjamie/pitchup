@@ -429,3 +429,217 @@ describe('OefeningEditor — overige velden', () => {
     expect(submitted.diagram?.markers).toEqual([{ x: 25, y: 35, teamIndex: 0, rol: 'speler' }])
   })
 })
+
+// ── Tekening: automatisch volgen vs. handmatig (opfrisronde 2026-09-09) ──────
+import { generateDiagram } from '@/lib/diagram'
+import type { Diagram, Oefening } from '@/lib/types'
+
+function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
+  return {
+    id: 'o1',
+    team_id: 'team-1',
+    naam: 'Rondo',
+    beschrijving: null,
+    categorie: 'partijen_klein',
+    duur_min: null,
+    breedte_m: null,
+    lengte_m: null,
+    orientatie: 'vrij',
+    veldzone: null,
+    teams: [],
+    aantal_neutralen: 0,
+    diagram: null,
+    created_at: '2024-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+// Plaatst via de speler-tool één marker op het veld (= handmatige aanpassing).
+function plaatsSpeler(container: HTMLElement) {
+  const svg = container.querySelector('[data-testid="diagram-svg"]') as SVGSVGElement
+  svg.getBoundingClientRect = () =>
+    ({ x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 140, width: 100, height: 140, toJSON() {} }) as DOMRect
+  fireEvent.click(screen.getByText(nl.oefeningen.toolSpeler))
+  const bg = svg.querySelector('[data-testid="diagram-field-bg"]') as SVGRectElement
+  const event = new Event('pointerdown', { bubbles: true, cancelable: true })
+  Object.assign(event, { clientX: 25, clientY: 35, pointerId: 1, pointerType: 'mouse', button: 0, isPrimary: true })
+  fireEvent(bg, event)
+}
+
+function renderEditorMetContainer(overrides: Partial<Parameters<typeof OefeningEditor>[0]> = {}) {
+  const onSubmit = vi.fn<(input: OefeningInput) => Promise<void>>().mockResolvedValue(undefined)
+  const utils = render(
+    <DictProvider dict={nl}>
+      <OefeningEditor onCancel={vi.fn()} onSubmit={onSubmit} {...overrides} />
+    </DictProvider>,
+  )
+  return { ...utils, onSubmit }
+}
+
+describe('OefeningEditor — tekening volgt automatisch de teams', () => {
+  it('sectie openen vóórdat de teams goed staan: bij opslaan gaat tóch de tekening van de uiteindelijke teams mee', async () => {
+    const { onSubmit } = renderEditorMetContainer()
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Partij' } })
+
+    // Eerst de tekening openen (0 teams) — de oude bron van verkeerde tekeningen.
+    fireEvent.click(screen.getByText(new RegExp(nl.oefeningen.diagramToggle)))
+    expect(screen.getByTestId('diagram-mode-badge')).toHaveTextContent(nl.oefeningen.diagramAutoBadge)
+    // In de automatische stand is er geen "Opnieuw genereren" maar een uitleg.
+    expect(screen.queryByText(nl.oefeningen.regenerate)).not.toBeInTheDocument()
+    expect(screen.getByTestId('diagram-auto-hint')).toBeInTheDocument()
+
+    // Daarna pas de teams en neutralen invullen.
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '5' } })
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[1], { target: { value: '5' } })
+    fireEvent.change(screen.getByLabelText(nl.oefeningen.neutralsLabel), { target: { value: '2' } })
+
+    // De tekening op het bord volgt live: 5 + 5 + 2 markers.
+    expect(screen.getAllByTestId(/^diagram-marker-\d+$/)).toHaveLength(12)
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    const submitted = onSubmit.mock.calls[0][0]
+    expect(submitted.diagram).toEqual(
+      generateDiagram(
+        [
+          { grootte: 5, formaties: [], keeperInGrootte: true },
+          { grootte: 5, formaties: [], keeperInGrootte: true },
+        ],
+        2,
+        null,
+      ),
+    )
+  })
+
+  it('zonder de tekening te openen blijft diagram null (weergaven vallen terug op de formatievelden)', async () => {
+    const { onSubmit } = renderEditorMetContainer()
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Partij' } })
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '5' } })
+    expect(screen.queryByTestId('diagram-mode-badge')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit.mock.calls[0][0].diagram).toBeNull()
+  })
+
+  it('handmatige aanpassing wordt bewaard; teams daarna wijzigen toont een melding, en "Opnieuw genereren" valt terug op automatisch', async () => {
+    const { container, onSubmit } = renderEditorMetContainer()
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Partij' } })
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '4' } })
+
+    fireEvent.click(screen.getByText(new RegExp(nl.oefeningen.diagramToggle)))
+    plaatsSpeler(container)
+    expect(screen.getByTestId('diagram-mode-badge')).toHaveTextContent(nl.oefeningen.diagramManualBadge)
+    expect(screen.queryByText(nl.oefeningen.diagramStale)).not.toBeInTheDocument()
+    // Handmatig: nu wél de gewone "Opnieuw genereren"-knop.
+    expect(screen.getByText(nl.oefeningen.regenerate)).toBeInTheDocument()
+
+    // Teams wijzigen → melding, maar de handmatige tekening wordt NIET stil overschreven.
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[1], { target: { value: '3' } })
+    expect(screen.getByText(nl.oefeningen.diagramStale)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    const eerste = onSubmit.mock.calls[0][0].diagram!
+    expect(eerste.markers).toHaveLength(5) // 4 gegenereerd + 1 handmatig geplaatst
+    expect(eerste.markers).toContainEqual({ x: 25, y: 35, teamIndex: 0, rol: 'speler' })
+
+    // Eén klik: terug naar automatisch, melding weg, tekening volgt de 2 teams.
+    // Binnen de melding (role=status): de DiagramEditor heeft zelf ook een
+    // "Opnieuw genereren"-knop met dezelfde tekst.
+    fireEvent.click(within(screen.getByRole('status')).getByText(nl.oefeningen.diagramStaleAction))
+    expect(screen.queryByText(nl.oefeningen.diagramStale)).not.toBeInTheDocument()
+    expect(screen.getByTestId('diagram-mode-badge')).toHaveTextContent(nl.oefeningen.diagramAutoBadge)
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2))
+    expect(onSubmit.mock.calls[1][0].diagram).toEqual(
+      generateDiagram(
+        [
+          { grootte: 4, formaties: [], keeperInGrootte: true },
+          { grootte: 3, formaties: [], keeperInGrootte: true },
+        ],
+        0,
+        null,
+      ),
+    )
+  })
+
+  it('handmatige tekening loopt achter: de melding staat ook zichtbaar als de tekening-sectie dicht is', () => {
+    const initial = makeOefening({
+      teams: [{ grootte: 4, formaties: [] }],
+      diagram: { markers: [{ x: 12, y: 34, teamIndex: 0, rol: 'speler' }], materiaal: [], lijnen: [] },
+    })
+    renderEditorMetContainer({ initial })
+    expect(screen.getByTestId('diagram-mode-badge')).toHaveTextContent(nl.oefeningen.diagramManualBadge)
+    expect(screen.queryByText(nl.oefeningen.diagramStale)).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(nl.oefeningen.neutralsLabel), { target: { value: '3' } })
+    expect(screen.getByText(nl.oefeningen.diagramStale)).toBeInTheDocument()
+  })
+
+  it('bestaande oefening met een automatisch gegenereerde tekening (uit JSONB, andere sleutelvolgorde) blijft de teams volgen', async () => {
+    const teams = [{ grootte: 4, formaties: [] as string[] }]
+    const gegenereerd = generateDiagram(teams, 1, 'links')
+    // JSONB bewaart de sleutelvolgorde niet: simuleer een andere volgorde.
+    const uitDatabase: Diagram = {
+      lijnen: [],
+      materiaal: [],
+      markers: gegenereerd.markers.map((m) => ({ rol: m.rol, teamIndex: m.teamIndex, y: m.y, x: m.x, ...(m.label !== undefined ? { label: m.label } : {}) })),
+    }
+    const initial = makeOefening({ teams, aantal_neutralen: 1, veldzone: 'links', diagram: uitDatabase })
+    const { onSubmit } = renderEditorMetContainer({ initial })
+    expect(screen.getByTestId('diagram-mode-badge')).toHaveTextContent(nl.oefeningen.diagramAutoBadge)
+
+    fireEvent.change(screen.getAllByLabelText(nl.oefeningen.teamSize)[0], { target: { value: '6' } })
+    expect(screen.queryByText(nl.oefeningen.diagramStale)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit.mock.calls[0][0].diagram).toEqual(
+      generateDiagram([{ grootte: 6, formaties: [], keeperInGrootte: true }], 1, 'links'),
+    )
+  })
+
+  it('bestaande handmatige tekening blijft bij openen en opslaan ongewijzigd zolang de teams gelijk blijven', async () => {
+    const handmatig: Diagram = {
+      markers: [{ x: 12, y: 34, teamIndex: 0, rol: 'speler', label: 'A' }],
+      materiaal: [{ type: 'bal', x: 5, y: 5 }],
+      lijnen: [],
+    }
+    const initial = makeOefening({ teams: [{ grootte: 4, formaties: [] }], diagram: handmatig })
+    const { onSubmit } = renderEditorMetContainer({ initial })
+    fireEvent.click(screen.getByText(new RegExp(nl.oefeningen.diagramToggle)))
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit.mock.calls[0][0].diagram).toEqual(handmatig)
+  })
+})
+
+describe('OefeningEditor — teams toevoegen (knop onder de lijst)', () => {
+  it('de knop staat ónder de teamkaarten, teamkaarten hebben een "Team n"-kop', () => {
+    renderEditorMetContainer()
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    expect(screen.getByText(nl.oefeningen.teamLabel.replace('{n}', '1'))).toBeInTheDocument()
+    expect(screen.getByText(nl.oefeningen.teamLabel.replace('{n}', '2'))).toBeInTheDocument()
+
+    const knop = screen.getByText(nl.oefeningen.addTeam)
+    const laatsteSelect = screen.getAllByLabelText(nl.oefeningen.teamSize)[1]
+    // DOCUMENT_POSITION_FOLLOWING: de knop komt in de DOM ná het laatste team.
+    expect(laatsteSelect.compareDocumentPosition(knop) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('bij 6 teams is de knop uitgeschakeld en staat er een hint', () => {
+    renderEditorMetContainer()
+    for (let i = 0; i < 6; i++) fireEvent.click(screen.getByText(nl.oefeningen.addTeam))
+    expect(screen.getAllByLabelText(nl.oefeningen.teamSize)).toHaveLength(6)
+    expect(screen.getByText(nl.oefeningen.addTeam)).toBeDisabled()
+    expect(screen.getByText(nl.oefeningen.maxTeamsHint.replace('{n}', '6'))).toBeInTheDocument()
+  })
+})

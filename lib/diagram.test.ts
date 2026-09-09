@@ -145,7 +145,7 @@ describe('generateDiagram', () => {
     expect(d.markers.every((m) => m.teamIndex === 0)).toBe(true)
   })
 
-  it('2 teams met formatie: team 1 is exact gespiegeld t.o.v. de basispositie van team 0', () => {
+  it('2 teams met formatie: elk team volledig in de eigen helft, team 1 exact gespiegeld t.o.v. team 0', () => {
     const size = 6
     const def = opties(size)[0]
     const teams: OefeningTeam[] = [
@@ -158,22 +158,68 @@ describe('generateDiagram', () => {
     expect(t0.length).toBe(def.positions.length)
     expect(t1.length).toBe(def.positions.length)
 
+    // Eigen helft: de linies van beide teams lopen niet meer door elkaar
+    // (voorheen stond elk team over de volle veldlengte).
+    expect(t0.every((m) => m.y > 70)).toBe(true)
+    expect(t1.every((m) => m.y < 70)).toBe(true)
+
     def.positions.forEach((p, idx) => {
-      const baseX = p.x
-      const baseY = p.y * 1.4
-      // team 0 = basis
-      expect(t0[idx].x).toBeCloseTo(baseX, 5)
-      expect(t0[idx].y).toBeCloseTo(baseY, 5)
-      // team 1 = gespiegeld: y'=140−y, x'=100−x
-      expect(t1[idx].y).toBeCloseTo(140 - baseY, 5)
-      expect(t1[idx].x).toBeCloseTo(100 - baseX, 5)
+      // team 0 = basis: x ongewijzigd, y samengedrukt in de onderste helft
+      expect(t0[idx].x).toBeCloseTo(p.x, 5)
+      // team 1 = gespiegeld t.o.v. team 0: y'=140−y, x'=100−x
+      expect(t1[idx].y).toBeCloseTo(140 - t0[idx].y, 5)
+      expect(t1[idx].x).toBeCloseTo(100 - t0[idx].x, 5)
     })
 
-    // Keeper: team 0 grote y (onderin), team 1 kleine y (overkant).
+    // Keeper bij de eigen doellijn, aanvalslinie vlak bij de middenlijn.
     const k0 = t0.find((m) => m.rol === 'keeper')!
     const k1 = t1.find((m) => m.rol === 'keeper')!
-    expect(k0.y).toBeGreaterThan(70)
-    expect(k1.y).toBeLessThan(70)
+    expect(k0.y).toBeGreaterThan(120)
+    expect(k1.y).toBeLessThan(20)
+    const aanval0 = Math.min(...t0.map((m) => m.y))
+    expect(aanval0).toBeGreaterThan(70)
+    expect(aanval0).toBeLessThan(85)
+  })
+
+  it('2 teams met formatie + neutralen: de neutralen op de middenlijn staan vrij tussen beide aanvalslinies', () => {
+    const def = opties(6)[0]
+    const teams: OefeningTeam[] = [
+      { grootte: 6, formaties: [def.key] },
+      { grootte: 6, formaties: [def.key] },
+    ]
+    const d = generateDiagram(teams, 3, null)
+    const neutralen = d.markers.filter((m) => m.rol === 'neutraal')
+    expect(neutralen).toHaveLength(3)
+    expect(neutralen.every((m) => m.y === 70)).toBe(true)
+    // Geen teamspeler binnen 5 eenheden van de middenlijn (markerstraal 2,5).
+    expect(d.markers.filter((m) => m.rol !== 'neutraal').every((m) => Math.abs(m.y - 70) >= 5)).toBe(true)
+  })
+
+  it('los team: rijen zo gelijk mogelijk verdeeld (5 → 3+2) en nooit op de rand van de zone', () => {
+    const d = generateDiagram([{ grootte: 5, formaties: [] }], 0, null)
+    const ys = [...new Set(d.markers.map((m) => m.y))].sort((a, b) => a - b)
+    expect(ys).toHaveLength(2)
+    expect(ys.map((y) => d.markers.filter((m) => m.y === y).length)).toEqual([3, 2])
+    // Zone van één team is 70..135: niemand óp de middenlijn of de doellijn.
+    expect(d.markers.every((m) => m.y > 70 && m.y < 135)).toBe(true)
+
+    const tien = generateDiagram([{ grootte: 10, formaties: [] }], 0, null)
+    const ys10 = [...new Set(tien.markers.map((m) => m.y))].sort((a, b) => a - b)
+    expect(ys10.map((y) => tien.markers.filter((m) => m.y === y).length)).toEqual([4, 3, 3])
+  })
+
+  it('2 losse teams: team 1 is het spiegelbeeld van team 0 (grootste rij bij beide aan de middenlijn)', () => {
+    const d = generateDiagram([{ grootte: 5, formaties: [] }, { grootte: 5, formaties: [] }], 0, null)
+    const t0 = d.markers.filter((m) => m.teamIndex === 0)
+    const t1 = d.markers.filter((m) => m.teamIndex === 1)
+    expect(t0).toHaveLength(5)
+    expect(t1).toHaveLength(5)
+    t0.forEach((m, idx) => {
+      expect(t1[idx].y).toBeCloseTo(140 - m.y, 5)
+      expect(t1[idx].x).toBeCloseTo(100 - m.x, 5)
+    })
+    expect(t0.every((m) => m.y > 70)).toBe(true)
+    expect(t1.every((m) => m.y < 70)).toBe(true)
   })
 
   it('1 team: alle markers liggen op de eigen (onder)helft (y>=70)', () => {
