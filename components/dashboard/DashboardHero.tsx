@@ -55,7 +55,7 @@ export default function DashboardHero({
 
   return (
     <div
-      className="rounded-[20px] lg:rounded-[22px] overflow-hidden relative p-[18px] lg:px-7 lg:py-6 text-white"
+      className="rounded-[20px] lg:rounded-[22px] overflow-hidden relative p-[18px] lg:px-7 lg:py-6 text-white transition-transform active:scale-[0.99] lg:active:scale-100"
       style={{ background: 'linear-gradient(125deg,#0a2e2a 0%,#0d3d38 45%,#14655c 100%)' }}
     >
       <div
@@ -83,6 +83,17 @@ export default function DashboardHero({
           <rect x="26" y="118" width="48" height="18" />
         </g>
       </svg>
+
+      {/* Mobiel: de hele tegel is één tik naar het event (aanwezigheid). Een
+          uitgerekte link onder de inhoud, zodat de knop hieronder (z-[2]) een
+          eigen, hogere laag houdt — geen geneste <a> in <a>. Op desktop staat
+          "Bekijk event" als losse knop; daar blijft deze laag verborgen. */}
+      <Link
+        href={secondaryHref}
+        aria-label={secondaryLabel}
+        data-testid="hero-tile-link"
+        className="lg:hidden absolute inset-0 z-[1] rounded-[20px]"
+      />
 
       {/* ── Mobile (compact) ── */}
       <div className="lg:hidden relative flex flex-col gap-3">
@@ -126,7 +137,7 @@ export default function DashboardHero({
           </div>
           <Link
             href={primaryHref}
-            className="h-9 rounded-[11px] px-3.5 flex items-center gap-1.5 text-[12.5px] font-bold text-white"
+            className="relative z-[2] h-9 rounded-[11px] px-3.5 flex items-center gap-1.5 text-[12.5px] font-bold text-white"
             style={{ background: 'var(--primary)' }}
           >
             <span className="ms text-[17px]">{primaryIcon}</span>
