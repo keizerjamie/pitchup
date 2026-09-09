@@ -34,7 +34,7 @@ Gebouwd via de feature-factory-keten (researcher → story → PM → backend �
 - Categorie zit met een CHECK-constraint in de DB (`oefeningen_categorie_check`) — nieuwe categorie = migratie nodig.
 
 ### Tekening / tactiekbord (`diagram`)
-- Pure functies in **`lib/diagram.ts`**: `generateDiagram(teams, aantalNeutralen, veldzone, ...)` (auto-opzet: 2 teams gespiegeld tegenover elkaar `y'=140−y`/`x'=100−x`, 1 team eigen helft, 3+ in banden; team **zonder** formatie → losse plaatsing zonder labels; neutralen apart) en `validateDiagram` (tolerante server-side normalisatie: clamp coords `0-100 × 0-140`, whitelist typen/stijlen/varianten, strip onbekende velden, maxima). Constanten `DIAGRAM_MAX_*`.
+- Pure functies in **`lib/diagram.ts`**: `generateDiagram(teams, aantalNeutralen, veldzone, ...)` (auto-opzet: 2 teams elk in de **eigen helft** en team 1 gespiegeld `y'=140−y`/`x'=100−x` — sinds 2026-09-09, zie "Oefening-editor opfrisronde" onderaan; 1 team eigen helft, 3+ in banden; team **zonder** formatie → losse plaatsing zonder labels; neutralen apart) en `validateDiagram` (tolerante server-side normalisatie: clamp coords `0-100 × 0-140`, whitelist typen/stijlen/varianten, strip onbekende velden, maxima). Constanten `DIAGRAM_MAX_*`.
 - Model: `Diagram { markers, materiaal, lijnen }`. Marker `{x,y,teamIndex,rol,label?}` (kleur uit rol+teamIndex; team0=licht, team1=oranje, neutraal=geel, keeper=rood accent). Materiaal `{type:'pion'|'bal'|'doeltje', x, y, variant?}` (doeltje-varianten groot/klein/mini). Lijn `{stijl:'pass'|'loop'|'dribbel', punten:{x,y}[]}` (min 2 punten; pass=doorgetrokken, loop=gestippeld, dribbel=golvend).
 - UI: `DiagramEditor` (unified Pointer Events + `touch-action:none`, tools select/speler/pion/bal/doeltje/lijn/verwijder, kleur-/variant-keuze via segmented controls, "Opnieuw genereren" met bevestiging), read-only `DiagramView` (kaart + trainingsschema, fallback op per-team `FormationField` als `diagram==null`), gedeeld `PitchBackground` + `DiagramElements`. Coördinatenstelsel = SVG viewBox `0 0 100 140`.
 - **Markers zijn vrij bewerkbaar**: toevoegen (speler-tool met kleurkeuze), verslepen, verwijderen. Teams+formaties zijn alleen het startpunt voor (opnieuw) genereren. Opslaan zonder team is mogelijk.
@@ -2943,3 +2943,58 @@ geen i18n-sleutels, geen migratie.
 - De categorie-chips in "Huidige periodiseringstatus" gebruiken vaste Tailwind-kleuren
   (`PERIODIZATION_CATEGORIES[].color`, bv. `bg-red-100 text-red-800`) en bewegen niet mee
   met dark mode. Leesbaar, maar uit de toon.
+
+## Oefening-editor opfrisronde: teams toevoegen, tekening volgt de teams, logischer veldbeeld (2026-09-09)
+Vraag van de eigenaar: "Team toevoegen" was klein en stond bóven de teams; de tekening werd
+gegenereerd terwijl de teams nog niet goed stonden (en liep daarna achter); gegenereerde
+spelers stonden onlogisch op het veld. Alleen frontend + pure lib; geen migratie, geen
+backend, wel 8 nieuwe i18n-sleutels (`oefeningen.teamLabel`, `maxTeamsHint`,
+`diagramAutoBadge`, `diagramManualBadge`, `diagramAutoHint`, `diagramStale`,
+`diagramStaleAction`, `diagramStaleWarning`) in alle 5 talen.
+
+### Tekening: twee standen in `components/OefeningEditor.tsx`
+- **Automatisch** (`handmatigDiagram === null`): `effectiefDiagram` wordt bij elke render uit
+  de huidige teams/neutralen/veldzone gegenereerd — de tekening kan dus niet meer achterlopen,
+  ook niet als de sectie vóór de teams wordt geopend. `DiagramEditor` krijgt `autoSync` (geen
+  "Opnieuw genereren"-knop, wel een uitleg, `data-testid="diagram-auto-hint"`).
+- **Handmatig** (na slepen/plaatsen via `onChange`): tekening wordt bewaard;
+  `handmatigBasis` = vingerafdruk (`diagramSignature`) van de invoer op dat moment. Wijkt de
+  huidige vingerafdruk af → melding (`role="status"`, óók zichtbaar als de sectie dicht is)
+  met één knop die terugvalt op automatisch. `DiagramEditor.onRegenerate` routeert de
+  bestaande "Opnieuw genereren"-bevestiging naar diezelfde terugval.
+- **`tekeningActief`** (opgeslagen tekening óf sectie ooit geopend) bepaalt of er überhaupt
+  een tekening meegaat; anders blijft `diagram: null` (weergaven vallen dan terug op de
+  `FormationField`s, belangrijk voor flexibele aantallen — dat gedrag is ongewijzigd).
+- **Bestaande oefening openen**: `isAutoDiagram` vergelijkt de opgeslagen tekening met
+  `generateDiagram(initial.teams, …)` via `stableStringify` (sleutelvolgorde-onafhankelijk —
+  **JSONB bewaart sleutelvolgorde niet**, `JSON.stringify` zou dus altijd ongelijk zijn).
+  Gelijk → automatisch (blijft de teams volgen); ongelijk → handmatig (nooit stil
+  overschreven). Gevolg: tekeningen van de generator van vóór deze datum tellen als
+  handmatig — één klik op de melding zet ze om.
+- Badge "Automatisch"/"Handmatig aangepast" (`data-testid="diagram-mode-badge"`) en een
+  kleine `DiagramView`-preview bij een dichtgeklapte sectie.
+
+### Generator (`lib/diagram.ts`)
+- **2 teams met formatie**: elk team samengedrukt in de eigen helft
+  (`TWEE_TEAMS_HELFT_Y_LO/HI` = 62..135, aanvalslinie ≈78/62, keeper ≈128/12), team 1
+  gespiegeld. Vóór: beide teams over de volle veldlengte → linies door elkaar. Neutralen op
+  y=70 blijven ≥5 vrij van teamspelers.
+- **Losse teams**: `verdeelRijen` verdeelt zo gelijk mogelijk (5 → 3+2, 10 → 4+3+3, nooit
+  4+1); rijen staan bínnen de zone (nooit op middenlijn/doellijn); bij 2 teams wordt team 1
+  vanuit de zone van team 0 gespiegeld, zodat de grootste rij bij beide aan de middenlijn staat.
+- Testcontract aangepast in `lib/diagram.test.ts` (de oude "team 0 = basispositie over het
+  hele veld"-test is vervangen); overige generator-tests bleven zonder wijziging groen.
+
+### Teams-sectie
+- "+ Team toevoegen" is een volle-breedte gestippelde knop **onder** de lijst; bij 6 teams
+  disabled met hint. Teamkaart heeft een kop "Team n" met de tekening-kleur (`markerFill`) en
+  de verwijderknop in die kop. Tests zoeken de knop nog steeds op `nl.oefeningen.addTeam`.
+
+### Verificatie
+- Playwright tegen een tijdelijke `/login/preview-oefening`-route (methode uit de vorige
+  sessie), scenario's: bestaande auto-tekening, klachtscenario (tekening open vóór teams →
+  volgt live 5+5+3 markers → slepen → melding → terugval), mobiel. Route na afloop verwijderd.
+- **Playwright-valkuil**: `mouse.move/down/up` raakt niets als het element buiten de viewport
+  ligt (`boundingBox` is viewport-relatief) — eerst `scrollIntoViewIfNeeded()`.
+- `cyclusweek-correctie` AC1/AC12 faalden opnieuw, ook met `git stash` (pre-existing,
+  datumafhankelijk — zie vorige sessie).
