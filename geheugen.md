@@ -2998,3 +2998,23 @@ backend, wel 8 nieuwe i18n-sleutels (`oefeningen.teamLabel`, `maxTeamsHint`,
   ligt (`boundingBox` is viewport-relatief) — eerst `scrollIntoViewIfNeeded()`.
 - `cyclusweek-correctie` AC1/AC12 faalden opnieuw, ook met `git stash` (pre-existing,
   datumafhankelijk — zie vorige sessie).
+
+## Dashboard-hero: hele tegel op mobiel tikbaar naar het event (2026-09-09, commit `b9c9a18`, live)
+Vraag: "kan ik op mobiel op de tegel drukken zodat hij direct naar het evenement gaat?"
+Op mobiel had de hero (`components/dashboard/DashboardHero.tsx`) alleen de primaire knop
+(trainingsplan/opstelling); "Bekijk event" bestond uitsluitend in de desktop-lay-out.
+
+- **Stretched-link-patroon**: een lege `<Link>` met `aria-label`, `data-testid="hero-tile-link"`,
+  `lg:hidden absolute inset-0 z-[1]` direct in de kaart-div; de mobiele primaire knop kreeg
+  `relative z-[2]`. Zo geen geneste `<a>` in `<a>` en de knop houdt zijn eigen doel. Desktop
+  ongewijzigd (twee losse knoppen). Tik-feedback `active:scale-[0.99] lg:active:scale-100`.
+- `app/page.tsx` niet aangeraakt: `secondaryHref` (`/events/[id]`) bestond al als prop.
+- Test: `hero-tegel-link.acceptance.test.tsx` rendert DashboardHero direct (geen mocks) en
+  toetst klassen-contract + DOM-structuur; jsdom rekent geen stacking door.
+- **Verificatie stacking in echte browser**: tijdelijke route `app/login-hero-preview/page.tsx`
+  (valt onder `path.startsWith('/login')` in proxy.ts, dus geen bypass nodig) en
+  `document.elementFromPoint(x,y).closest('a')` op 375px: alle tegelpunten → `/events/ev1`,
+  knop + icoon → `/events/ev1/training-plan`; op 1280px is de tegel-link `display:none`.
+  Route daarna verwijderd. Let op: `computer.left_click` faalt als het Browser-paneel
+  verborgen is — JS-hittest is dan het alternatief.
+- `cyclusweek-correctie` AC1/AC12 falen nog steeds pre-existing (ook met `git stash`).
