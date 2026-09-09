@@ -2893,3 +2893,53 @@ feature-factory-keten met beide goedkeuringspauzes; geen migratie nodig.
 - Visuele browsercheck van het chevron (licht/donker) is **niet** gedaan: dev-server zat achter
   de login. Structureel risico is weg (SVG kan niet als tekst renderen); uitlijning/grootte
   bij de eerste keer openen even bekijken.
+
+## Trainingsplan-pagina: opfrisronde — losse tekst in kaarten ondergebracht (2026-09-09, commit `6c47429`, live)
+Vraag van de eigenaar: "sommige tekst staat tussen secties in, dat ziet er gek uit". Alleen
+frontend (`TrainingPlanEditor`, `BezettingStepper`, `TeamIndelingEditor`); geen backend,
+geen i18n-sleutels, geen migratie.
+
+### Wat er structureel veranderd is (`components/TrainingPlanEditor.tsx`)
+- **Tijdregel per blok** ("19:00 – 19:10 · 10 min", `tijdKop`) staat nu ín de kaart als
+  kopstrook, met de acties bewerken/ontkoppelen (`acties`) rechts ernaast — niet meer als
+  losse `<p>` bóven de kaart. De acties zijn daarmee uit de titelrij gehaald, zodat de titel
+  op mobiel de volle breedte houdt.
+- **Parallelle groep = één groepskaart**: verzonken vlak (`bg-surface-sunken` + rand) met tijd
+  en "Parallel"-pil in de kop, de ledenkaarten (`bg-surface`) erin en `ParallelGroepEditor`
+  eronder. De "Parallel"-badge per lid is weg. Op papier valt de wrapper via
+  `print:bg-transparent print:border-0 print:rounded-none` terug op het bestaande
+  `.print-oefening-blok`-model; `print:break-inside-avoid` blijft op de wrapper (AC25 in
+  `parallelle-oefeningen.acceptance.test.tsx` leest `editor.parentElement.className`).
+- **Autosave-hint** zit in de kop van de doelstelling-kaart (rechts van het label, wisselt
+  met "✓ Opgeslagen"); textarea heeft nu `id="trainingsplan-doelstelling"` + `htmlFor`.
+- Mobiel: stepper-labels `flex-shrink-0`, knop "Genereer automatisch" `whitespace-nowrap`
+  (die brak in tweeën en overlapte de kop "Teamindeling"); stap-label `whitespace-nowrap`.
+
+### Structuurcontracten waar tests op leunen (gecheckt, blijven kloppen)
+- Ledenkaart van een groep = dichtstbijzijnde `.rounded-xl` rond de oefeningnaam en draagt
+  `flex-1` (parallelle-oefeningen AC-test). Zet dus geen extra `.rounded-xl` rond de naam.
+- `print-plan-kaart`, `print:flow-root`, de `print:float-left`-diagramwrapper en de badge met
+  `print-club-bg-primary` zijn ongewijzigd gebleven (E1/C1 in afdrukken-test).
+
+### Visueel testen zonder in te loggen — werkende methode
+- **Tijdelijke route onder `/login/…`** (bv. `app/login/preview-tp/page.tsx`) met nepdata:
+  `proxy.ts` laat elk pad dat met `/login` begint zonder sessie door, en `AppShell` toont
+  daar wél de volledige app-chrome (die checkt op `pathname === '/login'` exact). Na afloop
+  verwijderen; geen proxy-wijziging nodig.
+- **Playwright** (`devDependencies`) voor full-page screenshots desktop/mobiel × licht/donker
+  (`colorScheme` + `localStorage.theme` via `addInitScript`) en print
+  (`page.emulateMedia({ media: 'print' })`, viewport 703px). Het Browser-paneel van de
+  desktop-app tekent niet opnieuw zolang het verborgen is — screenshots daar blijven hangen.
+- **Icoonfont-valkuil bij zo'n preview**: `/fonts/*` valt onder de proxy-matcher en wordt
+  zonder sessie naar `/login` geredirect (307) → iconen renderen als tekst. In Playwright
+  oplossen met `page.route('**/fonts/material-symbols-rounded.woff2*', …fulfill van schijf)`.
+  In productie speelt dit niet (ingelogd). Structurele fix zou zijn: `fonts` toevoegen aan de
+  matcher-uitsluiting in `proxy.ts` — niet gedaan, buiten scope.
+
+### Openstaand / bewust niet aangeraakt
+- `cyclusweek-correctie.acceptance.test.tsx` AC1 en AC12 faalden op 2026-09-09 óók zonder
+  deze wijzigingen (met `git stash` geverifieerd); vermoedelijk datumafhankelijk. Niet
+  onderzocht.
+- De categorie-chips in "Huidige periodiseringstatus" gebruiken vaste Tailwind-kleuren
+  (`PERIODIZATION_CATEGORIES[].color`, bv. `bg-red-100 text-red-800`) en bewegen niet mee
+  met dark mode. Leesbaar, maar uit de toon.
