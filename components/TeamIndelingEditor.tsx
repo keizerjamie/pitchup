@@ -305,7 +305,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
             type="button"
             onClick={handleAutoAssign}
             disabled={isPending}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white active:scale-95 transition disabled:opacity-50 disabled:active:scale-100"
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white whitespace-nowrap flex-shrink-0 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100"
             style={{ background: 'var(--color-accent)' }}
           >
             {t.teamIndeling.autoAssign}

@@ -293,14 +293,6 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   return (
     <div className="space-y-6">
 
-      {/* Auto-save reassurance — there is no explicit save button */}
-      <p className="print:hidden flex items-center gap-1.5 text-xs text-faint -mb-2">
-        <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        {t.trainingPlan.autoSaveHint}
-      </p>
-
       {/* Doelstelling. Op print bewust compact (FOUT4 print-review): de
           scherm-typografie (grote letters, ruime p-5-padding) kostte
           onnodig veel papier. Kopje klein/subtiel, tekst in lijn met de
@@ -319,13 +311,27 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         data-testid="doelstelling-block"
         className={`bg-surface rounded-2xl border border-[var(--border-soft)] p-5 print:break-inside-avoid print:p-[2mm] print:rounded-md print:flow-root print-plan-kaart ${doelstelling.trim() === '' ? 'print:hidden' : ''}`}
       >
-        <label className="block text-sm font-semibold text-muted mb-2 flex items-center justify-between print:text-[7px] print:mb-[0.5mm] print:uppercase print:tracking-wide print:text-faint">
-          {t.trainingPlan.objective}
-          {doelstellingSaved && (
-            <span className="print:hidden text-xs text-panel-green-ink font-normal">{t.trainingPlan.saved}</span>
+        {/* Kopregel: label links, opslagstatus rechts. De autosave-hint
+            (er is geen opslaanknop) stond eerder als losse regel bóven deze
+            kaart en zweefde daar tussen de secties; hier hoort hij bij het
+            enige vrije-tekstveld van de pagina en wisselt hij met "Opgeslagen". */}
+        <div className="flex items-center justify-between gap-3 mb-2 print:mb-[0.5mm]">
+          <label htmlFor="trainingsplan-doelstelling" className="text-sm font-semibold text-muted print:text-[7px] print:uppercase print:tracking-wide print:text-faint">
+            {t.trainingPlan.objective}
+          </label>
+          {doelstellingSaved ? (
+            <span className="print:hidden text-xs font-semibold text-panel-green-ink">{t.trainingPlan.saved}</span>
+          ) : (
+            <span className="print:hidden inline-flex items-center gap-1.5 text-xs text-faint min-w-0">
+              <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="truncate">{t.trainingPlan.autoSaveHint}</span>
+            </span>
           )}
-        </label>
+        </div>
         <textarea
+          id="trainingsplan-doelstelling"
           rows={2}
           value={doelstelling}
           onChange={e => handleDoelstellingChange(e.target.value)}
@@ -447,19 +453,45 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               // "19:15" bruikbaarder dan "blok 2", en de trainer heeft het
               // uitgeprinte plan in zijn hand.
               const blokTijd = tijdPerBlok.get(blok.key)
+              // Tijd-kopregel van het blok. Stond eerder als losse tekstregel
+              // BOVEN de kaart en zweefde daarmee tussen de kaarten in; nu
+              // staat hij ín de kaart (los blok) of in de kop van de
+              // groepskaart (parallelle groep), zodat elke regel tekst een
+              // duidelijk eigenaar heeft. Bewust ook op papier (zie eerder).
+              const tijdKop = blokTijd && (blokTijd.startTijd || blokTijd.duurMin !== null) ? (
+                <p className="text-[11px] font-semibold text-faint tabular-nums print:text-[7pt]">
+                  {blokTijd.startTijd && blokTijd.eindTijd
+                    ? `${blokTijd.startTijd} – ${blokTijd.eindTijd}`
+                    : blokTijd.startTijd}
+                  {blokTijd.duurMin !== null && (
+                    <span className={blokTijd.startTijd ? 'text-faint' : undefined}>
+                      {blokTijd.startTijd ? ' · ' : ''}{blokTijd.duurMin} min
+                    </span>
+                  )}
+                </p>
+              ) : null
               return (
-                <div key={blok.key} className={isGroup ? 'print-oefening-blok print:break-inside-avoid' : 'print-oefening-blok print:break-inside-avoid'}>
-                  {blokTijd && (blokTijd.startTijd || blokTijd.duurMin !== null) && (
-                    <p className="text-[11px] font-bold text-faint mb-1 tabular-nums print:text-[7pt] print:mb-[0.5mm]">
-                      {blokTijd.startTijd && blokTijd.eindTijd
-                        ? `${blokTijd.startTijd} – ${blokTijd.eindTijd}`
-                        : blokTijd.startTijd}
-                      {blokTijd.duurMin !== null && (
-                        <span className={blokTijd.startTijd ? 'text-faint' : undefined}>
-                          {blokTijd.startTijd ? ' · ' : ''}{blokTijd.duurMin} min
-                        </span>
-                      )}
-                    </p>
+                // Een parallelle groep is één visuele kaart (verzonken vlak met
+                // rand) waarin de ledenkaarten naast elkaar staan en de
+                // verdeling eronder hoort — niet langer losse kaarten met een
+                // zwevende sectie "Parallelle verdeling" erachter. Op papier
+                // valt de groepskaart terug op het bestaande, kale
+                // `.print-oefening-blok`-model (globals.css).
+                <div
+                  key={blok.key}
+                  className={
+                    isGroup
+                      ? 'print-oefening-blok print:break-inside-avoid rounded-2xl border border-[var(--border-soft)] bg-surface-sunken p-3 sm:p-4 print:bg-transparent print:border-0 print:rounded-none'
+                      : 'print-oefening-blok print:break-inside-avoid'
+                  }
+                >
+                  {isGroup && (
+                    <div className="flex items-center justify-between gap-3 mb-3 print:mb-[0.5mm]">
+                      {tijdKop ?? <span />}
+                      <span className="print:hidden text-[11px] font-semibold px-2 py-0.5 rounded-full bg-surface text-muted border border-[var(--border-soft)] flex-shrink-0">
+                        {t.trainingPlan.parallelBadge}
+                      </span>
+                    </div>
                   )}
                   <div
                     className={
@@ -530,6 +562,48 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               const stepText = contentStep !== null && contentStep !== undefined
                 ? (k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${contentStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${contentStep}`))
                 : null
+              // Kaartacties (bewerken / ontkoppelen). Staan in de kopstrook
+              // van de kaart, naast de tijd — niet meer náást de titel, zodat
+              // de titel op een smal scherm de volle breedte houdt.
+              const acties = (
+                <div className="print:hidden flex items-center gap-1 flex-shrink-0 -my-1 -mr-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(isExpanded ? null : k.id)}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors active:scale-95 ${isExpanded ? 'bg-surface-sunken text-ink' : 'text-faint hover:bg-surface-sunken hover:text-muted'}`}
+                    aria-label={t.trainingPlan.detailsToggle}
+                    aria-expanded={isExpanded}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                  {unlinkConfirm === k.id ? (
+                    <div className="flex gap-1">
+                      <button type="button" onClick={() => handleUnlink(k.id)}
+                        disabled={isPending}
+                        className="text-xs font-semibold text-panel-red-ink px-2 py-1 rounded-lg hover:bg-panel-red transition-colors">
+                        {t.trainingPlan.confirmYes}
+                      </button>
+                      <button type="button" onClick={() => setUnlinkConfirm(null)}
+                        className="text-xs text-faint px-2 py-1 rounded-lg hover:bg-surface-sunken transition-colors">
+                        {t.trainingPlan.confirmNo}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setUnlinkConfirm(k.id)}
+                      aria-label={t.trainingPlan.unlink}
+                      className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors active:scale-95"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )
               return (
                 // `print:flow-root` (validator-fix, zie de toelichting bij
                 // het doelstellingblok hierboven): alleen de eerste kaart
@@ -544,6 +618,12 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       : 'print:break-inside-avoid bg-surface rounded-xl border border-[var(--border-soft)] p-4 print:p-[2mm] print:flow-root print-plan-kaart'
                   }
                 >
+                  {/* Kopstrook: tijd links (alleen bij een los blok — in een
+                      groep staat de tijd al in de groepskop), acties rechts. */}
+                  <div className="flex items-center justify-between gap-3 mb-2 print:mb-[0.5mm]">
+                    {!isGroup && tijdKop ? tijdKop : <span />}
+                    {acties}
+                  </div>
                   <div className="flex items-start gap-3">
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
                       {/* Badge: "3" voor een los blok, "3a"/"3b"/... voor de
@@ -577,7 +657,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       {/* Scherm: naam op eigen regel, badges als pillen eronder.
                           Print: vervangen door één compacte kopregel hieronder
                           (samen was dit >20mm van de kaarthoogte). */}
-                      <div className="font-semibold text-ink print:hidden">{o.naam}</div>
+                      <div className="text-[15px] font-semibold text-ink leading-snug print:hidden">{o.naam}</div>
 
                       {/* Print-only kopregel: naam · duur · afmetingen · stap,
                           achter elkaar op één regel. Staat bewust in de DOM
@@ -668,11 +748,6 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             {t.trainingPlan.nestedInBadge.replace('{name}', parent.oefeningen.naam)}
                           </span>
                         )}
-                        {isGroup && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
-                            {t.trainingPlan.parallelBadge}
-                          </span>
-                        )}
                       </div>
 
                       {/* Stapveld + trainingsparameters direct op de kaart
@@ -689,7 +764,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           className="print:hidden mt-2 p-2.5 rounded-lg bg-surface-sunken border border-[var(--border-soft)] space-y-1.5"
                         >
                           <div className="flex items-center gap-2">
-                            <label htmlFor={`stap-override-${k.id}`} className="text-xs font-semibold text-muted">
+                            <label htmlFor={`stap-override-${k.id}`} className="text-xs font-semibold text-muted whitespace-nowrap">
                               {t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})
                             </label>
                             <input
@@ -836,42 +911,6 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           players={players}
                           presentPlayerIds={presentPlayerIds}
                         />
-                      )}
-                    </div>
-                    <div className="print:hidden flex items-center gap-2 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedId(isExpanded ? null : k.id)}
-                        className="w-8 h-8 rounded-lg hover:bg-surface-sunken flex items-center justify-center text-faint hover:text-muted transition-colors"
-                        aria-label={t.trainingPlan.detailsToggle}
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-                      {unlinkConfirm === k.id ? (
-                        <div className="flex gap-1">
-                          <button type="button" onClick={() => handleUnlink(k.id)}
-                            disabled={isPending}
-                            className="text-xs font-semibold text-panel-red-ink px-2 py-1 rounded-lg hover:bg-panel-red transition-colors">
-                            {t.trainingPlan.confirmYes}
-                          </button>
-                          <button type="button" onClick={() => setUnlinkConfirm(null)}
-                            className="text-xs text-faint px-2 py-1 rounded-lg hover:bg-surface-sunken transition-colors">
-                            {t.trainingPlan.confirmNo}
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setUnlinkConfirm(k.id)}
-                          aria-label={t.trainingPlan.unlink}
-                          className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
                       )}
                     </div>
                   </div>

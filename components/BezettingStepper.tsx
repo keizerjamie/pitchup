@@ -151,8 +151,8 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
           const label = t.teamIndeling.teamLabel.replace('{n}', String(i + 1))
           return (
             <div key={i} className="flex items-center justify-between gap-3">
-              <span className="text-sm text-ink">{label}</span>
-              <div className="flex items-center gap-2">
+              <span className="text-sm text-ink flex-shrink-0">{label}</span>
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => adjustTeam(i, -1)}
@@ -182,8 +182,8 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
 
         {neutraalBereik.max > neutraalBereik.min && (
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-ink">{t.oefeningen.neutralsLabel}</span>
-            <div className="flex items-center gap-2">
+            <span className="text-sm text-ink flex-shrink-0">{t.oefeningen.neutralsLabel}</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 type="button"
                 onClick={() => adjustNeutralen(-1)}
