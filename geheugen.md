@@ -3018,3 +3018,55 @@ Op mobiel had de hero (`components/dashboard/DashboardHero.tsx`) alleen de prima
   Route daarna verwijderd. Let op: `computer.left_click` faalt als het Browser-paneel
   verborgen is — JS-hittest is dan het alternatief.
 - `cyclusweek-correctie` AC1/AC12 falen nog steeds pre-existing (ook met `git stash`).
+
+## Oefening direct bewerken vanaf de trainingskaart en uit de picker (2026-09-10, commit `b6b811d`, live)
+Vraag: "als een oefening op de training staat, wil ik hem daar meteen in zijn geheel kunnen
+aanpassen; ook in het selectiescherm." Gebouwd via de feature-factory-keten; geen backend-,
+datamodel- of dependencywijziging — twee nieuwe ingangen naar bestaand gedrag.
+
+- **Eén editor, drie aanroepers**: `OefeningEditor` kent zijn backend niet; de aanroeper geeft
+  `onSubmit` mee. `OefeningLibrary`, `TrainingPlanEditor` en `OefeningPicker` roepen alle drie
+  het ongewijzigde `updateOefening` aan (tenant-check `assertOwnOefening` + dubbel gescopede
+  update + revalidatie van `/oefeningen` én elke gekoppelde trainingspagina zaten er al in).
+  `OefeningInput` altijd als type uit `lib/oefening.ts` importeren, nooit via een
+  `'use server'`-bestand.
+- **Live referentie, bewust**: bewerken vanaf een training wijzigt de oefening in álle
+  trainingen (geen kopie per training). Daarom staat er vanuit de trainingsflow een hint-regel
+  bovenin de editor (`hint`-prop, sleutel `oefeningen.editSharedHint`); de bibliotheekpagina
+  geeft die prop níet mee, en een test bewaakt dat. "Alleen déze training aanpassen" is
+  expliciet out-of-scope (zou een override/kopie-datamodel vergen).
+- **Trainingskaart**: potlood tussen details-toggle en ontkoppelen (`openOefeningEditor`).
+  De editor wordt op topniveau gerenderd, als sibling van de picker. **Eén modal tegelijk in
+  beide richtingen**: `openOefeningEditor` sluit de picker, en `openPicker`/`openSuggestedPicker`
+  zetten `editingOefening` op null (de validator vond dat die tweede richting eerst ontbrak —
+  via toetsenbord bereikbaar, want `OefeningEditor` heeft geen focus-trap). `setShowPicker(true)`
+  bestaat alleen in die twee openers. Keerzijde: picker openen met open editor gooit
+  ongesaved typewerk weg — geaccepteerd.
+- **Details-toggle was ook een potlood met label "Bewerken"** — nu `ChevronIcon` met label
+  "Details" (`trainingPlan.detailsToggle`, 5 talen). Tests lezen die sleutel, geen letterlijke
+  string, dus dat brak niets.
+- **Picker-rij**: was zelf één `<button>`; potlood erin = `<button>` in `<button>`. Nu een
+  wrapper-div met toevoeg-knop (naam/badges/duur blijven erín, zodat bestaande tests die op
+  de naam klikken blijven toevoegen) en een apart `w-11`-potlood dat nooit `disabled` is.
+  Testcontract: `container.querySelectorAll('button button').length === 0`. De editor
+  vervangt de sheet-inhoud via early-return, zoals `showCreate` al deed; filters blijven staan.
+  De stretched-link-aanpak van de dashboard-hero is hier bewust níet gebruikt: jsdom vangt
+  dan geen klik op de naam-tekst.
+- **Aria met naam**: `oefeningen.editAriaNamed` = "Oefening bewerken: {name}" (`.replace`),
+  omdat er anders tientallen identieke labels op één scherm staan. Bijvangst: drie bestaande
+  `getByRole('button', {name: /…/})`-queries in `dezelfde-oefening-meerdere-keren` en
+  `flexibel-spelersaantal` matchten daardoor ook het potlood; aangescherpt zonder de
+  assertie te verzwakken. Les: naam-regexes op knoppen zijn fragiel zodra er een
+  aria-label met de oefeningnaam bijkomt.
+- **Tussentijds verwijderd/ander team**: `editingOefening` is een snapshot in state, geen
+  afgeleide waarde (anders sluit de editor zichzelf midden in het typen bij een revalidatie).
+  Opslaan faalt dan op `assertOwnOefening` met de melding in de editor-banner; typewerk blijft.
+- **Tests**: `oefening-inline-bewerken.acceptance.test.tsx` (25 its, AC1-AC11 tegen de echte
+  `updateOefening` met gemockte Supabase, incl. AC6/AC7 via beide ingangen); componenttests
+  van beide componenten uitgebreid (mock van `@/app/actions/oefening-library` nodig zodra een
+  component die module importeert).
+- **Bekende schuld, niet in deze commit**: potlood-SVG staat driemaal gekopieerd
+  (`OefeningLibrary`, `TrainingPlanEditor`, `OefeningPicker`) — kandidaat voor een gedeeld
+  `PencilIcon` zoals `ChevronIcon`. Foutstrings uit `assertOwnOefening`/`validateOefening`
+  zijn onvertaald Nederlands in en/de/fr/es (bestond al op `/oefeningen`).
+- `cyclusweek-correctie` AC1/AC12 falen nog steeds pre-existing (ook met `git stash`).
