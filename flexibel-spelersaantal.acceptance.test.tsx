@@ -413,7 +413,10 @@ describe('Filter & weergave', () => {
   it('AC11: de picker-rij toont ook het vorm-label "4v2–6v2" van een flexibele oefening (niet alleen de bibliotheekkaart)', () => {
     renderPlan([], { library: [makeOefening({ id: 'o1', naam: 'Flexibel bereik' })] })
     fireEvent.click(screen.getAllByRole('button', { name: nl.trainingPlan.addExercise })[0])
-    const rij = screen.getByRole('button', { name: /Flexibel bereik/ })
+    // .closest('button') i.p.v. getByRole(name: /Flexibel bereik/): sinds de
+    // inline-bewerken-feature heeft de rij ook een potlood-knop met
+    // aria-label "Oefening bewerken: Flexibel bereik", die de naam-regex ook matcht.
+    const rij = screen.getByText('Flexibel bereik').closest('button') as HTMLButtonElement
     expect(within(rij).getByText('4v2–6v2')).toBeInTheDocument()
   })
 
@@ -526,7 +529,13 @@ describe('Filter & weergave', () => {
       ],
     })
     fireEvent.click(screen.getAllByRole('button', { name: nl.trainingPlan.addExercise })[0])
-    const namen = screen.getAllByRole('button', { name: /Breed|Exact|Smal/ }).map((el) => el.textContent)
+    // Filtert de potlood-knoppen (aria-label "Oefening bewerken: …") eruit:
+    // die matchen de naam-regex ook sinds de inline-bewerken-feature, maar
+    // dragen zelf geen aria-label-vrije toevoeg-tekst.
+    const namen = screen
+      .getAllByRole('button', { name: /Breed|Exact|Smal/ })
+      .filter((el) => !el.hasAttribute('aria-label'))
+      .map((el) => el.textContent)
     expect(namen[0]).toContain('Exact')
     expect(namen[1]).toContain('Smal')
     expect(namen[2]).toContain('Breed')

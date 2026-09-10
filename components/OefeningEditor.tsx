@@ -92,6 +92,11 @@ interface Props {
   /** Voorinvullen bij het aanmaken vanuit een periodiserings-suggestie (alleen gebruikt als `initial` ontbreekt). */
   presetCategorie?: OefeningCategorie
   presetNaam?: string
+  /** Optionele, neutrale hint-regel bovenin (bij de foutbanner-plek). Alleen
+   *  meegegeven door aanroepers die bewerken vanaf een plek waar de oefening
+   *  ook nog ergens anders live gekoppeld kan zijn (trainingskaart, picker) —
+   *  de losstaande bibliotheekpagina geeft dit bewust niet mee. */
+  hint?: string
 }
 
 // Filtert meegekomen `formaties` alvast op geldigheid tegen de huidige
@@ -120,7 +125,7 @@ function teamsToRows(teams: OefeningTeam[], categorie: OefeningCategorie): TeamR
   })
 }
 
-export default function OefeningEditor({ initial, onCancel, onSubmit, presetCategorie, presetNaam }: Props) {
+export default function OefeningEditor({ initial, onCancel, onSubmit, presetCategorie, presetNaam, hint }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -317,6 +322,9 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
         </div>
 
         <div className="p-5 space-y-4">
+          {hint && (
+            <p className="text-xs text-faint bg-surface-sunken rounded-lg px-3 py-2">{hint}</p>
+          )}
           {error && (
             <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
               {error}

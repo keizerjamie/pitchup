@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import type { OefeningCategorie } from '@/lib/types'
-import { nl } from '@/messages/nl'
+import { nl, type Dict } from '@/messages/nl'
+import { en } from '@/messages/en'
 import type { Oefening } from '@/lib/types'
 import OefeningPicker from '@/components/OefeningPicker'
 
@@ -11,7 +12,17 @@ vi.mock('@/app/actions/training-plan', () => ({
   createAndAddOefening: vi.fn(),
 }))
 
+// Verplichte mock voor de nieuwe inline-bewerken-feature (zoals
+// OefeningLibrary.test.tsx:7-11).
+vi.mock('@/app/actions/oefening-library', () => ({
+  createOefening: vi.fn(),
+  updateOefening: vi.fn().mockResolvedValue(undefined),
+  deleteOefening: vi.fn(),
+}))
+
 import { addOefeningToTraining } from '@/app/actions/training-plan'
+import { updateOefening } from '@/app/actions/oefening-library'
+const mockUpdateOefening = updateOefening as unknown as ReturnType<typeof vi.fn>
 
 function makeOefening(overrides: Partial<Oefening> = {}): Oefening {
   return {
@@ -38,9 +49,10 @@ function renderPicker(
   onClose = vi.fn(),
   presetCategorie?: OefeningCategorie,
   aanwezigAantal = 0,
+  dict: Dict = nl,
 ) {
   render(
-    <DictProvider dict={nl}>
+    <DictProvider dict={dict}>
       <OefeningPicker
         eventId="event-1"
         library={library}
@@ -321,7 +333,13 @@ describe('OefeningPicker', () => {
       makeOefening({ id: 'o2', naam: 'Exact', teams: [{ grootte: 6, formaties: [] }] }),
       makeOefening({ id: 'o3', naam: 'Smal bereik', teams: [{ grootte: 5, formaties: [], grootteMax: 6 }] }),
     ])
-    const namen = screen.getAllByRole('button', { name: /Breed bereik|Exact|Smal bereik/ }).map((el) => el.textContent)
+    // Filtert de potlood-knoppen (aria-label "Oefening bewerken: …") eruit:
+    // die matchen de naam-regex ook, maar hebben zelf geen aria-label-vrije
+    // toevoeg-tekst.
+    const namen = screen
+      .getAllByRole('button', { name: /Breed bereik|Exact|Smal bereik/ })
+      .filter((el) => !el.hasAttribute('aria-label'))
+      .map((el) => el.textContent)
     expect(namen[0]).toContain('Exact')
     expect(namen[1]).toContain('Smal bereik')
     expect(namen[2]).toContain('Breed bereik')
@@ -335,5 +353,118 @@ describe('OefeningPicker', () => {
     expect(screen.getByText('4v2–6v2')).toBeInTheDocument()
     const exactRow = screen.getByText('Exact').closest('button')!
     expect(exactRow.textContent).not.toMatch(/–/)
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// Oefening bewerken vanaf de picker-rij (AC3, AC4, AC8, AC10). Zelfde
+// bewerkformulier (OefeningEditor) en server action (updateOefening) als de
+// trainingskaart — hier het tweede NIEUWE aanroeppunt.
+// ────────────────────────────────────────────────────────────────────────────
+describe('OefeningPicker — oefening bewerken vanaf een rij', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('AC3/AC4: potlood opent de editor (pickerTitle weg, vooringevuld), opslaan sluit hem en de verse library-prop toont de nieuwe naam', async () => {
+    const oefening = makeOefening({ id: 'o1', naam: 'Rondo' })
+    const { rerender } = render(
+      <DictProvider dict={nl}>
+        <OefeningPicker eventId="event-1" library={[oefening]} onClose={vi.fn()} aanwezigAantal={0} />
+      </DictProvider>,
+    )
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    expect(screen.queryByText(nl.oefeningen.pickerTitle)).not.toBeInTheDocument()
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+    expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Rondo')
+
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Rondo bijgewerkt' } })
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+
+    await waitFor(() => expect(mockUpdateOefening).toHaveBeenCalledWith('o1', expect.objectContaining({ naam: 'Rondo bijgewerkt' })))
+    await waitFor(() => expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument())
+
+    // Server revalideert; de parent (TrainingPlanEditor) geeft een verse
+    // `library`-prop door — de picker blijft gemount (showPicker is
+    // parent-state) en toont meteen de nieuwe naam.
+    rerender(
+      <DictProvider dict={nl}>
+        <OefeningPicker eventId="event-1" library={[{ ...oefening, naam: 'Rondo bijgewerkt' }]} onClose={vi.fn()} aanwezigAantal={0} />
+      </DictProvider>,
+    )
+    expect(screen.getByText('Rondo bijgewerkt')).toBeInTheDocument()
+  })
+
+  it('AC10: klik op de rij (toevoegen) roept addOefeningToTraining aan, niet updateOefening', () => {
+    renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })])
+    fireEvent.click(screen.getByText('Rondo'))
+    expect(addOefeningToTraining).toHaveBeenCalledWith('event-1', 'o1')
+    expect(mockUpdateOefening).not.toHaveBeenCalled()
+  })
+
+  it('AC10: klik op het potlood opent de editor en roept addOefeningToTraining niet aan', () => {
+    renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })])
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    expect(addOefeningToTraining).not.toHaveBeenCalled()
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+  })
+
+  it('AC10 structuurcontract: geen <button> genest in een <button> (rij is een wrapper-div met twee zusterknoppen)', () => {
+    const { container } = render(
+      <DictProvider dict={nl}>
+        <OefeningPicker eventId="event-1" library={[makeOefening({ id: 'o1', naam: 'Rondo' })]} onClose={vi.fn()} aanwezigAantal={0} />
+      </DictProvider>,
+    )
+    expect(container.querySelectorAll('button button').length).toBe(0)
+  })
+
+  it('AC8: annuleren in de bewerk-editor gaat terug naar de lijst met de filters nog intact', () => {
+    renderPicker([
+      makeOefening({ id: 'o1', naam: 'Rondo', categorie: 'partijen_klein' }),
+      makeOefening({ id: 'o2', naam: 'Positiespel', categorie: 'positiespel' }),
+    ])
+    fireEvent.change(screen.getByLabelText(nl.oefeningen.filterCategoryLabel), { target: { value: 'partijen_klein' } })
+    // Alleen het categorie-select-optie-element "Positiespel" blijft over
+    // (t.periodization.categories); de rij zelf is uitgefilterd.
+    expect(screen.queryByRole('option', { name: 'Positiespel' })).toBeInTheDocument()
+    expect(screen.queryByText('Rondo')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    fireEvent.click(screen.getByText(nl.trainingPlan.cancel))
+
+    expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument()
+    expect((screen.getByLabelText(nl.oefeningen.filterCategoryLabel) as HTMLSelectElement).value).toBe('partijen_klein')
+    // De uitgefilterde rij "Positiespel" toont geen eigen bewerk-potlood —
+    // het filter is dus behouden na annuleren.
+    expect(screen.queryByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Positiespel'))).not.toBeInTheDocument()
+    expect(mockUpdateOefening).not.toHaveBeenCalled()
+  })
+
+  it('geen geneste modals: bewerken toont nooit tegelijk pickerTitle, en de editor toont editTitle (niet newTitle)', () => {
+    renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })])
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    expect(screen.queryByText(nl.oefeningen.pickerTitle)).not.toBeInTheDocument()
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+    expect(screen.queryByText(nl.oefeningen.newTitle)).not.toBeInTheDocument()
+  })
+
+  it('meertaligheid: potlood-aria-label en editor-titel/-hint gebruiken de Engelse dictionary', () => {
+    renderPicker([makeOefening({ id: 'o1', naam: 'Rondo' })], vi.fn(), undefined, 0, en)
+    fireEvent.click(screen.getByLabelText(en.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    expect(screen.getByText(en.oefeningen.editTitle)).toBeInTheDocument()
+    expect(screen.getByText(en.oefeningen.editSharedHint)).toBeInTheDocument()
+  })
+
+  it('meerdere potloden: elke rij heeft een eigen aria-label en opent de juiste oefening', () => {
+    renderPicker([
+      makeOefening({ id: 'o1', naam: 'Oefening A' }),
+      makeOefening({ id: 'o2', naam: 'Oefening B' }),
+    ])
+    const potloden = screen.getAllByLabelText(/Oefening bewerken: /)
+    expect(potloden).toHaveLength(2)
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Oefening B')))
+    expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Oefening B')
   })
 })

@@ -7,6 +7,8 @@ import { basisFormatieDef } from '@/lib/formaties'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
 import { vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
+import { updateOefening } from '@/app/actions/oefening-library'
+import type { OefeningInput } from '@/lib/oefening'
 import { blokkenVanKoppelingen, blokLabel } from '@/lib/parallel-groep'
 import { berekenTijdlijn } from '@/lib/sessie-tijdlijn'
 import SessieTijdlijn from '@/components/SessieTijdlijn'
@@ -16,6 +18,8 @@ import { bereikVoorNeutralen, teamBereikLabel, vormLabel, type TrainingOefeningM
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningPicker from '@/components/OefeningPicker'
+import OefeningEditor from '@/components/OefeningEditor'
+import ChevronIcon from '@/components/icons/ChevronIcon'
 import TeamIndelingEditor from '@/components/TeamIndelingEditor'
 import ParallelGroepEditor from '@/components/ParallelGroepEditor'
 import BezettingStepper from '@/components/BezettingStepper'
@@ -95,6 +99,10 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
   const [showPicker, setShowPicker] = useState(false)
   const [pickerPresetCategorie, setPickerPresetCategorie] = useState<OefeningCategorie | undefined>(undefined)
+  // Snapshot van de te bewerken bibliotheek-oefening, geen afgeleide waarde —
+  // de editor mag na openen blijven staan met de waarden van het moment van
+  // openen, ook als `koppelingen` intussen elders wijzigt.
+  const [editingOefening, setEditingOefening] = useState<Oefening | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [unlinkConfirm, setUnlinkConfirm] = useState<string | null>(null)
   const doelstellingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -137,11 +145,13 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
   function openPicker() {
     setPickerPresetCategorie(undefined)
+    setEditingOefening(null)
     setShowPicker(true)
   }
 
   function openSuggestedPicker(categorie: OefeningCategorie) {
     setPickerPresetCategorie(categorie)
+    setEditingOefening(null)
     setShowPicker(true)
   }
 
@@ -151,6 +161,20 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
       setUnlinkConfirm(null)
       await removeOefeningFromTraining(koppelingId, eventId)
     })
+  }
+
+  // Bewerken vanaf de trainingskaart: sluit de picker (één modal tegelijk) en
+  // zet de snapshot. Geen server-call — dat gebeurt pas bij opslaan.
+  function openOefeningEditor(o: Oefening) {
+    setShowPicker(false)
+    setEditingOefening(o)
+  }
+
+  // Niet catchen: OefeningEditor vangt de fout zelf en toont hem in zijn
+  // eigen banner (zelfde patroon als OefeningLibrary.handleUpdate).
+  async function handleOefeningUpdate(id: string, input: OefeningInput) {
+    await updateOefening(id, input)
+    setEditingOefening(null)
   }
 
   // Werkt op blok-index (een blok is óf één losse koppeling, óf een hele
@@ -574,6 +598,14 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                     aria-label={t.trainingPlan.detailsToggle}
                     aria-expanded={isExpanded}
                   >
+                    <ChevronIcon open={isExpanded} className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openOefeningEditor(o)}
+                    aria-label={t.oefeningen.editAriaNamed.replace('{name}', o.naam)}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
+                  >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
@@ -753,7 +785,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       {/* Stapveld + trainingsparameters direct op de kaart
                           voor de 5 tabel-categorieën + steigerungs
                           (heeftStapInhoud) — niet meer verstopt achter
-                          "Bewerken" (zie ook het "Bewerken"-paneel verderop,
+                          "Details" (zie ook het "Details"-paneel verderop,
                           waar dit veld voor déze categorieën is verwijderd).
                           `print:hidden`: de afdruk krijgt hieronder, ná de
                           gefloate diagram-wrapper, een eigen compacte
@@ -1002,6 +1034,15 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           presetCategorie={pickerPresetCategorie}
           onClose={() => setShowPicker(false)}
           aanwezigAantal={presentPlayerIds.length}
+        />
+      )}
+
+      {editingOefening && (
+        <OefeningEditor
+          initial={editingOefening}
+          onCancel={() => setEditingOefening(null)}
+          onSubmit={(input) => handleOefeningUpdate(editingOefening.id, input)}
+          hint={t.oefeningen.editSharedHint}
         />
       )}
     </div>

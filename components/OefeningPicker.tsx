@@ -6,6 +6,7 @@ import type { OefeningInput } from '@/lib/oefening'
 import { filterOefeningen, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
 import { isFlexibel, sorteerOpPassendheid, bereikLabel } from '@/lib/oefening-bezetting'
 import { addOefeningToTraining, createAndAddOefening } from '@/app/actions/training-plan'
+import { updateOefening } from '@/app/actions/oefening-library'
 import OefeningEditor from '@/components/OefeningEditor'
 import { useDict } from '@/lib/i18n-context'
 
@@ -39,6 +40,9 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
   )
   const [error, setError] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  // Bewerken van een bestaande bibliotheek-oefening vanuit een rij hieronder.
+  // Snapshot, geen afgeleide waarde — zelfde patroon als TrainingPlanEditor.
+  const [editing, setEditing] = useState<Oefening | null>(null)
   // Wat er tijdens déze sheet-sessie is toegevoegd. Een array en geen Set:
   // dezelfde oefening twee keer aan één training koppelen is bestaand,
   // bedoeld gedrag (zie dezelfde-oefening-meerdere-keren.acceptance.test.tsx),
@@ -77,6 +81,25 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
     // server, dus hij staat er meteen tussen.
     setShowCreate(false)
     setToegevoegd((eerder) => [...eerder, 'nieuw'])
+  }
+
+  // Niet catchen: OefeningEditor vangt de fout zelf en toont hem in zijn eigen
+  // banner. Terug naar de lijst na opslaan (zoals handleCreateAndAdd) — sheet
+  // blijft open, verse `library` na revalidatie toont de bijgewerkte rij.
+  async function handleUpdate(input: OefeningInput) {
+    await updateOefening(editing!.id, input)
+    setEditing(null)
+  }
+
+  if (editing) {
+    return (
+      <OefeningEditor
+        initial={editing}
+        onCancel={() => setEditing(null)}
+        onSubmit={handleUpdate}
+        hint={t.oefeningen.editSharedHint}
+      />
+    )
   }
 
   if (showCreate) {
@@ -275,34 +298,48 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
           ) : (
             <div className="space-y-2">
               {filtered.map((o) => (
-                <button
+                <div
                   key={o.id}
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => handlePick(o.id)}
-                  className="w-full text-left bg-surface rounded-xl border border-[var(--border-soft)] hover:border-warning/50 hover:bg-warning/10 p-3 transition-colors disabled:opacity-50"
+                  className="flex items-stretch bg-surface rounded-xl border border-[var(--border-soft)] hover:border-warning/50 transition-colors overflow-hidden"
                 >
-                  <div className="font-semibold text-ink">{o.naam}</div>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
-                      {t.periodization.categories[o.categorie] ?? o.categorie}
-                    </span>
-                    {isFlexibel(o) && (
-                      <span
-                        aria-label={`${t.oefeningen.shapeLabel}: ${bereikLabel(o)}`}
-                        className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted"
-                      >
-                        {bereikLabel(o)}
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => handlePick(o.id)}
+                    className="flex-1 min-w-0 text-left p-3 hover:bg-warning/10 transition-colors disabled:opacity-50"
+                  >
+                    <div className="font-semibold text-ink">{o.naam}</div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
+                        {t.periodization.categories[o.categorie] ?? o.categorie}
                       </span>
-                    )}
-                    {o.duur_min != null && <span className="text-xs text-faint">{o.duur_min} min</span>}
-                    {aantalToegevoegd(o.id) > 0 && (
-                      <span className="text-xs font-bold" style={{ color: 'var(--brand-accent)' }}>
-                        {t.oefeningen.pickerAddedTimes.replace('{n}', String(aantalToegevoegd(o.id)))}
-                      </span>
-                    )}
-                  </div>
-                </button>
+                      {isFlexibel(o) && (
+                        <span
+                          aria-label={`${t.oefeningen.shapeLabel}: ${bereikLabel(o)}`}
+                          className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted"
+                        >
+                          {bereikLabel(o)}
+                        </span>
+                      )}
+                      {o.duur_min != null && <span className="text-xs text-faint">{o.duur_min} min</span>}
+                      {aantalToegevoegd(o.id) > 0 && (
+                        <span className="text-xs font-bold" style={{ color: 'var(--brand-accent)' }}>
+                          {t.oefeningen.pickerAddedTimes.replace('{n}', String(aantalToegevoegd(o.id)))}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(o)}
+                    aria-label={t.oefeningen.editAriaNamed.replace('{name}', o.naam)}
+                    className="w-11 flex-shrink-0 flex items-center justify-center border-l border-[var(--border-soft)] text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                  </button>
+                </div>
               ))}
             </div>
           )}

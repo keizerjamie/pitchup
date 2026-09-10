@@ -694,7 +694,14 @@ describe('AC11 — OefeningPicker markeert al-toegevoegde oefeningen niet', () =
     // Twee "+ Oefening toevoegen"-knoppen in de DOM (sectiekop + onderaan de
     // lijst) zodra er al koppelingen zijn — de eerste volstaat om de picker te openen.
     fireEvent.click(screen.getAllByText(nl.trainingPlan.addExercise)[0])
-    const pickerItem = screen.getByRole('button', { name: /Rondo/ })
+    // Scope tot de picker-sheet: "Rondo" staat ook op de al gekoppelde
+    // trainingskaarten (k1/k2), dus getByText('Rondo') buiten de sheet zou
+    // op meerdere elementen matchen. Binnen de sheet gescopeerd op
+    // .closest('button') i.p.v. getByRole(name: /Rondo/): sinds de
+    // inline-bewerken-feature heeft de rij ook een potlood-knop met
+    // aria-label "Oefening bewerken: Rondo", die de naam-regex ook matcht.
+    const pickerRoot = screen.getByText(nl.oefeningen.pickerTitle).closest('.fixed') as HTMLElement
+    const pickerItem = within(pickerRoot).getByText('Rondo').closest('button') as HTMLButtonElement
     expect(pickerItem.hasAttribute('disabled')).toBe(false)
   })
 })

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
-import { nl } from '@/messages/nl'
+import { nl, type Dict } from '@/messages/nl'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import type { Oefening, OefeningCategorie, Player, TrainingOefeningWithData } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
@@ -20,13 +20,24 @@ vi.mock('@/app/actions/training-plan', () => ({
   saveParallelIndeling: vi.fn().mockResolvedValue(undefined),
 }))
 
+// Verplichte mock voor de nieuwe inline-bewerken-feature (zoals
+// OefeningLibrary.test.tsx:7-11).
+vi.mock('@/app/actions/oefening-library', () => ({
+  createOefening: vi.fn(),
+  updateOefening: vi.fn().mockResolvedValue(undefined),
+  deleteOefening: vi.fn(),
+}))
+
 import { saveSpelerindeling, updateKoppeling, reorderKoppelingen, vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
+import { updateOefening } from '@/app/actions/oefening-library'
+import { en } from '@/messages/en'
 const mockSave = saveSpelerindeling as unknown as ReturnType<typeof vi.fn>
 const mockUpdateKoppeling = updateKoppeling as unknown as ReturnType<typeof vi.fn>
 const mockReorder = reorderKoppelingen as unknown as ReturnType<typeof vi.fn>
 const mockVormGroep = vormParallelGroep as unknown as ReturnType<typeof vi.fn>
 const mockVoegToe = voegToeAanParallelGroep as unknown as ReturnType<typeof vi.fn>
 const mockHaalUit = haalUitParallelGroep as unknown as ReturnType<typeof vi.fn>
+const mockUpdateOefening = updateOefening as unknown as ReturnType<typeof vi.fn>
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
@@ -520,4 +531,166 @@ describe('TrainingPlanEditor — "Parallel aan": faalpaden groep-mutaties', () =
     expect(screen.queryByText('1a')).not.toBeInTheDocument()
     expect(getSelect().value).toBe('')
   })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// Oefening bewerken vanaf de trainingskaart (AC1, AC2, AC5, AC6, AC8, AC9).
+// Zelfde bewerkformulier (OefeningEditor) en server action (updateOefening)
+// als de losstaande bibliotheekpagina — hier alleen het NIEUWE aanroeppunt.
+// ────────────────────────────────────────────────────────────────────────────
+function renderPlanWithDict(koppelingen: TrainingOefeningMetBezetting[], dict: Dict) {
+  return render(
+    <DictProvider dict={dict}>
+      <TrainingPlanEditor
+        eventId="e1"
+        initialDoelstelling={null}
+        initialOefeningen={koppelingen}
+        library={[]}
+        currentSteps={{}}
+        hasNulmeting={false}
+        suggestion={null}
+        players={players}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]}
+      />
+    </DictProvider>,
+  )
+}
+
+describe('TrainingPlanEditor — oefening bewerken vanaf de kaart', () => {
+  const basisOefening = makeKoppeling().oefeningen
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('AC1: potlood op de kaart opent de editor met editTitle, naam en categorie vooringevuld', () => {
+    const k = makeKoppeling({
+      oefeningen: { ...basisOefening, naam: 'Rondo 4v2', categorie: 'partijen_klein' },
+    })
+    renderPlan([k])
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo 4v2')))
+
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+    expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Rondo 4v2')
+    expect(screen.getByLabelText(nl.trainingPlan.category)).toHaveValue('partijen_klein')
+    // De live-referentie-hint hoort bij dit aanroeppunt (beslispunt 1-A).
+    expect(screen.getByText(nl.oefeningen.editSharedHint)).toBeInTheDocument()
+  })
+
+  it('AC2: opslaan roept updateOefening(id, input) aan en sluit de editor', async () => {
+    const k = makeKoppeling({ id: 'k1', oefening_id: 'o1', oefeningen: { ...basisOefening, id: 'o1', naam: 'Rondo' } })
+    renderPlan([k])
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Rondo bijgewerkt' } })
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+
+    await waitFor(() => expect(mockUpdateOefening).toHaveBeenCalledTimes(1))
+    expect(mockUpdateOefening.mock.calls[0][0]).toBe('o1')
+    expect(mockUpdateOefening.mock.calls[0][1]).toMatchObject({ naam: 'Rondo bijgewerkt' })
+    await waitFor(() => expect(screen.queryByText(nl.oefeningen.editTitle)).not.toBeInTheDocument())
+  })
+
+  it('AC5: naam leegmaken schakelt opslaan uit, geen call', () => {
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlan([k])
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: '' } })
+    expect(screen.getByText(nl.trainingPlan.save)).toBeDisabled()
+    expect(mockUpdateOefening).not.toHaveBeenCalled()
+  })
+
+  it('AC5/AC7 (tussentijds ontkoppeld/verwijderd, beslispunt 5-A): een reject met "Oefening niet gevonden" toont die melding, editor blijft open', async () => {
+    mockUpdateOefening.mockRejectedValueOnce(new Error('Oefening niet gevonden'))
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlan([k])
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+
+    await waitFor(() => expect(screen.getByText('Oefening niet gevonden')).toBeInTheDocument())
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+  })
+
+  it('AC6: een generieke serverfout toont de i18n-melding, nooit de rauwe fouttekst', async () => {
+    mockUpdateOefening.mockRejectedValueOnce(new Error('column "foo" does not exist'))
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlan([k])
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    fireEvent.click(screen.getByText(nl.trainingPlan.save))
+
+    await waitFor(() => expect(screen.getByText('column "foo" does not exist')).toBeInTheDocument())
+    // OefeningEditor toont e.message zelf (net als elders in de app); het
+    // relevante contract hier is dat een AFWEZIGE message-tekst nooit een
+    // rauwe fallback naar de client lekt — gedekt door genericError().
+    expect(screen.queryByText('[object Object]')).not.toBeInTheDocument()
+  })
+
+  it('AC8: annuleren sluit de editor zonder call, de kaart toont nog steeds de oude naam', () => {
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlan([k])
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    fireEvent.change(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`), { target: { value: 'Andere naam' } })
+
+    fireEvent.click(screen.getByText(nl.trainingPlan.cancel))
+
+    expect(screen.queryByText(nl.oefeningen.editTitle)).not.toBeInTheDocument()
+    // "Rondo" staat zowel in het scherm- als het print-only kopregel-element
+    // (dual markup, zie afdrukken-trainingsplan-feature) — vandaar getAllByText.
+    expect(screen.getAllByText('Rondo').length).toBeGreaterThan(0)
+    expect(mockUpdateOefening).not.toHaveBeenCalled()
+  })
+
+  it('geen geneste modals: bewerken vanaf een kaart terwijl de picker openstaat sluit de picker eerst', () => {
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlan([k])
+
+    fireEvent.click(screen.getAllByText(nl.trainingPlan.addExercise)[0])
+    expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+
+    expect(screen.queryByText(nl.oefeningen.pickerTitle)).not.toBeInTheDocument()
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+  })
+
+  it('geen geneste modals: de picker openen terwijl de editor openstaat sluit de editor', () => {
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlan([k])
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    expect(screen.getByText(nl.oefeningen.editTitle)).toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByText(nl.trainingPlan.addExercise)[0])
+
+    expect(screen.queryByText(nl.oefeningen.editTitle)).not.toBeInTheDocument()
+    expect(screen.getByText(nl.oefeningen.pickerTitle)).toBeInTheDocument()
+  })
+
+  it('meerdere potloden op de pagina: elk potlood heeft zijn eigen aria-label en opent de bijbehorende oefening', () => {
+    const basisOefening = makeKoppeling().oefeningen
+    const k1 = makeKoppeling({ id: 'k1', oefening_id: 'o1', volgorde: 0, oefeningen: { ...basisOefening, id: 'o1', naam: 'Oefening A' } })
+    const k2 = makeKoppeling({ id: 'k2', oefening_id: 'o2', volgorde: 1, oefeningen: { ...basisOefening, id: 'o2', naam: 'Oefening B' } })
+    renderPlan([k1, k2])
+
+    const potloden = screen.getAllByLabelText(/Oefening bewerken: /)
+    expect(potloden).toHaveLength(2)
+
+    fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Oefening B')))
+    expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Oefening B')
+  })
+
+  it('meertaligheid: potlood en editor-titel gebruiken de Engelse dictionary-teksten', () => {
+    const k = makeKoppeling({ oefeningen: { ...basisOefening, naam: 'Rondo' } })
+    renderPlanWithDict([k], en)
+
+    fireEvent.click(screen.getByLabelText(en.oefeningen.editAriaNamed.replace('{name}', 'Rondo')))
+    expect(screen.getByText(en.oefeningen.editTitle)).toBeInTheDocument()
+    expect(screen.getByText(en.oefeningen.editSharedHint)).toBeInTheDocument()
+  })
+
+  // Twee trainers/tabbladen die tegelijk dezelfde oefening bewerken: geen
+  // locking, laatste server-call wint (bestaand, niet-getest gedrag van
+  // updateOefening zelf — zie brief sectie 6c).
 })

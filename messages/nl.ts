@@ -337,7 +337,7 @@ export const nl = {
     stepAuto: 'auto',
     moveUp: 'Naar boven',
     moveDown: 'Naar beneden',
-    detailsToggle: 'Bewerken',
+    detailsToggle: 'Details',
     nestedInBadge: 'Genest in {name}',
     print: 'Afdrukken',
     stapOpslaanMislukt: 'Opslaan van de stap is mislukt. Probeer het opnieuw.',
@@ -373,6 +373,12 @@ export const nl = {
     deleteButton: 'Verwijderen',
     newTitle: 'Oefening toevoegen',
     editTitle: 'Oefening bewerken',
+    // Hint bovenin de editor bij het bewerken vanaf de trainingskaart/picker:
+    // maakt de live-referentie (geen kopie) expliciet zichtbaar.
+    editSharedHint: 'Deze oefening zit in je bibliotheek. Een wijziging geldt voor elke training waarin hij staat.',
+    // Aria-label voor de bewerk-potloden op de trainingskaart en in de picker
+    // (meerdere per scherm) — {name} maakt elke knop individueel aanwijsbaar.
+    editAriaNamed: 'Oefening bewerken: {name}',
     teamsSection: 'Teams',
     addTeam: '+ Team toevoegen',
     teamSize: 'Teamgrootte',
