@@ -3134,3 +3134,25 @@ vóór de push).
 - Policy-namen in `supabase/rls.sql` zijn niet uniform (`"<tabel>: team_id = auth.uid()"` vs.
   `"<tabel>: own team only"`); citeer ze letterlijk in migratiecommentaar.
 - `cyclusweek-correctie` AC1/AC12 falen nog steeds pre-existing (ook met `git stash`).
+
+---
+
+## To-do: afgeronde taken van dezelfde weekdag vorige week weg (2026-09-11, commit `60641ab`, live)
+Verzoek van de eigenaar: de lijst werd lang en een doorgestreepte taak van "afgelopen
+donderdag" (dezelfde weekdag vorige week) is niet meer relevant. Kleine wijziging, bewust
+zonder feature-factory-keten.
+
+- **Eén constante**: `RETENTION` in `lib/todos.mjs` van 7 naar 6. Het done-venster in
+  `isTaskVisible` is `daysUntilEvent >= -RETENTION && <= FORWARD`; met 7 zat dag −7 er nog
+  net in. Gekozen voor 6 (en niet voor `>` i.p.v. `>=`) zodat de constante letterlijk "t/m
+  N dagen terug" blijft betekenen, symmetrisch met `FORWARD` ("t/m +7"). Open taken en het
+  forward-venster ongewijzigd.
+- **Query hoefde niet mee**: `app/page.tsx` haalt met `FETCH_HORIZON_DAYS = 30` ruim
+  genoeg kandidaat-events op; zichtbaarheid zit volledig in `isTaskVisible`. Geen
+  gebruikerstekst noemt "7 dagen" (`todo.empty` = "Geen taken deze week").
+- **Tests**: unit-test (`RETENTION === 6`, −6 zichtbaar, −7/−8 niet) en AC14 in
+  `scripts/todos.acceptance.test.mjs` verschoven naar de nieuwe grens. AC12 gebruikt
+  −0..−5 en bleef ongeraakt.
+- **Suite-status bij afronden**: `cyclusweek-correctie` AC1/AC12 nog steeds pre-existing
+  rood (ook met `git stash`); `nulmeting-per-onderdeel.acceptance.test.tsx` faalde één run op
+  `categorie_metingen toHaveLength(0)` en slaagde daarna — flaky, niet onderzocht.
