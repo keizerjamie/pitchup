@@ -485,30 +485,30 @@ test('AC13: geen kandidaat-events → lege takenlijst', () => {
 // Zichtbaarheid
 // ═══════════════════════════════════════════════════════════════════════════
 
-// AC14: Afgeronde taak (auto én handmatig) zichtbaar t/m 7 dagen ná de
-// event-datum, daarna weg.
-test('AC14: afgeronde taak blijft t/m +7 dagen ná de event-datum zichtbaar, dag 8 verdwijnt hij', () => {
+// AC14: Afgeronde taak (auto én handmatig) zichtbaar t/m 6 dagen ná de
+// event-datum; op dag 7 (dezelfde weekdag vorige week) is hij weg.
+test('AC14: afgeronde taak blijft t/m +6 dagen ná de event-datum zichtbaar, dag 7 verdwijnt hij', () => {
   const withinAuto = buildTodoItems([
-    { id: 'v1', type: 'match', date: addDaysFixed(TODAY, -7), lineupExists: true },
+    { id: 'v1', type: 'match', date: addDaysFixed(TODAY, -6), lineupExists: true },
   ])
-  assert.ok(findTask(withinAuto, 'v1', 'lineup'), 'dag -7 (auto-done) nog zichtbaar')
+  assert.ok(findTask(withinAuto, 'v1', 'lineup'), 'dag -6 (auto-done) nog zichtbaar')
 
   const beyondAuto = buildTodoItems([
-    { id: 'v2', type: 'match', date: addDaysFixed(TODAY, -8), lineupExists: true },
+    { id: 'v2', type: 'match', date: addDaysFixed(TODAY, -7), lineupExists: true },
   ])
-  assert.equal(findTask(beyondAuto, 'v2', 'lineup'), undefined, 'dag -8 (auto-done) niet meer zichtbaar')
+  assert.equal(findTask(beyondAuto, 'v2', 'lineup'), undefined, 'dag -7 (auto-done) niet meer zichtbaar')
 
   const withinManual = buildTodoItems(
-    [{ id: 'v3', type: 'training', date: addDaysFixed(TODAY, -7), doelstelling: null, oefCount: 0 }],
+    [{ id: 'v3', type: 'training', date: addDaysFixed(TODAY, -6), doelstelling: null, oefCount: 0 }],
     { manualSet: new Set(['v3:training_plan']) },
   )
-  assert.ok(findTask(withinManual, 'v3', 'training_plan'), 'dag -7 (handmatig afgevinkt) nog zichtbaar')
+  assert.ok(findTask(withinManual, 'v3', 'training_plan'), 'dag -6 (handmatig afgevinkt) nog zichtbaar')
 
   const beyondManual = buildTodoItems(
-    [{ id: 'v4', type: 'training', date: addDaysFixed(TODAY, -8), doelstelling: null, oefCount: 0 }],
+    [{ id: 'v4', type: 'training', date: addDaysFixed(TODAY, -7), doelstelling: null, oefCount: 0 }],
     { manualSet: new Set(['v4:training_plan']) },
   )
-  assert.equal(findTask(beyondManual, 'v4', 'training_plan'), undefined, 'dag -8 (handmatig afgevinkt) niet meer zichtbaar')
+  assert.equal(findTask(beyondManual, 'v4', 'training_plan'), undefined, 'dag -7 (handmatig afgevinkt) niet meer zichtbaar')
 })
 
 // AC15: Open analyse-taak zichtbaar vanaf wedstrijddag t/m deadline, GEEN
