@@ -2,14 +2,15 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { assertOwnEvent, assertOwnOefening, getOwnPlayerIds } from '@/lib/authz'
+import { assertOwnEvent, getOwnPlayerIds } from '@/lib/authz'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 import { validateSpelerindeling } from '@/lib/spelerindeling'
 import { validateParallelSpelers, assertGeenOverlap } from '@/lib/parallel-groep'
 import { valideerAantallenOverride, type BezettingBasis } from '@/lib/oefening-bezetting'
 import { normalizeOefeningTeams, type AantallenOverride } from '@/lib/types'
 import { joinedCategorie } from '@/lib/periodization'
-import { clampStapOverride } from '@/lib/periodization-stappen'
+import { clampDuurMin } from '@/lib/sessie-tijdlijn'
+import { clampStapOverride, berekenDuurUitStap } from '@/lib/periodization-stappen'
 import { genericError, logError } from '@/lib/errors'
 import { kopieerKoppelingen, type BronKoppeling } from '@/lib/kopieer-trainingsplan'
 
@@ -109,10 +110,16 @@ export async function addOefeningToTraining(eventId: string, oefeningId: string)
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
-  await Promise.all([
+  const [, oefeningResult] = await Promise.all([
     assertOwnEvent(supabase, eventId, user.id),
-    assertOwnOefening(supabase, oefeningId, user.id),
+    // Doet zelf de tenant-check (id + team_id) én levert meteen de bibliotheek-
+    // duur, die de nieuwe koppeling EENMALIG overneemt. Zelfde melding als
+    // assertOwnOefening, zodat het faalpad ongewijzigd blijft.
+    supabase.from('oefeningen').select('id, duur_min')
+      .eq('id', oefeningId).eq('team_id', user.id).maybeSingle(),
   ])
+  const oefening = oefeningResult.data as { id: string; duur_min: number | null } | null
+  if (!oefening) throw new Error('Oefening niet gevonden')
 
   const volgorde = await nextVolgordeForEvent(supabase, eventId, user.id)
 
@@ -121,6 +128,8 @@ export async function addOefeningToTraining(eventId: string, oefeningId: string)
     event_id: eventId,
     oefening_id: oefeningId,
     volgorde,
+    // Eenmalige kopie: vanaf nu is deze koppeling los van de bibliotheek.
+    duur_min: clampDuurMin(oefening.duur_min),
   })
 
   if (error) throw genericError('trainingPlan.addOefeningToTraining', error)
@@ -156,6 +165,9 @@ export async function createAndAddOefening(
     event_id: eventId,
     oefening_id: oefeningId,
     volgorde,
+    // Eenmalige kopie van de zojuist gevalideerde bibliotheekduur (validateOefening
+    // clampt al op 0..600).
+    duur_min: v.duur_min,
   })
 
   if (linkError) throw genericError('trainingPlan.createAndAddOefening.link', linkError)
@@ -202,11 +214,16 @@ export async function removeOefeningFromTraining(koppelingId: string, eventId: s
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
-// Koppeling bijwerken: volgorde / stap_override / genest_in.
+// Koppeling bijwerken: volgorde / stap_override / genest_in / duur_min.
 export async function updateKoppeling(
   koppelingId: string,
   eventId: string,
-  patch: { volgorde?: number; stap_override?: number | null; genest_in?: string | null },
+  patch: {
+    volgorde?: number
+    stap_override?: number | null
+    genest_in?: string | null
+    duur_min?: number | null
+  },
 ): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -216,6 +233,13 @@ export async function updateKoppeling(
 
   if (patch.volgorde !== undefined) {
     update.volgorde = Math.max(0, Math.min(32767, Math.floor(patch.volgorde)))
+  }
+
+  if (patch.duur_min !== undefined) {
+    // Nooit `|| null`: 0 is een geldige waarde ("geen duur"), en 0 is falsy.
+    // Raakt uitsluitend training_oefeningen; de bibliotheek-oefening blijft
+    // ongemoeid (zelfde harde grens als saveSpelerindeling).
+    update.duur_min = patch.duur_min === null ? null : clampDuurMin(patch.duur_min)
   }
 
   if (patch.stap_override !== undefined) {
@@ -237,6 +261,14 @@ export async function updateKoppeling(
       // Onbekende/ontbrekende categorie → '' → clamp op de ruime grens 99.
       const categorie = joinedCategorie(koppeling) ?? ''
       update.stap_override = clampStapOverride(patch.stap_override, categorie)
+
+      // Auto-berekening bij een stapkeuze op een partijvorm. Rekent SERVER-SIDE
+      // uit de al server-side opgehaalde categorie + de al geclampte stap; een
+      // door de client meegestuurde duur wordt hier bewust overschreven. Andere
+      // categorieën geven null en laten de bestaande duur met rust — net als het
+      // wissen van de stap hierboven, dat duur_min niet aanraakt.
+      const berekend = berekenDuurUitStap(categorie, update.stap_override as number | null)
+      if (berekend !== null) update.duur_min = berekend
     }
   }
 
@@ -855,7 +887,7 @@ export async function kopieerTrainingsplan(
 
   const { data: bronRijen, error: leesError } = await supabase
     .from('training_oefeningen')
-    .select('oefening_id, volgorde, stap_override, parallel_groep_id')
+    .select('oefening_id, volgorde, stap_override, duur_min, parallel_groep_id')
     .eq('event_id', bronEventId)
     .eq('team_id', user.id)
     .order('volgorde')

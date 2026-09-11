@@ -106,7 +106,7 @@ function renderPlan(koppelingen: TrainingOefeningMetBezetting[]) {
         hasNulmeting={false}
         suggestion={null}
         players={players}
-        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )
@@ -203,7 +203,7 @@ function renderPlanWith(koppeling: TrainingOefeningMetBezetting) {
         hasNulmeting={false}
         suggestion={null}
         players={players}
-        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )
@@ -228,9 +228,9 @@ describe('Stap-inhoud direct op de kaart (heeftStapInhoud-categorieën)', () => 
   it('partijen_klein: het stapveld is zichtbaar zonder op "Bewerken" te klikken, max-attribuut is 13, en de 5 labels+waarden van stap 1 staan op de kaart', () => {
     renderPlanWith(makeKoppelingFor('partijen_klein', 1))
 
-    const input = screen.getByRole('spinbutton')
+    const input = document.getElementById('stap-override-k1') as HTMLInputElement
     expect(input).toHaveAttribute('max', '13')
-    expect((input as HTMLInputElement).value).toBe('1')
+    expect(input.value).toBe('1')
 
     // Geen klik op "Bewerken" nodig: het content-blok staat er al.
     const kaart = screen.getByTestId('stap-inhoud-k1')
@@ -266,10 +266,11 @@ describe('Stap-inhoud direct op de kaart (heeftStapInhoud-categorieën)', () => 
     renderPlanWith(makeKoppelingFor('warming_up', null))
 
     expect(screen.queryByTestId('stap-inhoud-k1')).not.toBeInTheDocument()
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    expect(document.getElementById('stap-override-k1')).not.toBeInTheDocument()
+    expect(document.getElementById('stap-generic-k1')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByLabelText(nl.trainingPlan.detailsToggle))
-    expect(screen.getByRole('spinbutton')).toBeInTheDocument()
+    expect(document.getElementById('stap-generic-k1')).toBeInTheDocument()
   })
 
   it('stap-override wijzigen (6 → 9 voor partijen_klein) laat de content SYNCHROON updaten, vóór de server-call resolved', () => {
@@ -280,7 +281,7 @@ describe('Stap-inhoud direct op de kaart (heeftStapInhoud-categorieën)', () => 
     // Stap 6: arbeid '1,5 min'.
     expect(kaart.textContent).toContain(`${nl.periodization.stepWork}: 1,5 min`)
 
-    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '9' } })
+    fireEvent.change(document.getElementById('stap-override-k1') as HTMLInputElement, { target: { value: '9' } })
 
     // Stap 9: arbeid '3 min', herhalingen '6' — update al zichtbaar terwijl
     // de (nooit resolvende) server-call nog "hangt".
@@ -291,7 +292,7 @@ describe('Stap-inhoud direct op de kaart (heeftStapInhoud-categorieën)', () => 
   it('stap_override: 40 bij partijen_klein (boven het echte max 13) toont bij render direct 13 (niet 40) — stille correctie bij laden, geen save-call puur door te renderen', () => {
     renderPlanWith(makeKoppelingFor('partijen_klein', 40))
 
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
+    const input = document.getElementById('stap-override-k1') as HTMLInputElement
     expect(input.value).toBe('13')
 
     // Stap 13: arbeid '3 min', herhalingen '10'.
@@ -550,7 +551,7 @@ function renderPlanWithDict(koppelingen: TrainingOefeningMetBezetting[], dict: D
         hasNulmeting={false}
         suggestion={null}
         players={players}
-        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )

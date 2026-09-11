@@ -6,11 +6,14 @@
 
 // De velden die uit de bron worden overgenomen. Alleen de SAMENSTELLING van
 // het plan — welke oefeningen, in welke volgorde, welke daarvan parallel
-// draaien, en een eventuele handmatige stap.
+// draaien, een eventuele handmatige stap, en de training-specifieke duur. Die
+// duur hoort erbij: hij is per training vastgelegd, maar staat los van de
+// spelers (anders dan spelerindeling/parallel_spelers hieronder).
 export interface BronKoppeling {
   oefening_id: string
   volgorde: number
   stap_override: number | null
+  duur_min: number | null
   parallel_groep_id?: string | null
 }
 
@@ -18,6 +21,7 @@ export interface NieuweKoppeling {
   oefening_id: string
   volgorde: number
   stap_override: number | null
+  duur_min: number | null
   parallel_groep_id: string | null
 }
 
@@ -62,6 +66,8 @@ export function kopieerKoppelingen(
       oefening_id: rij.oefening_id,
       volgorde: rij.volgorde + volgordeOffset,
       stap_override: rij.stap_override,
+      // NULL blijft NULL: bron én doel vallen dan terug op de bibliotheekduur.
+      duur_min: rij.duur_min ?? null,
       parallel_groep_id: groep,
     }
   })

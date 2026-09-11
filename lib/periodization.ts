@@ -290,6 +290,11 @@ export async function countCategoryOccurrences(
     .select('id')
     .eq('team_id', teamId)
     .eq('type', 'training')
+    // Teamtactische trainingen tellen niet mee in de VCT-periodisering. Het
+    // filter staat op de events-query: hun koppelingen worden daardoor nooit
+    // opgehaald. Bewust .eq('trainingstype','vct') en niet de negatie — die zou
+    // stil afhangen van de NOT NULL op de kolom.
+    .eq('trainingstype', 'vct')
     .gt('date', fromDateExclusive)
     .lt('date', toDateExclusive)
 
@@ -370,6 +375,9 @@ export async function getTrainingLog(
     .select('id, date')
     .eq('team_id', teamId)
     .eq('type', 'training')
+    // Zelfde filter als in countCategoryOccurrences: een teamtactische training
+    // levert geen logregel en telt nergens mee.
+    .eq('trainingstype', 'vct')
     .gt('date', fromDateExclusive)
     .lt('date', toDateExclusive)
     .order('date', { ascending: true })

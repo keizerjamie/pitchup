@@ -1,4 +1,5 @@
 import { PERIODIZATION_CATEGORIES, type OefeningCategorie } from '@/lib/types'
+import { clampDuurMin } from '@/lib/sessie-tijdlijn'
 
 // Statische, universele domeinkennis: de trainingsparameters per
 // periodiseringsstap. Bewust een module-constante in de code (net als
@@ -114,6 +115,118 @@ export const PERIODIZATION_STEP_TABLES: Partial<Record<OefeningCategorie, StapRi
     { arbeid: '3 min',   herhalingen: '9',  rustHH: '1 min',   series: '2', rustSeries: '4 min' },
     { arbeid: '3 min',   herhalingen: '10', rustHH: '1 min',   series: '2', rustSeries: '4 min' },
   ],
+}
+
+// Numerieke tegenhanger van PERIODIZATION_STEP_TABLES, UITSLUITEND voor de drie
+// partijen-categorieën: die zijn de enige waar een oefeningduur uit de stap te
+// berekenen valt. De strings hierboven blijven de bron voor WEERGAVE en worden
+// nooit geparsed (zie de kop van dit bestand); deze tabel is de bron voor
+// REKENEN. Twee tabellen, één waarheid — bewaakt door de consistentietest in
+// lib/periodization-stappen.test.ts, die elke numerieke rij terugformatteert
+// naar de weergavestring en met de rij hierboven vergelijkt. Wijkt er ooit één
+// waarde af, dan faalt die test; er is geen pad waarlangs ze stil uit elkaar
+// kunnen lopen.
+//
+// Minuten, niet seconden: alle vijf de velden van deze drie categorieën staan
+// in de brontabel in minuten. Decimale waarden (4,5) zijn geldig en komen voor.
+export interface StapRekenRij {
+  arbeidMin: number
+  herhalingen: number
+  rustHHMin: number
+  // Afwezig waar de brontabel de kolom niet heeft (partijen_groot/-midden).
+  series?: number
+  rustSeriesMin?: number
+}
+
+// Rij i hoort exact bij rij i van PERIODIZATION_STEP_TABLES[cat]; de lengtes zijn
+// per categorie gelijk (21 / 15 / 13).
+export const PERIODIZATION_STEP_MINUTEN: Partial<Record<OefeningCategorie, StapRekenRij[]>> = {
+  partijen_groot: [
+    { arbeidMin: 10, herhalingen: 2, rustHHMin: 2 },
+    { arbeidMin: 11, herhalingen: 2, rustHHMin: 2 },
+    { arbeidMin: 12, herhalingen: 2, rustHHMin: 2 },
+    { arbeidMin: 13, herhalingen: 2, rustHHMin: 2 },
+    { arbeidMin: 14, herhalingen: 2, rustHHMin: 2 },
+    { arbeidMin: 15, herhalingen: 2, rustHHMin: 2 },
+    { arbeidMin: 11, herhalingen: 3, rustHHMin: 2 },
+    { arbeidMin: 12, herhalingen: 3, rustHHMin: 2 },
+    { arbeidMin: 13, herhalingen: 3, rustHHMin: 2 },
+    { arbeidMin: 14, herhalingen: 3, rustHHMin: 2 },
+    { arbeidMin: 15, herhalingen: 3, rustHHMin: 2 },
+    { arbeidMin: 12, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 13, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 14, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 15, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 13, herhalingen: 5, rustHHMin: 2 },
+    { arbeidMin: 14, herhalingen: 5, rustHHMin: 2 },
+    { arbeidMin: 15, herhalingen: 5, rustHHMin: 2 },
+    { arbeidMin: 13, herhalingen: 6, rustHHMin: 2 },
+    { arbeidMin: 14, herhalingen: 6, rustHHMin: 2 },
+    { arbeidMin: 15, herhalingen: 6, rustHHMin: 2 },
+  ],
+  partijen_midden: [
+    { arbeidMin: 4, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 4.5, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 5, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 5.5, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 6, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 6.5, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 7, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 7.5, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 8, herhalingen: 4, rustHHMin: 2 },
+    { arbeidMin: 7, herhalingen: 5, rustHHMin: 2 },
+    { arbeidMin: 7.5, herhalingen: 5, rustHHMin: 2 },
+    { arbeidMin: 8, herhalingen: 5, rustHHMin: 2 },
+    { arbeidMin: 7, herhalingen: 6, rustHHMin: 2 },
+    { arbeidMin: 7.5, herhalingen: 6, rustHHMin: 2 },
+    { arbeidMin: 8, herhalingen: 6, rustHHMin: 2 },
+  ],
+  partijen_klein: [
+    { arbeidMin: 1, herhalingen: 6, rustHHMin: 3, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 1, herhalingen: 6, rustHHMin: 2.5, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 1, herhalingen: 6, rustHHMin: 2, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 1, herhalingen: 6, rustHHMin: 1.5, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 1, herhalingen: 6, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 1.5, herhalingen: 6, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 2, herhalingen: 6, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 2.5, herhalingen: 6, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 3, herhalingen: 6, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 3, herhalingen: 7, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 3, herhalingen: 8, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 3, herhalingen: 9, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+    { arbeidMin: 3, herhalingen: 10, rustHHMin: 1, series: 2, rustSeriesMin: 4 },
+  ],
+}
+
+// Berekende oefeningduur in hele minuten voor één periodiseringsstap.
+// null zodra er niets te rekenen valt: geen stap, of een categorie zonder
+// numerieke tabel (sprints, steigerungs, warming_up, …). Dat null is het
+// signaal "niet automatisch berekenen" — de aanroeper laat de bestaande duur
+// dan met rust.
+//
+// Formule: (arbeid × herhalingen + rustHH × (herhalingen − 1)) × series +
+// rustSeries × (series − 1). Ontbrekende series/rustSeries tellen als
+// series = 1 en rustSeries = 0; daarmee reduceert de formule zich vanzelf tot
+// arbeid × herhalingen + rustHH × (herhalingen − 1) voor partijen_groot en
+// partijen_midden — één formule, geen tweede tak die kan gaan afwijken.
+//
+// Stap-index wordt geclampt naar [1, tabellengte], exact zoals stapInhoud
+// hieronder: een berekende stap boven het maximum rekent met de zwaarste
+// beschikbare rij, en badge/inhoud/duur blijven dan onderling consistent.
+//
+// Math.round staat er omdat duur_min een SMALLINT is. Met de huidige rijen
+// levert de formule uitsluitend gehele getallen op; een test pint dat vast,
+// zodat een toekomstige rij die wél afrondt zichtbaar wordt in plaats van stil.
+export function berekenDuurUitStap(categorie: string, stap: number | null | undefined): number | null {
+  if (stap === null || stap === undefined || !Number.isFinite(stap)) return null
+  const tabel = PERIODIZATION_STEP_MINUTEN[categorie as OefeningCategorie]
+  if (!tabel || tabel.length === 0) return null
+  const rij = tabel[Math.min(Math.max(1, Math.floor(stap)), tabel.length) - 1]
+  if (!rij) return null
+  const series = rij.series ?? 1
+  const rustSeries = rij.rustSeriesMin ?? 0
+  const blok = rij.arbeidMin * rij.herhalingen + rij.rustHHMin * (rij.herhalingen - 1)
+  return clampDuurMin(Math.round(blok * series + rustSeries * (series - 1)))
 }
 
 // Bovengrens van het stapnummer voor een categorie. Onbekende categorie of een

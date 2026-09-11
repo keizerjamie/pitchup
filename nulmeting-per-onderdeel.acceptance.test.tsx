@@ -82,7 +82,9 @@ function meting(overrides: {
 // (lib/periodization.ts) verwacht — de generieke tableFactory hierboven doet
 // geen echte join, dus de geneste vorm moet al in de fixture zelf staan.
 function trainingEvent(id: string, date: string): Row {
-  return { id, team_id: TEAM, type: 'training', date }
+  // trainingstype: 'vct' — anders matcht het .eq('trainingstype','vct')-filter
+  // in getTrainingLog niets en telt geen enkele training mee (backend-feedback).
+  return { id, team_id: TEAM, type: 'training', date, trainingstype: 'vct' }
 }
 function trainingOefening(eventId: string, categorie: string): Row {
   return { event_id: eventId, team_id: TEAM, stap_override: null, oefeningen: { categorie } }

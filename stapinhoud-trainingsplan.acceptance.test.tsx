@@ -170,7 +170,7 @@ function renderPlan(
         hasNulmeting={opts.hasNulmeting ?? true}
         suggestion={null}
         players={[]}
-        presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+        presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )
@@ -200,8 +200,10 @@ describe('AC1 — stapveld direct zichtbaar op de kaart voor categorieën met br
     renderPlan([k])
 
     expect(stapInput('k1')).toBeInTheDocument()
-    // Precies één stapveld — geen dubbele input via het oude "Bewerken"-paneel.
-    expect(screen.getAllByRole('spinbutton')).toHaveLength(1)
+    // Precies één stapveld — geen dubbele input via het oude "Bewerken"-paneel
+    // (het duurveld is een apart, altijd zichtbaar spinbutton-veld en telt
+    // hier bewust niet mee — zie de duur-per-koppeling-acceptatietests).
+    expect(document.getElementById(`stap-generic-k1`)).not.toBeInTheDocument()
   })
 })
 
@@ -354,14 +356,17 @@ describe('AC6 — categorieën zonder brondata behouden het ongewijzigde gedrag'
     const k = makeKoppeling({ id: 'k1', oefening: { categorie } })
     renderPlan([k])
 
-    // Vóór "Bewerken": geen stapveld, geen content-blok.
-    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument()
+    // Vóór "Bewerken": geen stapveld (noch het altijd-zichtbare, noch het
+    // generieke fallback-veld — het duurveld is een apart veld en telt hier
+    // bewust niet mee), geen content-blok.
+    expect(document.getElementById('stap-override-k1')).not.toBeInTheDocument()
+    expect(document.getElementById('stap-generic-k1')).not.toBeInTheDocument()
     expect(stapBlock('k1')).not.toBeInTheDocument()
     expect(stapPrintBlock('k1')).not.toBeInTheDocument()
 
     // Na "Bewerken": het (ongewijzigde) invoerveld verschijnt, nog steeds geen content-blok.
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.detailsToggle }))
-    expect(screen.getByRole('spinbutton')).toBeInTheDocument()
+    expect(document.getElementById('stap-generic-k1')).toBeInTheDocument()
     expect(stapBlock('k1')).not.toBeInTheDocument()
   })
 })
@@ -425,7 +430,7 @@ describe('AC8 — stap_override wordt geclampt op het categorie-specifieke maxim
 
     // Dit veld zit hier (AC6) achter "Bewerken".
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.detailsToggle }))
-    const input = screen.getByRole('spinbutton') as HTMLInputElement
+    const input = document.getElementById('stap-generic-k1') as HTMLInputElement
     fireEvent.change(input, { target: { value: '150' } })
     expect(input.value).toBe('99')
 

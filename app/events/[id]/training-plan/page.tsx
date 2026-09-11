@@ -248,6 +248,7 @@ export default async function TrainingPlanPage({ params }: Props) {
             presentPlayerIds={Array.from(presentIds)}
             startTijd={event.time}
             kopieerOpties={kopieerOpties}
+            initialTrainingstype={event.trainingstype ?? 'vct'}
           />
         </div>
       </div>

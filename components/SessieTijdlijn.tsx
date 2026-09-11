@@ -7,8 +7,10 @@ import { STANDAARD_SESSIEDUUR_MIN, type Tijdlijn } from '@/lib/sessie-tijdlijn'
 //
 // De vraag die dit beantwoordt stelde de planner eerder helemaal niet: je zag
 // een lijst oefeningen zonder optelsom, en merkte pas op het veld dat je sessie
-// twintig minuten te lang was. Alle cijfers komen uit velden die er al waren
-// (`oefeningen.duur_min`, `events.time`) — geen datamodel-wijziging.
+// twintig minuten te lang was. De duur per oefening komt uit de effectieve
+// koppelingduur (`effectieveDuurMin`: `training_oefeningen.duur_min` met
+// fallback op de bibliotheekduur `oefeningen.duur_min`), de kloktijden uit
+// `events.time` — geen nieuwe tabel of kolom.
 //
 // Server component: puur presentatie, geen state.
 

@@ -48,12 +48,41 @@ export interface Tijdlijn {
   eindTijd: string | null
 }
 
+// Bovengrens van een duur in minuten. Gelijk aan de bibliotheekduur
+// (lib/oefening.ts, clampInt(input.duur_min, 0, 600)): ruim boven de UI-max en
+// veilig binnen SMALLINT.
+export const DUUR_MIN_MAX = 600
+
+// Clamp naar hele minuten binnen [0, DUUR_MIN_MAX]; null blijft null, en een
+// onbruikbare waarde wordt null (nooit een gegokt getal).
+export function clampDuurMin(waarde: number | null | undefined): number | null {
+  if (waarde === null || waarde === undefined) return null
+  const n = Math.floor(Number(waarde))
+  if (!Number.isFinite(n)) return null
+  return Math.max(0, Math.min(DUUR_MIN_MAX, n))
+}
+
+// Duur van één gekoppelde oefening, met fallback. NULL/afwezig op de koppeling
+// = "geen eigen duur" en valt terug op de bibliotheek-oefening (legacy-rijen én
+// een leeggemaakt invoerveld). Een getal op de koppeling WINT altijd — ook 0,
+// en 0 komt er als null uit: "expliciet geen duur", conform de bestaande
+// > 0-regel in blokDuur. Nooit `??`-loos of met `||` herschrijven: 0 is falsy
+// en zou dan stil de bibliotheekduur terughalen.
+export function effectieveDuurMin(lid: {
+  duur_min?: number | null
+  oefeningen?: { duur_min?: number | null } | null
+}): number | null {
+  const eigen = lid.duur_min
+  const waarde = eigen === null || eigen === undefined ? (lid.oefeningen?.duur_min ?? null) : eigen
+  return typeof waarde === 'number' && Number.isFinite(waarde) && waarde > 0 ? waarde : null
+}
+
 // Duur van één blok: de langste van zijn leden. Leden zonder duur tellen niet
 // mee (een oefening zonder ingevulde duur maakt het blok niet nul minuten).
+// De duur per lid komt uit effectieveDuurMin, zodat de tijdlijn dezelfde
+// koppeling-duur-met-fallback gebruikt als kaart en print.
 export function blokDuur(blok: ParallelBlok): number | null {
-  const duren = blok.leden
-    .map((lid) => lid.oefeningen?.duur_min ?? null)
-    .filter((d): d is number => typeof d === 'number' && Number.isFinite(d) && d > 0)
+  const duren = blok.leden.map(effectieveDuurMin).filter((d): d is number => d !== null)
   if (duren.length === 0) return null
   return Math.max(...duren)
 }

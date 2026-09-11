@@ -169,6 +169,20 @@ describe('createBulkMatches — opslaan', () => {
     expect(result).toEqual({ created: 2, attendanceFailed: false })
   })
 
+  it('stuurt nooit een trainingstype mee — de DB-default vult de kolom', async () => {
+    // createBulkMatches maakt uitsluitend wedstrijden; `trainingstype` is daar
+    // betekenisloos. De kolom noemen zou de bulk-insert bovendien breken zodra
+    // één rij hem wél en één rij hem niet heeft (PostgREST eist gelijke sleutels).
+    const m = eigenTeam()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    for (const rij of eventsPayloads(m)) {
+      expect(rij).not.toHaveProperty('trainingstype')
+    }
+  })
+
   it('zet het type hard op match en het team altijd uit de sessie', async () => {
     const m = eigenTeam()
     use(m)

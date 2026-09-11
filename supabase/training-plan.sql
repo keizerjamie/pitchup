@@ -11,6 +11,11 @@ ALTER TABLE events ADD CONSTRAINT events_type_check
 -- 2. Training objective per event
 ALTER TABLE events ADD COLUMN IF NOT EXISTS doelstelling TEXT;
 
+-- `events.trainingstype` ('vct' | 'teamtactisch', NOT NULL DEFAULT 'vct')
+-- bepaalt of de oefeningen van een training meetellen in de VCT-periodisering.
+-- Staat hier bewust niet in de fresh install: draai
+-- supabase/trainingstype-en-koppeling-duur.sql.
+
 -- 3. Nulmeting data per meting-event
 CREATE TABLE IF NOT EXISTS metingen (
   id           UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -102,6 +107,11 @@ CREATE TABLE IF NOT EXISTS training_oefeningen (
   -- specifieke bezetting van een flexibele oefening vast. Staat hier bewust
   -- niet in de fresh install, net als spelerindeling/parallel_*: draai
   -- supabase/oefening-flexibel-aantal.sql.
+  --
+  -- `duur_min` (SMALLINT, NULL = geen eigen duur) legt de TRAINING-specifieke
+  -- duur van deze koppeling vast, los van oefeningen.duur_min. NULL valt terug
+  -- op de bibliotheek, 0 betekent expliciet "geen duur". Idem: draai
+  -- supabase/trainingstype-en-koppeling-duur.sql.
 );
 
 -- 6. Indexes

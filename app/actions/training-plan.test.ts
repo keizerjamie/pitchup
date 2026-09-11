@@ -199,6 +199,66 @@ describe('addOefeningToTraining', () => {
     consoleError.mockRestore()
   })
 
+  it('neemt de bibliotheekduur EENMALIG over op de koppeling', async () => {
+    // Vanaf dit moment staat de koppeling los van de bibliotheek: een latere
+    // wijziging daar werkt niet meer door op deze training.
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1', duur_min: 18 } },
+        training_oefeningen: { data: { volgorde: 0 }, error: null },
+      },
+    })
+    use(m)
+    await addOefeningToTraining('e1', 'o1')
+    expect(m.calls.insert.find((i) => i.table === 'training_oefeningen')!.payload.duur_min).toBe(18)
+  })
+
+  it('neemt een bibliotheekduur van 0 over als 0, niet als null', async () => {
+    // 0 betekent "expliciet geen duur"; met `|| null` zou dat stil leeg worden.
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1', duur_min: 0 } },
+        training_oefeningen: { data: { volgorde: 0 }, error: null },
+      },
+    })
+    use(m)
+    await addOefeningToTraining('e1', 'o1')
+    expect(m.calls.insert.find((i) => i.table === 'training_oefeningen')!.payload.duur_min).toBe(0)
+  })
+
+  it('zet duur_min op null als de bibliotheek-oefening geen duur heeft', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1', duur_min: null } },
+        training_oefeningen: { data: { volgorde: 0 }, error: null },
+      },
+    })
+    use(m)
+    await addOefeningToTraining('e1', 'o1')
+    expect(m.calls.insert.find((i) => i.table === 'training_oefeningen')!.payload.duur_min).toBeNull()
+  })
+
+  it('haalt de oefening tenant-gescoped op (id + team_id) — de duur komt uit diezelfde check', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o1', duur_min: 12 } },
+        training_oefeningen: { data: { volgorde: 0 }, error: null },
+      },
+    })
+    use(m)
+    await addOefeningToTraining('e1', 'o1')
+    const sel = m.calls.select.find((sel) => sel.table === 'oefeningen')!
+    expect(String(sel.cols)).toContain('duur_min')
+    expect(sel.eqs).toEqual([
+      { col: 'id', val: 'o1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
   it('gooit "Niet ingelogd" zonder user', async () => {
     const m = makeSupabase({ user: null })
     use(m)
@@ -311,6 +371,93 @@ describe('updateKoppeling', () => {
     await expect(updateKoppeling('k1', 'e1', { genest_in: 'vreemd' }))
       .rejects.toThrow('Ongeldige nesting')
     expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('schrijft een handmatige duur weg en raakt de bibliotheek niet aan', async () => {
+    const m = metCategorie('partijen_groot')
+    use(m)
+    await updateKoppeling('k1', 'e1', { duur_min: 25 })
+    expect(m.calls.update).toHaveLength(1)
+    expect(m.calls.update[0].table).toBe('training_oefeningen')
+    expect(m.calls.update[0].payload.duur_min).toBe(25)
+    // De bibliotheek-oefening komt in dit pad helemaal niet voor.
+    expect(m.calls.update.some((u) => u.table === 'oefeningen')).toBe(false)
+    expect(m.calls.eq.some((e) => e.table === 'oefeningen')).toBe(false)
+  })
+
+  it('clamt de duur op 0..600 en houdt 0 als 0', async () => {
+    const m = metCategorie('partijen_groot')
+    use(m)
+    await updateKoppeling('k1', 'e1', { duur_min: 9999 })
+    await updateKoppeling('k1', 'e1', { duur_min: -4 })
+    // 0 is een geldige waarde ("geen duur") en mag nooit als leeg worden gelezen.
+    await updateKoppeling('k1', 'e1', { duur_min: 0 })
+    expect(m.calls.update.map((u) => u.payload.duur_min)).toEqual([600, 0, 0])
+  })
+
+  it('wist de duur met null (val terug op de bibliotheek)', async () => {
+    const m = metCategorie('partijen_groot')
+    use(m)
+    await updateKoppeling('k1', 'e1', { duur_min: null })
+    expect(m.calls.update[0].payload.duur_min).toBeNull()
+  })
+
+  it('doet voor een patch met alleen duur_min geen koppeling-select en scoped de update op alle drie', async () => {
+    const m = metCategorie('partijen_groot')
+    use(m)
+    await updateKoppeling('k1', 'e1', { duur_min: 30 })
+    expect(m.calls.select.filter((sel) => sel.table === 'training_oefeningen')).toHaveLength(0)
+    // De tenant-/event-scope zit dan volledig in de WHERE van de update: een
+    // koppeling van een ander team of event wordt niet geraakt.
+    expect(m.calls.update[0].eqs).toEqual([
+      { col: 'id', val: 'k1' },
+      { col: 'event_id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('berekent de duur server-side bij een stapkeuze op een partijvorm', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: 3 })
+    // partijen_klein stap 3: (1*6 + 2*5)*2 + 4*1 = 36
+    expect(m.calls.update[0].payload.stap_override).toBe(3)
+    expect(m.calls.update[0].payload.duur_min).toBe(36)
+  })
+
+  it('berekent niets voor een categorie zonder numerieke tabel', async () => {
+    const m = metCategorie('sprints_weinig_rust')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: 3 })
+    expect(m.calls.update[0].payload.stap_override).toBe(3)
+    expect(m.calls.update[0].payload).not.toHaveProperty('duur_min')
+  })
+
+  it('laat de laatst berekende duur staan als de stap gewist wordt', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: null })
+    expect(m.calls.update[0].payload.stap_override).toBeNull()
+    expect(m.calls.update[0].payload).not.toHaveProperty('duur_min')
+  })
+
+  it('laat de berekening winnen van een meegestuurde duur in dezelfde patch', async () => {
+    // De volgorde in de code is betekenisvol: de server rekent zelf en is
+    // leidend, een client-waarde wordt bewust overschreven.
+    const m = metCategorie('partijen_groot')
+    use(m)
+    await updateKoppeling('k1', 'e1', { duur_min: 5, stap_override: 3 })
+    // partijen_groot stap 3: 12*2 + 2*1 = 26
+    expect(m.calls.update[0].payload.duur_min).toBe(26)
+  })
+
+  it('rekent met de GECLAMPTE stap, niet met de doorgestuurde waarde', async () => {
+    const m = metCategorie('partijen_klein')
+    use(m)
+    await updateKoppeling('k1', 'e1', { stap_override: 999 })
+    expect(m.calls.update[0].payload.stap_override).toBe(13)
+    // Stap 13: (3*10 + 1*9)*2 + 4*1 = 82
+    expect(m.calls.update[0].payload.duur_min).toBe(82)
   })
 
   it('gooit "Niet ingelogd" zonder user', async () => {
@@ -704,6 +851,40 @@ describe('saveAantallenOverride', () => {
   })
 })
 
+describe('kopieerTrainingsplan — duur per koppeling', () => {
+  it('vraagt duur_min op en neemt hem mee naar de doeltraining', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e' } } },
+      queues: {
+        training_oefeningen: [
+          // 1) bronrijen, 2) hoogste volgorde in het doel, 3) insert-resultaat
+          {
+            data: [
+              { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: 22, parallel_groep_id: null },
+              // NULL blijft NULL: beide vallen terug op de bibliotheekduur.
+              { oefening_id: 'o2', volgorde: 1, stap_override: null, duur_min: null, parallel_groep_id: null },
+            ],
+            error: null,
+          },
+          { data: null, error: null },
+          { error: null },
+        ],
+      },
+    })
+    use(m)
+    await kopieerTrainingsplan('doel', 'bron')
+
+    const sel = m.calls.select.find((s) => String(s.cols).includes('oefening_id'))!
+    expect(String(sel.cols)).toContain('duur_min')
+
+    const insert = m.calls.insert.find((i) => i.table === 'training_oefeningen')!
+    const rijen = insert.payload as unknown as Record<string, unknown>[]
+    expect(rijen.map((r) => r.duur_min)).toEqual([22, null])
+    expect(rijen[0].event_id).toBe('doel')
+    expect(rijen[0].team_id).toBe('team-1')
+  })
+})
+
 describe('kopieerTrainingsplan — aantallen_override komt niet mee', () => {
   it('leest en schrijft de allowlist zonder aantallen_override', async () => {
     const m = makeSupabase({
@@ -761,6 +942,50 @@ describe('createAndAddOefening', () => {
       { grootte: 6, formaties: ['3-2-1'], keeperInGrootte: false },
     ])
     expect(oefening.payload.team_id).toBe('team-1')
+  })
+
+  it('zet de gevalideerde duur op de koppeling, niet alleen op de bibliotheek', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o-new' }, error: null },
+        training_oefeningen: { data: { id: 'k1' }, error: null },
+      },
+    })
+    use(m)
+    await createAndAddOefening('e1', { ...input, duur_min: 30 })
+
+    const koppeling = m.calls.insert.find((i) => i.table === 'training_oefeningen')!
+    expect(koppeling.payload.duur_min).toBe(30)
+    // Dezelfde waarde staat op de bibliotheek-oefening: de koppeling is er een
+    // eenmalige kopie van, geen verwijzing.
+    expect(m.calls.insert.find((i) => i.table === 'oefeningen')!.payload.duur_min).toBe(30)
+  })
+
+  it('neemt een duur buiten het bereik geclampt over (validateOefening clamt op 0..600)', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o-new' }, error: null },
+        training_oefeningen: { data: { id: 'k1' }, error: null },
+      },
+    })
+    use(m)
+    await createAndAddOefening('e1', { ...input, duur_min: 9999 })
+    expect(m.calls.insert.find((i) => i.table === 'training_oefeningen')!.payload.duur_min).toBe(600)
+  })
+
+  it('zet duur_min op null als er geen duur is ingevuld', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1' } },
+        oefeningen: { data: { id: 'o-new' }, error: null },
+        training_oefeningen: { data: { id: 'k1' }, error: null },
+      },
+    })
+    use(m)
+    await createAndAddOefening('e1', input)
+    expect(m.calls.insert.find((i) => i.table === 'training_oefeningen')!.payload.duur_min).toBeNull()
   })
 
   it('weigert meer dan één formatie per team', async () => {

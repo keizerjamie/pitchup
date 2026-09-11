@@ -2,9 +2,12 @@ import { describe, it, expect } from 'vitest'
 import type { ParallelBlok } from '@/lib/parallel-groep'
 import type { TrainingOefeningWithData } from '@/lib/types'
 import {
+  DUUR_MIN_MAX,
   STANDAARD_SESSIEDUUR_MIN,
   berekenTijdlijn,
   blokDuur,
+  clampDuurMin,
+  effectieveDuurMin,
   minutenNaarTijd,
   tijdNaarMinuten,
 } from '@/lib/sessie-tijdlijn'
@@ -118,5 +121,74 @@ describe('berekenTijdlijn', () => {
 
   it('de referentieduur is 90 minuten (bovengrens van 60-90 uit het onderzoek)', () => {
     expect(STANDAARD_SESSIEDUUR_MIN).toBe(90)
+  })
+})
+
+// ────────────────────────────────────────────────
+// clampDuurMin / effectieveDuurMin
+// ────────────────────────────────────────────────
+
+describe('clampDuurMin', () => {
+  it('houdt null null en gokt nooit een getal', () => {
+    expect(clampDuurMin(null)).toBeNull()
+    expect(clampDuurMin(undefined)).toBeNull()
+    expect(clampDuurMin('abc' as unknown as number)).toBeNull()
+    expect(clampDuurMin(NaN)).toBeNull()
+  })
+
+  it('clamt naar hele minuten binnen [0, DUUR_MIN_MAX]', () => {
+    expect(clampDuurMin(-5)).toBe(0)
+    expect(clampDuurMin(0)).toBe(0)
+    expect(clampDuurMin(12.9)).toBe(12)
+    expect(clampDuurMin(9999)).toBe(DUUR_MIN_MAX)
+    expect(DUUR_MIN_MAX).toBe(600)
+  })
+})
+
+describe('effectieveDuurMin', () => {
+  it('laat de duur op de koppeling winnen van de bibliotheekduur', () => {
+    expect(effectieveDuurMin({ duur_min: 20, oefeningen: { duur_min: 30 } })).toBe(20)
+  })
+
+  it('valt zonder eigen duur terug op de bibliotheek (legacy-rij én leeggemaakt veld)', () => {
+    expect(effectieveDuurMin({ duur_min: null, oefeningen: { duur_min: 30 } })).toBe(30)
+    expect(effectieveDuurMin({ oefeningen: { duur_min: 30 } })).toBe(30)
+  })
+
+  it('geeft null als nergens een duur staat', () => {
+    expect(effectieveDuurMin({ duur_min: null, oefeningen: { duur_min: null } })).toBeNull()
+    expect(effectieveDuurMin({})).toBeNull()
+    expect(effectieveDuurMin({ duur_min: null, oefeningen: null })).toBeNull()
+  })
+
+  it('leest een 0 op de koppeling als "expliciet geen duur", NOOIT als leeg', () => {
+    // Het scherpste punt van deze feature: met `||` in plaats van de expliciete
+    // null/undefined-check zou 0 hier stil de bibliotheekduur (30) teruggeven.
+    expect(effectieveDuurMin({ duur_min: 0, oefeningen: { duur_min: 30 } })).toBeNull()
+  })
+
+  it('geeft null bij een onbruikbare of negatieve waarde', () => {
+    expect(effectieveDuurMin({ duur_min: -3, oefeningen: { duur_min: 30 } })).toBeNull()
+    expect(effectieveDuurMin({ duur_min: NaN, oefeningen: { duur_min: 30 } })).toBeNull()
+  })
+})
+
+describe('blokDuur — met koppeling-duur', () => {
+  function lidMetKoppeling(duurKoppeling: number | null, duurBibliotheek: number | null, id = 'k1') {
+    return { id, duur_min: duurKoppeling, oefeningen: { duur_min: duurBibliotheek } } as unknown as TrainingOefeningWithData
+  }
+
+  it('parallelle groep: langste effectieve duur, mét fallback per lid', () => {
+    const blok: ParallelBlok = {
+      key: 'g:1',
+      groepId: 'g1',
+      leden: [lidMetKoppeling(20, 5, 'a'), lidMetKoppeling(null, 30, 'b')],
+    }
+    expect(blokDuur(blok)).toBe(30)
+  })
+
+  it('een koppeling met duur 0 telt als "geen duur" en haalt de bibliotheekduur niet terug', () => {
+    const blok: ParallelBlok = { key: 'k:a', groepId: null, leden: [lidMetKoppeling(0, 30, 'a')] }
+    expect(blokDuur(blok)).toBeNull()
   })
 })

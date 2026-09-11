@@ -6,6 +6,7 @@ import BackButton from '@/components/BackButton'
 import { createEvent } from '@/app/actions/events'
 import { todayLocal } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
+import type { TrainingsType } from '@/lib/types'
 
 type EventType = 'training' | 'match'
 
@@ -14,6 +15,7 @@ function NewEventForm() {
   const raw = searchParams.get('type')
   const defaultType: EventType = raw === 'match' ? 'match' : 'training'
   const [type, setType] = useState<EventType>(defaultType)
+  const [trainingstype, setTrainingstype] = useState<TrainingsType>('vct')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const t = useDict()
@@ -67,6 +69,24 @@ function NewEventForm() {
         <input type="hidden" name="type" value={type} />
 
         <div className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
+          {type === 'training' && (
+            <div>
+              <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.trainingstype}</label>
+              <div className="bg-surface rounded-2xl p-2 border border-[var(--border-soft)] flex gap-1.5">
+                <button type="button" onClick={() => setTrainingstype('vct')}
+                  aria-pressed={trainingstype === 'vct'}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-light ${trainingstype === 'vct' ? 'bg-event-training text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
+                  {t.event.trainingstypeVct}
+                </button>
+                <button type="button" onClick={() => setTrainingstype('teamtactisch')}
+                  aria-pressed={trainingstype === 'teamtactisch'}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-light ${trainingstype === 'teamtactisch' ? 'bg-event-training text-white shadow-sm' : 'text-muted hover:text-ink'}`}>
+                  {t.event.trainingstypeTeamtactisch}
+                </button>
+              </div>
+              <input type="hidden" name="trainingstype" value={trainingstype} />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.date}</label>

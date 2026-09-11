@@ -22,17 +22,41 @@ import { berekenStap, type CategorieMeting } from '@/lib/types'
 
 // Minimale, chainbare supabase-mock: elke query-methode geeft de builder terug
 // en de builder is awaitable; `from(table)` bepaalt welke dataset terugkomt.
+//
+// `eq` filtert WEL, maar alleen op kolommen die de fixture-rij ook echt heeft.
+// Zonder dat filter zou het nieuwe .eq('trainingstype','vct') in
+// countCategoryOccurrences/getTrainingLog hier niets doen en zou geen enkele
+// test bewijzen dat teamtactische trainingen wegvallen. En zonder de
+// "alleen als de kolom bestaat"-regel zou elke bestaande fixture (die geen
+// team_id/type draagt) opeens leeg worden — een rij zonder `trainingstype`
+// gedraagt zich hier dus als VCT, net als een omgeving waar de migratie nog
+// niet gedraaid heeft. `in` werkt op dezelfde manier; datum- en
+// volgordefilters blijven bewust ongemoeid.
 function makeSupabase(byTable: Record<string, { data: unknown }>): SupabaseClient {
   function chain(table: string) {
-    const result = byTable[table] ?? { data: [] }
+    const bron = byTable[table] ?? { data: [] }
+    const eqs: { col: string; val: unknown }[] = []
+    const ins: { col: string; vals: unknown[] }[] = []
+    const resultaat = () => {
+      if (!Array.isArray(bron.data)) return bron
+      const rijen = (bron.data as Record<string, unknown>[]).filter(
+        (rij) =>
+          eqs.every(({ col, val }) => !(col in rij) || rij[col] === val) &&
+          ins.every(({ col, vals }) => !(col in rij) || vals.includes(rij[col])),
+      )
+      return { ...bron, data: rijen }
+    }
     const c: Record<string, unknown> = {}
-    const methods = [
-      'select', 'eq', 'gt', 'lt', 'gte', 'lte', 'in', 'order', 'neq', 'limit',
-    ]
+    const methods = ['select', 'gt', 'lt', 'gte', 'lte', 'order', 'neq', 'limit']
     for (const m of methods) c[m] = () => c
-    c.single = () => Promise.resolve(result)
-    c.maybeSingle = () => Promise.resolve(result)
-    ;(c as { then: unknown }).then = (resolve: (v: unknown) => unknown) => resolve(result)
+    c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // `in` moet mee: de koppelingen worden opgehaald met .in('event_id', ids) uit
+    // de al gefilterde events-query. Zonder dit filter zou een uitgesloten
+    // training zijn oefeningen alsnog in de telling krijgen.
+    c.in = (col: string, vals: unknown[]) => { ins.push({ col, vals }); return c }
+    c.single = () => Promise.resolve(resultaat())
+    c.maybeSingle = () => Promise.resolve(resultaat())
+    ;(c as { then: unknown }).then = (resolve: (v: unknown) => unknown) => resolve(resultaat())
     return c
   }
   return { from: (t: string) => chain(t) } as unknown as SupabaseClient
@@ -83,6 +107,81 @@ describe('countCategoryOccurrences', () => {
 
     const occ = await countCategoryOccurrences(supabase, 'team-1', '2026-01-01', '2026-02-01')
     expect(occ.partijen_groot).toBe(2)
+  })
+})
+
+describe('countCategoryOccurrences — trainingstype', () => {
+  it('telt een teamtactische training niet mee', async () => {
+    const supabase = makeSupabase({
+      events: {
+        data: [
+          { id: 't1', type: 'training', trainingstype: 'vct' },
+          { id: 't2', type: 'training', trainingstype: 'teamtactisch' },
+        ],
+      },
+      training_oefeningen: {
+        data: [
+          { event_id: 't1', oefeningen: { categorie: 'partijen_groot' } },
+          { event_id: 't2', oefeningen: { categorie: 'partijen_groot' } },
+        ],
+      },
+    })
+
+    const occ = await countCategoryOccurrences(supabase, 'team-1', '2026-01-01', '2026-02-01')
+    expect(occ.partijen_groot).toBe(1)
+  })
+
+  it('telt niets van een teamtactische training, ook niet met een mix van categorieën', async () => {
+    const supabase = makeSupabase({
+      events: { data: [{ id: 't2', type: 'training', trainingstype: 'teamtactisch' }] },
+      training_oefeningen: {
+        data: [
+          { event_id: 't2', oefeningen: { categorie: 'partijen_groot' } },
+          { event_id: 't2', oefeningen: { categorie: 'sprints_veel_rust' } },
+          { event_id: 't2', oefeningen: { categorie: 'warming_up' } },
+        ],
+      },
+    })
+
+    expect(await countCategoryOccurrences(supabase, 'team-1', '2026-01-01', '2026-02-01')).toEqual({})
+  })
+
+  it('verandert niets met terugwerkende kracht: zonder teamtactische trainingen dezelfde uitkomst', async () => {
+    // Elke bestaande rij krijgt bij de migratie 'vct' (NOT NULL DEFAULT), dus
+    // dit is exact de situatie van vóór deze feature.
+    const supabase = makeSupabase({
+      events: {
+        data: [
+          { id: 't1', type: 'training', trainingstype: 'vct' },
+          { id: 't2', type: 'training', trainingstype: 'vct' },
+        ],
+      },
+      training_oefeningen: {
+        data: [
+          { event_id: 't1', oefeningen: { categorie: 'partijen_groot' } },
+          { event_id: 't1', oefeningen: { categorie: 'partijen_groot' } },
+          { event_id: 't2', oefeningen: { categorie: 'partijen_groot' } },
+        ],
+      },
+    })
+
+    expect((await countCategoryOccurrences(supabase, 'team-1', '2026-01-01', '2026-02-01')).partijen_groot).toBe(2)
+  })
+
+  it('laat een teamtactische training zónder oefeningen niets veranderen', async () => {
+    const supabase = makeSupabase({
+      events: {
+        data: [
+          { id: 't1', type: 'training', trainingstype: 'vct' },
+          { id: 't2', type: 'training', trainingstype: 'teamtactisch' },
+        ],
+      },
+      training_oefeningen: {
+        data: [{ event_id: 't1', oefeningen: { categorie: 'partijen_klein' } }],
+      },
+    })
+
+    expect((await countCategoryOccurrences(supabase, 'team-1', '2026-01-01', '2026-02-01')).partijen_klein).toBe(1)
   })
 })
 
@@ -372,6 +471,58 @@ describe('getTrainingLog — nieuwe vorm (per onderdeel)', () => {
     )
     expect(occurrences.partijen_groot).toBe(40)
     expect(currentSteps.partijen_groot).toBe(22) // 2 + floor(40/2)
+  })
+})
+
+describe('getTrainingLog — trainingstype', () => {
+  it('levert geen logregel voor een teamtactische training en telt hem niet mee', async () => {
+    const supabase = makeSupabase({
+      events: {
+        data: [
+          { id: 't1', date: '2026-01-10', type: 'training', trainingstype: 'vct' },
+          { id: 't2', date: '2026-01-17', type: 'training', trainingstype: 'teamtactisch' },
+        ],
+      },
+      training_oefeningen: {
+        data: [
+          { event_id: 't1', stap_override: null, oefeningen: { categorie: 'partijen_groot' } },
+          { event_id: 't2', stap_override: null, oefeningen: { categorie: 'partijen_groot' } },
+        ],
+      },
+    })
+
+    const { log, occurrences, currentSteps } = await getTrainingLog(
+      supabase, 'team-1', actueelUit([['partijen_groot', '2026-01-01', 3]]), '2026-03-01',
+    )
+
+    expect(log.map((e) => e.eventId)).toEqual(['t1'])
+    expect(occurrences.partijen_groot).toBe(1)
+    expect(currentSteps.partijen_groot).toBe(3) // 3 + floor(1/2)
+  })
+
+  it('geeft dezelfde uitkomst als vóór deze feature zolang alles VCT is', async () => {
+    const supabase = makeSupabase({
+      events: {
+        data: [
+          { id: 't1', date: '2026-01-10', type: 'training', trainingstype: 'vct' },
+          { id: 't2', date: '2026-01-17', type: 'training', trainingstype: 'vct' },
+        ],
+      },
+      training_oefeningen: {
+        data: [
+          { event_id: 't1', stap_override: null, oefeningen: { categorie: 'partijen_groot' } },
+          { event_id: 't2', stap_override: null, oefeningen: { categorie: 'partijen_groot' } },
+        ],
+      },
+    })
+
+    const { log, occurrences, currentSteps } = await getTrainingLog(
+      supabase, 'team-1', actueelUit([['partijen_groot', '2026-01-01', 3]]), '2026-03-01',
+    )
+
+    expect(log.map((e) => e.eventId)).toEqual(['t2', 't1'])
+    expect(occurrences.partijen_groot).toBe(2)
+    expect(currentSteps.partijen_groot).toBe(4) // 3 + floor(2/2)
   })
 })
 

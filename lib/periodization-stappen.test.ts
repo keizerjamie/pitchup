@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
   PERIODIZATION_STEP_TABLES,
+  PERIODIZATION_STEP_MINUTEN,
+  berekenDuurUitStap,
   maxStapVoor,
   clampStapOverride,
   stapInhoud,
   heeftStapInhoud,
   type StapRij,
+  type StapRekenRij,
 } from '@/lib/periodization-stappen'
 import { PERIODIZATION_CATEGORIES, type OefeningCategorie } from '@/lib/types'
 
@@ -340,6 +343,116 @@ describe('heeftStapInhoud', () => {
   it('is onwaar voor categorieën zonder inhoud', () => {
     for (const key of ['warming_up', 'positiespel', 'pass_trap', 'overig', 'onbekende_cat']) {
       expect(heeftStapInhoud(key)).toBe(false)
+    }
+  })
+})
+
+// ────────────────────────────────────────────────
+// PERIODIZATION_STEP_MINUTEN — de numerieke tegenhanger
+// ────────────────────────────────────────────────
+
+const MINUTEN_KEYS = Object.keys(PERIODIZATION_STEP_MINUTEN) as OefeningCategorie[]
+
+// Terugformatteren van een numerieke rij naar de weergavestring van de
+// brontabel. STAAT BEWUST IN HET TESTBESTAND: productiecode mag deze strings
+// nooit genereren (zie de kop van lib/periodization-stappen.ts). Alleen hier,
+// als bewijsmiddel dat beide tabellen dezelfde waarheid vertellen.
+function alsGetal(n: number): string {
+  return String(n).replace('.', ',')
+}
+function alsMinuten(n: number): string {
+  return `${alsGetal(n)} min`
+}
+function terugNaarStapRij(rij: StapRekenRij): StapRij {
+  const uit: StapRij = {
+    arbeid: alsMinuten(rij.arbeidMin),
+    herhalingen: alsGetal(rij.herhalingen),
+    rustHH: alsMinuten(rij.rustHHMin),
+  }
+  if (rij.series !== undefined) uit.series = alsGetal(rij.series)
+  if (rij.rustSeriesMin !== undefined) uit.rustSeries = alsMinuten(rij.rustSeriesMin)
+  return uit
+}
+
+describe('PERIODIZATION_STEP_MINUTEN — omvang', () => {
+  it('bevat EXACT de drie partijen-categorieën', () => {
+    // Een vierde key zou stilzwijgend auto-berekening aanzetten bij een
+    // categorie waar niets uit de stap te berekenen valt (sprints hebben een
+    // afstand als arbeid, steigerungs alleen tekst).
+    expect([...MINUTEN_KEYS].sort()).toEqual(['partijen_groot', 'partijen_klein', 'partijen_midden'])
+  })
+
+  it.each(MINUTEN_KEYS)('%s heeft evenveel rijen als de weergavetabel', (key) => {
+    expect(PERIODIZATION_STEP_MINUTEN[key]!.length).toBe(PERIODIZATION_STEP_TABLES[key]!.length)
+  })
+
+  it('heeft de drie controlerijen uit de brief exact overgetypt', () => {
+    expect(PERIODIZATION_STEP_MINUTEN.partijen_groot![0]).toEqual({ arbeidMin: 10, herhalingen: 2, rustHHMin: 2 })
+    expect(PERIODIZATION_STEP_MINUTEN.partijen_midden![1]).toEqual({ arbeidMin: 4.5, herhalingen: 4, rustHHMin: 2 })
+    expect(PERIODIZATION_STEP_MINUTEN.partijen_klein![1]).toEqual({
+      arbeidMin: 1, herhalingen: 6, rustHHMin: 2.5, series: 2, rustSeriesMin: 4,
+    })
+  })
+})
+
+describe('PERIODIZATION_STEP_MINUTEN — consistentie met de weergavetabel', () => {
+  // De kernbewaking van deze feature: twee tabellen, één waarheid. Deze test
+  // valt zowel bij een gewijzigd getal als bij een gewijzigde weergavestring.
+  it.each(MINUTEN_KEYS)('%s: elke numerieke rij formatteert terug naar de brontabel-rij', (key) => {
+    const getallen = PERIODIZATION_STEP_MINUTEN[key]!
+    const strings = PERIODIZATION_STEP_TABLES[key]!
+    for (const [i, rij] of getallen.entries()) {
+      expect(terugNaarStapRij(rij), `${key} stap ${i + 1}`).toEqual(strings[i])
+    }
+  })
+})
+
+// ────────────────────────────────────────────────
+// berekenDuurUitStap
+// ────────────────────────────────────────────────
+
+describe('berekenDuurUitStap', () => {
+  it('rekent de formule uit de story, per categorie', () => {
+    expect(berekenDuurUitStap('partijen_groot', 1)).toBe(22)   // 10*2 + 2*1
+    expect(berekenDuurUitStap('partijen_midden', 2)).toBe(24)  // 4,5*4 + 2*3
+    expect(berekenDuurUitStap('partijen_klein', 2)).toBe(41)   // (1*6 + 2,5*5)*2 + 4*1
+  })
+
+  it('levert over álle stappen gehele minuten op', () => {
+    // duur_min is een SMALLINT. Zou een toekomstige rij wél afronden, dan wordt
+    // dat hier zichtbaar in plaats van stil.
+    for (const key of MINUTEN_KEYS) {
+      for (let stap = 1; stap <= PERIODIZATION_STEP_MINUTEN[key]!.length; stap++) {
+        const duur = berekenDuurUitStap(key, stap)!
+        expect(duur % 1, `${key} stap ${stap}`).toBe(0)
+        expect(duur).toBeGreaterThan(0)
+        expect(duur).toBeLessThanOrEqual(600)
+      }
+    }
+  })
+
+  it('clamt de stap-index net als stapInhoud: onder 1 → eerste rij, boven het maximum → laatste rij', () => {
+    expect(berekenDuurUitStap('partijen_groot', 0)).toBe(berekenDuurUitStap('partijen_groot', 1))
+    expect(berekenDuurUitStap('partijen_groot', -5)).toBe(berekenDuurUitStap('partijen_groot', 1))
+    expect(berekenDuurUitStap('partijen_klein', 999)).toBe(berekenDuurUitStap('partijen_klein', 13))
+  })
+
+  it('geeft null zonder bruikbare stap', () => {
+    expect(berekenDuurUitStap('partijen_groot', null)).toBeNull()
+    expect(berekenDuurUitStap('partijen_groot', undefined)).toBeNull()
+    expect(berekenDuurUitStap('partijen_groot', NaN)).toBeNull()
+    expect(berekenDuurUitStap('partijen_groot', Infinity)).toBeNull()
+  })
+
+  it('geeft null voor elke categorie zonder numerieke tabel', () => {
+    // null = "niet automatisch berekenen"; de aanroeper laat de bestaande duur
+    // dan met rust. Sprints hebben een AFSTAND als arbeid — daar valt niets uit
+    // te rekenen.
+    for (const key of [
+      'sprints_weinig_rust', 'sprints_veel_rust', 'steigerungs',
+      'warming_up', 'positiespel', 'pass_trap', 'overig', 'onzin',
+    ]) {
+      expect(berekenDuurUitStap(key, 3), key).toBeNull()
     }
   })
 })

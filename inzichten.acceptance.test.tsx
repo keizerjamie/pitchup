@@ -152,6 +152,10 @@ function eventRow(overrides: Row = {}): Row {
     goals_for: null,
     goals_against: null,
     created_at: '2026-01-01T10:00:00Z',
+    // Nieuwe kolom (trainingstype-en-koppeling-duur): default 'vct', anders
+    // matcht het .eq('trainingstype','vct')-filter in countCategoryOccurrences
+    // niets en valt de trainingsinhoud-telling naar 0 (backend-feedback).
+    trainingstype: 'vct',
     ...overrides,
   }
 }

@@ -141,7 +141,7 @@ function renderPlan(
         players={[]}
         presentPlayerIds={[]}
         startTijd={null}
-        kopieerOpties={[]}
+        kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )
@@ -203,14 +203,19 @@ describe('AC1 — trainingskaart: potlood opent het bewerkformulier vooringevuld
     // Beslispunt 1-A: statische hint dat de wijziging overal doorwerkt.
     expect(screen.getByText(nl.oefeningen.editSharedHint)).toBeInTheDocument()
 
-    expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Positiespel 7v7')
-    expect(screen.getByDisplayValue('Twee vakken met overtal')).toBeInTheDocument()
-    expect(screen.getByLabelText(nl.trainingPlan.category)).toHaveValue('partijen_klein')
-    expect(screen.getByDisplayValue('25')).toBeInTheDocument() // duur_min
-    expect(screen.getByDisplayValue('40')).toBeInTheDocument() // breedte_m
-    expect(screen.getByDisplayValue('60')).toBeInTheDocument() // lengte_m
-    expect(screen.getByRole('button', { name: nl.trainingPlan.fieldZones.midden })).toHaveClass('bg-warning')
-    expect(screen.getByLabelText(nl.oefeningen.neutralsLabel)).toHaveValue(2)
+    // Gescoped op de editor-modal: de onderliggende trainingskaart heeft nu
+    // óók een duurveld (deel B, trainingstype-en-koppeling-duur) dat toevallig
+    // dezelfde waarde (25) kan tonen — zonder scope zou getByDisplayValue('25')
+    // dus dubbel matchen.
+    const editor = screen.getByText(nl.oefeningen.editTitle).closest('.relative') as HTMLElement
+    expect(within(editor).getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Positiespel 7v7')
+    expect(within(editor).getByDisplayValue('Twee vakken met overtal')).toBeInTheDocument()
+    expect(within(editor).getByLabelText(nl.trainingPlan.category)).toHaveValue('partijen_klein')
+    expect(within(editor).getByDisplayValue('25')).toBeInTheDocument() // duur_min
+    expect(within(editor).getByDisplayValue('40')).toBeInTheDocument() // breedte_m
+    expect(within(editor).getByDisplayValue('60')).toBeInTheDocument() // lengte_m
+    expect(within(editor).getByRole('button', { name: nl.trainingPlan.fieldZones.midden })).toHaveClass('bg-warning')
+    expect(within(editor).getByLabelText(nl.oefeningen.neutralsLabel)).toHaveValue(2)
 
     // Teams (2) + hun formaties.
     const teamSizeSelects = screen.getAllByLabelText(nl.oefeningen.teamSize)
@@ -267,7 +272,7 @@ describe('AC2 — trainingskaart: opslaan werkt de oefening bij en sluit het for
           eventId="e1" initialDoelstelling={null}
           initialOefeningen={[makeKoppeling({ id: 'k1', oefening_id: 'o1', oefeningen: { ...oefening, naam: 'Rondo bijgewerkt' } })]}
           library={[]} currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
         />
       </DictProvider>,
     )

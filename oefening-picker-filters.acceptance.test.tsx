@@ -98,7 +98,7 @@ function renderEditor(library: Oefening[]) {
         hasNulmeting={false}
         suggestion={null}
         players={[]}
-        presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+        presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )

@@ -108,6 +108,12 @@ export const nl = {
     training: 'Training',
     match: 'Wedstrijd',
     meting: 'Nulmeting',
+    // Soort training (deel A, trainingstype-en-koppeling-duur): VCT-training
+    // (telt mee in de periodisering) of teamtactisch (telt nergens mee).
+    trainingstype: 'Trainingstype',
+    trainingstypeVct: 'VCT',
+    trainingstypeTeamtactisch: 'Teamtactisch',
+    trainingstypeHint: 'Bij een teamtactische training tellen de oefeningen niet mee in de VCT-periodisering.',
     date: 'Datum',
     time: 'Tijdstip',
     location: 'Locatie',
@@ -341,6 +347,9 @@ export const nl = {
     nestedInBadge: 'Genest in {name}',
     print: 'Afdrukken',
     stapOpslaanMislukt: 'Opslaan van de stap is mislukt. Probeer het opnieuw.',
+    trainingstypeOpslaanMislukt: 'Wijzigen van het trainingstype is mislukt. Probeer het opnieuw.',
+    duurAutoHint: 'automatisch berekend uit de stap',
+    duurOpslaanMislukt: 'Opslaan van de duur is mislukt. Probeer het opnieuw.',
     parallelLabel: 'Parallel aan (tegelijk uitvoeren)',
     parallelNoneOption: '— niet parallel —',
     parallelNaastOption: 'Naast: {name}',

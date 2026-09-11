@@ -17,6 +17,15 @@ export async function assertOwnMatchEvent(supabase: SupabaseClient, eventId: str
   if (!data || data.type !== 'match') throw new Error('Event niet gevonden')
 }
 
+// Zelfde tenant-check als assertOwnEvent, plus de eis dat het event een
+// training is. Spiegel van assertOwnMatchEvent, inclusief de bewust
+// niet-onthullende melding: die verraadt niet of het event niet bestaat, van een
+// ander team is, of gewoon geen training is.
+export async function assertOwnTrainingEvent(supabase: SupabaseClient, eventId: string, teamId: string) {
+  const { data } = await supabase.from('events').select('id, type').eq('id', eventId).eq('team_id', teamId).maybeSingle()
+  if (!data || data.type !== 'training') throw new Error('Event niet gevonden')
+}
+
 export async function assertOwnPlayer(supabase: SupabaseClient, playerId: string, teamId: string) {
   const { data } = await supabase.from('players').select('id').eq('id', playerId).eq('team_id', teamId).maybeSingle()
   if (!data) throw new Error('Speler niet gevonden')

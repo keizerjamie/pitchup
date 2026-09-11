@@ -2,18 +2,19 @@
 
 import { useState, useTransition, useRef, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling } from '@/lib/types'
+import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, type TrainingsType } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
 import { saveDoelstelling } from '@/app/actions/training-plan'
 import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
 import { vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
 import { updateOefening } from '@/app/actions/oefening-library'
+import { updateTrainingstype } from '@/app/actions/events'
 import type { OefeningInput } from '@/lib/oefening'
 import { blokkenVanKoppelingen, blokLabel } from '@/lib/parallel-groep'
-import { berekenTijdlijn } from '@/lib/sessie-tijdlijn'
+import { berekenTijdlijn, clampDuurMin, effectieveDuurMin, DUUR_MIN_MAX } from '@/lib/sessie-tijdlijn'
 import SessieTijdlijn from '@/components/SessieTijdlijn'
 import KopieerVorigeTraining, { type KopieerOptie } from '@/components/KopieerVorigeTraining'
-import { clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
+import { berekenDuurUitStap, clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
 import { bereikVoorNeutralen, teamBereikLabel, vormLabel, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
@@ -23,6 +24,7 @@ import ChevronIcon from '@/components/icons/ChevronIcon'
 import TeamIndelingEditor from '@/components/TeamIndelingEditor'
 import ParallelGroepEditor from '@/components/ParallelGroepEditor'
 import BezettingStepper from '@/components/BezettingStepper'
+import TrainingstypeSchakelaar from '@/components/TrainingstypeSchakelaar'
 import { useDict } from '@/lib/i18n-context'
 
 interface Props {
@@ -40,6 +42,9 @@ interface Props {
   startTijd: string | null
   /** Eerdere trainingen met oefeningen, om het plan van over te nemen. */
   kopieerOpties: KopieerOptie[]
+  /** Opgeslagen trainingstype ('vct' | 'teamtactisch'), default 'vct' bij een
+   *  niet-gemigreerde omgeving (zie app/events/[id]/training-plan/page.tsx). */
+  initialTrainingstype: TrainingsType
 }
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
@@ -53,12 +58,22 @@ const ALL_CATS = PERIODIZATION_CATEGORIES
 // de referentie stabiel zolang `spelerindeling` zelf niet verandert.
 const EMPTY_INDELING: Spelerindeling = []
 
-export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties }: Props) {
+export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties, initialTrainingstype }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
   const [doelstellingSaved, setDoelstellingSaved] = useState(false)
   const [koppelingen, setKoppelingen] = useState<TrainingOefeningMetBezetting[]>(initialOefeningen)
+
+  // Trainingstype (VCT / teamtactisch): optimistische state + save, met
+  // rollback naar de laatst bevestigde waarde bij een mislukte server-call
+  // (zelfde patroon als lastConfirmedStapOverrideRef hieronder).
+  const [trainingstype, setTrainingstype] = useState<TrainingsType>(initialTrainingstype)
+  const [trainingstypeError, setTrainingstypeError] = useState<string | null>(null)
+  const lastConfirmedTrainingstypeRef = useRef<TrainingsType>(initialTrainingstype)
+  useEffect(() => {
+    lastConfirmedTrainingstypeRef.current = initialTrainingstype
+  }, [initialTrainingstype])
 
   // Sync when server revalidates and parent sends fresh data
   // (adjust-state-during-render pattern instead of a cascading effect)
@@ -129,6 +144,50 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   useEffect(() => {
     lastConfirmedStapOverrideRef.current = Object.fromEntries(initialOefeningen.map((k) => [k.id, k.stap_override]))
   }, [initialOefeningen])
+
+  // Duurveld per koppeling: foutmeldingen, laatst bevestigde waarde (rollback-
+  // bron), debounce-timers, en welke velden zojuist automatisch berekend zijn
+  // (voor de tijdelijke hint) — zelfde patroon als de stap_override-state
+  // hierboven.
+  const [duurErrors, setDuurErrors] = useState<Record<string, string>>({})
+  const lastConfirmedDuurRef = useRef<Record<string, number | null>>(
+    Object.fromEntries(initialOefeningen.map((k) => [k.id, k.duur_min ?? null])),
+  )
+  useEffect(() => {
+    lastConfirmedDuurRef.current = Object.fromEntries(initialOefeningen.map((k) => [k.id, k.duur_min ?? null]))
+  }, [initialOefeningen])
+  const duurTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const [duurAuto, setDuurAuto] = useState<Record<string, true>>({})
+
+  // Cleanup bij unmount: zonder dit blijven openstaande debounce-timers
+  // (doelstellingTimer, duurTimers) na het verlaten van de pagina hangen en
+  // vuren ze hun setTimeout-callback nog af op een ontmount component. Eén
+  // effect voor beide refs — geen gedragswijziging voor de gebruiker, puur
+  // opruimen.
+  useEffect(() => {
+    return () => {
+      if (doelstellingTimer.current) clearTimeout(doelstellingTimer.current)
+      // Bewust de ref op unmount-moment lezen, geen snapshot bij mount:
+      // precies de (mogelijk nog lopende) timers op het moment van weggaan
+      // moeten gecleared worden.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      Object.values(duurTimers.current).forEach((timer) => clearTimeout(timer))
+    }
+  }, [])
+
+  function handleTrainingstypeChange(next: TrainingsType) {
+    setTrainingstype(next)
+    setTrainingstypeError(null)
+    startTransition(async () => {
+      try {
+        await updateTrainingstype(eventId, next)
+        lastConfirmedTrainingstypeRef.current = next
+      } catch {
+        setTrainingstype(lastConfirmedTrainingstypeRef.current)
+        setTrainingstypeError(t.trainingPlan.trainingstypeOpslaanMislukt)
+      }
+    })
+  }
 
   function handleDoelstellingChange(val: string) {
     setDoelstelling(val)
@@ -279,22 +338,75 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
       delete rest[koppelingId]
       return rest
     })
+
+    // Zelfde pure functie die de server straks gebruikt — de client rekent
+    // alleen vooruit voor de weergave, de server rekent zelf opnieuw en is
+    // leidend.
+    const berekend = value === null ? null : berekenDuurUitStap(categorie, value)
+    if (berekend !== null) {
+      setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, duur_min: berekend } : k)))
+      setDuurAuto((prev) => ({ ...prev, [koppelingId]: true }))
+      setTimeout(() => setDuurAuto((prev) => {
+        const rest = { ...prev }
+        delete rest[koppelingId]
+        return rest
+      }), 3000)
+    }
+
     startTransition(async () => {
       try {
         await updateKoppeling(koppelingId, eventId, { stap_override: value })
-        // Geslaagd: dit is nu de laatst bevestigde stap_override.
+        // Geslaagd: dit is nu de laatst bevestigde stap_override (en, als de
+        // server hem auto-berekende, ook de laatst bevestigde duur).
         lastConfirmedStapOverrideRef.current[koppelingId] = value
+        if (berekend !== null) lastConfirmedDuurRef.current[koppelingId] = berekend
       } catch {
         // Opslaan mislukt (om welke reden dan ook — niet per se omdat de
         // koppeling zelf niet gevonden werd): rollback naar de laatst
         // bevestigde waarde, generieke i18n-foutmelding — nooit de rauwe
         // (server-)fout tonen (zelfde patroon als TeamIndelingEditor's
-        // saveError).
+        // saveError). Een net berekende duur die nooit is opgeslagen rolt
+        // mee terug — anders blijft hij staan bij een stap die niet gered is.
         const fallback = lastConfirmedStapOverrideRef.current[koppelingId] ?? null
-        setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, stap_override: fallback } : k)))
+        const duurFallback = lastConfirmedDuurRef.current[koppelingId] ?? null
+        setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, stap_override: fallback, duur_min: duurFallback } : k)))
         setStapOverrideErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.stapOpslaanMislukt }))
       }
     })
+  }
+
+  function handleDuurChange(koppelingId: string, raw: string) {
+    // Nooit `parseInt(raw, 10) || null`: 0 is een geldige, betekenisvolle
+    // waarde ("expliciet geen duur") en is falsy — eerst op raw === '' testen
+    // (exact de valkuil uit de stapveld-gotcha, geheugen.md).
+    const value = raw === '' ? null : clampDuurMin(parseInt(raw, 10))
+    setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, duur_min: value } : k)))
+    setDuurErrors((prev) => {
+      if (!(koppelingId in prev)) return prev
+      const rest = { ...prev }
+      delete rest[koppelingId]
+      return rest
+    })
+    setDuurAuto((prev) => {
+      if (!(koppelingId in prev)) return prev
+      const rest = { ...prev }
+      delete rest[koppelingId]
+      return rest
+    })
+
+    if (duurTimers.current[koppelingId]) clearTimeout(duurTimers.current[koppelingId])
+    duurTimers.current[koppelingId] = setTimeout(() => {
+      startTransition(async () => {
+        try {
+          await updateKoppeling(koppelingId, eventId, { duur_min: value })
+          lastConfirmedDuurRef.current[koppelingId] = value
+        } catch {
+          const fallback = lastConfirmedDuurRef.current[koppelingId] ?? null
+          setKoppelingen((prev) => prev.map((k) => (k.id === koppelingId ? { ...k, duur_min: fallback } : k)))
+          setDuurErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.duurOpslaanMislukt }))
+        }
+      })
+    }, 500)
   }
 
   function handleGenestInChange(koppelingId: string, raw: string) {
@@ -316,6 +428,12 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
   return (
     <div className="space-y-6">
+
+      <TrainingstypeSchakelaar
+        waarde={trainingstype}
+        onChange={handleTrainingstypeChange}
+        error={trainingstypeError}
+      />
 
       {/* Doelstelling. Op print bewust compact (FOUT4 print-review): de
           scherm-typografie (grote letters, ruime p-5-padding) kostte
@@ -365,9 +483,14 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         <p data-testid="doelstelling-print" className="hidden print:block whitespace-pre-wrap print:text-[9px] print:leading-snug text-ink">{doelstelling}</p>
       </div>
 
-      {/* Cycle-week suggestion */}
-      {suggestion && suggestion.items.length > 0 && (
-        <div className="print:hidden bg-surface rounded-r-2xl border border-warning/30 border-l-[3px] border-l-warning p-4">
+      {/* Cycle-week suggestion. Verborgen bij een teamtactische training
+          (eigenaarsbesluit, brief sectie 8): de suggestie stuurt de VCT-
+          periodisering en een teamtactische training telt daar niet in mee —
+          "voeg partijen groot toe" boven zo'n training leest gek. De
+          "Huidige periodiseringstatus"-kaart hieronder blijft wél staan, daar
+          is niets over besloten. */}
+      {trainingstype === 'vct' && suggestion && suggestion.items.length > 0 && (
+        <div data-testid="cyclusweek-suggestie" className="print:hidden bg-surface rounded-r-2xl border border-warning/30 border-l-[3px] border-l-warning p-4">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-panel-orange-ink uppercase tracking-wide">
               {t.periodization.suggestTitle}
@@ -558,6 +681,13 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   ]
               const parallelDisabled = !currentGroupId && parallelOptions.length === 0
 
+              // Alleen bij VCT tonen we stapinhoud/-badge/-printregel: bij een
+              // teamtactische training telt een oefening niet mee in de
+              // VCT-periodisering, dus is de stap-inhoud betekenisloos (brief
+              // deel A). `stap_override` zelf wordt nooit gewist — wisselen
+              // VCT → Teamtactisch → VCT toont hem gewoon weer.
+              const isVct = trainingstype === 'vct'
+
               // Stap-inhoud (Arbeid/Herhalingen/Rust HH/Series/Rust series),
               // alleen voor de 5 tabel-categorieën + steigerungs
               // (heeftStapInhoud). `overrideClamped` is meteen de "stille
@@ -578,14 +708,23 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               const steigerungsTekst = o.categorie === 'steigerungs' && contentStep
                 ? t.periodization.steigerungsSteps[contentStep - 1] ?? null
                 : null
-              const showsStepContent = heeftStapInhoud(o.categorie)
+              // Categorie-only: blijft ook de conditie van het uitklap-paneel
+              // hieronder (het "generieke" stapveld daar), zodat een
+              // teamtactische partijvorm daar géén stapveld terugkrijgt in
+              // plaats van het verborgen VCT-veld.
+              const heeftInhoud = heeftStapInhoud(o.categorie)
+              // Vervangt showsStepContent op de drie plekken waar het om
+              // ZICHTBAARHEID van stapinformatie gaat: het stapblok op de
+              // kaart, de print-only stapregel en de stap-badge.
+              const toonStapblok = heeftInhoud && isVct
               // Print-only kopregel-tekst: nummer staat al in de badge links,
               // hier alleen naam + duur + afmetingen + categorie + stap achter
               // elkaar op één regel — platte tekst i.p.v. pillen (scheelt
-              // padding/hoogte, zie het "kladblok"-doelontwerp).
-              const stepText = contentStep !== null && contentStep !== undefined
+              // padding/hoogte, zie het "kladblok"-doelontwerp). Alleen bij VCT.
+              const stepText = isVct && contentStep !== null && contentStep !== undefined
                 ? (k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${contentStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${contentStep}`))
                 : null
+              const effDuur = effectieveDuurMin(k)
               // Kaartacties (bewerken / ontkoppelen). Staan in de kopstrook
               // van de kaart, naast de tijd — niet meer náást de titel, zodat
               // de titel op een smal scherm de volle breedte houdt.
@@ -691,8 +830,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           (samen was dit >20mm van de kaarthoogte). */}
                       <div className="text-[15px] font-semibold text-ink leading-snug print:hidden">{o.naam}</div>
 
-                      {/* Print-only kopregel: naam · duur · afmetingen · stap,
-                          achter elkaar op één regel. Staat bewust in de DOM
+                      {/* ANKER print-kopregel: Print-only kopregel: naam ·
+                          duur · afmetingen · stap, achter elkaar op één
+                          regel. Staat bewust in de DOM
                           VÓÓR de beschrijving hieronder — anders leest de
                           afdruk eerst de kleine grijze beschrijving en pas
                           daarna de vetgedrukte kopregel (omgekeerde
@@ -709,7 +849,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             egale grijze regel (verstrakking 2026-08-24). */}
                         <span className="print:font-bold">{o.naam}</span>
                         <span className="print:font-semibold print-poster-meta">
-                          {o.duur_min != null && <> · {o.duur_min} min</>}
+                          {effDuur !== null && <> · {effDuur} min</>}
                           {o.breedte_m && o.lengte_m && <> · {o.breedte_m}×{o.lengte_m}m</>}
                           {stepText && <> · {stepText}</>}
                           {/* Extra segment binnen de bestaande print-kopregel
@@ -731,14 +871,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             {catLabel(o.categorie)}
                           </span>
                         )}
-                        {contentStep !== null && contentStep !== undefined && (
+                        {isVct && contentStep !== null && contentStep !== undefined && (
                           <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-muted">
                             {k.stap_override !== null ? `${t.trainingPlan.stepBadge} ${contentStep}` : (stepForCategory(o.categorie) || `${t.trainingPlan.stepBadge} ${contentStep}`)}
                             {k.stap_override !== null && <span className="ml-1 opacity-60">{t.trainingPlan.manualSuffix}</span>}
                           </span>
-                        )}
-                        {o.duur_min != null && (
-                          <span className="text-xs text-faint">{o.duur_min} min</span>
                         )}
                         {o.breedte_m && o.lengte_m && (
                           <span className="text-xs text-faint">{o.breedte_m}×{o.lengte_m}m</span>
@@ -782,6 +919,42 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         )}
                       </div>
 
+                      {/* Duurveld: vervangt de vroegere read-only duur-badge.
+                          `??`, nooit `||` — een koppelingduur van 0 is een
+                          geldige, betekenisvolle waarde ("geen duur") en zou
+                          door `||` stil overschreven worden door de
+                          bibliotheekduur (dezelfde valkuil als de
+                          stapveld-gotcha, geheugen.md). Altijd zichtbaar, voor
+                          élke categorie. `print:hidden`: op papier staat de
+                          duur al in de kopregel (effDuur, hierboven) en in de
+                          tijdregel (tijdKop, via blokDuur). */}
+                      <div className="print:hidden mt-2 flex items-center gap-2 flex-wrap">
+                        <label htmlFor={`duur-${k.id}`} className="text-xs font-semibold text-muted whitespace-nowrap">
+                          {t.trainingPlan.duration}
+                        </label>
+                        <input
+                          id={`duur-${k.id}`}
+                          type="number"
+                          min={0}
+                          max={DUUR_MIN_MAX}
+                          inputMode="numeric"
+                          value={k.duur_min ?? o.duur_min ?? ''}
+                          placeholder=""
+                          onChange={(e) => handleDuurChange(k.id, e.target.value)}
+                          className="w-20 px-2 py-1 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink"
+                        />
+                        {duurAuto[k.id] && (
+                          <span aria-live="polite" className="text-xs text-faint">
+                            {t.trainingPlan.duurAutoHint}
+                          </span>
+                        )}
+                      </div>
+                      {duurErrors[k.id] && (
+                        <p className="print:hidden text-xs text-panel-red-ink bg-panel-red border border-panel-red-edge rounded-lg px-2 py-1 mt-1">
+                          {duurErrors[k.id]}
+                        </p>
+                      )}
+
                       {/* Stapveld + trainingsparameters direct op de kaart
                           voor de 5 tabel-categorieën + steigerungs
                           (heeftStapInhoud) — niet meer verstopt achter
@@ -790,7 +963,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           `print:hidden`: de afdruk krijgt hieronder, ná de
                           gefloate diagram-wrapper, een eigen compacte
                           print-only regel. */}
-                      {showsStepContent && (
+                      {toonStapblok && (
                         <div
                           data-testid={`stap-inhoud-${k.id}`}
                           className="print:hidden mt-2 p-2.5 rounded-lg bg-surface-sunken border border-[var(--border-soft)] space-y-1.5"
@@ -896,8 +1069,8 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
                       {/* Print-only stap-inhoud: dezelfde content als het
                           scherm-blok hierboven, maar in het `·`-gescheiden
-                          platte-tekst-patroon van de print-kopregel
-                          (TrainingPlanEditor.tsx:379-384 hierboven). Staat
+                          platte-tekst-patroon van de print-kopregel (zie
+                          anker "print-kopregel" hierboven). Staat
                           bewust NA de gefloate diagram-wrapper zodat hij op
                           papier meestal in de witruimte naast het diagram
                           valt i.p.v. de kaart te verlengen. Eigen
@@ -905,7 +1078,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           in het scherm-blok staat — jsdom past @media print
                           niet toe, dus tests moeten het print-element apart
                           kunnen vinden. */}
-                      {showsStepContent && (inhoud || steigerungsTekst) && (
+                      {toonStapblok && (inhoud || steigerungsTekst) && (
                         <p
                           data-testid={`stap-inhoud-print-${k.id}`}
                           className="hidden print:block print:text-[8px] print:leading-tight print:text-ink"
@@ -953,10 +1126,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           staat dit veld nu direct op de kaart hierboven —
                           niet meer hier, om nooit twee inputs voor hetzelfde
                           veld tegelijk te tonen. */}
-                      {!showsStepContent && (
+                      {!heeftInhoud && (
                         <div>
-                          <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})</label>
+                          <label htmlFor={`stap-generic-${k.id}`} className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.stepBadge} ({t.trainingPlan.stepAuto})</label>
                           <input
+                            id={`stap-generic-${k.id}`}
                             type="number" min={1} max={99}
                             value={k.stap_override ?? ''}
                             placeholder={t.trainingPlan.stepAuto}

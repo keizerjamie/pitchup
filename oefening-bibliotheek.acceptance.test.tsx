@@ -259,7 +259,7 @@ describe('AC6 — bestaande bibliotheek-oefening toevoegen aan een training, gee
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
         />
       </DictProvider>,
     )
@@ -362,7 +362,7 @@ describe('AC8/AC17 — volgorde/stap_override/genest_in zijn training-specifiek'
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppelingA, koppelingB]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
         />
       </DictProvider>,
     )

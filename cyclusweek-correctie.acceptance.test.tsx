@@ -117,7 +117,10 @@ function correctieRow(value: string, teamId: string = TEAM): Row {
 }
 
 function trainingEvent(id: string, date: string, overrides: Row = {}): Row {
-  return { id, team_id: TEAM, type: 'training', date, time: null, ...overrides }
+  // trainingstype: 'vct' — anders matcht het .eq('trainingstype','vct')-filter
+  // in getTrainingLog niets (backend-feedback; breekt deze tests nu nog niet
+  // omdat ze niet op de telling zelf toetsen, maar voorkomt stille drift).
+  return { id, team_id: TEAM, type: 'training', date, time: null, trainingstype: 'vct', ...overrides }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

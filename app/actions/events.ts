@@ -3,9 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { EventType, MatchType, HomeAway } from '@/lib/types'
+import { EventType, MatchType, HomeAway, VALID_TRAININGSTYPES, type TrainingsType } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
-import { assertOwnMatchEvent } from '@/lib/authz'
+import { assertOwnMatchEvent, assertOwnTrainingEvent } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
 import { isTimeString } from '@/lib/utils'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
@@ -38,6 +38,17 @@ export async function createEvent(formData: FormData) {
   const notes = ((formData.get('notes') as string) || null)?.slice(0, 2000) ?? null
 
   const payload: Record<string, unknown> = { type, date, time: timeRaw, location, notes, team_id: user.id }
+
+  if (type === 'training') {
+    const trainingstype = formData.get('trainingstype') as TrainingsType
+    // Ontbrekend veld = VCT (de DB-default), een ONGELDIGE waarde wordt
+    // geweigerd — nooit stil naar de default terugvallen, zelfde lijn als
+    // match_type hieronder.
+    if (formData.has('trainingstype') && !VALID_TRAININGSTYPES.includes(trainingstype)) {
+      throw new Error('Ongeldig trainingstype')
+    }
+    payload.trainingstype = formData.has('trainingstype') ? trainingstype : 'vct'
+  }
 
   if (type === 'match') {
     const match_type = formData.get('match_type') as MatchType
@@ -145,6 +156,38 @@ export async function updateGatherTime(eventId: string, gatherTime: string | nul
 
   revalidatePath(`/events/${eventId}/squad`)
   revalidatePath(`/events/${eventId}`)
+}
+
+// Zet het trainingstype van één training. Bepaalt of de oefeningen van deze
+// training meetellen in de VCT-periodisering. Gooit bij een fout in plaats van
+// { error } terug te geven — zelfde contract als updateGatherTime hierboven.
+export async function updateTrainingstype(eventId: string, trainingstype: TrainingsType): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Niet ingelogd')
+
+  // Vóór elke query: een ongeldige waarde hoort de database nooit te bereiken.
+  if (!VALID_TRAININGSTYPES.includes(trainingstype)) throw new Error('Ongeldig trainingstype')
+
+  // Checkt eigenaarschap én type = 'training' in één query, met een melding die
+  // niet verraadt wélke van de twee misging.
+  await assertOwnTrainingEvent(supabase, eventId, user.id)
+
+  const { error } = await supabase
+    .from('events')
+    .update({ trainingstype })
+    .eq('id', eventId)
+    .eq('team_id', user.id)
+    .eq('type', 'training')
+
+  if (error) throw genericError('events.updateTrainingstype', error)
+
+  // Het type stuurt de telling op alle pagina's die de periodisering tonen; die
+  // moeten dus alle vier opnieuw.
+  revalidatePath(`/events/${eventId}/training-plan`)
+  revalidatePath('/')
+  revalidatePath('/periodisering')
+  revalidatePath('/inzichten')
 }
 
 export async function deleteEvent(id: string) {

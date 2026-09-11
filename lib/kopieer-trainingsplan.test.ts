@@ -10,30 +10,30 @@ function idFabriek() {
 describe('kopieerKoppelingen', () => {
   it('neemt oefening, volgorde en handmatige stap over', () => {
     const bron: BronKoppeling[] = [
-      { oefening_id: 'o1', volgorde: 0, stap_override: null },
-      { oefening_id: 'o2', volgorde: 1, stap_override: 3 },
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: null },
+      { oefening_id: 'o2', volgorde: 1, stap_override: 3, duur_min: null },
     ]
     expect(kopieerKoppelingen(bron, 0, idFabriek())).toEqual([
-      { oefening_id: 'o1', volgorde: 0, stap_override: null, parallel_groep_id: null },
-      { oefening_id: 'o2', volgorde: 1, stap_override: 3, parallel_groep_id: null },
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: null, parallel_groep_id: null },
+      { oefening_id: 'o2', volgorde: 1, stap_override: 3, duur_min: null, parallel_groep_id: null },
     ])
   })
 
   it('schuift alles achter wat er al staat, zodat bestaande oefeningen blijven', () => {
     const bron: BronKoppeling[] = [
-      { oefening_id: 'o1', volgorde: 0, stap_override: null },
-      { oefening_id: 'o2', volgorde: 1, stap_override: null },
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: null },
+      { oefening_id: 'o2', volgorde: 1, stap_override: null, duur_min: null },
     ]
     expect(kopieerKoppelingen(bron, 5, idFabriek()).map((r) => r.volgorde)).toEqual([5, 6])
   })
 
   it('deelt nieuwe groep-id\'s uit, maar houdt leden van dezelfde groep bij elkaar', () => {
     const bron: BronKoppeling[] = [
-      { oefening_id: 'o1', volgorde: 0, stap_override: null, parallel_groep_id: null },
-      { oefening_id: 'o2', volgorde: 1, stap_override: null, parallel_groep_id: 'bron-a' },
-      { oefening_id: 'o3', volgorde: 1, stap_override: null, parallel_groep_id: 'bron-a' },
-      { oefening_id: 'o4', volgorde: 2, stap_override: null, parallel_groep_id: 'bron-b' },
-      { oefening_id: 'o5', volgorde: 2, stap_override: null, parallel_groep_id: 'bron-b' },
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: null, parallel_groep_id: null },
+      { oefening_id: 'o2', volgorde: 1, stap_override: null, duur_min: null, parallel_groep_id: 'bron-a' },
+      { oefening_id: 'o3', volgorde: 1, stap_override: null, duur_min: null, parallel_groep_id: 'bron-a' },
+      { oefening_id: 'o4', volgorde: 2, stap_override: null, duur_min: null, parallel_groep_id: 'bron-b' },
+      { oefening_id: 'o5', volgorde: 2, stap_override: null, duur_min: null, parallel_groep_id: 'bron-b' },
     ]
     const uit = kopieerKoppelingen(bron, 0, idFabriek())
     expect(uit[0].parallel_groep_id).toBeNull()
@@ -49,8 +49,8 @@ describe('kopieerKoppelingen', () => {
 
   it('parallelle leden houden hun gedeelde volgorde', () => {
     const bron: BronKoppeling[] = [
-      { oefening_id: 'o1', volgorde: 3, stap_override: null, parallel_groep_id: 'g' },
-      { oefening_id: 'o2', volgorde: 3, stap_override: null, parallel_groep_id: 'g' },
+      { oefening_id: 'o1', volgorde: 3, stap_override: null, duur_min: null, parallel_groep_id: 'g' },
+      { oefening_id: 'o2', volgorde: 3, stap_override: null, duur_min: null, parallel_groep_id: 'g' },
     ]
     const uit = kopieerKoppelingen(bron, 2, idFabriek())
     expect(uit.map((r) => r.volgorde)).toEqual([5, 5])
@@ -58,18 +58,18 @@ describe('kopieerKoppelingen', () => {
 
   it('gaten in de bron-volgorde blijven staan (niet stilzwijgend hernummeren)', () => {
     const bron: BronKoppeling[] = [
-      { oefening_id: 'o1', volgorde: 0, stap_override: null },
-      { oefening_id: 'o2', volgorde: 4, stap_override: null },
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: null },
+      { oefening_id: 'o2', volgorde: 4, stap_override: null, duur_min: null },
     ]
     expect(kopieerKoppelingen(bron, 0, idFabriek()).map((r) => r.volgorde)).toEqual([0, 4])
   })
 
   it('kopieert nooit spelerindeling of parallel_spelers — die horen bij de spelers van díé training', () => {
     const bron = [
-      { oefening_id: 'o1', volgorde: 0, stap_override: null, spelerindeling: [['p1']], parallel_spelers: ['p2'] },
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: null, spelerindeling: [['p1']], parallel_spelers: ['p2'] },
     ] as unknown as BronKoppeling[]
     const uit = kopieerKoppelingen(bron, 0, idFabriek())
-    expect(Object.keys(uit[0]).sort()).toEqual(['oefening_id', 'parallel_groep_id', 'stap_override', 'volgorde'])
+    expect(Object.keys(uit[0]).sort()).toEqual(['duur_min', 'oefening_id', 'parallel_groep_id', 'stap_override', 'volgorde'])
   })
 
   it('kopieert nooit aantallen_override — de kopie start op de basisvorm', () => {
@@ -80,17 +80,32 @@ describe('kopieerKoppelingen', () => {
         oefening_id: 'o1',
         volgorde: 0,
         stap_override: null,
+        duur_min: null,
         aantallen_override: { teams: [6, null], neutralen: 2 },
       },
     ] as unknown as BronKoppeling[]
     const uit = kopieerKoppelingen(bron, 0, idFabriek())
     expect(uit[0]).not.toHaveProperty('aantallen_override')
     expect(Object.keys(uit[0]).sort()).toEqual([
+      'duur_min',
       'oefening_id',
       'parallel_groep_id',
       'stap_override',
       'volgorde',
     ])
+  })
+
+  it('neemt de training-specifieke duur mee, inclusief NULL', () => {
+    // NULL blijft NULL: bron en doel vallen dan allebei terug op de
+    // bibliotheekduur, dus de kopie toont hetzelfde als het origineel.
+    const bron: BronKoppeling[] = [
+      { oefening_id: 'o1', volgorde: 0, stap_override: null, duur_min: 22 },
+      { oefening_id: 'o2', volgorde: 1, stap_override: null, duur_min: null },
+      // 0 is een betekenisvolle waarde ("expliciet geen duur") en mag nooit
+      // stilzwijgend naar null zakken.
+      { oefening_id: 'o3', volgorde: 2, stap_override: null, duur_min: 0 },
+    ]
+    expect(kopieerKoppelingen(bron, 0, idFabriek()).map((r) => r.duur_min)).toEqual([22, null, 0])
   })
 
   it('lege bron levert een lege lijst op, geen crash', () => {

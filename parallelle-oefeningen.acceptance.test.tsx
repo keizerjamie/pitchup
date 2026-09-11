@@ -194,7 +194,7 @@ function renderPlan(
         hasNulmeting={false}
         suggestion={null}
         players={opts.players ?? players4}
-        presentPlayerIds={opts.presentPlayerIds ?? players4.map((p) => p.id)} startTijd={null} kopieerOpties={[]}
+        presentPlayerIds={opts.presentPlayerIds ?? players4.map((p) => p.id)} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )

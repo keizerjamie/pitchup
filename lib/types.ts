@@ -68,6 +68,16 @@ export interface Player {
 }
 
 export type EventType = 'training' | 'match' | 'meting'
+
+// Soort training. 'vct' = telt mee in de VCT-periodisering (de tellingen op het
+// dashboard, /periodisering en /inzichten); 'teamtactisch' = een training die
+// buiten die opbouw valt en dus nergens meetelt. Alleen betekenisvol bij
+// type = 'training'; elke lezer combineert de kolom met .eq('type','training').
+// Zelfde patroon als PlayerType/position: DB-CHECK + const-array hier +
+// migratiebestand in supabase/ (trainingstype-en-koppeling-duur.sql).
+export type TrainingsType = 'vct' | 'teamtactisch'
+
+export const VALID_TRAININGSTYPES: TrainingsType[] = ['vct', 'teamtactisch']
 export type MatchType = 'friendly' | 'league' | 'cup'
 export type HomeAway = 'home' | 'away'
 export type AttendanceStatus = 'present' | 'absent' | 'unknown'
@@ -308,6 +318,13 @@ export interface TrainingOefening {
   // (supabase/oefening-flexibel-aantal.sql). NULL/afwezig = geen override, dus
   // de basisvorm. Om dezelfde reden optioneel getypeerd als parallel_*.
   aantallen_override?: AantallenOverride | null
+  // Training-specifieke duur in minuten, los van oefeningen.duur_min
+  // (supabase/trainingstype-en-koppeling-duur.sql). NULL/afwezig = geen eigen
+  // duur, val terug op de bibliotheek-oefening; 0 = expliciet "geen duur".
+  // Lezen gaat altijd via effectieveDuurMin (lib/sessie-tijdlijn.ts), nooit met
+  // `||` — 0 is falsy en zou dan stil de bibliotheekduur terughalen. Om dezelfde
+  // reden optioneel getypeerd als parallel_*/aantallen_override.
+  duur_min?: number | null
   created_at: string
 }
 
@@ -330,6 +347,12 @@ export interface FootballEvent {
   // aanpasbaar op de squad-pagina (app/events/[id]/squad/page.tsx), zie
   // updateGatherTime (app/actions/events.ts).
   gather_time: string | null
+  // Alleen betekenisvol bij type = 'training' (supabase/trainingstype-en-
+  // koppeling-duur.sql). Optioneel getypeerd om dezelfde reden als
+  // TrainingOefening.parallel_groep_id: zolang de migratie in een omgeving nog
+  // niet gedraaid heeft levert de server `undefined`. Lezers vullen dat aan met
+  // `?? 'vct'` — de DB-default.
+  trainingstype?: TrainingsType
   notes: string | null
   doelstelling: string | null
   goals_for: number | null

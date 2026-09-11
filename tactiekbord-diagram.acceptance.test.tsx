@@ -516,7 +516,7 @@ describe('Criterium 15/16/17 — zelfde tekening, read-only, op bibliotheekkaart
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
         />
       </DictProvider>,
     )
@@ -538,7 +538,7 @@ describe('Criterium 15/16/17 — zelfde tekening, read-only, op bibliotheekkaart
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[koppeling]} library={[]}
           currentSteps={{}} hasNulmeting={false} suggestion={null}
-          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]}
+          players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
         />
       </DictProvider>,
     )

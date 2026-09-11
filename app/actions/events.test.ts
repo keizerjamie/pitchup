@@ -12,7 +12,7 @@ vi.mock('@/app/actions/settings', () => ({ getDefaultAttendance: vi.fn(async () 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
-import { createEvent, updateGatherTime } from '@/app/actions/events'
+import { createEvent, updateGatherTime, updateTrainingstype } from '@/app/actions/events'
 
 // ────────────────────────────────────────────────
 // Mocks (opzet overgenomen uit app/actions/match-squad.test.ts)
@@ -478,6 +478,179 @@ describe('createEvent — gastspeler', () => {
         ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
       )
     }
+  })
+})
+
+// ────────────────────────────────────────────────
+// createEvent — trainingstype
+// ────────────────────────────────────────────────
+
+describe('createEvent — trainingstype', () => {
+  it('schrijft het gekozen trainingstype weg', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...TRAINING, trainingstype: 'teamtactisch' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsPayload(m).trainingstype).toBe('teamtactisch')
+  })
+
+  it('valt zonder veld terug op VCT (gelijk aan de DB-default)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsPayload(m).trainingstype).toBe('vct')
+  })
+
+  it('geeft een wedstrijd nooit een trainingstype, ook niet als het veld wordt meegestuurd', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...WEDSTRIJD, trainingstype: 'teamtactisch' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsPayload(m)).not.toHaveProperty('trainingstype')
+  })
+
+  it('weigert een onbekend trainingstype en schrijft niets weg', async () => {
+    // Nooit stil terugvallen op de default: een waarde die er wél stond maar
+    // onzin is, is een fout — zelfde lijn als match_type.
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...TRAINING, trainingstype: 'onzin' })))
+      .rejects.toThrow('Ongeldig trainingstype')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert een leeg trainingstype-veld (leeg is geen geldige keuze)', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...TRAINING, trainingstype: '' })))
+      .rejects.toThrow('Ongeldig trainingstype')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+})
+
+// ────────────────────────────────────────────────
+// updateTrainingstype
+// ────────────────────────────────────────────────
+
+// Standaard: eigen training e1.
+function eigenTraining(extra: Record<string, TableResult> = {}) {
+  return makeSupabase({
+    tables: {
+      events: { data: { id: 'e1', type: 'training' }, error: null },
+      ...extra,
+    },
+  })
+}
+
+describe('updateTrainingstype — succes', () => {
+  it('werkt het type bij met alle drie de filters, inclusief team_id en type', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await updateTrainingstype('e1', 'teamtactisch')
+
+    const update = m.calls.update.find((u) => u.table === 'events')!
+    expect(update.payload).toEqual({ trainingstype: 'teamtactisch' })
+    expect(update.eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+      { col: 'type', val: 'training' },
+    ])
+  })
+
+  it('zet ook terug naar vct', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await updateTrainingstype('e1', 'vct')
+
+    expect(m.calls.update.find((u) => u.table === 'events')!.payload).toEqual({ trainingstype: 'vct' })
+  })
+
+  it('haalt het event team-gescoped op vóór het bijwerken', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await updateTrainingstype('e1', 'teamtactisch')
+
+    const eventsSelect = m.calls.select.find((s) => s.table === 'events')!
+    expect(eventsSelect.eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('revalideert de plannerpagina en alle drie de pagina\'s die de telling tonen', async () => {
+    use(eigenTraining())
+
+    await updateTrainingstype('e1', 'teamtactisch')
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/training-plan')
+    expect(revalidatePath).toHaveBeenCalledWith('/')
+    expect(revalidatePath).toHaveBeenCalledWith('/periodisering')
+    expect(revalidatePath).toHaveBeenCalledWith('/inzichten')
+  })
+})
+
+describe('updateTrainingstype — weigeringen', () => {
+  it('weigert zonder ingelogde gebruiker', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+
+    await expect(updateTrainingstype('e1', 'vct')).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.update).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('weigert een ongeldige waarde vóór enige query', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await expect(updateTrainingstype('e1', 'onzin' as unknown as 'vct'))
+      .rejects.toThrow('Ongeldig trainingstype')
+    expect(m.calls.select).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('weigert een event van een ander team', async () => {
+    const m = eigenTraining({ events: { data: null, error: null } })
+    use(m)
+
+    await expect(updateTrainingstype('vreemd', 'teamtactisch')).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('weigert een event dat geen training is', async () => {
+    const m = eigenTraining({ events: { data: { id: 'e1', type: 'match' }, error: null } })
+    use(m)
+
+    await expect(updateTrainingstype('e1', 'teamtactisch')).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('geeft een generieke melding bij een databasefout en lekt niets', async () => {
+    use(eigenTraining({
+      events: {
+        data: { id: 'e1', type: 'training' },
+        error: { code: '42501', message: 'permission denied for table events' },
+      },
+    }))
+
+    await expect(updateTrainingstype('e1', 'teamtactisch')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('events.updateTrainingstype')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
+    expect(revalidatePath).not.toHaveBeenCalled()
   })
 })
 

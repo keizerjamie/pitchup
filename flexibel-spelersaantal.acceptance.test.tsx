@@ -158,7 +158,7 @@ function renderPlan(
         players={opts.players ?? players6}
         presentPlayerIds={opts.presentPlayerIds ?? players6.map((p) => p.id)}
         startTijd={null}
-        kopieerOpties={[]}
+        kopieerOpties={[]} initialTrainingstype="vct"
       />
     </DictProvider>,
   )

@@ -84,6 +84,8 @@ export const de: Dict = {
   event: {
     editAttendance: 'Anwesenheit ändern',
     newTitle: 'Neues Event', training: 'Training', match: 'Spiel', date: 'Datum', time: 'Uhrzeit',
+    trainingstype: 'Trainingsart', trainingstypeVct: 'VCT', trainingstypeTeamtactisch: 'Teamtaktisch',
+    trainingstypeHint: 'Bei einem teamtaktischen Training zählen die Übungen nicht in der VCT-Periodisierung.',
     location: 'Ort', optional: 'optional', opponent: 'Gegner', matchType: 'Spieltyp', locationPlaceholder: 'Sportpark Mitte', opponentPlaceholder: 'FC Beispiel',
     homeAway: 'Heim/Auswärts', home: '🏠 Heim', away: '🚌 Auswärts', notes: 'Notizen',
     gatherTime: 'Sammelzeit',
@@ -223,6 +225,9 @@ export const de: Dict = {
     nestedInBadge: 'Eingebettet in {name}',
     print: 'Drucken',
     stapOpslaanMislukt: 'Speichern des Schritts ist fehlgeschlagen. Bitte erneut versuchen.',
+    trainingstypeOpslaanMislukt: 'Ändern der Trainingsart ist fehlgeschlagen. Bitte erneut versuchen.',
+    duurAutoHint: 'automatisch aus dem Schritt berechnet',
+    duurOpslaanMislukt: 'Speichern der Dauer ist fehlgeschlagen. Bitte erneut versuchen.',
     parallelLabel: 'Parallel zu (gleichzeitig ausführen)',
     parallelNoneOption: '— nicht parallel —',
     parallelNaastOption: 'Neben: {name}',
