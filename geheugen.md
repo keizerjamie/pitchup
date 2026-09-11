@@ -18,6 +18,7 @@ Kernpunten over dit project, opgebouwd per sessie. Vul aan; verwijder niets zond
 ## Belangrijke gotchas
 - **`'use server'`-bestanden mogen alleen async functies exporteren.** Een `export type { X }` (type re-export) uit een server-action-bestand lekt in Turbopack als runtime-verwijzing → `X is not defined` bij het aanroepen van de action. Typecheck ziet dit niet. Importeer types rechtstreeks uit hun bron (`@/lib/...`), niet via de action-bestanden.
 - Bij een type-contractwijziging die een verplicht veld toevoegt, moeten bestaande testfixtures dat veld krijgen (anders faalt typecheck).
+- **Testmocks bestaan in twee smaken.** De acceptatietests in de projectroot gebruiken een tabel-engine die `.eq/.in/...` écht toepast; `lib/periodization.test.ts` en `app/actions/*.test.ts` gebruiken een chainable stub die filters negeert. Een nieuw `.eq`-filter in productiecode blijft bij de stub dus stil groen (bewijst niets) en breekt bij de engine hard zodra fixtures de kolom missen. Bij een nieuw filter: fixtures uitbreiden én controleren welke mock je voor je hebt.
 
 ## Feature: Trainingsplanner — oefeningen-bibliotheek + tactiekbord
 Gebouwd via de feature-factory-keten (researcher → story → PM → backend → frontend → test-verifier → validator), met goedkeuringspauzes.
@@ -3069,4 +3070,67 @@ datamodel- of dependencywijziging — twee nieuwe ingangen naar bestaand gedrag.
   (`OefeningLibrary`, `TrainingPlanEditor`, `OefeningPicker`) — kandidaat voor een gedeeld
   `PencilIcon` zoals `ChevronIcon`. Foutstrings uit `assertOwnOefening`/`validateOefening`
   zijn onvertaald Nederlands in en/de/fr/es (bestond al op `/oefeningen`).
+- `cyclusweek-correctie` AC1/AC12 falen nog steeds pre-existing (ook met `git stash`).
+
+## Trainingstype (VCT/teamtactisch) + duur per oefening-koppeling (2026-09-11, commit `1247aa6`, live)
+Vraag: "bij stap ook NVT kunnen kiezen; niet elke training is VCT" en "de tijd van een oefening
+niet op de oefening opslaan maar in de training, en bij een stap automatisch berekenen incl.
+rust". Feature-factory-keten. NVT-per-oefening is in overleg vervangen door een **trainingstype
+per training**. Migratie `supabase/trainingstype-en-koppeling-duur.sql` (door eigenaar gedraaid
+vóór de push).
+
+- **Datamodel**: `events.trainingstype TEXT NOT NULL DEFAULT 'vct'` (CHECK `vct|teamtactisch`).
+  NOT NULL + default bewust: alle bestaande trainingen zijn daarmee VCT zonder backfill, en de
+  telfilters zijn een simpele `.eq('trainingstype','vct')` (nooit `.neq` — dat sluit NULL stil
+  uit). Match/meting-rijen krijgen ook 'vct'; niemand leest het daar.
+  `training_oefeningen.duur_min SMALLINT` (CHECK NULL of 0..600). **NULL = geen eigen duur,
+  fallback op `oefeningen.duur_min`; 0 = expliciet "geen duur"** (conform de `> 0`-filter in
+  `blokDuur`). Nooit `||` op deze waarde.
+- **Trainingstype**: keuze bij aanmaken (`app/events/new/page.tsx`, hidden input, default
+  vct; bij match gaat het veld nooit mee) → `createEvent` valideert tegen
+  `VALID_TRAININGSTYPES` (uit `lib/types.ts`, nooit via een action-bestand). Achteraf wijzigen
+  via `TrainingstypeSchakelaar` bovenaan het trainingsplan → `updateTrainingstype`
+  (`assertOwnTrainingEvent`, update gescoped op id+team_id+type, revalideert plan, `/`,
+  `/periodisering`, `/inzichten`). Zichtbaarheid is puur afgeleid in `TrainingPlanEditor`
+  (`toonStapblok = heeftStapInhoud(cat) && trainingstype === 'vct'`): stapblok, stap-badge,
+  print-stapregel én cyclusweek-suggestie verdwijnen bij teamtactisch; `stap_override` wordt
+  nooit gewist, dus terugschakelen toont de oude waarde. De "Huidige periodiseringstatus"-kaart
+  blijft (teamstand, niet trainingstand). Telling: `countCategoryOccurrences` en
+  `getTrainingLog` filteren op de events-query; signaturen ongewijzigd, dus dashboard,
+  `/periodisering` en `/inzichten` volgen vanzelf. Bulk-aanmaak (`generateSeasonTrainings`)
+  levert VCT; geen badge buiten de plannerpagina (bewust).
+- **Duur per koppeling**: `addOefeningToTraining`/`createAndAddOefening` kopiëren de
+  bibliotheekduur eenmalig naar de koppeling. Duurveld op de kaart (vervangt de read-only
+  duur-badge; `print:hidden`), debounce 500 ms, `raw === '' ? null : clampDuurMin(parseInt)`
+  (nooit `|| null`), rollback + `trainingPlan.duurOpslaanMislukt`. `updateKoppeling` kreeg
+  `patch.duur_min`; bij een `stap_override` op partijen_groot/midden/klein rekent de **server**
+  `berekenDuurUitStap(categorie, geclampteStap)` en overschrijft altijd (ook een in dezelfde
+  patch meegestuurde duur). `stap_override: null` laat de duur staan. Client rekent alleen
+  vooruit voor de weergave (auto-hint 3 s, `aria-live`). `kopieerTrainingsplan` neemt
+  `duur_min` mee. Alle lezers (tijdlijn `blokDuur`, kaart, print-kopregel) via
+  `effectieveDuurMin` in `lib/sessie-tijdlijn.ts`.
+- **Numerieke staptabel naast de weergavestrings**: de regel "StapRij-strings nooit parsen"
+  blijft. `PERIODIZATION_STEP_MINUTEN` (alleen de drie partijen-categorieën, 21/15/13 rijen)
+  staat direct onder `PERIODIZATION_STEP_TABLES`; een consistentietest formatteert elke
+  numerieke rij terug en vergelijkt (formatter alleen in het testbestand). Formule:
+  `(arbeid×herh + rustHH×(herh−1))×series + rustSeries×(series−1)`, ontbrekende series = 1,
+  rustSeries = 0 (groot/midden hebben die kolommen niet). Controle: groot stap 1 = 22,
+  midden stap 2 = 24, klein stap 2 = 41. Sprints/steigerungs → `null` → geen auto-duur.
+- **i18n**: `event.trainingstype/-Vct/-Teamtactisch/-Hint`,
+  `trainingPlan.trainingstypeOpslaanMislukt/duurAutoHint/duurOpslaanMislukt`; `duration`
+  hergebruikt. Nieuwe verplichte prop `initialTrainingstype` op `TrainingPlanEditor` → alle
+  renderende tests kregen die (ook drie die niet in de brief stonden).
+- **Tests**: `trainingstype-en-duur.acceptance.test.tsx` (test-verifier, 62 its, A1-A11 en
+  B1-B13 tegen de echte actions met een muterende tabel-engine), `trainingstype.acceptance`
+  en `duur-per-koppeling.acceptance` (bouwers), unit-tests op formule/clamp/telling/actions.
+  Mutatiecheck: `??` → `||` in `effectieveDuurMin` laat 3 tests vallen.
+- **Bewust geaccepteerd (validator)**: (1) een oefening zónder bibliotheekduur krijgt bij
+  koppelen NULL en volgt dus wél een latere bibliotheekwijziging — alleen duurloze
+  oefeningen, geen backfill-issue; (2) de vooruitblik op `/periodisering` filtert het
+  trainingstype niet (kandidaat-vervolg); (3) duurveld leegmaken toont meteen de
+  bibliotheekduur (dat ís de opgeslagen betekenis); (4) aanmaakformulier en schakelaar bouwen
+  elk hun eigen VCT/Teamtactisch-knoppen. Clamp 0..600 staat dubbel (`lib/oefening.ts` en
+  `clampDuurMin`), zelfde categorie als `clampSteps`.
+- Policy-namen in `supabase/rls.sql` zijn niet uniform (`"<tabel>: team_id = auth.uid()"` vs.
+  `"<tabel>: own team only"`); citeer ze letterlijk in migratiecommentaar.
 - `cyclusweek-correctie` AC1/AC12 falen nog steeds pre-existing (ook met `git stash`).
