@@ -3137,22 +3137,34 @@ vóór de push).
 
 ---
 
-## To-do: afgeronde taken van dezelfde weekdag vorige week weg (2026-09-11, commit `60641ab`, live)
-Verzoek van de eigenaar: de lijst werd lang en een doorgestreepte taak van "afgelopen
-donderdag" (dezelfde weekdag vorige week) is niet meer relevant. Kleine wijziging, bewust
-zonder feature-factory-keten.
+## To-do: taken met een verstreken deadline verdwijnen (2026-09-11 → 2026-09-13, commits `60641ab` en `8a8172a`, live)
+Verzoek van de eigenaar in twee stappen, bewust zonder feature-factory-keten (één functie).
+1. Vrijdag: "de doorgestreepte taak van dezelfde weekdag vorige week is niet meer relevant"
+   → `RETENTION` van 7 naar 6 (`60641ab`).
+2. Zondag, na doorvragen: "alleen taken met een vervaldatum vandaag of later wil ik zien"
+   → `RETENTION` helemaal weg (`8a8172a`). Stap 1 is dus achterhaald; de eindstand hieronder.
 
-- **Eén constante**: `RETENTION` in `lib/todos.mjs` van 7 naar 6. Het done-venster in
-  `isTaskVisible` is `daysUntilEvent >= -RETENTION && <= FORWARD`; met 7 zat dag −7 er nog
-  net in. Gekozen voor 6 (en niet voor `>` i.p.v. `>=`) zodat de constante letterlijk "t/m
-  N dagen terug" blijft betekenen, symmetrisch met `FORWARD` ("t/m +7"). Open taken en het
-  forward-venster ongewijzigd.
-- **Query hoefde niet mee**: `app/page.tsx` haalt met `FETCH_HORIZON_DAYS = 30` ruim
-  genoeg kandidaat-events op; zichtbaarheid zit volledig in `isTaskVisible`. Geen
-  gebruikerstekst noemt "7 dagen" (`todo.empty` = "Geen taken deze week").
-- **Tests**: unit-test (`RETENTION === 6`, −6 zichtbaar, −7/−8 niet) en AC14 in
-  `scripts/todos.acceptance.test.mjs` verschoven naar de nieuwe grens. AC12 gebruikt
-  −0..−5 en bleef ongeraakt.
+- **Eén regel in `isTaskVisible` (`lib/todos.mjs`)**: eerst `daysUntilOwnDeadline < 0 → false`,
+  ongeacht open of afgerond. Daarna de bestaande vensters: open analyse pas vanaf de
+  wedstrijddag zonder +7-cap (never-miss), al het overige t/m `FORWARD` (+7) op de event-dag.
+  `daysUntilOwnDeadline` is `daysUntilDeadline` voor `analysis` en `daysUntilEvent` voor de
+  rest — de pagina en het testharnas geven voor niet-analyse-taken `daysUntilDeadline: 0`
+  door, dus die parameter is daar bewust níet gebruikt.
+- **Gedragsverschil t.o.v. vóór 09-11**: alleen afgeronde taken bleven hangen (tot 7 dagen
+  na de event-dag). Open taken met een verstreken deadline stonden al nooit in de lijst.
+- **Analyse volgt haar eigen deadline**: een afgevinkte analyse van zaterdag blijft t/m de
+  dinsdagtraining staan (die datum toont de lijst ook) en is woensdag weg. Gekozen omdat de
+  eigenaar het woord "vervaldatum" gebruikte en `TodoList` per taak `item.deadline` toont.
+- **Query hoefde niet mee**: `app/page.tsx` haalt met `FETCH_HORIZON_DAYS = 30` ruim genoeg
+  kandidaat-events op; zichtbaarheid zit volledig in `isTaskVisible`. Geen gebruikerstekst
+  noemt een aantal dagen (`todo.empty` = "Geen taken deze week").
+- **Tests**: `scripts/todos.test.mjs` (deadline vandaag/+7 zichtbaar, −1/−7 weg, analyse met
+  eigen deadline, +8 buiten venster) en AC14 + "AC14 (analyse)" in
+  `scripts/todos.acceptance.test.mjs`. AC11 en AC12 gebruikten afgeronde wedstrijden in het
+  verleden als "zichtbaar"; die zijn naar `TODAY` verplaatst.
+- **Dood spoor, niet aangeraakt**: het label "Te laat" (`overdue` in
+  `components/dashboard/TodoList.tsx`) kan nooit verschijnen — een open taak met een
+  verstreken deadline komt de lijst niet in, en dat was al zo. Opruimen is losse UI-taak.
 - **Suite-status bij afronden**: `cyclusweek-correctie` AC1/AC12 nog steeds pre-existing
   rood (ook met `git stash`); `nulmeting-per-onderdeel.acceptance.test.tsx` faalde één run op
   `categorie_metingen toHaveLength(0)` en slaagde daarna — flaky, niet onderzocht.
