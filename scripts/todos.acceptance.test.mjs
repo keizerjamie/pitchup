@@ -389,7 +389,7 @@ test('AC11: open taken eerst (oplopend op deadline), daarna afgevinkte taken (op
   const items = buildTodoItems([
     { id: 'o1', type: 'training', date: addDaysFixed(TODAY, 5), doelstelling: null, oefCount: 0 }, // open, laat
     { id: 'o2', type: 'training', date: addDaysFixed(TODAY, 1), doelstelling: null, oefCount: 0 }, // open, vroeg
-    { id: 'd1', type: 'match', date: addDaysFixed(TODAY, -3), squadExists: true, lineupExists: true }, // done, vroege deadline
+    { id: 'd1', type: 'match', date: TODAY, squadExists: true, lineupExists: true }, // done, vroege deadline (vandaag)
     { id: 'd2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupExists: true }, // done, latere deadline
   ])
   // Alleen de opstellings- en trainingstaken: deze test gaat over open-vóór-
@@ -443,15 +443,16 @@ test('een handmatige override op de opstelling raakt de selectietaak niet', () =
 // per event (match → 3 taken, training → 1 taak).
 test('AC12: geen limiet — meerdere events leveren hun volledige takenset op', () => {
   const events = []
-  // 6 wedstrijden, elk al gespeeld (binnen de retentie) én auto-afgerond op
-  // alle drie de taken, zodat squad + lineup + analysis betrouwbaar zichtbaar zijn
-  // (de timing-grenzen van open taken worden al door AC14-AC16 gedekt; AC12
-  // gaat specifiek over "geen limiet + volledige set per event").
+  // 6 wedstrijden, allemaal vandaag (deadline = vandaag, dus ook afgerond nog
+  // zichtbaar) én auto-afgerond op alle drie de taken, zodat squad + lineup +
+  // analysis betrouwbaar zichtbaar zijn (de timing-grenzen worden al door
+  // AC14-AC16 gedekt; AC12 gaat specifiek over "geen limiet + volledige set
+  // per event").
   for (let i = 0; i < 6; i++) {
     events.push({
       id: `match-${i}`,
       type: 'match',
-      date: addDaysFixed(TODAY, -i),
+      date: TODAY,
       squadExists: true,
       lineupExists: true,
       goals_for: 1,
@@ -485,30 +486,52 @@ test('AC13: geen kandidaat-events → lege takenlijst', () => {
 // Zichtbaarheid
 // ═══════════════════════════════════════════════════════════════════════════
 
-// AC14: Afgeronde taak (auto én handmatig) zichtbaar t/m 6 dagen ná de
-// event-datum; op dag 7 (dezelfde weekdag vorige week) is hij weg.
-test('AC14: afgeronde taak blijft t/m +6 dagen ná de event-datum zichtbaar, dag 7 verdwijnt hij', () => {
-  const withinAuto = buildTodoItems([
-    { id: 'v1', type: 'match', date: addDaysFixed(TODAY, -6), lineupExists: true },
+// AC14: Afgeronde taak (auto én handmatig) alleen zichtbaar zolang de deadline
+// vandaag of later is; deadline gisteren → weg. Voor squad/lineup/training is de
+// deadline de event-dag; de analyse volgt haar eigen deadline (eerste training
+// ná de wedstrijd).
+test('AC14: afgeronde taak zichtbaar t/m de deadline-dag, de dag erna verdwijnt hij', () => {
+  const onDayAuto = buildTodoItems([
+    { id: 'v1', type: 'match', date: TODAY, lineupExists: true },
   ])
-  assert.ok(findTask(withinAuto, 'v1', 'lineup'), 'dag -6 (auto-done) nog zichtbaar')
+  assert.ok(findTask(onDayAuto, 'v1', 'lineup'), 'deadline vandaag (auto-done) zichtbaar')
 
-  const beyondAuto = buildTodoItems([
-    { id: 'v2', type: 'match', date: addDaysFixed(TODAY, -7), lineupExists: true },
+  const yesterdayAuto = buildTodoItems([
+    { id: 'v2', type: 'match', date: addDaysFixed(TODAY, -1), lineupExists: true },
   ])
-  assert.equal(findTask(beyondAuto, 'v2', 'lineup'), undefined, 'dag -7 (auto-done) niet meer zichtbaar')
+  assert.equal(findTask(yesterdayAuto, 'v2', 'lineup'), undefined, 'deadline gisteren (auto-done) niet meer zichtbaar')
 
-  const withinManual = buildTodoItems(
-    [{ id: 'v3', type: 'training', date: addDaysFixed(TODAY, -6), doelstelling: null, oefCount: 0 }],
+  const onDayManual = buildTodoItems(
+    [{ id: 'v3', type: 'training', date: TODAY, doelstelling: null, oefCount: 0 }],
     { manualSet: new Set(['v3:training_plan']) },
   )
-  assert.ok(findTask(withinManual, 'v3', 'training_plan'), 'dag -6 (handmatig afgevinkt) nog zichtbaar')
+  assert.ok(findTask(onDayManual, 'v3', 'training_plan'), 'deadline vandaag (handmatig afgevinkt) zichtbaar')
 
-  const beyondManual = buildTodoItems(
-    [{ id: 'v4', type: 'training', date: addDaysFixed(TODAY, -7), doelstelling: null, oefCount: 0 }],
+  const yesterdayManual = buildTodoItems(
+    [{ id: 'v4', type: 'training', date: addDaysFixed(TODAY, -1), doelstelling: null, oefCount: 0 }],
     { manualSet: new Set(['v4:training_plan']) },
   )
-  assert.equal(findTask(beyondManual, 'v4', 'training_plan'), undefined, 'dag -7 (handmatig afgevinkt) niet meer zichtbaar')
+  assert.equal(findTask(yesterdayManual, 'v4', 'training_plan'), undefined, 'deadline gisteren (handmatig afgevinkt) niet meer zichtbaar')
+
+  const futureDone = buildTodoItems([
+    { id: 'v5', type: 'match', date: addDaysFixed(TODAY, 7), lineupExists: true },
+  ])
+  assert.ok(findTask(futureDone, 'v5', 'lineup'), 'afgerond met deadline +7 nog zichtbaar')
+})
+
+test('AC14 (analyse): afgeronde analyse blijft tot haar eigen deadline, ook al is de wedstrijd al geweest', () => {
+  const matchDate = addDaysFixed(TODAY, -3)
+  const stillOpenDeadline = buildTodoItems(
+    [{ id: 'a1', type: 'match', date: matchDate, goals_for: 2, goals_against: 1 }],
+    { trainingDates: [addDaysFixed(TODAY, 1)] },
+  )
+  assert.ok(findTask(stillOpenDeadline, 'a1', 'analysis'), 'deadline morgen → afgeronde analyse zichtbaar')
+
+  const expiredDeadline = buildTodoItems(
+    [{ id: 'a2', type: 'match', date: matchDate, goals_for: 2, goals_against: 1 }],
+    { trainingDates: [addDaysFixed(TODAY, -1)] },
+  )
+  assert.equal(findTask(expiredDeadline, 'a2', 'analysis'), undefined, 'deadline gisteren → afgeronde analyse weg')
 })
 
 // AC15: Open analyse-taak zichtbaar vanaf wedstrijddag t/m deadline, GEEN

@@ -7,7 +7,6 @@ import assert from 'node:assert/strict'
 import {
   TASK_TYPES,
   FORWARD,
-  RETENTION,
   isValidTaskType,
   analysisDeadline,
   effectiveDone,
@@ -22,7 +21,6 @@ import {
 test('TASK_TYPES is exact squad/lineup/analysis/training_plan', () => {
   assert.deepEqual(TASK_TYPES, ['squad', 'lineup', 'analysis', 'training_plan'])
   assert.equal(FORWARD, 7)
-  assert.equal(RETENTION, 6)
 })
 
 // ── isValidTaskType ─────────────────────────────────────────────────────────
@@ -188,11 +186,7 @@ test('isTaskVisible: open lineup/training buiten forward-venster (+8) → NIET z
 
 // ── isTaskVisible: afgerond ─────────────────────────────────────────────────
 
-test('isTaskVisible: afgerond binnen retentie/forward-venster → zichtbaar', () => {
-  assert.equal(
-    isTaskVisible({ taskType: 'analysis', done: true, daysUntilEvent: -6, daysUntilDeadline: 0 }),
-    true,
-  )
+test('isTaskVisible: afgerond met deadline vandaag of later → zichtbaar', () => {
   assert.equal(
     isTaskVisible({ taskType: 'lineup', done: true, daysUntilEvent: 0, daysUntilDeadline: 0 }),
     true,
@@ -201,15 +195,48 @@ test('isTaskVisible: afgerond binnen retentie/forward-venster → zichtbaar', ()
     isTaskVisible({ taskType: 'lineup', done: true, daysUntilEvent: 7, daysUntilDeadline: 0 }),
     true,
   )
+  assert.equal(
+    isTaskVisible({ taskType: 'training_plan', done: true, daysUntilEvent: 3, daysUntilDeadline: 0 }),
+    true,
+  )
 })
 
-test('isTaskVisible: afgerond op dezelfde weekdag vorige week (-7) → NIET zichtbaar', () => {
+test('isTaskVisible: afgerond met deadline gisteren → NIET zichtbaar', () => {
   assert.equal(
-    isTaskVisible({ taskType: 'analysis', done: true, daysUntilEvent: -7, daysUntilDeadline: 0 }),
+    isTaskVisible({ taskType: 'lineup', done: true, daysUntilEvent: -1, daysUntilDeadline: 0 }),
     false,
   )
   assert.equal(
-    isTaskVisible({ taskType: 'lineup', done: true, daysUntilEvent: -8, daysUntilDeadline: 0 }),
+    isTaskVisible({ taskType: 'squad', done: true, daysUntilEvent: -1, daysUntilDeadline: 0 }),
+    false,
+  )
+  assert.equal(
+    isTaskVisible({ taskType: 'training_plan', done: true, daysUntilEvent: -7, daysUntilDeadline: 0 }),
+    false,
+  )
+})
+
+test('isTaskVisible: afgeronde analyse volgt haar eigen deadline, niet de wedstrijddag', () => {
+  // Wedstrijd 3 dagen geleden, eerstvolgende training morgen → nog zichtbaar.
+  assert.equal(
+    isTaskVisible({ taskType: 'analysis', done: true, daysUntilEvent: -3, daysUntilDeadline: 1 }),
+    true,
+  )
+  // Deadline vandaag → nog zichtbaar.
+  assert.equal(
+    isTaskVisible({ taskType: 'analysis', done: true, daysUntilEvent: -3, daysUntilDeadline: 0 }),
+    true,
+  )
+  // Deadline gisteren → weg.
+  assert.equal(
+    isTaskVisible({ taskType: 'analysis', done: true, daysUntilEvent: -3, daysUntilDeadline: -1 }),
+    false,
+  )
+})
+
+test('isTaskVisible: afgerond buiten forward-venster (+8) → NIET zichtbaar', () => {
+  assert.equal(
+    isTaskVisible({ taskType: 'lineup', done: true, daysUntilEvent: 8, daysUntilDeadline: 0 }),
     false,
   )
 })
