@@ -231,11 +231,12 @@ describe('AC2/AC20/AC24 — Gast-badge zichtbaar op de echte /players-route', ()
     const badgeWrap = naam.parentElement as HTMLElement
     expect(within(badgeWrap).getByText(nl.players.guestBadge)).toBeInTheDocument()
 
-    // "Gedimd" = de rij-knop draagt de opacity-klasse die PlayerList voor elke
+    // "Gedimd" = de rij-link draagt de opacity-klasse die PlayerList voor elke
     // inactieve speler toepast (component-niveau al bewezen voor reguliere
     // spelers; hier bewijzen we dat een GAST hetzelfde gedrag krijgt, geen
-    // uitzondering).
-    const row = naam.closest('button')
+    // uitzondering). Sinds AC1 (spelersprofiel-feature) is de rij een <a>
+    // i.p.v. een <button> — gemeld door de frontend-engineer.
+    const row = naam.closest('a')
     expect(row).not.toBeNull()
     expect(row!.className).toMatch(/opacity-55/)
   })

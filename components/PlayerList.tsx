@@ -1,36 +1,10 @@
 'use client'
 
-import { useState, useEffect, useMemo, useTransition } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { Player, POSITION_GROUPS } from '@/lib/types'
-import { markInjured, markRecovered } from '@/app/actions/players'
 import { useDict } from '@/lib/i18n-context'
-import { useReducedMotion } from '@/lib/use-reduced-motion'
-
-type SheetAction = {
-  label: string
-  icon: string
-  tone: 'ink' | 'danger'
-  href?: string
-  onClick?: () => void
-}
-
-const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
-
-// Must stay in sync with the sheet's transform transition duration below.
-const SHEET_EXIT_MS = 320
-
-function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return '?'
-  return (words.length >= 2 ? words[0][0] + words[words.length - 1][0] : words[0].slice(0, 2)).toUpperCase()
-}
-function avatarBg(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return AVATAR_BG[h % AVATAR_BG.length]
-}
+import { avatarBg, initialsOf } from '@/lib/avatar'
 
 interface Props {
   active: Player[]
@@ -39,12 +13,7 @@ interface Props {
 
 export default function PlayerList({ active, inactive }: Props) {
   const t = useDict()
-  const router = useRouter()
-  const [selected, setSelected] = useState<Player | null>(null)
-  const [sheetVisible, setSheetVisible] = useState(false)
   const [query, setQuery] = useState('')
-  const [isPending, startTransition] = useTransition()
-  const reduceMotion = useReducedMotion()
 
   const q = query.trim().toLowerCase()
   const filteredActive = useMemo(
@@ -56,53 +25,12 @@ export default function PlayerList({ active, inactive }: Props) {
     [inactive, q],
   )
 
-  function openSheet(player: Player) {
-    setSelected(player)
-    requestAnimationFrame(() => requestAnimationFrame(() => setSheetVisible(true)))
-  }
-  function closeSheet() {
-    setSheetVisible(false)
-    // Small buffer above SHEET_EXIT_MS so the exit transition finishes before unmount.
-    setTimeout(() => setSelected(null), SHEET_EXIT_MS + 20)
-  }
-  function navigate(href: string) {
-    closeSheet()
-    setTimeout(() => router.push(href), 260)
-  }
-  function runAction(fn: () => Promise<void>) {
-    startTransition(async () => {
-      await fn()
-      router.refresh()
-      closeSheet()
-    })
-  }
-
-  useEffect(() => {
-    if (!selected) return
-    document.body.style.overflow = 'hidden'
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') closeSheet() }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      document.body.style.overflow = ''
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [selected])
-
-  const actions: SheetAction[] = selected ? [
-    { label: t.players.editLabel, icon: 'edit',        tone: 'ink',    href: `/players/${selected.id}/edit` },
-    { label: t.players.signOff,   icon: 'event_busy',  tone: 'danger', href: `/players/${selected.id}/absence` },
-    selected.injured
-      ? { label: t.players.reportRecovered, icon: 'check_circle', tone: 'ink',    onClick: () => runAction(() => markRecovered(selected.id)) }
-      : { label: t.players.reportInjury,    icon: 'healing',      tone: 'danger', onClick: () => runAction(() => markInjured(selected.id)) },
-  ] : []
-
   const hasAny = active.length > 0 || inactive.length > 0
 
   function PlayerRow({ player, dimmed }: { player: Player; dimmed?: boolean }) {
     return (
-      <button
-        type="button"
-        onClick={() => openSheet(player)}
+      <Link
+        href={`/players/${player.id}`}
         className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-sunken ${dimmed ? 'opacity-55' : ''}`}
       >
         <div
@@ -152,7 +80,7 @@ export default function PlayerList({ active, inactive }: Props) {
           {player.jersey_number ?? '–'}
         </span>
         <span className="ms text-[20px] text-faint flex-shrink-0">chevron_right</span>
-      </button>
+      </Link>
     )
   }
 
@@ -244,80 +172,6 @@ export default function PlayerList({ active, inactive }: Props) {
           {q && filteredActive.length === 0 && filteredInactive.length === 0 && (
             <p className="text-center text-faint text-sm py-6">{t.players.noPlayers}</p>
           )}
-        </>
-      )}
-
-      {/* Bottom sheet */}
-      {selected && (
-        <>
-          <div
-            className="fixed inset-0 z-[var(--z-scrim)]"
-            onClick={closeSheet}
-            style={{
-              background: 'rgba(0,0,0,0.28)',
-              backdropFilter: sheetVisible ? 'blur(6px)' : 'blur(0px)',
-              WebkitBackdropFilter: sheetVisible ? 'blur(6px)' : 'blur(0px)',
-              opacity: sheetVisible ? 1 : 0,
-              transition: 'opacity 0.25s ease, backdrop-filter 0.25s ease',
-            }}
-          />
-          <div
-            className="fixed left-0 right-0 z-[var(--z-sheet)] px-4 max-w-md mx-auto"
-            style={{
-              bottom: 'max(env(safe-area-inset-bottom), 16px)',
-              transform: reduceMotion ? 'none' : sheetVisible ? 'translateY(0)' : 'translateY(110%)',
-              opacity: reduceMotion ? (sheetVisible ? 1 : 0) : 1,
-              transition: reduceMotion
-                ? `opacity ${SHEET_EXIT_MS}ms ease`
-                : `transform ${SHEET_EXIT_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
-            }}
-          >
-            <div className="surface-card rounded-2xl overflow-hidden mb-3">
-              <div className="px-5 py-4 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border-soft)' }}>
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[13px] font-bold font-display flex-shrink-0"
-                  style={{ background: avatarBg(selected.name) }}
-                  aria-hidden="true"
-                >
-                  {initialsOf(selected.name)}
-                </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-ink truncate">{selected.name}</div>
-                  <div className="text-xs font-semibold text-faint">{t.players.positions[selected.position] ?? selected.position}</div>
-                </div>
-              </div>
-              {actions.map((action, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => (action.href ? navigate(action.href) : action.onClick?.())}
-                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-surface-sunken transition-colors text-left disabled:opacity-55 disabled:pointer-events-none"
-                  style={i < actions.length - 1 ? { borderBottom: '1px solid var(--border-soft)' } : undefined}
-                >
-                  <div
-                    className="w-[38px] h-[38px] rounded-xl flex items-center justify-center flex-shrink-0"
-                    style={
-                      action.tone === 'danger'
-                        ? { background: 'rgba(220,38,38,0.12)', color: 'var(--chip-red-fg)' }
-                        : { background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'var(--brand-accent)' }
-                    }
-                  >
-                    <span className="ms text-[20px]">{action.icon}</span>
-                  </div>
-                  <span className="font-bold text-ink flex-1">{action.label}</span>
-                  <span className="ms text-[20px] text-faint">chevron_right</span>
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={closeSheet}
-              className="surface-card w-full py-4 rounded-2xl font-bold text-ink"
-            >
-              {t.players.cancel ?? 'Annuleren'}
-            </button>
-          </div>
         </>
       )}
     </div>

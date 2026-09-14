@@ -9,7 +9,7 @@ vi.mock('@/app/actions/settings', () => ({ getDefaultAttendance: vi.fn(async () 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
-import { createPlayer, markRecovered, updatePlayer } from '@/app/actions/players'
+import { createPlayer, markInjured, markRecovered, updatePlayer } from '@/app/actions/players'
 
 type TableResult = { data?: unknown; error?: unknown }
 
@@ -164,6 +164,10 @@ describe('markRecovered', () => {
     ])
     expect(revalidatePath).toHaveBeenCalledWith('/players')
     expect(revalidatePath).toHaveBeenCalledWith('/')
+    // Ook het profiel van deze ene speler: dat rendert de beschikbaarheidspil
+    // server-side en zou anders op de oude stand blijven staan.
+    expect(revalidatePath).toHaveBeenCalledWith(`/players/${PLAYER_A}`)
+    expect(revalidatePath).toHaveBeenCalledTimes(3)
   })
 
   it('weigert een speler van een ander team en werkt dan niets bij', async () => {
@@ -202,6 +206,47 @@ describe('markRecovered', () => {
 // Herstellen van een blessure zet toekomstige rijen terug naar de
 // teamstandaard. Voor een gastspeler is die standaard 'absent': hij komt alleen
 // op 'present' als de trainer hem daar handmatig op zet.
+
+describe('markInjured', () => {
+  it('zet de speler op geblesseerd en revalideert lijst, dashboard én het spelersprofiel', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await markInjured(PLAYER_A)
+
+    const player = m.calls.update.find((u) => u.table === 'players')!
+    expect(player.payload).toEqual({ injured: true })
+    expect(player.filters).toEqual([
+      { op: 'eq', col: 'id', val: PLAYER_A },
+      { op: 'eq', col: 'team_id', val: 'team-1' },
+    ])
+    expect(revalidatePath).toHaveBeenCalledWith('/players')
+    expect(revalidatePath).toHaveBeenCalledWith('/')
+    expect(revalidatePath).toHaveBeenCalledWith(`/players/${PLAYER_A}`)
+    expect(revalidatePath).toHaveBeenCalledTimes(3)
+  })
+
+  it('revalideert het profiel met een LITERAAL pad, zonder \'page\'-argument', async () => {
+    // Een routepatroon (`/players/[id]`, 'page') zou elk spelersprofiel in één
+    // keer invalideren terwijl er precies één speler wijzigt
+    // (Next-docs revalidatePath.md, "If `path` is a literal path ... omit `type`").
+    use(eigenTeam())
+
+    await markInjured(PLAYER_A)
+
+    for (const call of vi.mocked(revalidatePath).mock.calls) {
+      expect(call).toHaveLength(1)
+    }
+    expect(vi.mocked(revalidatePath).mock.calls.map((c) => c[0])).not.toContain('/players/[id]')
+  })
+
+  it('revalideert niets als de speler van een ander team is', async () => {
+    use(eigenTeam({ players: { data: null, error: null } }))
+
+    await expect(markInjured(PLAYER_A)).rejects.toThrow('Speler niet gevonden')
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+})
 
 describe('markRecovered — gastspeler', () => {
   it('zet de rijen van een GAST terug naar absent in plaats van de teamstandaard', async () => {

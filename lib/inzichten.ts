@@ -662,3 +662,64 @@ export function periodeVenster(
   const start = grens > venster.start ? grens : venster.start
   return { start, end: venster.end }
 }
+
+// ── Spelersprofiel: statistieken van één speler ───────────────────────
+//
+// Het profiel (/players/[id], tab Statistieken) bundelt drie bestaande
+// bronnen: de aanwezigheids-RPC per speler, de ratingreeks per speler en de
+// match_events van die speler. De types en de pure telling staan hier — niet
+// in app/actions/inzichten.ts, want een 'use server'-bestand mag alleen async
+// functies exporteren (geheugen.md).
+
+// Per-kind tellingen uit match_events binnen het seizoensvenster.
+// Altijd alle vier de velden gevuld; 0 is een echte telling, geen "onbekend".
+export interface MatchEventTelling {
+  doelpunten: number
+  assists: number
+  geel: number
+  rood: number
+}
+
+// Retourvorm van getSpelerStatistieken (app/actions/inzichten.ts).
+export interface SpelerStatistieken {
+  // Geklemd venster (t/m gisteren) — alleen voor de aanwezigheid. Zie
+  // verledenSeizoensVenster: toekomstige, nog niet gespeelde events mogen het
+  // percentage niet omlaag trekken (markInjured zet daar al 'absent' neer).
+  aanwezig: number
+  afwezig: number
+  // null = geen enkele present/absent-registratie; NOOIT 0% — zelfde regel als
+  // berekenAanwezigheidPercentage hierboven.
+  aanwezigheidPercentage: number | null
+  // Volledig seizoensvenster: een rating bestaat per definitie pas ná de
+  // wedstrijd, dus die heeft het klemmen niet nodig.
+  ratingReeks: SpelerRatingPunt[]
+  // null = geen beoordeelde wedstrijden. Ongerond; de UI rondt af.
+  gemiddeldeRating: number | null
+  tellingen: MatchEventTelling
+}
+
+// Bovengrens op het aantal match_events-rijen dat één speler oplevert. Zelfde
+// gedachte als MAX_SEIZOEN_WEDSTRIJDEN hierboven: de seizoenslengte is door de
+// gebruiker bepaald en mag het geheugen niet sturen.
+export const MAX_SPELER_MATCH_EVENTS = 500
+
+// Telt match_events-rijen naar vier getallen. Puur, zonder databasetoegang, en
+// de invoer wordt niet gemuteerd.
+//
+// Een onbekende `kind` wordt genegeerd: de CHECK-constraint op match_events
+// (supabase/schema.sql) laat er geen toe, maar tellen is niet de plek om daar
+// blind op te vertrouwen — een onbekende waarde mag nooit stilzwijgend als
+// doelpunt meetellen.
+export function telMatchEvents(rows: { kind: string }[]): MatchEventTelling {
+  const telling: MatchEventTelling = { doelpunten: 0, assists: 0, geel: 0, rood: 0 }
+  for (const row of rows) {
+    switch (row?.kind) {
+      case 'goal': telling.doelpunten++; break
+      case 'assist': telling.assists++; break
+      case 'yellow': telling.geel++; break
+      case 'red': telling.rood++; break
+      default: break
+    }
+  }
+  return telling
+}

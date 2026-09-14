@@ -1,18 +1,9 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { Player } from '@/lib/types'
 import PlayerList from '@/components/PlayerList'
-
-vi.mock('@/app/actions/players', () => ({
-  markInjured: vi.fn().mockResolvedValue(undefined),
-  markRecovered: vi.fn().mockResolvedValue(undefined),
-}))
-
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
-}))
 
 function makePlayer(overrides: Partial<Player> = {}): Player {
   return {
@@ -38,31 +29,6 @@ function renderList(active: Player[], inactive: Player[] = []) {
   )
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-  // PlayerList gebruikt useReducedMotion (lib/use-reduced-motion.ts) voor de
-  // bottom-sheet-animatie; jsdom kent window.matchMedia niet standaard. Zelfde
-  // stub als wedstrijden-bulk-toevoegen.acceptance.test.tsx.
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    configurable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  })
-})
-
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-
 describe('Gast-badge', () => {
   it('toont geen Gast-badge bij een reguliere speler', () => {
     renderList([makePlayer({ type: 'regular' })])
@@ -83,8 +49,24 @@ describe('Gast-badge', () => {
   it('een inactieve gast staat gedimd in de inactief-sectie mét de Gast-badge', () => {
     renderList([], [makePlayer({ id: 'p2', name: 'Oud Gediende', type: 'guest', active: false })])
     expect(screen.getByText(nl.players.inactiveLabel)).toBeInTheDocument()
-    const row = screen.getByText('Oud Gediende').closest('button') as HTMLElement
+    const row = screen.getByText('Oud Gediende').closest('a') as HTMLElement
     expect(within(row).getByText(nl.players.guestBadge)).toBeInTheDocument()
     expect(row.className).toContain('opacity-55')
+  })
+})
+
+describe('Navigatie naar het profiel (AC1)', () => {
+  it('elke rij is een link naar /players/<id>', () => {
+    renderList([makePlayer({ id: 'p1', name: 'Piet Peters' })])
+    const row = screen.getByText('Piet Peters').closest('a') as HTMLAnchorElement
+    expect(row).toHaveAttribute('href', '/players/p1')
+  })
+
+  it('regressie: er verschijnt geen bottom-sheet meer na een tik op een rij', () => {
+    renderList([makePlayer({ id: 'p1', name: 'Piet Peters' })])
+    // Er is geen sheet-actie meer in de DOM — de rij is nu een gewone link,
+    // geen knop die een menu opent.
+    expect(screen.queryByText(nl.players.reportInjury)).not.toBeInTheDocument()
+    expect(screen.queryByText(nl.players.signOff)).not.toBeInTheDocument()
   })
 })

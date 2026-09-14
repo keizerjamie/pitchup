@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   MAX_SEIZOEN_WEDSTRIJDEN,
+  MAX_SPELER_MATCH_EVENTS,
   TOP_WORST_AANTAL,
   berekenAanwezigheidPercentage,
   filterDoelpunten,
   isGeldigSeizoensvenster,
   seizoensVenster,
+  telMatchEvents,
   telVorm,
   toMaandOpkomst,
   topWorstAanwezigheid,
@@ -761,5 +763,46 @@ describe('periodeVenster', () => {
     const origineel = { start: '2026-07-01', end: '2026-12-31' }
     periodeVenster(origineel, '4w', '2026-10-15')
     expect(origineel).toEqual({ start: '2026-07-01', end: '2026-12-31' })
+  })
+})
+
+describe('telMatchEvents', () => {
+  it('telt een lege lijst als vier nullen — 0 is een echte telling, geen "onbekend"', () => {
+    expect(telMatchEvents([])).toEqual({ doelpunten: 0, assists: 0, geel: 0, rood: 0 })
+  })
+
+  it('telt gemengde kinds per soort', () => {
+    const rows = [
+      { kind: 'goal' },
+      { kind: 'assist' },
+      { kind: 'goal' },
+      { kind: 'yellow' },
+      { kind: 'red' },
+      { kind: 'goal' },
+    ]
+
+    expect(telMatchEvents(rows)).toEqual({ doelpunten: 3, assists: 1, geel: 1, rood: 1 })
+  })
+
+  it('negeert een onbekende kind en laat de andere tellingen ongemoeid', () => {
+    // De CHECK-constraint op match_events laat zo'n waarde niet toe, maar een
+    // onbekende soort mag nooit stilzwijgend als doelpunt meetellen.
+    const rows = [{ kind: 'goal' }, { kind: 'wissel' }, { kind: 'yellow' }]
+
+    expect(telMatchEvents(rows)).toEqual({ doelpunten: 1, assists: 0, geel: 1, rood: 0 })
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [{ kind: 'goal' }, { kind: 'assist' }]
+
+    telMatchEvents(rows)
+
+    expect(rows).toEqual([{ kind: 'goal' }, { kind: 'assist' }])
+  })
+
+  it('begrenst het aantal opgehaalde rijen met een vaste bovengrens', () => {
+    // Zelfde gedachte als MAX_SEIZOEN_WEDSTRIJDEN: de seizoenslengte is door de
+    // gebruiker bepaald en mag het geheugen niet sturen.
+    expect(MAX_SPELER_MATCH_EVENTS).toBe(500)
   })
 })

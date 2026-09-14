@@ -162,6 +162,11 @@ export async function markInjured(playerId: string): Promise<void> {
 
   revalidatePath('/players')
   revalidatePath('/')
+  // Het spelersprofiel rendert de beschikbaarheidspil server-side; zonder deze
+  // regel blijft die op de oude stand staan na een blessuremelding. Literaal
+  // pad en bewust geen 'page'-argument: dat invalideert elk profiel in een keer
+  // terwijl er precies een speler wijzigt (Next-docs revalidatePath.md).
+  revalidatePath(`/players/${playerId}`)
 }
 
 export async function markRecovered(playerId: string): Promise<void> {
@@ -240,4 +245,7 @@ export async function markRecovered(playerId: string): Promise<void> {
 
   revalidatePath('/players')
   revalidatePath('/')
+  // Spiegel van markInjured: ook het profiel van deze ene speler moet de
+  // nieuwe status tonen.
+  revalidatePath(`/players/${playerId}`)
 }
