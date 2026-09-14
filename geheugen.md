@@ -3168,3 +3168,62 @@ Verzoek van de eigenaar in twee stappen, bewust zonder feature-factory-keten (é
 - **Suite-status bij afronden**: `cyclusweek-correctie` AC1/AC12 nog steeds pre-existing
   rood (ook met `git stash`); `nulmeting-per-onderdeel.acceptance.test.tsx` faalde één run op
   `categorie_metingen toHaveLength(0)` en slaagde daarna — flaky, niet onderzocht.
+
+## Spelersprofiel `/players/[id]` in SportEasy-stijl (2026-09-13 → 2026-09-14, commit `7b235d1`)
+Gebouwd via de feature-factory-keten (researcher → story → PM → backend → frontend →
+test-verifier → validator, met beide goedkeuringspauzes en één feedback-lus). Aanleiding:
+designbenchmark van 9 concurrent-apps; de eigenaar koos de ledenpagina van SportEasy als
+referentie (donkere kop, ronde avatar, pil, tabs, kaart met label/waarde-rijen).
+
+### Wat er is
+- **Tik op een speler in `/players` gaat direct naar `/players/[id]`**; de bottom-sheet in
+  `components/PlayerList.tsx` is weg. Bewerken, afmelden en blessure/hersteld melden zitten
+  als knoppen op het profiel (`components/players/PlayerProfileActions.tsx`).
+- **`/players/[id]/absence` is een pure `redirect('/players/{id}?tab=aanwezigheid')`** —
+  geen query, geen guard; het profiel doet alle checks. `edit/page.tsx` bewust ongewijzigd
+  (AC5 uit de story is vervallen: die pagina had nooit een link naar afmelden).
+- **Kop is full-bleed zonder negatieve marge**: `main` in `AppShell` heeft alleen verticale
+  padding, de horizontale marges komen van de pagina-container. De kop staat dus gewoon
+  BUITEN die container (`PlayerProfile.tsx`). Gradient uit `--color-brand-dark/-brand/
+  -brand-mid` (themaconstant); pil uit `--primary`/`--danger`. Geen nieuwe kleur.
+- **Tabs = `role="group"` + `aria-pressed`** (stijl van `TrainingstypeSchakelaar`, actief
+  `var(--primary)`), client-side `useState`; `?tab=` is alleen de startwaarde (whitelist in
+  `lib/player-profile.ts`), geen URL-sync bij wisselen.
+- **Info-tab** toont posities via `POSITIE_GROEP_TOKENS` (`--panel-*`) i.p.v. het hardcoded
+  `POSITION_COLORS` (dat blijft bestaan voor andere schermen).
+- **Aanwezigheid-tab** = ongewijzigde `PlayerAbsenceList` met dezelfde vier props,
+  conditioneel gemount.
+- **Statistieken-tab** = stat-tegels, geen grafiek. Data uit `getSpelerStatistieken(id)`
+  (`app/actions/inzichten.ts`); types in `lib/inzichten.ts` (`SpelerStatistieken`,
+  `MatchEventTelling`, `telMatchEvents`). `null` = uitsluitend "geen seizoensvenster".
+  Aparte `statsError`-prop voor een mislukte load (pagina vangt de throw op; alleen de tab
+  toont `statsLoadError`, de rest van het profiel blijft werken — validator-bevinding).
+- **Avatar-helpers** (`initialsOf`, `avatarBg`) verhuisd naar `lib/avatar.ts`.
+
+### Twee vensters in `getSpelerStatistieken` (niet cosmetisch)
+Aanwezigheid gebruikt `verledenSeizoensVenster` (t/m gisteren); ratings en `match_events`
+het volle seizoen. Reden: `markInjured` schrijft `absent` op TOEKOMSTIGE events, dus zonder
+klemmen kelderde het percentage van elke geblesseerde speler. Vastgepind in
+`app/actions/inzichten.test.ts`. De drie takken lopen via `Promise.allSettled` (eerste fout
+in vaste volgorde doorgegooid) om een onafgehandelde tweede rejection te voorkomen.
+
+### Migratie `supabase/speler-statistieken.sql` — EERST DRAAIEN, DAN DEPLOYEN
+Voegt `p_player uuid default null` toe aan `inzichten_aanwezigheid_per_speler`. Let op de
+`drop function ... (date, date)` vooraf: zonder drop ontstaat een OVERLOAD en breekt
+`/inzichten` (2-arg-aanroep) met "function is not unique". Grants gelden per signatuur en
+zijn opnieuw gezet op `(date, date, uuid)`. Zonder migratie geeft de aanwezigheidstak
+`PGRST202` → `statsLoadError` op de tab; niets anders breekt.
+
+### Bewust geaccepteerd
+- Gast- en inactieve spelers: RPC's filteren `p.active`/`p.type='regular'`, de
+  `match_events`-telling niet. Zij zien dus wél doelpunten/assists/kaarten, geen
+  aanwezigheid/rating. Tekst `statsExcludedHint` is daarop aangescherpt ("… tellen niet mee
+  in aanwezigheid en beoordeling").
+- `app/actions/attendance.ts` revalideert nog `/players/{id}/absence` (nu een redirect);
+  onschadelijk omdat `PlayerAbsenceList` zelf `router.refresh()` doet. Opruimen = losse taak.
+- AC7 (full-bleed) is niet in jsdom te bewijzen; alleen visueel gecontroleerd door de
+  eigenaar.
+- Testharness `app/actions/inzichten.test.ts`: `opts.rpc` is nu een map per functienaam
+  (met terugval); nieuwe filter-operatoren (`gte`/`lte`/`in`/`is`/`limit`) moeten expliciet
+  aan de chain-stub worden toegevoegd, anders `x.gte is not a function`.
+- Suite-status bij afronden: `cyclusweek-correctie` AC1/AC12 nog steeds pre-existing rood.
