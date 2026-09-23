@@ -67,10 +67,24 @@ begin
     raise exception 'FOUT: can_edit weigert een onderdeel voor de hoofdtrainer';
   end if;
 
-  -- Onbekend onderdeel moet DICHT vallen.
-  if can_edit('TEAM_A_UUID','bestaat-niet') then
-    raise exception 'LEK: can_edit geeft true voor een onbekend onderdeel';
+  -- LET OP — VOOR EEN OWNER GEEFT OOK EEN ONBEKEND ONDERDEEL `true`, EN DAT IS
+  -- GEEN LEK. can_edit() is `m.rol = 'owner' or case p_onderdeel ...`: bij een
+  -- hoofdtrainer kortsluit de OR vóór de case, dus de naam van het onderdeel
+  -- doet er niet toe. Dat is ontworpen gedrag — een hoofdtrainer mag per
+  -- definitie alles in zijn eigen team, ook een onderdeel dat later wordt
+  -- toegevoegd. De "onbekend valt dicht"-regel uit de brief gaat over
+  -- ASSISTENTEN en wordt daarom in blok 3 getest, niet hier.
+  --
+  -- Deze assertie legt de kortsluiting expliciet vast, want de
+  -- bootstrap-INSERT-policy op team_members leunt erop: die staat toe dat
+  -- iemand zijn eigen owner-rij met alle zes vlaggen op `false` aanmaakt, en
+  -- dat is alleen onschadelijk zolang can_edit() op `rol = 'owner'` kortsluit
+  -- (zie rand 1 bij die policy in supabase/teams-en-leden.sql). Haalt iemand
+  -- die kortsluiting ooit weg, dan faalt deze regel — precies de bedoeling.
+  if not can_edit('TEAM_A_UUID','bestaat-niet') then
+    raise exception 'FOUT: can_edit kort niet meer kort op rol = owner — de bootstrap-policy leunt daarop';
   end if;
+  raise notice 'OK blok 1: can_edit kort kort op rol = owner (ook voor een onbekend onderdeel)';
   reset role;
 end $$;
 
@@ -142,6 +156,16 @@ begin
   -- Lezen mag altijd (AC: een assistent ziet alles).
   select count(*) into n from players where team_id = 'TEAM_A_UUID';
   raise notice 'OK blok 3: assistent ziet % spelers', n;
+
+  -- HIER hoort de "onbekend onderdeel valt dicht"-regel thuis: bij een
+  -- assistent loopt can_edit() wél door de case-takken, en die eindigt op
+  -- `else false`. Dat is wat een toekomstig zevende onderdeel afdwingt zonder
+  -- dat iemand de functie bijwerkt. (Bij een owner kortsluit de OR ervóór —
+  -- zie blok 1.)
+  if can_edit('TEAM_A_UUID','bestaat-niet') then
+    raise exception 'LEK: can_edit geeft true voor een onbekend onderdeel bij een assistent';
+  end if;
+  raise notice 'OK blok 3: onbekend onderdeel valt dicht voor een assistent';
 
   -- Schrijven zonder recht mag niet.
   begin

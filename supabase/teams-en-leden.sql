@@ -131,8 +131,21 @@ create or replace function public.is_team_owner(p_team_id uuid) returns boolean
                  where m.team_id = p_team_id and m.user_id = auth.uid() and m.rol = 'owner');
 $$;
 
--- Onbekend onderdeel valt DICHT (else false). Dat is wat een toekomstig
--- zevende onderdeel afdwingt zonder dat iemand deze functie bijwerkt.
+-- VOOR EEN ASSISTENT valt een onbekend onderdeel DICHT (else false). Dat is wat
+-- een toekomstig zevende onderdeel afdwingt zonder dat iemand deze functie
+-- bijwerkt.
+--
+-- VOOR EEN HOOFDTRAINER NIET, en dat is ontworpen gedrag: `m.rol = 'owner' or
+-- case ...` kortsluit vóór de case, dus een owner krijgt op ELK onderdeel true
+-- — ook op een onbekend. Een hoofdtrainer mag per definitie alles in zijn eigen
+-- team. Die kortsluiting is bovendien waar de bootstrap-INSERT-policy op
+-- team_members op leunt (rand 1 daar): een owner-rij met alle zes vlaggen op
+-- false is daardoor onschadelijk. Haal de kortsluiting nooit weg zonder die
+-- policy mee te veranderen.
+--
+-- supabase/team-rls-verificatie.sql legt beide kanten vast: blok 1 dat een
+-- owner true krijgt op een onbekend onderdeel, blok 3 dat een assistent false
+-- krijgt.
 create or replace function public.can_edit(p_team_id uuid, p_onderdeel text) returns boolean
   language sql stable security definer set search_path = public as $$
   select exists (

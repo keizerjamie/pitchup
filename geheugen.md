@@ -5,7 +5,7 @@ Kernpunten over dit project, opgebouwd per sessie. Vul aan; verwijder niets zond
 ## Project & stack
 - **Next.js App Router + Supabase.** Repo: github.com/keizerjamie/pitchup.
 - **Deploy:** elke `git push` naar `main` triggert automatisch een Vercel-deploy (prod). Zie `DEPLOY.md`. `.env.local` is gitignored (Supabase-keys gaan niet mee).
-- **Tenant-isolatie altijd:** RLS `team_id = auth.uid()` op elke tabel, én expliciete `.eq('team_id', user.id)` in elke query/insert/update/delete. Guards tegen forged id's in `lib/authz.ts` (`assertOwnEvent`, `assertOwnPlayer`, `assertOwnOefening`).
+- **Tenant-isolatie altijd (sinds 2026-09-23, fase 1 assistent-trainers):** RLS per tabel gesplitst in lezen (`is_team_member(team_id)`) en schrijven (`can_edit(team_id, '<onderdeel>')`), én expliciet `.eq('team_id', ctx.teamId)` in elke query, waarbij `ctx` uit `requireTeamContext()` (`lib/team-context.ts`) komt — **nooit meer `user.id` als team**. Vóór elke schrijfactie `assertCanEdit(ctx, '<onderdeel>')`. Guards tegen forged id's in `lib/authz.ts` (`assertOwnEvent`, `assertOwnPlayer`, `assertOwnOefening` — die laatste op `ctx.userId`, want oefeningen zijn persoonlijk bezit). Zie de sectie "Assistent-trainers fase 1" onderaan.
 - **i18n:** `messages/{nl,en,de,fr,es}.ts`; `nl.ts` is leidend, `Dict = typeof nl`. Elke nieuwe UI-string in alle 5 bestanden. Client: `useDict()`, server: `getDict()`.
 - **Theming:** licht/donker via CSS-variabelen in `app/globals.css`, omgeschakeld met `:root[data-theme="dark"]`. Gebruik thema-utilities: `text-ink`/`text-muted`/`text-faint`, `bg-surface`/`bg-surface-sunken`, `border-[var(--border-soft)]`. **Nooit hardcoded `text-gray-*`/`bg-white`** — dat breekt dark mode (is een keer misgegaan).
 - **Responsive-conventie:** container `max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8`, `lg:grid`; sheet/modal `rounded-t-3xl sm:rounded-2xl` (bottom-sheet mobiel / gecentreerd desktop); oranje accent voor acties.
@@ -3227,3 +3227,109 @@ zijn opnieuw gezet op `(date, date, uuid)`. Zonder migratie geeft de aanwezighei
   (met terugval); nieuwe filter-operatoren (`gte`/`lte`/`in`/`is`/`limit`) moeten expliciet
   aan de chain-stub worden toegevoegd, anders `x.gte is not a function`.
 - Suite-status bij afronden: `cyclusweek-correctie` AC1/AC12 nog steeds pre-existing rood.
+
+## Assistent-trainers fase 1: teams-/ledenmodel, teamcontext en gesplitste RLS (2026-09-23, commit `2d749be`, live)
+Fundament voor assistent-trainers met rechten per onderdeel, meerdere teams per account en
+persoonlijke oefeningen. Gebouwd via de feature-factory in vier fasen (brief §0); dit is fase 1,
+**zonder zichtbare UI-verandering**. Werkdocumenten (researcher-briefing, story v3 met 58
+criteria, brief, addendum §8, validator- en test-verifier-rapporten):
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-assistent/`. Leesbare samenvatting in de
+Obsidian-kluis: `Werk/KZR Labs/Projecten/Pitchup/Pitchup - Assistent-trainers en meerdere teams.md`.
+
+### Kern van het ontwerp
+- **`teams.id` van een bestaand team = user-id van de hoofdtrainer** (backfill uit `auth.users`).
+  Daardoor verhuist geen rij, en is `is_team_member(team_id)` na M1 exact even waar als het oude
+  `team_id = auth.uid()`. Nieuwe teams (fase 2) krijgen een eigen uuid.
+- **`team_members`**: `(team_id, user_id)` PK, `rol` owner/assistent, zes boolean-kolommen
+  `mag_<onderdeel>_bewerken` (geen JSONB), partiële unique index "één owner per team".
+  **`team_invites`**: `token_hash` (sha256, ruwe token nooit opgeslagen), `verloopt_op timestamptz`
+  (beoordeeld met `now()` in de database, nooit in JS), partiële unique "één actief per team".
+- **Vier `security definer`-helpers** (`is_team_member`, `is_team_owner`, `can_edit`,
+  `settings_key_editable`), verplicht: een policy op `team_members` die een invoker-functie
+  aanroept die `team_members` leest, geeft "infinite recursion". Eerste `security definer` in het
+  project; altijd `set search_path = public` + revoke public/anon + grant authenticated.
+- **Onderdelen** (`ONDERDELEN` in `lib/team-rechten.ts`): spelers, agenda, aanwezigheid,
+  wedstrijd, training, periodisering. Tabel→onderdeel: players→spelers; events→agenda;
+  attendance+absence_periods→aanwezigheid; lineups/match_squad/match_ratings/match_events→
+  wedstrijd; training_oefeningen→training (ook `stap_override`); metingen/categorie_metingen→
+  periodisering; task_overrides per `task_type`; settings per **sleutel** via
+  `settings_key_editable` (season_*/training_*→agenda, cyclus_week_correctie→periodisering, rest
+  owner-only); oefeningen ongewijzigd `team_id = auth.uid()` = eigenaar-user.
+- **`lib/team-context.ts`** (plain lib, géén `'use server'`): `getTeamContext()` is `cache()`-
+  gewrapt (patroon `getDict`), leest lidmaatschappen + teamnamen, kiest het actieve team uit de
+  cookie `active_team` — **de cookie is nooit autorisatiebron**: onbekend id valt terug op het
+  eerste eigen team (alfabetisch op naam, tiebreak id). `requireTeamContext()` (actions, throwt
+  'Niet ingelogd'/'Geen team'), `requireTeamContextOrLogin()` (pages, `redirect('/login')`),
+  `canEdit`/`assertCanEdit`/`assertIsOwner`. `app/actions/team.ts` heeft alleen `setActiveTeam`
+  (valideert lidmaatschap, cookie, `redirect('/')`).
+- **RPC's** (`inzichten_*`, 6 stuks + spelersprofiel-overload) hebben nu `p_team_id` vooraan met
+  `is_team_member(p_team_id)` als tweede laag; blijven `security invoker`.
+
+### Addendum §8 — "principe van afgeleide macht" (gat dat pas bij de bouw bleek)
+Zeven acties schrijven een tabel van een ánder onderdeel dan ze vragen. Regel: de app-laag vraagt
+precies één recht (dat van de handeling); een policy mag alleen verruimd worden richting een
+onderdeel dat die rijen via de cascade tóch al kan wissen. Toegepast:
+- `attendance` INSERT ook via `agenda` (createEvent/createBulkMatches/generateSeasonTrainings)
+  en INSERT+UPDATE via `spelers` (markInjured/markRecovered); DELETE strikt aanwezigheid. Het
+  attendance-blok staat **woordelijk gelijk** in `team-rls.sql` en `team-rls-gevolgacties.sql` —
+  bewust, zodat de volgorde M2b/M2 niet uitmaakt; wijzig ze samen.
+- `events` NIET verruimd. Kolom-begrensde `security definer`-RPC's: `set_event_doelstelling`
+  (training), `set_match_result` (wedstrijd, geen tweede clamp), `set_gather_time` (wedstrijd,
+  plain `time`), `set_trainingstype` (training, whitelist). team_id komt altijd uit de rij;
+  errcodes `P0002`→'Event niet gevonden', `42501`→'Geen toegang' via `rpcEventError` in
+  `lib/errors.ts`. **Gevolg voor fase 2-UI:** verzameltijd valt onder wedstrijd, trainingstype
+  onder training, niet meer onder agenda.
+- `createEvent` rolt het event terug als de attendance-insert faalt (was stil half werk);
+  mislukte compensatie wordt gelogd (`events.createEvent.compensatie`).
+- **Bewust aanvaard restrisico:** assistent met alleen Spelers-recht kan via een directe aanroep
+  een aanwezigheidsstatus zetten; kleiner dan wat `deletePlayer` al mag. Blok 7 van het
+  verificatiescript legt dit vast en faalt hard als iemand het ooit dichtzet.
+
+### Registratie en accountverwijdering
+- **Bootstrap-policies** `"teams: eigen team bij registratie"` (`id = auth.uid()`) en
+  `"team_members: eigen owner-rij bij registratie"`: nodig omdat `create_team()` pas in fase 2
+  komt. Pas droppen **ná de deploy van fase 2** via M5b, niet in M5 (zelfde valkuil als M3a/M3b).
+- **E-mailbevestiging:** `signUp` parkeert de teamnaam in user-metadata (`pitchup_team_name`,
+  `TEAM_NAAM_METADATA_KEY`) en `maakEigenTeam()` in `lib/team-context.ts` herstelt het eigen team
+  bij de eerste context, **alleen als die vlag er is** (nul lidmaatschappen zonder vlag = niets
+  doen; dat houdt BR 51 "uitnodiging → geen eigen team" haalbaar). Vlag wordt na succes gewist.
+  Fase-2/3-aandachtspunt: `leaveTeam`/`deleteTeam` moeten de vlag ook wissen, anders kan het
+  zelfherstel na het verlaten van het laatste team een leeg team terugtoveren. Of bevestiging in
+  productie aanstaat is **nog steeds onbekend**; de code dekt beide.
+- `deleteAccount` wist nu de volledige tabellijst (incl. het oude gat `categorie_metingen`),
+  eerst `oefeningen` op de user-id, dan 13 tabellen op `ctx.teamId`, dan de `teams`-rij; alleen
+  bij `ctx.rol === 'owner'`. De rollen-lus (assistent verwijdert eigen account) is fase 3.
+
+### Migraties — volgorde is hard (preview-deploys praten met productie)
+M1 `teams-en-leden.sql` → M3a `inzichten-team-id.sql` → M2b `team-rls-gevolgacties.sql` →
+**deploy** → backfill (M1 sectie 6) nogmaals → M2 `team-rls.sql` → M3b
+`inzichten-team-id-opruimen.sql` → `team-rls-verificatie.sql` handmatig (13 blokken, één
+`begin…rollback`; blok 1, 2, 6, 13 zinvol zonder assistent). M2b moet vóór de deploy omdat de
+code de vier RPC's direct aanroept (anders PGRST202). M3b pas ná de deploy (oude signaturen).
+`drop policy if exists` noemt overal **beide** naamvarianten (`team_id = auth.uid()` én
+`own team only`), want drie policy-sets stonden dubbel in de repo.
+
+### Lessen (uit de keten)
+- **Vitest bewijst niets over RLS.** Het verificatiescript is het enige vangnet; draai het na elke
+  policy-wijziging met twee testaccounts.
+- **Drie testsmaken, niet twee:** naast de chainable stub en de tabel-engine leest
+  `scripts/*.test.mjs` productiecode als tekst en breekt op een hernoemde query. Bij een brede
+  refactor altijd `npm run test:all`. Een per-tabel-factory-mock throwt op een onbekende tabel
+  (`Onverwachte tabel in test`): nieuwe tabel = alle drie plekken bijwerken. Een nieuwe
+  filter-operator (`.in()`) moet aan elke chain-stub.
+- **Per fase nalopen of registratie, accountverwijdering en de lege staat blijven werken met de
+  policies die ná díé fase live staan** (de bootstrap-lacune en de M2b-volgorde kwamen daaruit).
+- **Parallelle sessie in dezelfde working tree, derde keer:** de aanwezigheid-telling-feature
+  stond ongecommit naast fase 1 met hunks in vijf gedeelde bestanden. Gecommit door per bestand de
+  fase-1-versie uit HEAD te genereren en via `git hash-object` + `update-index --cacheinfo` te
+  stagen, daarna de index met `git checkout-index` in een tijdelijke map gematerialiseerd en daar
+  typecheck/lint/tests gedraaid (3172 groen, alleen cyclusweek AC1/AC12 rood).
+- Suite-status bij afronden: `cyclusweek-correctie` AC1/AC12 pre-existing rood;
+  `nulmeting-per-onderdeel` AC20 intermitterend (1 op 4 volledige runs, ook op de baseline).
+
+### Nog te bouwen (fase 2–4, elk apart door de keten)
+Fase 2: `create_team`, uitnodigen (`/invite/[token]`, `peek_team_invite`/`accept_team_invite`,
+`lib/invite-token.ts`, `proxy.ts`-uitzondering + `Referrer-Policy`), rechten-UI, teamwisselaar,
+lege staat, knoppen verbergen (`canEdit`-props, `GlobalFab`), `signUp` via `create_team`, M5b.
+Fase 3: `deleteTeam`, rollen-lus in `deleteAccount`. Fase 4: `oefeningen`-SELECT-policy via
+gekoppeld trainingsplan + `kopieerOefeningNaarBibliotheek` (M6).
