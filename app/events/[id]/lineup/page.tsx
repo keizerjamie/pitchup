@@ -9,6 +9,7 @@ import { logError } from '@/lib/errors'
 import { isDateString } from '@/lib/season-dates'
 import { buildPlayerForms, FORM_MATCH_HORIZON } from '@/lib/lineup-form'
 import { CLUB_COLOR_KEYS, resolveKitColors } from '@/lib/club-colors'
+import { splitsAanwezigheid } from '@/lib/aanwezigheid-telling'
 import type { FormMatchRow, FormRatingRow } from '@/lib/lineup-form'
 
 interface Props {
@@ -110,7 +111,7 @@ export default async function LineupPage({ params }: Props) {
 
   const players: Player[] = allPlayers ?? []
 
-  // Faaltak: nooit de ruwe PostgREST-fout loggen of tonen (lib/errors.ts:27-30).
+  // Faaltak: nooit de ruwe PostgREST-fout loggen of tonen (logError in lib/errors.ts).
   // Bij een fout gaan we verder met een lege rijenset; elke speler valt dan
   // terug op X = 0 — precies het gedrag van vóór deze feature.
   if (formMatchError) logError('lineup-form', formMatchError)
@@ -151,8 +152,13 @@ export default async function LineupPage({ params }: Props) {
     ...players.filter((p) => !eligiblePlayerIds.has(p.id)),
   ]
 
-  const presentPlayers = players.filter((p) => presentPlayerIds.has(p.id))
-  const absentPlayers = players.filter((p) => !presentPlayerIds.has(p.id))
+  // Dezelfde regel als op het trainingsplan: een afwezige gast hoort niet in de
+  // "Afwezig"-kaart, een aanwezige gast wél in het positie-overzicht. Zie
+  // splitsAanwezigheid in lib/aanwezigheid-telling.ts. Dit raakt alleen die twee
+  // lijsten — eligiblePlayerIds en sortedPlayers hierboven blijven op de volle
+  // spelerslijst werken, zodat een gast selecteerbaar blijft.
+  const { aanwezig: presentPlayers, afwezig: absentPlayers } =
+    splitsAanwezigheid(players, (p) => presentPlayerIds.has(p.id))
 
   const overviewGroups = [
     { label: 'GK',   positions: ['Keeper'] },

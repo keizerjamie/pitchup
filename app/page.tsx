@@ -17,6 +17,7 @@ import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
 import { OPKOMST_DOEL } from '@/lib/inzichten'
+import { teltMee } from '@/lib/aanwezigheid-telling'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 // AANNAME A1 (goedgekeurd): backward-fetchhorizon voor To-do kandidaat-events —
@@ -97,7 +98,6 @@ export default async function DashboardPage() {
 
   const upcoming: FootballEvent[] = upcomingEvents ?? []
   const players = playerRows ?? []
-  const squadSize = players.length
   const totalActive = players.length
   // Drie elkaar uitsluitende groepen voor de balk in de tegel "Actieve spelers":
   // een blessure weegt zwaarder dan het gast-zijn, dus een geblesseerde gast
@@ -116,10 +116,29 @@ export default async function DashboardPage() {
     : { data: [] }
   const allAttendance = attendanceRows ?? []
 
+  // Faalt de gast-query, dan weten we niet wie gast is. Doortellen zou de
+  // gasten stilzwijgend meerekenen en dus een te hoog percentage tonen dat
+  // bovendien afwijkt van /inzichten — zonder enig signaal aan de trainer.
+  // Daarom valt de tegel "Opkomst" verderop terug op "geen getal" (—): liever
+  // niets tonen dan een verkeerd getal. Alleen een statisch label naar de log,
+  // geen ruwe melding.
+  if (guestPlayerError) logError('dashboard.guestPlayers', guestPlayerError)
+  // De hero-tegel kán niet terugvallen op "geen getal": die toont altijd een
+  // ring. Bij een gefaalde gast-query valt hij daarom terug op de gasten uit de
+  // al opgehaalde actieve spelers — een benadering zonder extra query, in
+  // plaats van een lege set waardoor elke gast stilzwijgend zou meetellen.
+  const gastIds = guestPlayerError
+    ? new Set(players.filter((p) => p.type === 'guest').map((p) => p.id))
+    : new Set((guestPlayerRows ?? []).map((p: { id: string }) => p.id))
+
   function statsFor(eventId: string) {
     const records = allAttendance.filter((a) => a.event_id === eventId)
     const present = records.filter((a) => a.status === 'present').length
-    const absent = records.filter((a) => a.status === 'absent').length
+    // Een afwezige gast hoort niet in het afwezig-segment van de hero-ring — en
+    // via heroSquadSize ook niet in "geen reactie". `present` blijft bewust
+    // ongefilterd: een gast die op aanwezig staat telt juist wél mee. Dezelfde
+    // regel als teltMee in lib/aanwezigheid-telling.ts.
+    const absent = records.filter((a) => a.status === 'absent' && !gastIds.has(a.player_id)).length
     return { present, absent, total: records.length }
   }
 
@@ -138,17 +157,10 @@ export default async function DashboardPage() {
 
   // ── Stat cards (all real data) ──
   let totalPresent = 0, totalAbsent = 0
-  // Faalt de gast-query, dan weten we niet wie gast is. Doortellen zou de
-  // gasten stilzwijgend meerekenen en dus een te hoog percentage tonen dat
-  // bovendien afwijkt van /inzichten — zonder enig signaal aan de trainer.
-  // Daarom valt de tegel terug op "geen getal" (—): liever niets tonen dan een
-  // verkeerd getal. Alleen een statisch label naar de log, geen ruwe melding.
-  if (guestPlayerError) logError('dashboard.guestPlayers', guestPlayerError)
-  const guestPlayerIds = new Set((guestPlayerRows ?? []).map((p: { id: string }) => p.id))
   for (const a of allAttendance) {
     // Een gast telt in teller noch noemer mee — zelfde regel als
     // inzichten_aanwezigheid, anders wijken de twee getallen van elkaar af.
-    if (guestPlayerIds.has(a.player_id)) continue
+    if (gastIds.has(a.player_id)) continue
     if (a.status === 'present') totalPresent++
     else if (a.status === 'absent') totalAbsent++
   }
@@ -297,16 +309,29 @@ export default async function DashboardPage() {
       if (a.event_id === heroEvent.id && a.player_id) heroAttendance.set(a.player_id, a.status as AttendanceStatus)
     }
   }
-  const availabilityItems: AvailabilityItem[] = players.slice(0, 6).map((p, i) => ({
-    id: p.id,
-    initials: initialsOf(p.name),
-    avatarBg: AVATAR_BG[i % AVATAR_BG.length],
-    name: p.name,
-    num: p.jersey_number,
-    pos: POSITION_ABBREVIATIONS[p.position] ?? p.position,
-    status: heroAttendance.get(p.id) ?? 'unknown',
-    injured: p.injured,
-  }))
+  // Noemer van de hero: vaste spelers altijd, gasten alleen als ze aanwezig
+  // staan. DashboardHero rekent noResponse = squadSize - present - absent zelf
+  // uit (die formules wijzigen niet); door de noemer mee te laten bewegen valt
+  // een afwezige gast ook uit "geen reactie".
+  const heroSquadSize = players.filter((p) => teltMee(p.type, heroAttendance.get(p.id) === 'present')).length
+
+  // Een afwezige of onbekende gast hoort niet in de Beschikbaarheid-tegel, die
+  // er anders een chip "Afwezig"/"nog niet gereageerd" aan hangt. Filteren VÓÓR
+  // de slice, anders bezet hij alsnog een van de zes plekken. Een aanwezige
+  // gast mag er wel tussen staan. Nul extra queries.
+  const availabilityItems: AvailabilityItem[] = players
+    .filter((p) => teltMee(p.type, heroAttendance.get(p.id) === 'present'))
+    .slice(0, 6)
+    .map((p, i) => ({
+      id: p.id,
+      initials: initialsOf(p.name),
+      avatarBg: AVATAR_BG[i % AVATAR_BG.length],
+      name: p.name,
+      num: p.jersey_number,
+      pos: POSITION_ABBREVIATIONS[p.position] ?? p.position,
+      status: heroAttendance.get(p.id) ?? 'unknown',
+      injured: p.injured,
+    }))
 
   const heroStats = heroEvent ? statsFor(heroEvent.id) : { present: 0, absent: 0, total: 0 }
   const heroIsMatch = heroEvent?.type === 'match'
@@ -342,7 +367,7 @@ export default async function DashboardPage() {
           t={t}
           present={heroStats.present}
           absent={heroStats.absent}
-          squadSize={squadSize}
+          squadSize={heroSquadSize}
           primaryHref={heroIsMatch ? `/events/${heroEvent.id}/lineup` : `/events/${heroEvent.id}/training-plan`}
           primaryLabel={heroIsMatch ? t.home.makeLineup : t.home.makeTrainingPlan}
           primaryIcon={heroIsMatch ? 'sports' : 'assignment'}

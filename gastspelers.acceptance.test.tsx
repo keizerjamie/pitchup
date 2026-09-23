@@ -48,7 +48,7 @@
 // dát een filter ooit is aangeroepen.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, fireEvent } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 
@@ -67,6 +67,10 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 vi.mock('@/app/actions/attendance', () => ({
   updateAttendance: vi.fn().mockResolvedValue(undefined),
   markAllPresent: vi.fn().mockResolvedValue(undefined),
+  // Nooit daadwerkelijk aangeroepen (geen enkele test klikt "Opslaan") — puur
+  // nodig zodat de import in LineupBuilder (AC4-tests) resolvet. Zelfde
+  // precedent als opstelling-vorm.acceptance.test.tsx.
+  saveLineup: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('@/app/actions/players', () => ({
   markInjured: vi.fn().mockResolvedValue(undefined),
@@ -81,7 +85,9 @@ import { createClient } from '@/lib/supabase/server'
 import PlayersPage from '@/app/players/page'
 import EventDetailPage from '@/app/events/[id]/page'
 import TrainingPlanPage from '@/app/events/[id]/training-plan/page'
+import LineupPage from '@/app/events/[id]/lineup/page'
 import DashboardPage from '@/app/page'
+import EventsPage from '@/app/events/page'
 
 // ── team_members: de teamcontext van élke page en server action ──
 // lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
@@ -445,8 +451,8 @@ async function renderTrainingPlanPage(opts: {
 // Sinds de print-verstrakking (2026-08-24) staat het rugnummer in een eigen
 // uitlijn-span binnen de <li>; getByText's getNodeText ziet alleen directe
 // tekstnodes, dus deze asserties matchen op de volledige li-textContent.
-describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (trainingsplan-pagina)', () => {
-  it('toont "(Gast)" achter de naam van een AANWEZIGE gast in het printblok', async () => {
+describe('AC15/AC3 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (trainingsplan-pagina)', () => {
+  it('AC15 — toont "(Gast)" achter de naam van een AANWEZIGE gast in het printblok', async () => {
     await renderTrainingPlanPage({
       players: [
         makePlayer({ id: 'p1', team_id: TEAM, name: 'Aanwezige Gast', type: 'guest', jersey_number: 21 }),
@@ -456,14 +462,21 @@ describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (train
     expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `21 Aanwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
   })
 
-  it('toont "(Gast)" achter de naam van een AFWEZIGE gast in het printblok', async () => {
+  // AC3 heft AC15's oorspronkelijke tegenhanger op: een AFWEZIGE gast hoorde
+  // vroeger met "(Gast)" in de afwezig-lijst te staan, maar staat sinds deze
+  // feature NERGENS meer — niet op scherm, niet in het printblok. Deze test
+  // stond hier voorheen omgekeerd (bewees juist wél de "(Gast)"-suffix bij
+  // afwezig); zie BRIEF.md, sectie "JOUW SCOPE" punt 2.
+  it('AC3 — een AFWEZIGE gast staat NERGENS in het printblok, niet in de aanwezig- en niet in de afwezig-lijst', async () => {
     await renderTrainingPlanPage({
       players: [
         makePlayer({ id: 'p1', team_id: TEAM, name: 'Afwezige Gast', type: 'guest', jersey_number: 22 }),
       ],
-      attendance: [], // geen 'present'-rij → valt in absentPlayers
+      attendance: [], // geen 'present'-rij → zou vóór AC3 in absentPlayers zijn beland
     })
-    expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `22 Afwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(screen.queryByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim().includes('Afwezige Gast'))).not.toBeInTheDocument()
+    // De kop-teller ({present}/{present+absent}) telt de gast dus ook niet mee.
+    expect(screen.getByText((_c, el) => el?.tagName === 'P' && /^Aanwezigheid \(0\/0\)$/.test(el.textContent?.replace(/\s+/g, ' ').trim() ?? ''))).toBeInTheDocument()
   })
 
   it('een reguliere speler krijgt géén "(Gast)"-suffix, aanwezig noch afwezig', async () => {
@@ -477,6 +490,100 @@ describe('AC15 — "Gast" op de afdruk van de aanwezig-/afwezigheidslijst (train
     expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === '5 Reguliere Aanwezige')).toBeInTheDocument()
     expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === '6 Reguliere Afwezige')).toBeInTheDocument()
     expect(screen.queryByText(new RegExp(`Reguliere .* \\(${nl.players.guestBadge}\\)`))).not.toBeInTheDocument()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// AC4 — Opstellingpagina afwezigenlijst, via de ECHTE /events/<id>/lineup-route
+// ═══════════════════════════════════════════════════════════════════════
+function baseMatchEventRow(overrides: Row = {}): Row {
+  return {
+    id: 'lineup-e1',
+    team_id: TEAM,
+    type: 'match',
+    date: '2026-08-20',
+    time: null,
+    location: null,
+    match_type: 'league',
+    opponent: 'Tegenstander',
+    home_away: 'home',
+    gather_time: null,
+    notes: null,
+    doelstelling: null,
+    goals_for: null,
+    goals_against: null,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+async function renderLineupPage(opts: {
+  user?: { id: string } | null
+  event?: Row | null
+  players?: Row[]
+  attendance?: Row[]
+  id?: string
+} = {}) {
+  const user = opts.user === undefined ? { id: TEAM } : opts.user
+  const eventRows = opts.event === undefined ? [baseMatchEventRow()] : opts.event === null ? [] : [opts.event]
+  const tables: Record<string, Row[]> = {
+    events: eventRows,
+    players: opts.players ?? [],
+    attendance: opts.attendance ?? [],
+    lineups: [],
+    match_squad: [],
+    settings: [],
+    match_ratings: [],
+  }
+  vi.mocked(createClient).mockResolvedValue(
+    makeSupabase(user, tables) as unknown as Awaited<ReturnType<typeof createClient>>,
+  )
+  const el = await LineupPage({ params: Promise.resolve({ id: opts.id ?? 'lineup-e1' }) })
+  return render(<DictProvider dict={nl}>{el}</DictProvider>)
+}
+
+function absentLineupCard(): HTMLElement {
+  return screen.getByText(nl.event.absentStat).closest('.surface-card') as HTMLElement
+}
+
+describe('AC4 — opstellingpagina: afwezige gast niet in de "Afwezig"-kaart, aanwezige gast blijft selecteerbaar', () => {
+  it('een afwezige gast staat niet in de "Afwezig"-kaart, een afwezige vaste speler wel', async () => {
+    await renderLineupPage({
+      players: [
+        makePlayer({ id: 'p1', team_id: TEAM, name: 'Blijvende Afwezige', type: 'regular', position: 'Spits', jersey_number: 5 }),
+        makePlayer({ id: 'p2', team_id: TEAM, name: 'Afwezige Gast', type: 'guest', position: 'Spits', jersey_number: 6 }),
+      ],
+      attendance: [
+        { event_id: 'lineup-e1', team_id: TEAM, player_id: 'p1', status: 'absent' },
+        { event_id: 'lineup-e1', team_id: TEAM, player_id: 'p2', status: 'absent' },
+      ],
+    })
+    const card = absentLineupCard()
+    // Beide namen tonen alleen hun eerste woord (p.name.split(' ')[0]) — bewust
+    // twee namen gekozen die daarna niet met elkaar botsen.
+    expect(within(card).getByText('Blijvende')).toBeInTheDocument()
+    expect(within(card).queryByText('Afwezige')).not.toBeInTheDocument()
+  })
+
+  it('een aanwezige gast blijft zichtbaar in het positie-overzicht en selecteerbaar in de spelerspopup', async () => {
+    await renderLineupPage({
+      players: [
+        makePlayer({ id: 'p1', team_id: TEAM, name: 'Aanwezige Gast', type: 'guest', position: 'Spits', jersey_number: 7 }),
+      ],
+      attendance: [
+        { event_id: 'lineup-e1', team_id: TEAM, player_id: 'p1', status: 'present' },
+      ],
+    })
+    // Zichtbaar: staat in het positie-overzicht (Aanv-groep, positie Spits),
+    // niet in de "Afwezig"-kaart.
+    expect(screen.getByText('Aanwezige')).toBeInTheDocument()
+    expect(within(absentLineupCard()).queryByText('Aanwezige')).not.toBeInTheDocument()
+
+    // Selecteerbaar: staat als keuze-optie in de spelerspopup van een leeg
+    // slot — zelfde openCmSlot-precedent als opstelling-vorm.acceptance.test.tsx.
+    fireEvent.click(screen.getByText('CM'))
+    const popupButtons = screen.getAllByTestId('popup-speler')
+    expect(popupButtons.some((b) => b.textContent?.includes('Aanwezige'))).toBe(true)
   })
 })
 
@@ -784,5 +891,380 @@ describe('dashboardtegel "Actieve spelers" — gastspelers krijgen een eigen kle
 
     expect(segments().map((s) => s[0])).toEqual([SEGMENT_GREEN])
     expect(activePlayersSubtitle()).toBe(`1 ${nl.home.fit} · 0 ${nl.home.injured} (0%)`)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// AC1 — Dashboard hero-tegel: afwezige/onbekende gasten tellen niet mee in
+// het "afwezig"-segment noch in "geen reactie" van de ring
+// ═══════════════════════════════════════════════════════════════════════
+// De desktop-legendarij (LegendRow in components/dashboard/DashboardHero.tsx)
+// rendert exact "<n> <label>" als eigen tekstnode (de kleurstip ernaast is een
+// lege <span>); de mobiele compacte tekst gebruikt het afwijkende formaat
+// "<n>/<squadSize> <label>" en botst dus niet met dit exacte-match-patroon.
+function heroLegendText(label: string): string {
+  return screen.getByText(new RegExp(`^\\d+ ${label}$`)).textContent ?? ''
+}
+
+describe('AC1 — hero-tegel: afwezige/onbekende gasten tellen niet mee in "afwezig"/"geen reactie"', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const regulars = [
+    makePlayer({ id: 'hr1', team_id: TEAM, name: 'Hero Reg 1', type: 'regular' }),
+    makePlayer({ id: 'hr2', team_id: TEAM, name: 'Hero Reg 2', type: 'regular' }),
+    makePlayer({ id: 'hr3', team_id: TEAM, name: 'Hero Reg 3', type: 'regular' }),
+    makePlayer({ id: 'hr4', team_id: TEAM, name: 'Hero Reg 4', type: 'regular' }),
+    makePlayer({ id: 'hr5', team_id: TEAM, name: 'Hero Reg 5', type: 'regular' }),
+  ]
+  const guests = Array.from({ length: 6 }, (_, i) =>
+    makePlayer({ id: `hg${i + 1}`, team_id: TEAM, name: `Hero Gast ${i + 1}`, type: 'guest' }))
+
+  it('6 afwezige gasten: "afwezig" telt alleen de vaste afwezigen, "geen reactie" blijft 0', async () => {
+    const attendance: Row[] = [
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr1', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr2', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr3', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr4', status: 'absent' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr5', status: 'absent' },
+      ...guests.map((g) => ({ event_id: 'ev1', team_id: TEAM, player_id: g.id as string, status: 'absent' })),
+    ]
+    await renderDashboard({ players: [...regulars, ...guests], attendance })
+
+    expect(heroLegendText(nl.home.absent)).toBe(`2 ${nl.home.absent}`)
+    expect(heroLegendText(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
+  })
+
+  it('6 aanwezige gasten: tellen wél mee bij "aanwezig" en de "van {n}"-noemer beweegt mee', async () => {
+    const attendance: Row[] = [
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr1', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr2', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr3', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr4', status: 'absent' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'hr5', status: 'absent' },
+      ...guests.map((g) => ({ event_id: 'ev1', team_id: TEAM, player_id: g.id as string, status: 'present' })),
+    ]
+    await renderDashboard({ players: [...regulars, ...guests], attendance })
+
+    // present = 3 vast + 6 gast = 9; squadSize (heroSquadSize) = 5 vast + 6
+    // aanwezige gast = 11 → "van 11" in de ring, noResponse blijft 0.
+    expect(heroLegendText(nl.home.present)).toBe(`9 ${nl.home.present}`)
+    expect(screen.getByText(nl.home.ofCount.replace('{n}', '11'))).toBeInTheDocument()
+    expect(heroLegendText(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// AC6 — Dashboardtegel "Beschikbaarheid": afwezige gast niet tussen de
+// eerste 6 spelers op rugnummer
+// ═══════════════════════════════════════════════════════════════════════
+function availabilityCard(): HTMLElement {
+  return screen.getByText(nl.home.availability).closest('.surface-card') as HTMLElement
+}
+
+describe('AC6 — Beschikbaarheid-tegel: afwezige gast met laag rugnummer bezet geen plek in de top 6', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function buildPlayers() {
+    const guest = makePlayer({ id: 'ag1', team_id: TEAM, name: 'Lage Gast', type: 'guest', jersey_number: 1 })
+    const regulars = Array.from({ length: 6 }, (_, i) =>
+      makePlayer({ id: `av${i + 1}`, team_id: TEAM, name: `Beschikbaar ${i + 1}`, jersey_number: i + 2, type: 'regular' }))
+    return { guest, regulars }
+  }
+
+  it('een AFWEZIGE gast met het laagste rugnummer staat niet tussen de eerste 6', async () => {
+    const { guest, regulars } = buildPlayers()
+    await renderDashboard({
+      players: [guest, ...regulars],
+      attendance: [{ event_id: 'ev1', team_id: TEAM, player_id: guest.id as string, status: 'absent' }],
+    })
+    const card = availabilityCard()
+    expect(within(card).queryByText('Lage Gast')).not.toBeInTheDocument()
+    for (const r of regulars) expect(within(card).getByText(r.name as string)).toBeInTheDocument()
+  })
+
+  it('een AANWEZIGE gast met het laagste rugnummer staat wél tussen de eerste 6 (en verdringt de zesde)', async () => {
+    const { guest, regulars } = buildPlayers()
+    await renderDashboard({
+      players: [guest, ...regulars],
+      attendance: [{ event_id: 'ev1', team_id: TEAM, player_id: guest.id as string, status: 'present' }],
+    })
+    const card = availabilityCard()
+    expect(within(card).getByText('Lage Gast')).toBeInTheDocument()
+    // Met de gast erbij zijn er 7 kandidaten; de zesde vaste speler (het
+    // hoogste rugnummer) valt nu net buiten de top 6.
+    expect(within(card).queryByText('Beschikbaar 6')).not.toBeInTheDocument()
+    for (const r of regulars.slice(0, 5)) expect(within(card).getByText(r.name as string)).toBeInTheDocument()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Edge case (BRIEF.md §"EDGE CASES") — een event waarin ALLE spelers gast
+// zijn: geen crash, opkomst "—" (nooit "0%")
+// ═══════════════════════════════════════════════════════════════════════
+describe('Edge — event waarin alle spelers gast zijn', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('dashboard rendert zonder crash en toont "—" als opkomstpercentage', async () => {
+    const guests = [
+      makePlayer({ id: 'eg1', team_id: TEAM, name: 'Enige Gast 1', type: 'guest' }),
+      makePlayer({ id: 'eg2', team_id: TEAM, name: 'Enige Gast 2', type: 'guest' }),
+    ]
+    await renderDashboard({
+      players: guests,
+      attendance: [
+        { event_id: 'ev1', team_id: TEAM, player_id: 'eg1', status: 'present' },
+        { event_id: 'ev1', team_id: TEAM, player_id: 'eg2', status: 'absent' },
+      ],
+    })
+    expect(attendancePercentage()).toBe('—')
+    expect(attendancePercentage()).not.toBe('0%')
+  })
+
+  it('trainingsplan-pagina rendert zonder crash met uitsluitend gastspelers', async () => {
+    await renderTrainingPlanPage({
+      players: [
+        makePlayer({ id: 'eg1', team_id: TEAM, name: 'Plan Gast', type: 'guest' }),
+      ],
+      attendance: [],
+    })
+    expect(screen.getByText(nl.event.trainingPlan)).toBeInTheDocument()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// AC7 — Agendapagina (/events): de rij-teller "{present}/{total}" sluit
+// afwezige/onbekende gasten uit de noemer; een aanwezige gast telt wel mee.
+// Faalt de players-query (het gast-filter), dan crasht de pagina niet en
+// valt de noemer terug op de ongefilterde telling (de `total`-tak in de
+// `attendanceMap`-berekening van `app/events/page.tsx`), en wordt
+// uitsluitend het statische label
+// hierboven ("opkomsttegel is fail-safe als de gast-query faalt").
+// ═══════════════════════════════════════════════════════════════════════
+function agendaEventRow(overrides: Row = {}): Row {
+  return {
+    id: 'agenda-e1',
+    team_id: TEAM,
+    type: 'training',
+    date: '2026-08-19',
+    time: '19:00',
+    location: null,
+    match_type: null,
+    opponent: null,
+    home_away: null,
+    gather_time: null,
+    notes: null,
+    doelstelling: null,
+    goals_for: null,
+    goals_against: null,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+async function renderEventsPage(opts: {
+  user?: { id: string } | null
+  events?: Row[]
+  attendance?: Row[]
+  players?: Row[]
+  failGuestQuery?: boolean
+} = {}) {
+  const user = opts.user === undefined ? { id: TEAM } : opts.user
+  const tables: Record<string, Row[]> = {
+    events: opts.events ?? [agendaEventRow()],
+    attendance: opts.attendance ?? [],
+    players: opts.players ?? [],
+  }
+  const supabase = opts.failGuestQuery
+    ? withFailingGuestQuery(makeSupabase(user, tables))
+    : makeSupabase(user, tables)
+  vi.mocked(createClient).mockResolvedValue(
+    supabase as unknown as Awaited<ReturnType<typeof createClient>>,
+  )
+  const el = await EventsPage()
+  return render(<DictProvider dict={nl}>{el}</DictProvider>)
+}
+
+// Elk test-scenario in dit blok rendert precies één event met stats>0, dus
+// de ene "<present>/<total>"-tekst op de pagina is ondubbelzinnig.
+function agendaRowStat(): string {
+  return screen.getByText(/^\d+\/\d+$/).textContent ?? ''
+}
+
+describe('AC7 — agendapagina (/events): rijteller sluit afwezige/onbekende gasten uit de noemer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const regulars20 = Array.from({ length: 20 }, (_, i) =>
+    makePlayer({ id: `ar${i + 1}`, team_id: TEAM, name: `Agenda Reg ${i + 1}`, type: 'regular' }))
+  const guests6 = Array.from({ length: 6 }, (_, i) =>
+    makePlayer({ id: `ag${i + 1}`, team_id: TEAM, name: `Agenda Gast ${i + 1}`, type: 'guest' }))
+
+  it('(a) 20 vast (15 present/5 absent) + 6 gasten absent => rij toont 15/20, niet 15/26', async () => {
+    const attendance: Row[] = [
+      ...regulars20.map((p, i) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: i < 15 ? 'present' : 'absent' })),
+      ...guests6.map((p) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: 'absent' })),
+    ]
+    await renderEventsPage({ players: [...regulars20, ...guests6], attendance })
+    expect(agendaRowStat()).toBe('15/20')
+  })
+
+  it('(b) diezelfde 6 gasten op present => rij toont 21/26', async () => {
+    const attendance: Row[] = [
+      ...regulars20.map((p, i) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: i < 15 ? 'present' : 'absent' })),
+      ...guests6.map((p) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: 'present' })),
+    ]
+    await renderEventsPage({ players: [...regulars20, ...guests6], attendance })
+    expect(agendaRowStat()).toBe('21/26')
+  })
+
+  it('(c) een gast met status "unknown" telt niet mee in de noemer', async () => {
+    const players = [
+      makePlayer({ id: 'cr1', team_id: TEAM, name: 'C Reg 1', type: 'regular' }),
+      makePlayer({ id: 'cg1', team_id: TEAM, name: 'C Gast 1', type: 'guest' }),
+    ]
+    const attendance: Row[] = [
+      { event_id: 'agenda-e1', team_id: TEAM, player_id: 'cr1', status: 'present' },
+      { event_id: 'agenda-e1', team_id: TEAM, player_id: 'cg1', status: 'unknown' },
+    ]
+    await renderEventsPage({ players, attendance })
+    // Noemer telt alleen de vaste speler (1); de 'unknown' gast bestaat voor
+    // deze teller niet — noch teller noch noemer.
+    expect(agendaRowStat()).toBe('1/1')
+  })
+
+  it('(d) faalt de players-query, dan crasht de pagina niet, toont de ongefilterde noemer en logt uitsluitend het statische label', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const players = [
+      makePlayer({ id: 'dr1', team_id: TEAM, name: 'D Reg 1', type: 'regular' }),
+      makePlayer({ id: 'dr2', team_id: TEAM, name: 'D Reg 2', type: 'regular' }),
+      ...Array.from({ length: 6 }, (_, i) => makePlayer({ id: `dg${i + 1}`, team_id: TEAM, name: `D Gast ${i + 1}`, type: 'guest' })),
+    ]
+    const attendance: Row[] = [
+      { event_id: 'agenda-e1', team_id: TEAM, player_id: 'dr1', status: 'present' },
+      { event_id: 'agenda-e1', team_id: TEAM, player_id: 'dr2', status: 'present' },
+      ...Array.from({ length: 6 }, (_, i) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: `dg${i + 1}`, status: 'absent' })),
+    ]
+
+    await renderEventsPage({ players, attendance, failGuestQuery: true })
+
+    // Ongefilterde noemer (records.length): 2 present regulars + 6 absent
+    // gasten = 8 records, present blijft 2 — géén crash.
+    expect(agendaRowStat()).toBe('2/8')
+
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    const logged = String(errorSpy.mock.calls[0][0])
+    expect(logged).toContain('[events.guestPlayers]')
+    expect(logged).toContain(GUEST_QUERY_ERROR.code)
+    expect(logged).not.toContain(GUEST_QUERY_ERROR.message)
+    expect(logged).not.toContain(GUEST_QUERY_ERROR.details)
+
+    errorSpy.mockRestore()
+  })
+
+  // Validator-punt 2 — tenant-isolatie van de NIEUWE gast-query in
+  // app/events/page.tsx. Zonder de team_id-scoping op die query zou een
+  // gastspeler van een ANDER team met hetzelfde speler-id de eigen
+  // (reguliere) speler ten onrechte als "gast" classificeren, en een
+  // afwezige "gast" telt niet mee in de noemer (teltMee, lib/
+  // aanwezigheid-telling.ts). Dat effect is alleen zichtbaar te maken via
+  // een id-botsing tussen teams: de database garandeert normaal unieke
+  // ids, maar de team_id-filter moet die botsing al onmogelijk maken
+  // vóórdat het id ooit relevant wordt — precies wat deze test bewijst.
+  it('(e) een gastspeler van een ANDER team met hetzelfde speler-id verlaagt de noemer van de agendateller niet', async () => {
+    const players = [
+      makePlayer({ id: 'iso-r1', team_id: TEAM, name: 'Iso Reg 1', type: 'regular' }),
+      makePlayer({ id: 'iso-shared', team_id: TEAM, name: 'Iso Shared', type: 'regular' }),
+      makePlayer({ id: 'iso-shared', team_id: OTHER_TEAM, name: 'Andermans Gast', type: 'guest' }),
+    ]
+    const attendance: Row[] = [
+      { event_id: 'agenda-e1', team_id: TEAM, player_id: 'iso-r1', status: 'present' },
+      { event_id: 'agenda-e1', team_id: TEAM, player_id: 'iso-shared', status: 'absent' },
+    ]
+    await renderEventsPage({ players, attendance })
+    // Blijft 'iso-shared' terecht als reguliere speler van het EIGEN team
+    // geteld (geen lek uit OTHER_TEAM via het gedeelde id), dan telt de
+    // afwezige gewoon mee in de noemer: 1 present / 2 total. Lekt de
+    // OTHER_TEAM-gast toch mee, dan verdwijnt 'iso-shared' uit de noemer
+    // en wordt het ten onrechte 1/1.
+    expect(agendaRowStat()).toBe('1/2')
+  })
+
+  // Validator-punt 3 — een agenda-event waarvan ALLE attendance-rijen
+  // afwezige gasten zijn: total wordt dan 0 en de teller verdwijnt volledig
+  // uit de agendarij (AgendaRow in components/CalendarView.tsx rendert de
+  // "{present}/{total}"-tekst alleen als total>0). Dat volgt logisch uit de
+  // vastgestelde regel, maar was tot nu toe niet vastgelegd — zodat een
+  // volgende sessie ziet dat dit bedoeld gedrag is en niet per ongeluk
+  // "gerepareerd" wordt naar bijvoorbeeld "0/0".
+  it('(f) een event waarvan alle attendance-rijen afwezige gasten zijn toont GEEN teller meer op de agendarij', async () => {
+    const onlyGuests = Array.from({ length: 3 }, (_, i) =>
+      makePlayer({ id: `only-g${i + 1}`, team_id: TEAM, name: `Only Gast ${i + 1}`, type: 'guest' }))
+    const attendance: Row[] = onlyGuests.map((p) => ({
+      event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: 'absent',
+    }))
+    await renderEventsPage({ players: onlyGuests, attendance })
+    expect(screen.queryByText(/^\d+\/\d+$/)).not.toBeInTheDocument()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Validator-punt 3 — het degradatiepad van de hero (de `gastIds`-fallback in
+// `app/page.tsx`): bij een gefaalde gast-query valt gastIds terug op de gasten uit players
+// i.p.v. een lege set. Bewijs met een AFWEZIGE gast dat de fallback-set
+// echt gevuld is (en niet leeg) — anders zou de hero deze gast alsnog
+// meetellen in "afwezig".
+// ═══════════════════════════════════════════════════════════════════════
+describe('Validator-punt 3 — hero-degradatiepad bij gefaalde gast-query telt een afwezige gast nog steeds niet mee', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('faalt de gast-query én staat een gast op afwezig, dan telt "afwezig" in de hero-legenda die gast nog steeds niet mee', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const regulars = [
+      makePlayer({ id: 'vr1', team_id: TEAM, name: 'Val Reg 1', type: 'regular' }),
+      makePlayer({ id: 'vr2', team_id: TEAM, name: 'Val Reg 2', type: 'regular' }),
+    ]
+    const guest = makePlayer({ id: 'vg1', team_id: TEAM, name: 'Val Gast 1', type: 'guest' })
+    const attendance: Row[] = [
+      { event_id: 'ev1', team_id: TEAM, player_id: 'vr1', status: 'present' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'vr2', status: 'absent' },
+      { event_id: 'ev1', team_id: TEAM, player_id: 'vg1', status: 'absent' },
+    ]
+
+    await renderDashboard({ players: [...regulars, guest], attendance, failGuestQuery: true })
+
+    // Zou de fallback-set leeg zijn (het ongerepareerde gedrag), dan telt de
+    // gast mee en staat er "2 afwezig" i.p.v. "1 afwezig".
+    expect(heroLegendText(nl.home.absent)).toBe(`1 ${nl.home.absent}`)
+
+    errorSpy.mockRestore()
   })
 })

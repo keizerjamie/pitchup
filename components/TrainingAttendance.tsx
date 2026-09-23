@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { updateAttendance, markAllPresent } from '@/app/actions/attendance'
 import { AttendanceStatus, Player, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
+import { telAanwezigheid } from '@/lib/aanwezigheid-telling'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 function initialsOf(name: string): string {
@@ -53,11 +54,19 @@ export default function TrainingAttendance({ eventId, players, initialStatuses }
     )
   }
 
-  const total = players.length
-  const present = players.filter((p) => statuses[p.id] === 'present').length
-  const absent = players.filter((p) => statuses[p.id] === 'absent').length
-  const unknown = total - present - absent
-  const turnout = total > 0 ? Math.round((present / total) * 100) : 0
+  const { aanwezig, afwezig, onbekend, opkomstPercentage, gastenAanwezig, vastAanwezig, vastAfwezig } =
+    telAanwezigheid(players, (p) => statuses[p.id] ?? 'unknown')
+
+  // Geen subregel zonder vaste selectie (bv. een event met uitsluitend
+  // gasten): "0/0 vaste selectie" is technisch correct maar zegt niets.
+  const turnoutSub = vastAanwezig + vastAfwezig > 0
+    ? t.event.turnoutScopeSub
+        .replace('{present}', String(vastAanwezig))
+        .replace('{total}', String(vastAanwezig + vastAfwezig))
+    : undefined
+  const guestSub = gastenAanwezig > 0
+    ? (gastenAanwezig === 1 ? t.event.presentGuestSubOne : t.event.presentGuestSubMany.replace('{n}', String(gastenAanwezig)))
+    : undefined
 
   return (
     <div className="flex flex-col gap-4">
@@ -65,11 +74,25 @@ export default function TrainingAttendance({ eventId, players, initialStatuses }
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(120deg,#0d3d38,#14655c)' }}>
           <div className="text-[12.5px] font-bold" style={{ color: '#9fd8cd' }}>{t.event.turnout}</div>
-          <div className="font-display text-[30px] font-bold mt-1">{turnout}%</div>
+          <div className="font-display text-[30px] font-bold mt-1">
+            {opkomstPercentage !== null ? `${opkomstPercentage}%` : '—'}
+          </div>
+          {/* Vaste min-hoogte: vastAanwezig/vastAfwezig kunnen tijdens het
+              aanvinken van 0 naar >0 gaan (en terug), dus de subregel kan
+              zelf verschijnen/verdwijnen. Zelfde reservering als de sub-regel
+              in StatMini hieronder, zodat de kaartenrij dan niet verspringt.
+              LET OP: min-h-[14px] en leading-[14px] moeten aan elkaar gelijk
+              blijven. Een arbitrary text-[Npx] utility in Tailwind v4 zet
+              alléén font-size, geen line-height (die zonder expliciete
+              leading-* uit preflight's html/body line-height: 1.5 komt) —
+              zonder leading-[14px] zou de gevulde regel dus hoger renderen
+              (11.5 * 1.5 ≈ 17px) dan de lege min-h-[14px], en verspringt de
+              kaartenrij alsnog. */}
+          <div className="text-[11.5px] font-semibold mt-0.5 min-h-[14px] leading-[14px]" style={{ color: '#9fd8cd' }}>{turnoutSub}</div>
         </div>
-        <StatMini dot="#22c55e" label={t.event.presentStat} value={present} />
-        <StatMini dot="#ef4444" label={t.event.absentStat} value={absent} />
-        <StatMini dot="#f59e0b" label={t.event.unknownStat} value={unknown} />
+        <StatMini dot="#22c55e" label={t.event.presentStat} value={aanwezig} sub={guestSub} />
+        <StatMini dot="#ef4444" label={t.event.absentStat} value={afwezig} />
+        <StatMini dot="#f59e0b" label={t.event.unknownStat} value={onbekend} />
       </div>
 
       {/* List header */}
@@ -120,13 +143,20 @@ export default function TrainingAttendance({ eventId, players, initialStatuses }
   )
 }
 
-function StatMini({ dot, label, value }: { dot: string; label: string; value: number }) {
+function StatMini({ dot, label, value, sub }: { dot: string; label: string; value: number; sub?: string }) {
   return (
     <div className="surface-card p-4">
       <div className="flex items-center gap-2 text-[12.5px] font-bold text-muted">
         <span className="w-[9px] h-[9px] rounded-full" style={{ background: dot }} />{label}
       </div>
       <div className="font-display text-[30px] font-bold text-ink mt-1">{value}</div>
+      {/* Vaste min-hoogte: reserveert de ruimte zodat een verschijnende/verdwijnende
+          gast-subregel de kaartenrij niet laat verspringen tijdens het aanvinken.
+          min-h-[14px] en leading-[14px] moeten aan elkaar gelijk blijven — zie de
+          toelichting bij de turnoutSub-subregel hierboven (Tailwind v4 zet bij een
+          arbitrary text-[Npx] utility geen line-height mee, dus zonder expliciete
+          leading loopt de gevulde hoogte uit preflight's line-height: 1.5). */}
+      <div className="text-faint text-[11.5px] font-semibold mt-0.5 min-h-[14px] leading-[14px]">{sub}</div>
     </div>
   )
 }

@@ -13,6 +13,7 @@ import AttendanceSummary from '@/components/AttendanceSummary'
 import PrintButton from '@/components/PrintButton'
 import TeamLogo from '@/components/TeamLogo'
 import { getDict } from '@/lib/i18n'
+import { splitsAanwezigheid } from '@/lib/aanwezigheid-telling'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -44,8 +45,12 @@ export default async function TrainingPlanPage({ params }: Props) {
   ])
   const activePlayers: Player[] = playersData ?? []
   const presentIds = new Set((attendanceData ?? []).filter((a) => a.status === 'present').map((a) => a.player_id))
-  const presentPlayers = activePlayers.filter((p) => presentIds.has(p.id))
-  const absentPlayers = activePlayers.filter((p) => !presentIds.has(p.id))
+  // Eén regel voor beide lijsten (scherm én printblok): een gast staat alleen
+  // tussen de aanwezigen en nooit in de afwezigenlijst. Zie splitsAanwezigheid
+  // in lib/aanwezigheid-telling.ts; `afwezig` blijft daar bewust "niet
+  // aanwezig", dus inclusief status unknown — dat gedrag verandert niet.
+  const { aanwezig: presentPlayers, afwezig: absentPlayers } =
+    splitsAanwezigheid(activePlayers, (p) => presentIds.has(p.id))
 
   // Clubkleuren serverzijdig geresolved (ingestelde waarde óf fallback), zodat
   // de printweergave altijd kant-en-klare hexstrings krijgt. Het doorgeven aan

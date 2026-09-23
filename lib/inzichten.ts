@@ -139,8 +139,9 @@ type UitslagRij = Pick<DoelpuntItem, 'goals_for' | 'goals_against'>
 // ── Berekeningen ─────────────────────────────────────────────────────
 
 // Aanwezigheidspercentage, afgerond op hele procenten — exact dezelfde
-// afronding als het dashboard (app/page.tsx:112-114), zodat hetzelfde seizoen
-// nooit op twee plekken een ander getal geeft.
+// afronding als de opkomst-KPI van het dashboard (attendancePct in
+// app/page.tsx), zodat hetzelfde seizoen nooit op twee plekken een ander getal
+// geeft.
 //
 // null bij noemer 0: zonder aanwezig- én afwezig-registraties is er geen
 // percentage. 0% teruggeven zou "iedereen afwezig" suggereren.
@@ -155,6 +156,15 @@ type UitslagRij = Pick<DoelpuntItem, 'goals_for' | 'goals_against'>
 // supabase/inzichten.sql filteren op p.type = 'regular', en het dashboard doet
 // hetzelfde in JS (app/page.tsx). Een gast telt dus nergens mee in teller of
 // noemer.
+//
+// Parallelle regel voor de UI-tellingen en -lijsten (stat-cards, hero-ring,
+// afwezigenlijsten): die woont in teltMee/telAanwezigheid/splitsAanwezigheid in
+// lib/aanwezigheid-telling.ts. Het verschil met hierboven zit in de
+// ZICHTBAARHEID, niet in het percentage: een gast die handmatig op aanwezig is
+// gezet staat daar wél tussen de aanwezigen, maar telt nog steeds niet mee in
+// teller of noemer van het opkomstpercentage. telAanwezigheid roept daarvoor
+// berekenAanwezigheidPercentage hieronder aan met UITSLUITEND de vaste
+// selectie, zodat er maar één afronding en één null-bij-noemer-0 bestaat.
 export function berekenAanwezigheidPercentage(aanwezig: number, afwezig: number): number | null {
   if (!Number.isFinite(aanwezig) || !Number.isFinite(afwezig)) return null
   if (aanwezig < 0 || afwezig < 0) return null

@@ -20,14 +20,33 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
   }
 }
 
-describe('print-only Gast-label', () => {
-  it('toont "(Gast)" achter de naam in het printblok voor zowel aanwezige als afwezige gasten', () => {
+// ── COMPONENTCONTRACT (bijgewerkt voor de gastspelers-uit-afwezigheidscijfers
+// feature, zie BRIEF.md sectie "5.4 components/AttendanceSummary.tsx — BEWUST
+// ONGEWIJZIGD") ──
+// AttendanceSummary rendert domweg de `present`/`absent`-props die het
+// krijgt, inclusief het "(Gast)"-printlabel voor elke speler met
+// `type === 'guest'` — de component filtert zelf GEEN gasten weg, ook niet
+// een afwezige gast in de `absent`-prop. Dat weglaten is de verantwoordelijk-
+// heid van de AANROEPER: `splitsAanwezigheid` (lib/aanwezigheid-telling.ts)
+// haalt afwezige/onbekende gasten er al vóór het doorgeven uit. Deze test
+// bewijst dus uitsluitend het componentcontract ("ik render wat je me geeft,
+// ik ken zelf geen gast-regel") — géén acceptatiecriterium op zich. Dat
+// AttendanceSummary in de ECHTE trainingsplan-pagina nooit een afwezige gast
+// te zien krijgt, staat in gastspelers.acceptance.test.tsx, describe-blok
+// "AC15/AC3 — ...", met name de test "AC3 — een AFWEZIGE gast staat NERGENS
+// in het printblok...".
+describe('componentcontract — AttendanceSummary rendert wat het krijgt, filtert zelf niet', () => {
+  it('geeft de "(Gast)"-suffix in het printblok door voor élke speler met type "guest" in de meegegeven props, ook als de aanroeper (per ongeluk) een afwezige gast in `absent` zou doorgeven', () => {
     const present = [makePlayer({ id: 'p1', name: 'Present Gast', type: 'guest' })]
     const absent = [makePlayer({ id: 'p2', name: 'Afwezige Gast', type: 'guest' })]
     render(<AttendanceSummary present={present} absent={absent} eventId="e1" t={nl} />)
 
     // Twee losse teksten (dual-markup: scherm-blok bevat de naam zonder
-    // suffix, print-blok mét) — zoek specifiek op de print-suffix-tekst.
+    // suffix, print-blok mét) — zoek specifiek op de print-suffix-tekst. Dit
+    // bewijst NIET dat een afwezige gast in het echt in `absent` terechtkomt
+    // (dat voorkomt splitsAanwezigheid vóór deze component wordt aangeroepen,
+    // zie AC3 hierboven) — alleen dat de component zelf geen tweede filter
+    // toepast.
     expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `9 Present Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
     expect(screen.getByText((_c, el) => el?.tagName === 'LI' && el.textContent?.replace(/\s+/g, ' ').trim() === `9 Afwezige Gast (${nl.players.guestBadge})`)).toBeInTheDocument()
   })
