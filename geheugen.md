@@ -3333,3 +3333,100 @@ Fase 2: `create_team`, uitnodigen (`/invite/[token]`, `peek_team_invite`/`accept
 lege staat, knoppen verbergen (`canEdit`-props, `GlobalFab`), `signUp` via `create_team`, M5b.
 Fase 3: `deleteTeam`, rollen-lus in `deleteAccount`. Fase 4: `oefeningen`-SELECT-policy via
 gekoppeld trainingsplan + `kopieerOefeningNaarBibliotheek` (M6).
+
+## Gastspelers tellen niet meer mee bij de afwezigen (2026-09-23, commit `1165737`, live)
+Gebouwd via de feature-factory-keten (researcher → story → PM → backend → frontend →
+test-verifier → validator, met beide goedkeuringspauzes en vier feedback-lussen). Aanleiding:
+"het lijkt nu alsof wij 24 spelers afwezig hadden in de laatste training, maar daar zaten 6
+gastspelers bij".
+
+**Diagnose: de opslag was al goed, de weergave niet.** `resolveAttendanceStatus`
+(`lib/attendance-rows.ts`) zet een gast altijd op `absent`, en nergens wordt een handmatig
+gezette `present` teruggedraaid — niet door de backfill (die vult alleen ontbrekende rijen),
+niet door `revokeAbsencePeriod` (`clearOnly`-tak) en niet door `markRecovered`. Het probleem zat
+volledig in de telling/weergave, verdeeld over zes plekken die elk hun eigen `filter` herhaalden.
+Drie filterden al correct (`attendancePct` in `app/page.tsx`, de zes RPC's in
+`supabase/inzichten.sql`, `supabase/speler-statistieken.sql`), drie niet, en twee kwamen pas bij
+de validatie boven water.
+
+### Twee regels, twee pure modules
+- `lib/attendance-rows.ts` — **opslagregel**: welke status krijgt een NIEUWE attendance-rij.
+- `lib/aanwezigheid-telling.ts` — **weergaveregel** (nieuw): hoe wordt een opgeslagen status
+  geteld en getoond. Exports: `teltMee(type, aanwezig)`, `telAanwezigheid(spelers, statusVan)`,
+  `splitsAanwezigheid(spelers, isAanwezig)`.
+
+Ze spreken elkaar bewust tegen: in de database staat een gast `absent`, in de UI bestaat hij dan
+niet. Beide bestanden verwijzen in hun kopcommentaar naar elkaar. Verwar ze niet — een wijziging
+in de ene is nooit automatisch een wijziging in de andere.
+
+De volledige matrix (2 types × 3 statussen), die IS de specificatie:
+
+| `type` | status | `aanwezig` | `afwezig` | `onbekend` | opkomst-noemer |
+|---|---|---|---|---|---|
+| `regular` | `present` | ja | nee | nee | teller + noemer |
+| `regular` | `absent` | nee | ja | nee | alleen noemer |
+| `regular` | `unknown` | nee | nee | ja | **nee** |
+| `guest` | `present` | **ja** | nee | nee | **nee** |
+| `guest` | `absent` | nee | **nee** | **nee** | nee |
+| `guest` | `unknown` | nee | **nee** | **nee** | nee |
+
+Rij 4 is de kern van de keuze van de eigenaar: een aanwezig gezette gast is wél zichtbaar tussen
+de aanwezigen, maar verhoogt het percentage niet. 20 vast (15/5) + 6 aanwezige gasten toont
+**75%**, niet 81% — daarmee zegt de trainingsdetailpagina hetzelfde als de KPI-tegel en
+`/inzichten`.
+
+### Zes verplichte aanroepers (geen enkele formuleert de regel nog zelf)
+`components/TrainingAttendance.tsx` (`telAanwezigheid`), `app/page.tsx` hero + Beschikbaarheid
+(`teltMee`), `app/events/[id]/training-plan/page.tsx` en `app/events/[id]/lineup/page.tsx`
+(`splitsAanwezigheid`), `app/events/page.tsx` agendateller (`teltMee`). De enige inline
+formulering is `&& !gastIds.has(a.player_id)` in `statsFor` — noodzakelijk omdat attendance-rijen
+geen `players.type` dragen.
+
+### Presentatie
+De stat-cards benoemen hun eigen populatie met een subregel: `{present}/{total} vaste selectie`
+onder Opkomst, `waarvan {n} gasten` onder Aanwezig (alleen bij `gastenAanwezig > 0`). Zonder dat
+leest "Aanwezig 21" naast "Opkomst 75%" als een rekenfout. Opkomst toont `—` bij noemer 0, nooit
+`0%`; `turnoutSub` verdwijnt dan helemaal. Drie nieuwe sleutels in alle vijf `messages/*.ts`.
+
+### Bewust ongewijzigd
+De opslagregel; `markAllPresent` (zet ook gasten op present); de dashboard-KPI inclusief zijn
+`guestPlayerError`-guard die `—` toont; de zes inzichten-RPC's (dus **geen SQL-migratie**); de
+spelersprofiel-statistieken; `totalActive`/de tegel Actieve spelers met zijn oranje gast-segment;
+de oranje afwezig-waarschuwing bij een met naam genoemde speler in `TeamIndelingEditor`/
+`ParallelGroepEditor` (nuttige waarschuwing, geen cijfer); `eligiblePlayerIds`/`sortedPlayers` in
+de opstelling; `components/AttendanceSummary.tsx` en `components/dashboard/DashboardHero.tsx`
+(beide blijven dom — de callers filteren). De hero-ring blijft een koppenteller (21 van 26) en
+geen opkomst-KPI; dat is expliciet bevestigd.
+
+### Gotcha die de validator ving: Tailwind v4 zet bij een arbitrary font-size geen line-height mee
+`text-[11.5px]` zonder `leading-*` krijgt zijn regelhoogte uit preflight (`line-height: 1.5`), dus
+een gevulde subregel was 17,25px terwijl de reservering `min-h-[14px]` was. De kaartenrij
+versprong 3,25px tijdens het aanvinken — precies de layout-shift die de brief verbood. Opgelost
+met een expliciete `leading-[14px]` náást `min-h-[14px]`; die twee moeten gelijk blijven. Geldt
+voor elke `text-[Npx]`-utility in deze codebase.
+
+### Nieuwe query (de enige)
+`app/events/page.tsx` haalde alleen `event_id, status` op en kon dus niet zien wie gast was.
+Toegevoegd: `player_id` aan de attendance-select plus een gast-id-query, `team_id`-gescoped en
+in dezelfde `Promise.all`. Faalt die query, dan `logError('events.guestPlayers', …)` en terugval
+op de ongefilterde telling — **bewust anders dan de KPI-tegel**, die `—` toont: de agendateller
+staat op élke rij, en elke rij zijn teller ontnemen is een grotere regressie dan een zeldzaam iets
+te hoog getal.
+
+### Tests
+`lib/aanwezigheid-telling.test.ts` (elke matrixcel apart, het 75%-voorbeeld, de drie noemer-0-
+randen, volgorde-behoud en niet-muteren), `components/TrainingAttendance.test.tsx` (nieuw; 7
+tests) en een uitgebreid `gastspelers.acceptance.test.tsx` (37 tests) dat AC1/AC3/AC4/AC6/AC7 via
+de **echte** server components bewijst, inclusief het faalpad van beide gast-queries en de
+tenant-isolatie van de nieuwe query via een id-botsing tussen twee teams.
+`components/AttendanceSummary.test.tsx` bleef groen maar is hertekstueerd naar het
+componentcontract: de component filtert bewust niet, de callers doen dat.
+
+### Bewust geaccepteerd
+De filtering gebruikt de **huidige** `players.type`, dus een wissel gast ↔ vast werkt met
+terugwerkende kracht door op historische events en op een afdruk van vorige maand. Consistent met
+wat `supabase/inzichten.sql` al deed; de andere keuze zou juist een nieuwe inconsistentie maken.
+
+### Suite-status bij afronden
+`typecheck` en `lint` groen; 3211/3213 tests groen. De twee falen zijn `cyclusweek-correctie`
+AC1/AC12 via `PeriodizationPage` — pre-existing rood sinds 2026-09-14, niet van deze feature.
