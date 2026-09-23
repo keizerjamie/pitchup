@@ -8,6 +8,7 @@ import { useDict } from '@/lib/i18n-context'
 interface Props {
   eventId: string
   initialMeting: MetingData | null
+  canEdit: boolean
 }
 
 const METING_CATEGORIES = PERIODIZATION_CATEGORIES.filter(c => c.hasMeting)
@@ -22,7 +23,7 @@ const CATEGORY_BADGE: Record<string, string> = {
   sprints_veel_rust: 'bg-panel-purple text-panel-purple-ink',
 }
 
-export default function MetingEditor({ eventId, initialMeting }: Props) {
+export default function MetingEditor({ eventId, initialMeting, canEdit }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
@@ -79,30 +80,36 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
                 <div className="text-xs text-faint mt-0.5">{t.periodization.maxSteps.replace('{n}', String(cat.maxStap))}</div>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleStepChange(stepKey, String(Math.max(1, currentStep - 1)))}
-                  className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
-                >
-                  −
-                </button>
-                <div className="w-16">
-                  <input
-                    type="number"
-                    min={1}
-                    max={cat.maxStap}
-                    value={currentStep}
-                    onChange={e => handleStepChange(stepKey, e.target.value)}
-                    className="w-full text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-panel-purple-ink focus:ring-2 focus:ring-panel-purple-ink/30 font-semibold text-ink"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleStepChange(stepKey, String(Math.min(cat.maxStap, currentStep + 1)))}
-                  className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
-                >
-                  +
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => handleStepChange(stepKey, String(Math.max(1, currentStep - 1)))}
+                    className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
+                  >
+                    −
+                  </button>
+                )}
+                {canEdit && (
+                  <div className="w-16">
+                    <input
+                      type="number"
+                      min={1}
+                      max={cat.maxStap}
+                      value={currentStep}
+                      onChange={e => handleStepChange(stepKey, e.target.value)}
+                      className="w-full text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-panel-purple-ink focus:ring-2 focus:ring-panel-purple-ink/30 font-semibold text-ink"
+                    />
+                  </div>
+                )}
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => handleStepChange(stepKey, String(Math.min(cat.maxStap, currentStep + 1)))}
+                    className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
+                  >
+                    +
+                  </button>
+                )}
                 <span className={`text-xs font-medium px-2 py-1 rounded-full min-w-0 ${CATEGORY_BADGE[cat.key] ?? ''}`}>
                   {t.periodization.step} {currentStep}
                 </span>
@@ -124,24 +131,27 @@ export default function MetingEditor({ eventId, initialMeting }: Props) {
           rows={3}
           value={notes}
           onChange={e => setNotes(e.target.value)}
+          readOnly={!canEdit}
           placeholder={t.event.notesMeetingPlaceholder}
-          className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-panel-purple-ink focus:ring-2 focus:ring-panel-purple-ink/30 text-ink placeholder-faint resize-none text-sm"
+          className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-panel-purple-ink focus:ring-2 focus:ring-panel-purple-ink/30 text-ink placeholder-faint resize-none text-sm read-only:opacity-70"
         />
       </div>
 
-      {/* Save button */}
-      <button
-        type="button"
-        onClick={handleSave}
-        disabled={isPending}
-        className={`w-full py-3.5 rounded-xl font-semibold transition active:scale-95 text-sm ${
-          saved
-            ? 'bg-primary text-white'
-            : 'bg-panel-purple-solid hover:bg-panel-purple-solid/90 text-white'
-        } ${isPending ? 'opacity-60' : ''}`}
-      >
-        {saved ? t.periodization.saved : isPending ? t.periodization.saving : t.periodization.save}
-      </button>
+      {/* Save button — alleen met Periodisering-recht */}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={isPending}
+          className={`w-full py-3.5 rounded-xl font-semibold transition active:scale-95 text-sm ${
+            saved
+              ? 'bg-primary text-white'
+              : 'bg-panel-purple-solid hover:bg-panel-purple-solid/90 text-white'
+          } ${isPending ? 'opacity-60' : ''}`}
+        >
+          {saved ? t.periodization.saved : isPending ? t.periodization.saving : t.periodization.save}
+        </button>
+      )}
     </div>
   )
 }

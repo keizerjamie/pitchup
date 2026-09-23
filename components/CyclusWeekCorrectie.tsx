@@ -15,6 +15,10 @@ interface Props {
   // De trigger-knop staat op twee verschillende achtergronden (donkere
   // cyclus-kaart, lichte lege-staat-kaart) en heeft dus per plek eigen styling.
   triggerClassName?: string
+  // Periodisering-recht (brief §4.5). Default true, zelfde reden als
+  // components/LineupBuilder.tsx. De effectieve week zelf staat elders op de
+  // pagina als platte tekst — dit component IS uitsluitend de bewerkactie.
+  canEdit?: boolean
 }
 
 const WEEKS = Array.from({ length: CYCLE_LENGTH_WEEKS }, (_, i) => i + 1)
@@ -22,7 +26,7 @@ const WEEKS = Array.from({ length: CYCLE_LENGTH_WEEKS }, (_, i) => i + 1)
 // Sheet-markup één-op-één van components/NulmetingManager.tsx (container,
 // backdrop, paneel, sticky kop/voet, foutbalk): dezelfde patronen, nu voor het
 // instellen van de cyclusweek in plaats van een nulmeting.
-export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, triggerClassName }: Props) {
+export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, triggerClassName, canEdit = true }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [open, setOpen] = useState(false)
@@ -73,6 +77,10 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
       }
     })
   }
+
+  // Zonder Periodisering-recht is dit uitsluitend een bewerkactie — de
+  // effectieve week zelf blijft elders op de pagina leesbaar.
+  if (!canEdit) return null
 
   return (
     <>

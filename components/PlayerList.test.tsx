@@ -21,10 +21,10 @@ function makePlayer(overrides: Partial<Player> = {}): Player {
   }
 }
 
-function renderList(active: Player[], inactive: Player[] = []) {
+function renderList(active: Player[], inactive: Player[] = [], canEdit = true) {
   return render(
     <DictProvider dict={nl}>
-      <PlayerList active={active} inactive={inactive} />
+      <PlayerList active={active} inactive={inactive} canEdit={canEdit} />
     </DictProvider>,
   )
 }
@@ -68,5 +68,20 @@ describe('Navigatie naar het profiel (AC1)', () => {
     // geen knop die een menu opent.
     expect(screen.queryByText(nl.players.reportInjury)).not.toBeInTheDocument()
     expect(screen.queryByText(nl.players.signOff)).not.toBeInTheDocument()
+  })
+})
+
+describe('canEdit (assistent-trainers fase 2, brief §4.5)', () => {
+  it('canEdit=false verbergt "Speler toevoegen", zowel met als zonder spelers', () => {
+    renderList([makePlayer()], [], false)
+    expect(screen.queryByLabelText(nl.players.add)).not.toBeInTheDocument()
+
+    renderList([], [], false)
+    expect(screen.queryByText(nl.players.add)).not.toBeInTheDocument()
+  })
+
+  it('canEdit=true toont "Speler toevoegen"', () => {
+    renderList([makePlayer()], [], true)
+    expect(screen.getByLabelText(nl.players.add)).toBeInTheDocument()
   })
 })

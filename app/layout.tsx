@@ -3,6 +3,7 @@ import { headers } from 'next/headers'
 import { Space_Grotesk, Manrope, Archivo_Black } from 'next/font/google'
 import './globals.css'
 import AppShell from '@/components/AppShell'
+import EmptyTeamState from '@/components/EmptyTeamState'
 import InactivityLogout from '@/components/InactivityLogout'
 import { getDict } from '@/lib/i18n'
 import { DictProvider } from '@/lib/i18n-context'
@@ -78,6 +79,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       .maybeSingle()
     teamLogoUrl = (data?.value as string | undefined) || null
   }
+  // hasTeam = ctx !== null (er is geen apart veld op TeamContext, zie de
+  // backend-samenvatting fase 2 §4). Bij een sessie zonder enkel lidmaatschap
+  // laat AppShell de lege staat zien i.p.v. children.
+  const hasTeam = ctx !== null
+
+  // EmptyTeamState (AC 16/52) is bewust HIER geconstrueerd, niet in
+  // AppShell.tsx: AppShell is 'use client' en mag geen async server
+  // component rechtstreeks renderen (die zou anders in de clientbundel
+  // belanden, inclusief zijn next/headers-afhankelijkheid via getDict — zie
+  // validatiebevinding 1). `<EmptyTeamState />` als kant-en-klaar element
+  // als prop doorgeven aan een Client Component is wél het ondersteunde
+  // patroon: Next's RSC-pipeline resolvet de async component hier server-side
+  // vóór de overdracht naar AppShell. Alleen opbouwen als er ook echt geen
+  // team is — scheelt een overbodige getDict()-aanroep in het normale pad.
+  const emptyState = hasTeam ? null : <EmptyTeamState />
 
   return (
     <html lang={t.locale} className={`${display.variable} ${body.variable} ${pdfDisplay.variable}`} suppressHydrationWarning>
@@ -95,7 +111,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body>
         <DictProvider dict={t}>
           <ThemeInit />
-          <AppShell teamName={teamName} teamLogoUrl={teamLogoUrl} userEmail={user?.email ?? null}>{children}</AppShell>
+          <AppShell
+            emptyState={emptyState}
+            teamName={teamName}
+            teamLogoUrl={teamLogoUrl}
+            userEmail={user?.email ?? null}
+            hasTeam={hasTeam}
+            teamId={ctx?.teamId ?? null}
+            rol={ctx?.rol ?? null}
+            rechten={ctx?.rechten ?? null}
+            teams={ctx?.teams ?? []}
+          >
+            {children}
+          </AppShell>
           <InactivityLogout />
         </DictProvider>
       </body>

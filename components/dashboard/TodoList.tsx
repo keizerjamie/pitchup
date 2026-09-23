@@ -29,7 +29,14 @@ const TASK_HREF: Record<TaskType, string> = {
 // Server-gesorteerde To-do-lijst: open wedstrijdselecties, opstellingen,
 // wedstrijdanalyses en trainingsplannen. Checkbox = optimistisch (lokale manual-state), auto-done
 // taken blijven altijd aangevinkt (ook na "reopen" — bewust, zie brief).
-export default function TodoList({ items }: { items: TodoItem[] }) {
+//
+// `canEditTask` (brief §4.5): markTaskDone/reopenTask vragen 'training' bij
+// task_type='training_plan', anders 'wedstrijd' (squad/lineup/analysis) —
+// app/page.tsx berekent die twee waarden en geeft ze hier als kaart door.
+// Zonder het bijbehorende recht blijft de taak zichtbaar en aanklikbaar (de
+// link naar de onderliggende pagina blijft werken), alleen het vinkje zelf
+// wordt uitgeschakeld.
+export default function TodoList({ items, canEditTask }: { items: TodoItem[]; canEditTask: Record<TaskType, boolean> }) {
   const t = useDict()
   const [manual, setManual] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(items.map((item) => [`${item.eventId}:${item.taskType}`, item.manual]))
@@ -91,9 +98,10 @@ export default function TodoList({ items }: { items: TodoItem[] }) {
               <button
                 type="button"
                 onClick={() => toggle(item)}
-                disabled={isPending}
+                disabled={isPending || !canEditTask[item.taskType]}
                 aria-pressed={checked}
                 aria-label={label[item.taskType]}
+                title={canEditTask[item.taskType] ? undefined : t.errors.noPermission}
                 className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
                 style={checked
                   ? { background: 'var(--primary)', color: '#fff' }

@@ -16,8 +16,10 @@
 //     afwezig bij Teamtactisch, aanwezig bij VCT.
 //
 // ── Aanpak ──
-// `app/events/new/page.tsx` wordt echt gerenderd (alleen next/navigation
-// gemockt, zoals gebruikelijk voor 'use client'-pagina's). `TrainingPlanEditor`
+// `components/NewEventForm.tsx` (losgetrokken uit app/events/new/page.tsx —
+// die is nu een server component die eerst het Agenda-recht afdwingt, zie
+// validatiebevinding 2) wordt echt gerenderd (alleen next/navigation gemockt,
+// zoals gebruikelijk voor 'use client'-componenten). `TrainingPlanEditor`
 // wordt echt gerenderd met de server actions als vi.fn()-mocks (zelfde patroon
 // als components/TrainingPlanEditor.test.tsx) — dat bewijst de UI-kant zonder
 // een Supabase-tabel-engine te hoeven nabouwen voor iets dat hier niet de kern is.
@@ -56,7 +58,7 @@ vi.mock('@/app/actions/events', () => ({
   updateTrainingstype: vi.fn().mockResolvedValue(undefined),
 }))
 
-import NewEventPage from '@/app/events/new/page'
+import NewEventForm from '@/components/NewEventForm'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import { updateTrainingstype } from '@/app/actions/events'
 
@@ -74,7 +76,7 @@ describe('aanmaakformulier — trainingstype-keuze bij type=training', () => {
   function renderNewEventPage() {
     return render(
       <DictProvider dict={nl}>
-        <NewEventPage />
+        <NewEventForm />
       </DictProvider>,
     )
   }

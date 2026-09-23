@@ -45,6 +45,11 @@ interface Props {
   /** Opgeslagen trainingstype ('vct' | 'teamtactisch'), default 'vct' bij een
    *  niet-gemigreerde omgeving (zie app/events/[id]/training-plan/page.tsx). */
   initialTrainingstype: TrainingsType
+  // Training-recht (brief §4.5). Default true — zelfde reden als
+  // components/LineupBuilder.tsx/MatchAnalysisEditor.tsx: geen bestaande
+  // aanroep breken. Regelt doelstelling, trainingstype, oefening toevoegen/
+  // verwijderen/herordenen, stap_override en de teamindeling (TeamIndelingEditor).
+  canEdit?: boolean
 }
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
@@ -58,7 +63,7 @@ const ALL_CATS = PERIODIZATION_CATEGORIES
 // de referentie stabiel zolang `spelerindeling` zelf niet verandert.
 const EMPTY_INDELING: Spelerindeling = []
 
-export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties, initialTrainingstype }: Props) {
+export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties, initialTrainingstype, canEdit = true }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
@@ -433,6 +438,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         waarde={trainingstype}
         onChange={handleTrainingstypeChange}
         error={trainingstypeError}
+        disabled={!canEdit}
       />
 
       {/* Doelstelling. Op print bewust compact (FOUT4 print-review): de
@@ -476,9 +482,10 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           id="trainingsplan-doelstelling"
           rows={2}
           value={doelstelling}
-          onChange={e => handleDoelstellingChange(e.target.value)}
+          onChange={canEdit ? (e => handleDoelstellingChange(e.target.value)) : undefined}
+          readOnly={!canEdit}
           placeholder={t.trainingPlan.objectivePlaceholder}
-          className="print:hidden w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink placeholder:text-faint resize-none text-sm"
+          className="print:hidden w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink placeholder:text-faint resize-none text-sm read-only:opacity-70"
         />
         <p data-testid="doelstelling-print" className="hidden print:block whitespace-pre-wrap print:text-[9px] print:leading-snug text-ink">{doelstelling}</p>
       </div>
@@ -508,13 +515,15 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                     <span className="text-faint"> · {t.periodization.step} {item.step}</span>
                   )}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => openSuggestedPicker(item.key as OefeningCategorie)}
-                  className="text-xs font-semibold text-warning-text border border-warning/30 hover:border-warning hover:bg-warning/10 rounded-lg px-3 py-1.5 transition-colors active:scale-95 flex-shrink-0"
-                >
-                  + {t.periodization.suggestAdd}
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => openSuggestedPicker(item.key as OefeningCategorie)}
+                    className="text-xs font-semibold text-warning-text border border-warning/30 hover:border-warning hover:bg-warning/10 rounded-lg px-3 py-1.5 transition-colors active:scale-95 flex-shrink-0"
+                  >
+                    + {t.periodization.suggestAdd}
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -565,13 +574,15 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               aan (badge "1", "2", ...), dus deze sectiekop voegt op papier
               geen informatie toe en kost alleen ruimte (FOUT4, print-review). */}
           <h2 className="text-sm font-semibold text-muted uppercase tracking-wide print:hidden">{t.trainingPlan.exercisesHeading}</h2>
-          <button
-            type="button"
-            onClick={openPicker}
-            className="print:hidden text-sm font-semibold text-warning-text hover:text-panel-orange-ink active:scale-95 transition"
-          >
-            {t.trainingPlan.addExercise}
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={openPicker}
+              className="print:hidden text-sm font-semibold text-warning-text hover:text-panel-orange-ink active:scale-95 transition"
+            >
+              {t.trainingPlan.addExercise}
+            </button>
+          )}
         </div>
 
         {koppelingen.length === 0 ? (
@@ -583,7 +594,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
             <p className="text-sm text-faint mt-1">{t.trainingPlan.noExercisesHint}</p>
             {/* Alleen hier: kopiëren plakt achter wat er staat, en dat is bij
                 een half gevuld plan zelden de bedoeling. */}
-            {kopieerOpties.length > 0 && (
+            {canEdit && kopieerOpties.length > 0 && (
               <div className="mt-4 max-w-xs mx-auto">
                 <KopieerVorigeTraining eventId={eventId} opties={kopieerOpties} />
               </div>
@@ -749,7 +760,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                     </svg>
                   </button>
-                  {unlinkConfirm === k.id ? (
+                  {canEdit && (unlinkConfirm === k.id ? (
                     <div className="flex gap-1">
                       <button type="button" onClick={() => handleUnlink(k.id)}
                         disabled={isPending}
@@ -772,7 +783,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
                     </button>
-                  )}
+                  ))}
                 </div>
               )
               return (
@@ -803,26 +814,28 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       <span className="min-w-[1.75rem] h-7 px-1 rounded-lg bg-surface-sunken flex items-center justify-center text-xs font-bold text-muted print:min-w-[4mm] print:h-[4mm] print:px-[0.5mm] print:text-[8px] print-club-bg-primary">
                         {blokLabel(blokIndex, blok.leden.length, ledenIndex)}
                       </span>
-                      <div className="print:hidden flex flex-col">
-                        <button
-                          type="button"
-                          onClick={() => move(blokIndex, -1)}
-                          disabled={blokIndex === 0}
-                          aria-label={t.trainingPlan.moveUp}
-                          className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => move(blokIndex, 1)}
-                          disabled={blokIndex === blokken.length - 1}
-                          aria-label={t.trainingPlan.moveDown}
-                          className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
-                        </button>
-                      </div>
+                      {canEdit && (
+                        <div className="print:hidden flex flex-col">
+                          <button
+                            type="button"
+                            onClick={() => move(blokIndex, -1)}
+                            disabled={blokIndex === 0}
+                            aria-label={t.trainingPlan.moveUp}
+                            className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => move(blokIndex, 1)}
+                            disabled={blokIndex === blokken.length - 1}
+                            aria-label={t.trainingPlan.moveDown}
+                            className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       {/* Scherm: naam op eigen regel, badges als pillen eronder.
@@ -979,8 +992,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                               max={maxStap}
                               value={overrideClamped ?? ''}
                               placeholder={t.trainingPlan.stepAuto}
-                              onChange={(e) => handleStepOverrideChange(k.id, e.target.value, o.categorie)}
-                              className="w-20 px-2 py-1 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink"
+                              onChange={canEdit ? (e) => handleStepOverrideChange(k.id, e.target.value, o.categorie) : undefined}
+                              readOnly={!canEdit}
+                              className="w-20 px-2 py-1 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink read-only:opacity-70"
                             />
                           </div>
                           {stapOverrideErrors[k.id] && (
@@ -1105,6 +1119,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         basis={o}
                         initialAantallen={k.aantallen_override ?? null}
                         aanwezigAantal={presentPlayerIds.length}
+                        canEdit={canEdit}
                       />
 
                       {o.teams.length > 0 && (
@@ -1115,6 +1130,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           initialIndeling={k.spelerindeling ?? EMPTY_INDELING}
                           players={players}
                           presentPlayerIds={presentPlayerIds}
+                          canEdit={canEdit}
                         />
                       )}
                     </div>
@@ -1134,8 +1150,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             type="number" min={1} max={99}
                             value={k.stap_override ?? ''}
                             placeholder={t.trainingPlan.stepAuto}
-                            onChange={(e) => handleStepOverrideChange(k.id, e.target.value, o.categorie)}
-                            className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink"
+                            onChange={canEdit ? (e) => handleStepOverrideChange(k.id, e.target.value, o.categorie) : undefined}
+                            readOnly={!canEdit}
+                            className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink read-only:opacity-70"
                           />
                         </div>
                       )}
@@ -1144,7 +1161,8 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         <select
                           value={k.genest_in ?? ''}
                           onChange={(e) => handleGenestInChange(k.id, e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
+                          disabled={!canEdit}
+                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface disabled:opacity-60"
                         >
                           <option value="">{t.trainingPlan.nestedNoneOption}</option>
                           {koppelingen.filter((other) => other.id !== k.id).map((other) => (
@@ -1156,7 +1174,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         <label className="block text-xs font-semibold text-muted mb-1">{t.trainingPlan.parallelLabel}</label>
                         <select
                           value={currentGroupId ? `groep:${currentGroupId}` : ''}
-                          disabled={parallelDisabled}
+                          disabled={parallelDisabled || !canEdit}
                           onChange={(e) => handleParallelChange(k.id, e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface disabled:opacity-50"
                         >
@@ -1184,6 +1202,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       leden={blok.leden}
                       players={players}
                       presentPlayerIds={presentPlayerIds}
+                      canEdit={canEdit}
                     />
                   )}
                 </div>
@@ -1192,16 +1211,18 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={openPicker}
-          className="print:hidden mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
-        >
-          {t.trainingPlan.addExercise}
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={openPicker}
+            className="print:hidden mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
+          >
+            {t.trainingPlan.addExercise}
+          </button>
+        )}
       </div>
 
-      {showPicker && (
+      {canEdit && showPicker && (
         <OefeningPicker
           eventId={eventId}
           library={library}

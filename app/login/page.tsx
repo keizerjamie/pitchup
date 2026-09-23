@@ -1,10 +1,22 @@
 'use client'
 
-import { useActionState } from 'react'
+import { Suspense, useActionState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { signIn } from '@/app/actions/auth'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useDict } from '@/lib/i18n-context'
+
+// Hidden `next`-veld: als iemand vanaf de invite-pagina op "Ik heb al een
+// account" klikt (/login?next=/invite/<token>), moet hij na het inloggen
+// terug naar die link — anders moet hij hem opnieuw openen (backend-
+// samenvatting fase 2 §7). De action valideert `next` zelf strikt
+// (veiligeNextPath, lib/invite-token.ts); hier is geen validatie nodig.
+// useSearchParams() vereist een Suspense-boundary (Next.js-eis).
+function NextParamInput() {
+  const searchParams = useSearchParams()
+  return <input type="hidden" name="next" value={searchParams.get('next') ?? ''} />
+}
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState(signIn, null)
@@ -20,6 +32,9 @@ export default function LoginPage() {
         </div>
 
         <form action={action} className="space-y-4">
+          <Suspense fallback={null}>
+            <NextParamInput />
+          </Suspense>
           {state?.error && (
             <div className="bg-red-500/20 border border-red-400/30 text-red-200 text-sm px-4 py-3 rounded-xl">
               {state.error}

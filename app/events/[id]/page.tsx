@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, AttendanceStatus } from '@/lib/types'
 import { formatDateLong, formatTime } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
@@ -82,8 +82,10 @@ export default async function EventDetailPage({ params }: Props) {
         </div>
         {metaLine && <div className="surface-card px-4 py-3 text-[13.5px] font-semibold text-muted">{metaLine}</div>}
         {event.notes && <div className="surface-card px-4 py-3 text-[13.5px] text-muted">{event.notes}</div>}
-        <MetingEditor eventId={id} initialMeting={meting} />
-        <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
+        <MetingEditor eventId={id} initialMeting={meting} canEdit={canEdit(ctx, 'periodisering')} />
+        {canEdit(ctx, 'agenda') && (
+          <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
+        )}
       </div>
     )
   }
@@ -203,7 +205,7 @@ export default async function EventDetailPage({ params }: Props) {
       )}
 
       {/* Attendance (stat cards + list) */}
-      <TrainingAttendance eventId={id} players={allPlayers} initialStatuses={initialStatuses} />
+      <TrainingAttendance eventId={id} players={allPlayers} initialStatuses={initialStatuses} canEdit={canEdit(ctx, 'aanwezigheid')} />
 
       {/* Notes */}
       {event.notes && (
@@ -213,7 +215,9 @@ export default async function EventDetailPage({ params }: Props) {
         </div>
       )}
 
-      <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
+      {canEdit(ctx, 'agenda') && (
+        <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
+      )}
     </div>
   )
 }

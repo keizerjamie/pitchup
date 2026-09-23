@@ -56,6 +56,32 @@ async function run() {
       `status ${res.status}, location "${location}"`)
   }
 
+  // 6. Invite landing (brief §5.1 punt 3): /invite/* moet publiek bereikbaar
+  // zijn (proxy.ts isPublicPath) — een niet-ingelogde bezoeker mag NIET naar
+  // /login geduwd worden, anders is de hele uitnodigingsflow onbereikbaar. Een
+  // willekeurige/ongeldige token geeft peek_team_invite() altijd 'invalid'
+  // terug (brief §1.6: geen onderscheid, geen teamnaam) — de pagina moet dus
+  // de neutrale melding tonen en NOOIT de "account aanmaken/inloggen"-takken
+  // die alleen bij een geldig token horen (die zouden een teamnaam tonen).
+  {
+    const randomToken = 'zZ9' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    const res = await fetch(`${BASE}/invite/${randomToken}`, { redirect: 'manual' })
+    const location = res.headers.get('location') ?? ''
+    const redirectsToLogin = [302, 303, 307].includes(res.status) && location.includes('/login')
+    check('unauthenticated /invite/<random-token> does NOT redirect to /login',
+      !redirectsToLogin, `status ${res.status}, location "${location}"`)
+
+    const body = res.status === 200 ? await res.text() : ''
+    check('GET /invite/<random-token> is 200', res.status === 200, `status ${res.status}`)
+    check('invite page for an invalid token shows the neutral message',
+      body.includes('Deze uitnodiging is niet (meer) geldig'))
+    // Bewijs dat er geen teamnaam kon lekken: de takken die een teamnaam tonen
+    // (account aanmaken / al een account) horen bij status 'ok' en mogen bij
+    // een ongeldig token niet renderen.
+    check('invite page for an invalid token contains no team name (no "ok" branch rendered)',
+      !body.includes('Account aanmaken') && !body.includes('Ik heb al een account'))
+  }
+
   console.log(`\n${failures === 0 ? 'All smoke checks passed.' : `${failures} check(s) failed.`}`)
   process.exit(failures === 0 ? 0 : 1)
 }

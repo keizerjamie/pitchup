@@ -9,6 +9,9 @@ interface Props {
   onChange: (v: string | null) => void
   isPending: boolean
   error: string | null
+  // Wedstrijd-recht (brief §8.8/addendum: verzameltijd valt onder wedstrijd,
+  // niet agenda). Zonder dit recht toont het veld alleen de waarde.
+  canEdit: boolean
 }
 
 // "Dom" invoerveld: houdt alleen de invoer-in-bewerking (draft) bij, de
@@ -17,7 +20,7 @@ interface Props {
 // app/events/new/page.tsx. Draagt zelf `print:hidden` (zelfde precedent als
 // PrintButton.tsx) zodat dit veld nooit op de afdruk verschijnt, ongeacht
 // waar het geplaatst wordt.
-export default function GatherTimeField({ value, onChange, isPending, error }: Props) {
+export default function GatherTimeField({ value, onChange, isPending, error, canEdit }: Props) {
   const t = useDict()
   // formatTime() normaliseert hier naar "HH:MM" (en levert '' voor null, exact
   // zoals de oude `value ?? ''` deed) — dit is de plek waar de waarde het
@@ -37,6 +40,15 @@ export default function GatherTimeField({ value, onChange, isPending, error }: P
   if (value !== prevValue) {
     setPrevValue(value)
     setDraft(formatTime(value))
+  }
+
+  if (!canEdit) {
+    return (
+      <div className="print:hidden flex flex-col gap-1">
+        <span className="block text-[13px] font-semibold text-faint">{t.matchSquad.gatherTimeEditLabel}</span>
+        <span className="text-[14px] font-semibold text-ink">{value ? formatTime(value) : '—'}</span>
+      </div>
+    )
   }
 
   return (

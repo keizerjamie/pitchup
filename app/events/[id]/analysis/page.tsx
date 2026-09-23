@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, MatchRating, MatchEvent } from '@/lib/types'
 import MatchAnalysisEditor from '@/components/MatchAnalysisEditor'
 import { getDict } from '@/lib/i18n'
@@ -68,6 +68,7 @@ export default async function AnalysisPage({ params }: Props) {
         initialGoalsAgainst={event.goals_against}
         initialRatings={(ratings ?? []) as MatchRating[]}
         initialEvents={(matchEvents ?? []) as MatchEvent[]}
+        canEdit={canEdit(ctx, 'wedstrijd')}
       />
     </div>
   )

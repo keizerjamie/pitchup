@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import { actueleMetingen, ankerDatum, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
@@ -256,6 +256,7 @@ export default async function TrainingPlanPage({ params }: Props) {
             startTijd={event.time}
             kopieerOpties={kopieerOpties}
             initialTrainingstype={event.trainingstype ?? 'vct'}
+            canEdit={canEdit(ctx, 'training')}
           />
         </div>
       </div>

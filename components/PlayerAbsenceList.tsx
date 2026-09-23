@@ -23,6 +23,10 @@ interface Props {
   events: EventWithStatus[]
   periods: PeriodRange[]
   defaultStatus: 'present' | 'unknown'
+  // Aanwezigheid-recht (brief §4.5): zonder dit recht is deze hele tab
+  // read-only — geen afmeldperiode-formulier, geen intrekken, geen
+  // present/afwezig-toggles, wél de waarden zelf blijven zichtbaar.
+  canEdit: boolean
 }
 
 function todayStr() {
@@ -30,7 +34,7 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function PlayerAbsenceList({ playerId, events: initialEvents, periods: initialPeriods, defaultStatus }: Props) {
+export default function PlayerAbsenceList({ playerId, events: initialEvents, periods: initialPeriods, defaultStatus, canEdit }: Props) {
   const [events, setEvents] = useState(initialEvents)
   const [periods, setPeriods] = useState(initialPeriods)
   const [, startTransition] = useTransition()
@@ -143,56 +147,58 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
 
   return (
     <div className="space-y-5">
-      {/* Period selector */}
-      <div className="rounded-2xl border border-[var(--border-soft)] overflow-hidden">
-        <div className="bg-surface-sunken px-4 pt-4 pb-3 border-b border-[var(--border-soft)]">
-          <h3 className="font-semibold text-ink text-sm">{t.players.periodTitle}</h3>
-          <p className="text-xs text-faint mt-0.5">{t.players.periodHint}</p>
-        </div>
-        <div className="px-4 py-4 space-y-3 bg-surface">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="text-xs font-medium text-muted mb-1.5 block">{t.players.periodFrom}</label>
-              <input
-                type="date"
-                value={fromDate}
-                onChange={(e) => { setFromDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
-                className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-xs font-medium text-muted mb-1.5 block">{t.players.periodTo}</label>
-              <input
-                type="date"
-                value={toDate}
-                min={fromDate}
-                onChange={(e) => { setToDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
-                className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
-              />
-            </div>
+      {/* Period selector — alleen met Aanwezigheid-recht */}
+      {canEdit && (
+        <div className="rounded-2xl border border-[var(--border-soft)] overflow-hidden">
+          <div className="bg-surface-sunken px-4 pt-4 pb-3 border-b border-[var(--border-soft)]">
+            <h3 className="font-semibold text-ink text-sm">{t.players.periodTitle}</h3>
+            <p className="text-xs text-faint mt-0.5">{t.players.periodHint}</p>
           </div>
+          <div className="px-4 py-4 space-y-3 bg-surface">
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-xs font-medium text-muted mb-1.5 block">{t.players.periodFrom}</label>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => { setFromDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-xs font-medium text-muted mb-1.5 block">{t.players.periodTo}</label>
+                <input
+                  type="date"
+                  value={toDate}
+                  min={fromDate}
+                  onChange={(e) => { setToDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
+                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
+                />
+              </div>
+            </div>
 
-          <button
-            onClick={handlePeriodAbsence}
-            disabled={!fromDate || !toDate || fromDate > toDate || isPeriodPending}
-            className="w-full py-2.5 rounded-xl bg-danger text-white font-semibold text-sm disabled:opacity-40 active:scale-[0.98] transition hover:bg-danger/90"
-          >
-            {isPeriodPending ? '…' : t.players.periodButton}
-          </button>
+            <button
+              onClick={handlePeriodAbsence}
+              disabled={!fromDate || !toDate || fromDate > toDate || isPeriodPending}
+              className="w-full py-2.5 rounded-xl bg-danger text-white font-semibold text-sm disabled:opacity-40 active:scale-[0.98] transition hover:bg-danger/90"
+            >
+              {isPeriodPending ? '…' : t.players.periodButton}
+            </button>
 
-          {periodResult !== null && !isPeriodPending && (
-            <p className={`text-sm font-medium text-center ${periodResult === 0 ? 'text-faint' : 'text-panel-green-ink'}`}>
-              {periodResult === 0
-                ? t.players.periodNone
-                : `${periodResult} ${t.players.periodSuccess}`}
-            </p>
-          )}
+            {periodResult !== null && !isPeriodPending && (
+              <p className={`text-sm font-medium text-center ${periodResult === 0 ? 'text-faint' : 'text-panel-green-ink'}`}>
+                {periodResult === 0
+                  ? t.players.periodNone
+                  : `${periodResult} ${t.players.periodSuccess}`}
+              </p>
+            )}
 
-          {periodError && !isPeriodPending && (
-            <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-3 py-2 rounded-lg">{periodError}</div>
-          )}
+            {periodError && !isPeriodPending && (
+              <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-3 py-2 rounded-lg">{periodError}</div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Period list */}
       <div className="rounded-2xl border border-[var(--border-soft)] overflow-hidden">
@@ -212,14 +218,16 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                 return (
                   <div key={period.id} className="flex items-center justify-between gap-3">
                     <span className="text-sm text-muted">{rangeLabel}</span>
-                    <button
-                      onClick={() => handleRevoke(period.id)}
-                      disabled={isRevokePending}
-                      aria-label={t.players.periodRevokeAria.replace('{range}', rangeLabel)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-muted bg-surface-sunken hover:bg-panel-red hover:text-panel-red-ink transition disabled:opacity-40"
-                    >
-                      {t.players.periodRevoke}
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => handleRevoke(period.id)}
+                        disabled={isRevokePending}
+                        aria-label={t.players.periodRevokeAria.replace('{range}', rangeLabel)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-muted bg-surface-sunken hover:bg-panel-red hover:text-panel-red-ink transition disabled:opacity-40"
+                      >
+                        {t.players.periodRevoke}
+                      </button>
+                    )}
                   </div>
                 )
               })}
@@ -272,26 +280,44 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                   </div>
 
                   <div className="flex-shrink-0 flex gap-2">
-                    <button
-                      onClick={() => !isPresent && setStatus(event.id, 'present')}
-                      disabled={isPeriodPending || isRevokePending}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 ${
-                        isPresent
-                          ? 'bg-primary text-white'
-                          : 'bg-surface-sunken text-faint hover:bg-panel-green hover:text-panel-green-ink'
-                      }`}>
-                      {t.players.present}
-                    </button>
-                    <button
-                      onClick={() => !isAbsent && setStatus(event.id, 'absent')}
-                      disabled={isPeriodPending || isRevokePending}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 ${
-                        isAbsent
-                          ? 'bg-danger text-white'
-                          : 'bg-surface-sunken text-faint hover:bg-panel-red hover:text-panel-red-ink'
-                      }`}>
-                      {t.players.absent}
-                    </button>
+                    {canEdit ? (
+                      <>
+                        <button
+                          onClick={() => !isPresent && setStatus(event.id, 'present')}
+                          disabled={isPeriodPending || isRevokePending}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 ${
+                            isPresent
+                              ? 'bg-primary text-white'
+                              : 'bg-surface-sunken text-faint hover:bg-panel-green hover:text-panel-green-ink'
+                          }`}>
+                          {t.players.present}
+                        </button>
+                        <button
+                          onClick={() => !isAbsent && setStatus(event.id, 'absent')}
+                          disabled={isPeriodPending || isRevokePending}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 ${
+                            isAbsent
+                              ? 'bg-danger text-white'
+                              : 'bg-surface-sunken text-faint hover:bg-panel-red hover:text-panel-red-ink'
+                          }`}>
+                          {t.players.absent}
+                        </button>
+                      </>
+                    ) : (
+                      // Read-only: de waarde blijft zichtbaar als badge, geen
+                      // knop die zonder recht toch zou kunnen worden geklikt.
+                      <span
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                          isPresent
+                            ? 'bg-primary text-white'
+                            : isAbsent
+                              ? 'bg-danger text-white'
+                              : 'bg-surface-sunken text-faint'
+                        }`}
+                      >
+                        {isPresent ? t.players.present : isAbsent ? t.players.absent : t.players.unknownStatus}
+                      </span>
+                    )}
                   </div>
                 </div>
               )

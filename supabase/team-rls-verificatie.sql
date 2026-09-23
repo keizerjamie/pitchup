@@ -1,8 +1,9 @@
 -- ============================================================
--- Pitchup — handmatig verificatiescript voor de team-RLS (fase 1)
+-- Pitchup — handmatig verificatiescript voor de team-RLS (fase 1 + fase 2)
 --
--- WANNEER DRAAIEN: direct NA supabase/team-rls.sql (M2), en opnieuw na elke
--- latere wijziging aan de policies. Run dit in de Supabase SQL Editor.
+-- WANNEER DRAAIEN: direct NA supabase/team-rls.sql (M2), opnieuw na M4/M5
+-- (fase 2) en verder na elke wijziging aan de policies of de RPC's. Run dit in
+-- de Supabase SQL Editor.
 --
 -- WAAROM DIT BESTAAT: `npm test` bewijst NIETS over RLS. Vitest draait buiten
 -- de Next-compiler en praat nooit met een database, en de chainable testmock
@@ -29,9 +30,20 @@
 --   TEAM_A_UUID       = team_id van team A
 --   TEAM_B_UUID       = team_id van een ANDER team, waar OWNER_A geen lid van is
 --
--- FASE 1: er bestaan nog geen assistenten — de uitnodigingsflow komt in fase 2.
--- Blok 1, 2, 6 en 13 zijn nu al zinvol en moeten slagen. Blok 3 t/m 12 hebben
--- een echte assistent nodig; maak die desnoods tijdelijk aan met:
+-- Voor blok 14 t/m 20 (fase 2, uitnodigingen en team aanmaken) is er één
+-- waarde extra nodig:
+--
+--   BUITENSTAANDER_UUID = user_id van iemand die GEEN lid is van TEAM_A
+--                         (bijvoorbeeld de hoofdtrainer van TEAM_B)
+--
+-- WELKE BLOKKEN WANNEER:
+--   * blok 1, 2, 6, 13        — altijd zinvol, ook zonder assistent
+--   * blok 3 t/m 12           — vereisen een echte assistent in TEAM_A (M2b)
+--   * blok 14 t/m 19          — vereisen M4 (supabase/team-invites-rpc.sql)
+--   * blok 20                 — vereist M5 (supabase/team-aanmaken-rpc.sql)
+--
+-- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
+-- geaccepteerd), maak er dan tijdelijk een aan met:
 --
 --   insert into team_members (team_id, user_id, rol) values
 --     ('TEAM_A_UUID', 'ASSISTENT_A_UUID', 'assistent');
@@ -569,25 +581,436 @@ begin
   raise notice 'OK blok 13: elk team heeft een hoofdtrainer';
 end $$;
 
+-- ============================================================
+-- UITNODIGINGEN (M4 — supabase/team-invites-rpc.sql, fase 2)
+--
+-- Deze blokken vereisen M4. Draaien ze met een "function peek_team_invite does
+-- not exist"-fout, dan staat M4 nog niet in deze database.
+--
+-- Zoek-en-vervang hiervoor één extra waarde:
+--   BUITENSTAANDER_UUID = user_id van iemand die GEEN lid is van TEAM_A
+--                         (bijvoorbeeld de hoofdtrainer van TEAM_B)
+--
+-- Alles blijft binnen dezelfde transactie en verdwijnt bij de `rollback`
+-- onderaan — ook de lidmaatschappen die accept_team_invite hier aanmaakt.
+-- ============================================================
+
+-- ── Blok 14: de vervaltermijn valt in de DATABASE ───────────
+-- Dit is de enige plek in de hele feature waar over geldigheid wordt beslist:
+-- `verloopt_op <= now()` in accept_team_invite. now() is binnen één transactie
+-- constant, dus de twee randen hieronder zijn exact te testen.
+do $$
+declare v_status text; v_team uuid; n int;
+begin
+  reset role;
+  delete from team_invites where team_id = 'TEAM_A_UUID';
+
+  -- Rand 1: exact op het verloopmoment -> ONGELDIG.
+  insert into team_invites (team_id, token_hash, aangemaakt_door, verloopt_op)
+  values ('TEAM_A_UUID', repeat('a', 64), 'OWNER_A_UUID', now());
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  select status, team_id into v_status, v_team from accept_team_invite(repeat('a', 64));
+  if v_status <> 'invalid' then
+    raise exception 'LEK: een token dat exact NU verloopt werd geaccepteerd (%)', v_status;
+  end if;
+  raise notice 'OK blok 14: verloopt_op = now() geeft invalid';
+
+  reset role;
+  select count(*) into n from team_members
+   where team_id = 'TEAM_A_UUID' and user_id = 'BUITENSTAANDER_UUID';
+  if n <> 0 then raise exception 'LEK: verlopen token leverde toch een lidmaatschap op'; end if;
+
+  -- Rand 2: één seconde later -> GELDIG.
+  delete from team_invites where team_id = 'TEAM_A_UUID';
+  insert into team_invites (team_id, token_hash, aangemaakt_door, verloopt_op)
+  values ('TEAM_A_UUID', repeat('b', 64), 'OWNER_A_UUID', now() + interval '1 second');
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  select status, team_id into v_status, v_team from accept_team_invite(repeat('b', 64));
+  if v_status <> 'ok' or v_team <> 'TEAM_A_UUID' then
+    raise exception 'KAPOT: een geldig token werd geweigerd (%)', v_status;
+  end if;
+  raise notice 'OK blok 14: verloopt_op = now() + 1 second geeft ok';
+
+  -- De nieuwe assistent begint met NUL rechten (BR 39).
+  reset role;
+  select count(*) into n from team_members
+   where team_id = 'TEAM_A_UUID' and user_id = 'BUITENSTAANDER_UUID'
+     and rol = 'assistent'
+     and not mag_spelers_bewerken and not mag_agenda_bewerken
+     and not mag_aanwezigheid_bewerken and not mag_wedstrijd_bewerken
+     and not mag_training_bewerken and not mag_periodisering_bewerken;
+  if n <> 1 then raise exception 'KAPOT: nieuwe assistent kreeg niet precies nul rechten'; end if;
+  raise notice 'OK blok 14: nieuwe assistent is assistent met alle zes rechten op false';
+
+  -- De invite is nu verbruikt en een tweede poging faalt.
+  select count(*) into n from team_invites
+   where token_hash = repeat('b', 64) and gebruikt_op is not null
+     and gebruikt_door = 'BUITENSTAANDER_UUID';
+  if n <> 1 then raise exception 'KAPOT: de invite is niet als gebruikt gemarkeerd'; end if;
+  raise notice 'OK blok 14: de invite is eenmalig';
+end $$;
+
+-- ── Blok 15: een bestaand lid verbruikt de link NIET ────────
+-- Beslissing 9 van de eigenaar: anders verbrandt de hoofdtrainer zijn eigen
+-- link door hem te controleren. De rechten van dat lidmaatschap blijven ook
+-- ongemoeid (AC 26) — accepteren mag nooit rechten weggooien.
+do $$
+declare v_status text; v_team uuid; n int;
+begin
+  reset role;
+  delete from team_invites where team_id = 'TEAM_A_UUID';
+  insert into team_invites (team_id, token_hash, aangemaakt_door)
+  values ('TEAM_A_UUID', repeat('c', 64), 'OWNER_A_UUID');
+  update team_members set mag_spelers_bewerken = true
+   where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID';
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  select status, team_id into v_status, v_team from accept_team_invite(repeat('c', 64));
+  if v_status <> 'already_member' then
+    raise exception 'KAPOT: een bestaand lid kreeg status % in plaats van already_member', v_status;
+  end if;
+  if v_team <> 'TEAM_A_UUID' then
+    raise exception 'KAPOT: already_member gaf niet het team-id terug';
+  end if;
+
+  reset role;
+  select count(*) into n from team_invites
+   where token_hash = repeat('c', 64)
+     and gebruikt_op is null and ingetrokken_op is null;
+  if n <> 1 then raise exception 'LEK: een bestaand lid heeft de uitnodiging verbruikt'; end if;
+
+  select count(*) into n from team_members
+   where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID' and mag_spelers_bewerken;
+  if n <> 1 then raise exception 'KAPOT: accepteren heeft bestaande rechten gewist'; end if;
+  raise notice 'OK blok 15: already_member laat de invite ongebruikt en de rechten ongemoeid';
+end $$;
+
+-- ── Blok 16: peek toont de teamnaam, maar verraadt niets ────
+-- Verlopen, gebruikt, ingetrokken en onbekend geven ALLEMAAL exact dezelfde
+-- uitkomst: ('invalid', null). Wie een token raadt mag niet kunnen aflezen of
+-- hij bestaat (AC 23/24/25).
+do $$
+declare v_status text; v_naam text; v_verwacht text;
+begin
+  reset role;
+  delete from team_invites where team_id = 'TEAM_A_UUID';
+  insert into team_invites (team_id, token_hash, aangemaakt_door) values
+    ('TEAM_A_UUID', repeat('d', 64), 'OWNER_A_UUID');
+  select coalesce(value, '') into v_verwacht from settings
+   where team_id = 'TEAM_A_UUID' and key = 'team_name';
+
+  -- Zonder sessie (de anon-rol), want de invite-pagina is publiek
+  -- (beslissing 12 + proxy.ts).
+  set local role anon;
+  set local request.jwt.claims = '{"role":"anon"}';
+  select status, team_naam into v_status, v_naam from peek_team_invite(repeat('d', 64));
+  if v_status <> 'ok' then
+    raise exception 'KAPOT: anon kan een geldige uitnodiging niet bekijken (%)', v_status;
+  end if;
+  if v_naam is distinct from coalesce(v_verwacht, '') then
+    raise exception 'KAPOT: peek gaf teamnaam % in plaats van %', v_naam, v_verwacht;
+  end if;
+  raise notice 'OK blok 16: anon ziet de teamnaam bij een geldige link';
+
+  -- Onbekend token.
+  select status, team_naam into v_status, v_naam from peek_team_invite(repeat('e', 64));
+  if v_status <> 'invalid' or v_naam is not null then
+    raise exception 'LEK: onbekend token gaf % / %', v_status, v_naam;
+  end if;
+
+  reset role;
+  update team_invites set ingetrokken_op = now() where token_hash = repeat('d', 64);
+  set local role anon;
+  set local request.jwt.claims = '{"role":"anon"}';
+  select status, team_naam into v_status, v_naam from peek_team_invite(repeat('d', 64));
+  if v_status <> 'invalid' or v_naam is not null then
+    raise exception 'LEK: ingetrokken token gaf % / %', v_status, v_naam;
+  end if;
+
+  reset role;
+  update team_invites set ingetrokken_op = null, verloopt_op = now() - interval '1 day'
+   where token_hash = repeat('d', 64);
+  set local role anon;
+  set local request.jwt.claims = '{"role":"anon"}';
+  select status, team_naam into v_status, v_naam from peek_team_invite(repeat('d', 64));
+  if v_status <> 'invalid' or v_naam is not null then
+    raise exception 'LEK: verlopen token gaf % / %', v_status, v_naam;
+  end if;
+
+  reset role;
+  update team_invites set verloopt_op = now() + interval '7 days', gebruikt_op = now()
+   where token_hash = repeat('d', 64);
+  set local role anon;
+  set local request.jwt.claims = '{"role":"anon"}';
+  select status, team_naam into v_status, v_naam from peek_team_invite(repeat('d', 64));
+  if v_status <> 'invalid' or v_naam is not null then
+    raise exception 'LEK: gebruikt token gaf % / %', v_status, v_naam;
+  end if;
+
+  raise notice 'OK blok 16: verlopen, ingetrokken, gebruikt en onbekend geven alle vier exact ''invalid'' zonder teamnaam';
+  reset role;
+end $$;
+
+-- ── Blok 17: staf beheren is hoofdtrainer-werk ──────────────
+-- AC 32/46: een assistent — ook met alle zes bewerkrechten — kan geen rechten
+-- wijzigen, geen lid verwijderen, geen link genereren en geen link intrekken.
+do $$
+declare n int; v_ok boolean;
+begin
+  reset role;
+  delete from team_invites where team_id = 'TEAM_A_UUID';
+  update team_members set
+    mag_spelers_bewerken = true, mag_agenda_bewerken = true,
+    mag_aanwezigheid_bewerken = true, mag_wedstrijd_bewerken = true,
+    mag_training_bewerken = true, mag_periodisering_bewerken = true
+   where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID';
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+
+  -- updateMemberRights: de UPDATE-policy eist is_team_owner -> 0 rijen, geen
+  -- fout. Hij probeert hier zijn EIGEN rij te wijzigen; ook dat mag niet.
+  update team_members set mag_spelers_bewerken = false
+   where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: assistent kon % rechtenrij(en) wijzigen', n; end if;
+
+  -- removeMember: de DELETE-policy laat alleen de owner of het lid zelf toe.
+  -- De owner-rij is sowieso onaanraakbaar (rol = 'assistent' in de policy).
+  delete from team_members where team_id = 'TEAM_A_UUID' and user_id = 'OWNER_A_UUID';
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: assistent kon de hoofdtrainer verwijderen'; end if;
+  raise notice 'OK blok 17: assistent kan geen rechten wijzigen en de hoofdtrainer niet verwijderen';
+
+  -- createInvite / revokeInvite lopen via de RPC's; die gooien 42501.
+  begin
+    perform create_team_invite('TEAM_A_UUID', repeat('f', 64));
+    raise exception 'LEK: assistent kon een uitnodigingslink genereren';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 17: create_team_invite geweigerd voor een assistent';
+  end;
+
+  begin
+    perform revoke_team_invite('TEAM_A_UUID');
+    raise exception 'LEK: assistent kon een uitnodigingslink intrekken';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 17: revoke_team_invite geweigerd voor een assistent';
+  end;
+
+  begin
+    perform active_team_invite('TEAM_A_UUID');
+    raise exception 'LEK: assistent kon de actieve uitnodiging opvragen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 17: active_team_invite geweigerd voor een assistent';
+  end;
+
+  -- Rechtstreeks in team_invites schrijven kan ook niet: er staat geen
+  -- INSERT-policy op de tabel.
+  begin
+    insert into team_invites (team_id, token_hash, aangemaakt_door)
+    values ('TEAM_A_UUID', repeat('9', 64), 'ASSISTENT_A_UUID');
+    raise exception 'LEK: assistent kon rechtstreeks een invite-rij schrijven';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 17: directe insert in team_invites geweigerd';
+  end;
+
+  -- En hij ziet de uitnodigingen van zijn team niet (SELECT is owner-only).
+  reset role;
+  insert into team_invites (team_id, token_hash, aangemaakt_door)
+  values ('TEAM_A_UUID', repeat('7', 64), 'OWNER_A_UUID');
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  select count(*) into n from team_invites where team_id = 'TEAM_A_UUID';
+  if n <> 0 then raise exception 'LEK: assistent ziet % uitnodiging(en) van zijn team', n; end if;
+  raise notice 'OK blok 17: assistent ziet geen enkele uitnodigingsrij';
+  reset role;
+end $$;
+
+-- ── Blok 18: één actieve link per team ──────────────────────
+-- AC 2/44: een nieuwe link maken trekt de oude direct in. De partiële unique
+-- index team_invites_een_actief_per_team is het tweede vangnet.
+do $$
+declare v_verloopt timestamptz; n int; v_status text;
+begin
+  reset role;
+  delete from team_invites where team_id = 'TEAM_A_UUID';
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+
+  select verloopt_op into v_verloopt from create_team_invite('TEAM_A_UUID', repeat('1', 64));
+  if v_verloopt is null then raise exception 'KAPOT: create_team_invite gaf geen vervaldatum'; end if;
+  -- Kolomdefault: zeven dagen, in de database bepaald.
+  if v_verloopt <= now() + interval '6 days' or v_verloopt > now() + interval '8 days' then
+    raise exception 'KAPOT: vervaldatum ligt niet rond 7 dagen (%)', v_verloopt;
+  end if;
+
+  perform create_team_invite('TEAM_A_UUID', repeat('2', 64));
+
+  reset role;
+  select count(*) into n from team_invites
+   where team_id = 'TEAM_A_UUID' and gebruikt_op is null and ingetrokken_op is null;
+  if n <> 1 then raise exception 'KAPOT: % actieve uitnodigingen na het vervangen', n; end if;
+  select count(*) into n from team_invites
+   where token_hash = repeat('1', 64) and ingetrokken_op is not null;
+  if n <> 1 then raise exception 'KAPOT: de oude link is niet ingetrokken'; end if;
+  raise notice 'OK blok 18: de nieuwe link vervangt de oude en die oude is direct ingetrokken';
+
+  -- De ingetrokken link is meteen onbruikbaar.
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  select status into v_status from accept_team_invite(repeat('1', 64));
+  if v_status <> 'invalid' then
+    raise exception 'LEK: de ingetrokken link werkt nog (%)', v_status;
+  end if;
+  raise notice 'OK blok 18: de ingetrokken link geeft invalid';
+
+  -- revoke_team_invite maakt het team linkloos.
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if not revoke_team_invite('TEAM_A_UUID') then
+    raise exception 'KAPOT: revoke_team_invite meldde dat er niets in te trekken viel';
+  end if;
+  if revoke_team_invite('TEAM_A_UUID') then
+    raise exception 'KAPOT: revoke_team_invite trok twee keer iets in';
+  end if;
+  select count(*) into n from active_team_invite('TEAM_A_UUID');
+  if n <> 0 then raise exception 'KAPOT: er staat nog een actieve link na het intrekken'; end if;
+  raise notice 'OK blok 18: intrekken werkt en is idempotent';
+  reset role;
+end $$;
+
+-- ── Blok 19: een vreemd team is onbereikbaar ────────────────
+-- Tenant-isolatie op de RPC's: p_team_id komt van de client, dus dit is de
+-- controle dat is_team_owner() de enige poort is.
+do $$
+begin
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+
+  begin
+    perform create_team_invite('TEAM_B_UUID', repeat('3', 64));
+    raise exception 'LEK: hoofdtrainer van A kon een link voor team B maken';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 19: create_team_invite weigert een vreemd team';
+  end;
+
+  begin
+    perform revoke_team_invite('TEAM_B_UUID');
+    raise exception 'LEK: hoofdtrainer van A kon een link van team B intrekken';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 19: revoke_team_invite weigert een vreemd team';
+  end;
+
+  begin
+    perform active_team_invite('TEAM_B_UUID');
+    raise exception 'LEK: hoofdtrainer van A kon de link van team B opvragen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 19: active_team_invite weigert een vreemd team';
+  end;
+  reset role;
+end $$;
+
+-- ── Blok 20: create_team maakt nooit een team zonder owner ──
+-- M5. De functie doet de drie inserts in één transactie; deze controle bewijst
+-- dat de owner-rij en de teamnaam er meteen bij staan.
+do $$
+declare v_team uuid; n int;
+begin
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+
+  -- BUITENSTAANDER is na blok 14 assistent van TEAM_A en nergens hoofdtrainer.
+  -- Met p_alleen_zonder_team = true MOET hij hier alsnog een eigen team
+  -- krijgen: de functie kijkt uitsluitend naar een OWNER-lidmaatschap. Zonder
+  -- die rolfilter zou ze TEAM_A teruggeven, en zou het zelfherstel in
+  -- lib/team-context.ts dat assistent-team als eigen owner-team behandelen —
+  -- canEdit/assertIsOwner zouden dan één request lang openstaan.
+  v_team := create_team('RLS-controle team', true);
+  if v_team = 'TEAM_A_UUID'::uuid then
+    raise exception 'LEK: create_team gaf een ASSISTENT-team terug als eigen team';
+  end if;
+  raise notice 'OK blok 20: p_alleen_zonder_team kijkt alleen naar owner-lidmaatschappen';
+  reset role;
+
+  select count(*) into n from team_members
+   where team_id = v_team and user_id = 'BUITENSTAANDER_UUID' and rol = 'owner'
+     and mag_spelers_bewerken and mag_agenda_bewerken and mag_aanwezigheid_bewerken
+     and mag_wedstrijd_bewerken and mag_training_bewerken and mag_periodisering_bewerken;
+  if n <> 1 then raise exception 'KAPOT: create_team leverde geen owner-rij met alle rechten'; end if;
+
+  select count(*) into n from settings
+   where team_id = v_team and key = 'team_name' and value = 'RLS-controle team';
+  if n <> 1 then raise exception 'KAPOT: create_team schreef de teamnaam niet'; end if;
+
+  if v_team = 'BUITENSTAANDER_UUID'::uuid then
+    raise exception 'KAPOT: een NIEUW team hoort een eigen uuid te krijgen, niet de user-id';
+  end if;
+  raise notice 'OK blok 20: create_team levert team, hoofdtrainer en naam in één keer';
+
+  -- Lege naam wordt geweigerd.
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  begin
+    perform create_team('   ');
+    raise exception 'KAPOT: create_team accepteerde een lege naam';
+  exception when others then
+    if sqlstate <> '22023' then raise; end if;
+    raise notice 'OK blok 20: lege teamnaam geweigerd';
+  end;
+
+  -- p_alleen_zonder_team (het zelfherstel-pad) maakt geen TWEEDE team. Welk
+  -- bestaand team hij teruggeeft doet er niet toe — deze gebruiker kan er
+  -- inmiddels meerdere hebben; de eis is dat het AANTAL teams niet groeit.
+  reset role;
+  select count(*) into n from teams;
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  perform create_team('Mag niet', true);
+  reset role;
+  if (select count(*) from teams) <> n then
+    raise exception 'KAPOT: p_alleen_zonder_team maakte alsnog een team aan';
+  end if;
+  raise notice 'OK blok 20: p_alleen_zonder_team maakt geen tweede team';
+end $$;
+
 rollback;
 
 -- ============================================================
 -- Blok 7 t/m 12 vereisen supabase/team-rls-gevolgacties.sql (M2b). Draaien ze
 -- met een "function set_event_doelstelling does not exist"-fout, dan staat M2b
--- nog niet in deze database.
+-- nog niet in deze database. Blok 14 t/m 19 vereisen M4
+-- (supabase/team-invites-rpc.sql), blok 20 vereist M5
+-- (supabase/team-aanmaken-rpc.sql).
 --
--- NOG NIET VAN TOEPASSING IN FASE 1 — toevoegen zodra die fase er is:
+-- NIET IN DIT SCRIPT TE VANGEN — HANDMATIG, MET TWEE SQL-TABBLADEN:
 --
--- FASE 2 (uitnodigingen):
---   * token met verloopt_op = now()        -> accept_team_invite geeft 'invalid'
---   * token met verloopt_op = now() + '1 second' -> 'ok'
---   * een reeds lid dat accepteert         -> 'already_member', invite blijft
---                                             ONGEBRUIKT
---   * twee gelijktijdige sessies: één createInvite en één acceptInvite,
---     precies één heeft effect (open twee SQL-tabbladen, beide in een
---     transactie, en controleer de rij-lock via `for update`)
---   * een assistent die updateMemberRights/removeMember/createInvite probeert
---     -> geweigerd
+--   De race op linkvervanging (fase 2). Open twee tabbladen, allebei met een
+--   eigen `begin;`:
+--     tabblad 1: select * from team_invites
+--                 where team_id = 'TEAM_A_UUID'
+--                   and gebruikt_op is null and ingetrokken_op is null
+--                 for update;              -- houdt de rij vast
+--     tabblad 2: select * from accept_team_invite('<hash van de oude link>');
+--                                          -- blijft hangen op dezelfde lock
+--     tabblad 1: select * from create_team_invite('TEAM_A_UUID', repeat('5',64));
+--                commit;
+--     tabblad 2: deblokkeert en moet nu 'invalid' teruggeven, want de rij is
+--                inmiddels ingetrokken. Sluit af met rollback in beide.
+--   Precies één van de twee heeft effect; dat is wat de `for update` in
+--   accept_team_invite en create_team_invite afdwingt.
+--
+-- NOG NIET VAN TOEPASSING — toevoegen zodra die fase er is:
+--
+-- FASE 3 (verwijderen):
+--   * deleteTeam door een niet-owner -> geweigerd
+--   * na deleteTeam: geen enkele rij meer in de dertien teamtabellen, en de
+--     oefeningen van de assistenten staan er nog
 --
 -- FASE 4 (persoonlijke oefeningen):
 --   * een oefening van een teamgenoot is WEL leesbaar via een gekoppeld

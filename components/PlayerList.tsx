@@ -9,9 +9,10 @@ import { avatarBg, initialsOf } from '@/lib/avatar'
 interface Props {
   active: Player[]
   inactive: Player[]
+  canEdit: boolean
 }
 
-export default function PlayerList({ active, inactive }: Props) {
+export default function PlayerList({ active, inactive, canEdit }: Props) {
   const t = useDict()
   const [query, setQuery] = useState('')
 
@@ -106,15 +107,17 @@ export default function PlayerList({ active, inactive }: Props) {
               style={{ border: '1px solid var(--border-soft)' }}
             />
           </div>
-          <Link
-            href="/players/new"
-            aria-label={t.players.add}
-            className="h-[42px] rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0"
-            style={{ background: 'var(--primary)' }}
-          >
-            <span className="ms text-[19px]" aria-hidden="true">person_add</span>
-            <span className="hidden sm:inline">{t.players.add}</span>
-          </Link>
+          {canEdit && (
+            <Link
+              href="/players/new"
+              aria-label={t.players.add}
+              className="h-[42px] rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0"
+              style={{ background: 'var(--primary)' }}
+            >
+              <span className="ms text-[19px]" aria-hidden="true">person_add</span>
+              <span className="hidden sm:inline">{t.players.add}</span>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -123,9 +126,11 @@ export default function PlayerList({ active, inactive }: Props) {
           <span className="ms text-[40px] text-faint">groups</span>
           <p className="text-ink font-bold">{t.players.noPlayers}</p>
           <p className="text-faint text-sm">{t.players.noPlayersHint}</p>
-          <Link href="/players/new" className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white" style={{ background: 'var(--primary)' }}>
-            <span className="ms text-[19px]">person_add</span>{t.players.add}
-          </Link>
+          {canEdit && (
+            <Link href="/players/new" className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white" style={{ background: 'var(--primary)' }}>
+              <span className="ms text-[19px]">person_add</span>{t.players.add}
+            </Link>
+          )}
         </div>
       ) : (
         <>

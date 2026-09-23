@@ -224,6 +224,12 @@ create policy "teams: owner mag wissen" on teams for delete
 --      uitnodiging levert geen eigen team) wordt afgedwongen door de CODE —
 --      signUpViaInvite roept de teams-insert simpelweg niet aan. De policy is
 --      hier de ondergrens, niet de businessregel.
+--
+-- LET OP BIJ EEN HERHAALDE RUN NA M5b: dit blok ZET DE POLICIES TERUG. Is M5b
+-- al gedraaid (fase 2 staat live), sla dit blok dan over — of draai M5b erna
+-- opnieuw. Ze terugzetten is niet direct gevaarlijk (een gebruiker kan er
+-- alleen zijn EIGEN team <zijn user-id> mee maken), maar het opent wel weer de
+-- weg waarlangs een half aangemaakt team kan ontstaan.
 drop policy if exists "teams: eigen team bij registratie" on teams;
 create policy "teams: eigen team bij registratie" on teams for insert
   to authenticated

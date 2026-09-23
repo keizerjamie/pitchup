@@ -14,6 +14,7 @@ import { render, fireEvent, within } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import AppShell from '@/components/AppShell'
+import { ALLE_RECHTEN } from '@/lib/team-rechten'
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
@@ -37,9 +38,23 @@ vi.mock('@/components/Navigation', () => ({ default: () => null }))
 vi.mock('@/components/GlobalFab', () => ({ default: () => null }))
 
 function renderShell(teamLogoUrl: string | null, teamName: string | null = 'FC Voorbeeld') {
+  // Deze story gaat over het logo, niet over teams/rechten — bewust maar één
+  // team, zodat TeamSwitcher (brief §4.1) hier gewoon de kale teamnaam toont
+  // (geen chevron/popover) en de bestaande asserties op die naam kloppen.
+  const teams = teamName ? [{ teamId: 'team-1', naam: teamName, rol: 'owner' as const, rechten: ALLE_RECHTEN }] : []
   return render(
     <DictProvider dict={nl}>
-      <AppShell teamName={teamName} teamLogoUrl={teamLogoUrl} userEmail="coach@example.com">
+      <AppShell
+        emptyState={null}
+        teamName={teamName}
+        teamLogoUrl={teamLogoUrl}
+        userEmail="coach@example.com"
+        hasTeam={teams.length > 0}
+        teamId={teams[0]?.teamId ?? null}
+        rol={teams[0]?.rol ?? null}
+        rechten={teams[0]?.rechten ?? null}
+        teams={teams}
+      >
         <div>Inhoud</div>
       </AppShell>
     </DictProvider>,

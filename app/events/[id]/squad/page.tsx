@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player } from '@/lib/types'
 import { formatDateLong, todayLocal } from '@/lib/utils'
 import { toMatchFormItems } from '@/lib/match-form'
@@ -101,6 +101,7 @@ export default async function MatchSquadPage({ params }: Props) {
         primaryColor={clubColors.primary}
         secondaryColor={clubColors.secondary}
         accentText={readableAccentOnWhite(clubColors.primary)}
+        canEdit={canEdit(ctx, 'wedstrijd')}
       />
     </div>
   )

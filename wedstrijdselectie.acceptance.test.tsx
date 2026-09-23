@@ -241,6 +241,7 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         formItems={overrides.formItems ?? []}
         primaryColor={overrides.primaryColor ?? '#004f3b'}
         secondaryColor={overrides.secondaryColor ?? '#009966'}
+        canEdit={overrides.canEdit ?? true}
       />
     </DictProvider>,
   )

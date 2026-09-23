@@ -4,7 +4,9 @@
 // iets wordt opgeslagen).
 //
 // ── Testmethode ──
-// Rendert de ECHTE orkestrator-pagina (app/events/bulk/page.tsx) met RTL.
+// Rendert het ECHTE orkestrator-formulier (components/BulkMatchesForm.tsx,
+// losgetrokken uit app/events/bulk/page.tsx — die is nu een server component
+// die eerst het Agenda-recht afdwingt, zie validatiebevinding 2) met RTL.
 // 'next/navigation' is gestubd (precedent: MatchSquadEditor.test.tsx). Anders
 // dan de eerdere versie van dit bestand worden de server actions uit
 // app/actions/events-bulk.ts NIET meer als geheel gemockt: alleen de externe
@@ -45,8 +47,10 @@ import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import { MAX_BULK_MATCHES, BULK_HEADER_LINE, type ParsedMatchRow } from '@/lib/bulk-matches'
 import { TEXT_NO_MATCHES_ERROR } from '@/lib/bulk-matches-text'
-import BulkMatchesPage from '@/app/events/bulk/page'
+import BulkMatchesForm from '@/components/BulkMatchesForm'
 import GlobalFab from '@/components/GlobalFab'
+import { TeamContextClientProvider } from '@/lib/team-context-client'
+import { ALLE_RECHTEN } from '@/lib/team-rechten'
 
 vi.mock('next/navigation', () => {
   const push = vi.fn()
@@ -155,7 +159,7 @@ function defaultSupabase(extra: Record<string, TableConfig> = {}) {
 function renderPage() {
   return render(
     <DictProvider dict={nl}>
-      <BulkMatchesPage />
+      <BulkMatchesForm />
     </DictProvider>,
   )
 }
@@ -656,7 +660,9 @@ describe('Story-H3 — GlobalFab: nieuwe menu-optie', () => {
   it('toont "Wedstrijden importeren" naast "Wedstrijd", met href="/events/bulk"', () => {
     render(
       <DictProvider dict={nl}>
-        <GlobalFab />
+        <TeamContextClientProvider value={{ teamId: 'team-1', rol: 'owner', rechten: ALLE_RECHTEN, teams: [] }}>
+          <GlobalFab />
+        </TeamContextClientProvider>
       </DictProvider>,
     )
     fireEvent.click(screen.getByRole('button', { name: nl.fab.title }))

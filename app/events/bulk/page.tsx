@@ -1,124 +1,14 @@
-'use client'
+import { redirect } from 'next/navigation'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
+import BulkMatchesForm from '@/components/BulkMatchesForm'
 
-// Orkestrator voor "wedstrijden bulk toevoegen" — statemachine invoer →
-// preview → opgeslagen. Opgezet als app/events/new/page.tsx: zelfde
-// BackButton/container/foutkader-stijl. De feitelijke rij-state en afgeleide
-// validatie/duplicaten zitten in useBulkMatchRows (lib/use-bulk-match-rows.ts);
-// deze pagina koppelt dat aan de server actions.
+// Server component (brief §4.5, validatiebevinding 2): de "Wedstrijden
+// importeren"-knop is al overal verborgen zonder Agenda-recht
+// (CalendarView.tsx); directe navigatie naar dit pad wordt hier hetzelfde
+// afgehandeld — terug naar de kalender.
+export default async function BulkMatchesPage() {
+  const ctx = await requireTeamContextOrLogin()
+  if (!canEdit(ctx, 'agenda')) redirect('/events')
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
-import BackButton from '@/components/BackButton'
-import BulkMatchInput from '@/components/BulkMatchInput'
-import BulkMatchPreviewTable from '@/components/BulkMatchPreviewTable'
-import { createBulkMatches } from '@/app/actions/events-bulk'
-import { toBulkMatchInput, type ParsedMatchRow } from '@/lib/bulk-matches'
-import { useBulkMatchRows } from '@/lib/use-bulk-match-rows'
-import { useDict } from '@/lib/i18n-context'
-
-type Phase = 'invoer' | 'preview' | 'opgeslagen'
-
-export default function BulkMatchesPage() {
-  const t = useDict()
-  const router = useRouter()
-  const [phase, setPhase] = useState<Phase>('invoer')
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [savedCount, setSavedCount] = useState(0)
-  const [attendanceFailed, setAttendanceFailed] = useState(false)
-  const [isPending, startTransition] = useTransition()
-
-  const {
-    rows, setField, removeRow, reset,
-    errorsByRow, duplicateIds, duplicateCheckFailed, blockingReason,
-  } = useBulkMatchRows()
-
-  function handleParsed(parsedRows: ParsedMatchRow[]) {
-    setSaveError(null)
-    reset(parsedRows)
-    setPhase('preview')
-  }
-
-  function handleBackToInput() {
-    reset([])
-    setSaveError(null)
-    setPhase('invoer')
-  }
-
-  function handleSave() {
-    if (blockingReason.blocked) return
-    setSaveError(null)
-    startTransition(async () => {
-      try {
-        const inputs = rows.map(toBulkMatchInput)
-        const result = await createBulkMatches(inputs)
-        setSavedCount(result.created)
-        setAttendanceFailed(result.attendanceFailed)
-        setPhase('opgeslagen')
-      } catch (err) {
-        setSaveError(err instanceof Error ? err.message : t.event.bulk.saveGenericError)
-      }
-    })
-  }
-
-  return (
-    <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
-      <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/events" className="text-faint hover:text-ink">
-          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
-        </BackButton>
-        <h1 className="text-2xl font-bold text-ink">{t.event.bulk.title}</h1>
-      </div>
-
-      {saveError && (
-        <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl mb-5">
-          {saveError}
-        </div>
-      )}
-
-      {phase === 'opgeslagen' && (
-        <div className="space-y-3 mb-5">
-          <div className="bg-panel-green border border-panel-green-edge text-panel-green-ink text-sm px-4 py-3 rounded-xl">
-            {t.event.bulk.savedCount.replace('{count}', String(savedCount))}
-          </div>
-          {attendanceFailed && (
-            <div className="bg-panel-amber border border-panel-amber-edge text-panel-amber-ink text-sm px-4 py-3 rounded-xl">
-              {t.event.bulk.attendanceWarning}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => router.push('/events')}
-            className="w-full py-3 rounded-xl font-semibold text-white bg-event-match hover:bg-event-match/90 transition active:scale-[0.98]"
-          >
-            {t.event.bulk.backToEvents}
-          </button>
-        </div>
-      )}
-
-      {phase === 'invoer' && <BulkMatchInput onParsed={handleParsed} />}
-
-      {phase === 'preview' && (
-        <div className="space-y-4">
-          <button
-            type="button"
-            onClick={handleBackToInput}
-            className="text-[13px] font-semibold text-muted hover:text-ink"
-          >
-            &larr; {t.event.bulk.pasteLabel} / {t.event.bulk.fileLabel}
-          </button>
-          <BulkMatchPreviewTable
-            rows={rows}
-            errorsByRow={errorsByRow}
-            duplicateIds={duplicateIds}
-            duplicateCheckFailed={duplicateCheckFailed}
-            blockingReason={blockingReason}
-            setField={setField}
-            removeRow={removeRow}
-            onSave={handleSave}
-            saving={isPending}
-          />
-        </div>
-      )}
-    </div>
-  )
+  return <BulkMatchesForm />
 }

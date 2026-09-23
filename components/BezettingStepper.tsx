@@ -31,6 +31,10 @@ interface Props {
   initialAantallen: AantallenOverride | null
   /** = presentPlayerIds.length; voedt alleen de stepper-SUGGESTIE en de totaalregel. */
   aanwezigAantal: number
+  // Training-recht (brief §4.5). Default true, zelfde reden als
+  // components/LineupBuilder.tsx. De concrete bezetting blijft elders op de
+  // kaart zichtbaar (badges); dit is uitsluitend de bewerk-stepper.
+  canEdit?: boolean
 }
 
 function clamp(waarde: number, min: number, max: number): number {
@@ -47,7 +51,7 @@ function concreteVan(basis: BezettingBasis, initialAantallen: AantallenOverride 
   return { teams: bezetting.teams.map((tm) => tm.grootte), neutralen: bezetting.aantal_neutralen }
 }
 
-export default function BezettingStepper({ koppelingId, eventId, basis, initialAantallen, aanwezigAantal }: Props) {
+export default function BezettingStepper({ koppelingId, eventId, basis, initialAantallen, aanwezigAantal, canEdit = true }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [aantallen, setAantallen] = useState<Aantallen>(() => concreteVan(basis, initialAantallen, aanwezigAantal))
@@ -85,6 +89,10 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
   // staan hierboven, vóór deze conditionele return (rules-of-hooks) — zelfde
   // volgorde als TeamIndelingEditor.tsx.
   if (!isFlexibel(basis)) return null
+  // Zonder Training-recht is dit uitsluitend een bewerkcontrole (de
+  // concrete bezetting blijft elders op de kaart leesbaar) — verdwijnt dus
+  // volledig, geen read-only variant nodig.
+  if (!canEdit) return null
 
   function persist(next: Aantallen, delta: AantallenOverride | null) {
     setAantallen(next)

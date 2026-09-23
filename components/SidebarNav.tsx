@@ -22,15 +22,21 @@ function personFromEmail(email: string | null, fallback: string): { name: string
 export default function SidebarNav({
   teamName,
   userEmail,
+  hasTeam,
 }: {
   teamName: string | null
   userEmail: string | null
+  // AC 16/52 + brief §4.2: zonder team verbergt AppShell de navigatie-items
+  // op desktop, maar Instellingen (uitloggen, account verwijderen) blijft
+  // bereikbaar — vandaar geen lege lijst, maar een lijst met alleen dat ene
+  // item.
+  hasTeam: boolean
 }) {
   const pathname = usePathname()
   const t = useDict()
   const { name, initials } = personFromEmail(userEmail, t.nav.accountFallback)
 
-  const items = [
+  const alleItems = [
     { href: '/',              label: t.nav.dashboard,     icon: 'space_dashboard' },
     { href: '/players',       label: t.nav.players,       icon: 'groups' },
     { href: '/events',        label: t.nav.calendar,      icon: 'calendar_month' },
@@ -41,6 +47,7 @@ export default function SidebarNav({
     { href: '/inzichten',     label: t.nav.insights,      icon: 'scoreboard' },
     { href: '/settings',      label: t.nav.settings,      icon: 'settings' },
   ]
+  const items = hasTeam ? alleItems : alleItems.filter((item) => item.href === '/settings')
 
   return (
     <>
@@ -83,9 +90,15 @@ export default function SidebarNav({
           </div>
           <div className="flex flex-col leading-tight flex-1 min-w-0">
             <span className="text-[13.5px] font-bold text-ink truncate">{name}</span>
-            <span className="text-[11.5px] font-semibold text-faint truncate">
-              {teamName ?? t.settings.logout}
-            </span>
+            {/* Geen fallback-tekst zonder team: de vorige "Uitloggen"-fallback
+                was een bestaande verrassing (geheugen.md) die nu, in de
+                nieuwe lege staat, gegarandeerd zichtbaar zou zijn. De lege
+                staat zelf legt al uit waarom er geen team is. */}
+            {teamName && (
+              <span className="text-[11.5px] font-semibold text-faint truncate">
+                {teamName}
+              </span>
+            )}
           </div>
           <div className="flex items-center flex-shrink-0">
             <ThemeToggle />

@@ -55,6 +55,8 @@ function renderProfile(overrides: Partial<Player> = {}) {
         stats={stats}
         statsError={false}
         t={nl}
+        canEditSpelers
+        canEditAanwezigheid
       />
     </DictProvider>,
   )

@@ -203,6 +203,30 @@ function makeSupabase(opts: {
     // `args` wordt nu ook vastgelegd (ronde-2-uitbreiding) zodat een
     // broncontract-check op de exacte parameternamen mogelijk is (addendum §8.7).
     rpc: async (fn: string, args?: Record<string, unknown>) => {
+      // create_team (M5, fase 2) is GEEN events-RPC maar de vervanger van de
+      // drie losse inserts die signUp en het zelfherstel vroeger deden. Hij
+      // wordt hier nagebootst tegen dezelfde store, zodat de acceptatietests
+      // blijven bewijzen dat er een team, een owner-rij én een teamnaam
+      // ontstaan — nu alleen in één transactie in plaats van drie calls.
+      if (fn === 'create_team') {
+        calls.push({ table: 'teams', op: 'rpc', fn, args })
+        if (!store.teams) store.teams = []
+        // p_alleen_zonder_team: bestaat er al een lidmaatschap, dan geeft de
+        // functie dat team terug in plaats van een tweede aan te maken.
+        if (args?.p_alleen_zonder_team === true) {
+          const bestaand = store.team_members.find((r) => r.user_id === user?.id)
+          if (bestaand) return { data: bestaand.team_id, error: null }
+        }
+        store.teams.push({ id: NIEUW_TEAM_ID })
+        store.team_members.push({
+          team_id: NIEUW_TEAM_ID,
+          user_id: user?.id,
+          rol: 'owner',
+          ...rechtenNaarKolommen(ALLE_RECHTEN),
+        })
+        store.settings.push({ team_id: NIEUW_TEAM_ID, key: 'team_name', value: args?.p_naam })
+        return { data: NIEUW_TEAM_ID, error: null }
+      }
       calls.push({ table: 'events', op: 'rpc', fn, args })
       return { data: null, error: null }
     },
@@ -252,6 +276,11 @@ const TEAM_A = '11111111-1111-4111-8111-111111111111'
 const TEAM_B = '22222222-2222-4222-8222-222222222222'
 const VREEMD_TEAM = '99999999-9999-4999-8999-999999999999'
 const ANDERE_USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+// Het team-id dat create_team (M5) teruggeeft. Bewust NIET gelijk aan een
+// user-id: de fase-1-invariant teams.id = user.id gold alleen om fase 1 zonder
+// gedragsverandering uit te kunnen rollen. Bestaande teams houden hun oude id;
+// elk NIEUW team krijgt sinds fase 2 een eigen uuid.
+const NIEUW_TEAM_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 
 // ════════════════════════════════════════════════════════════════════════
 // AC15/50 — signUp maakt team, owner-rij en teamnaam aan, in die volgorde
@@ -268,8 +297,15 @@ const ANDERE_USER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 // testverslag voor de melding hierover (o.a. dat dit ook app/actions/
 // auth.test.ts zelf rood maakt). Onderstaande tests toetsen de HUIDIGE code.
 describe('AC15/50 — signUp via de gewone registratiepagina', () => {
+  // HERZIEN IN FASE 2: signUp deed hier drie losse inserts (teams ->
+  // team_members -> settings). Dat kan sinds M5b niet meer — die migratie
+  // dropt de bootstrap-INSERT-policies, waarna een gewone client die rijen
+  // helemaal niet meer kan schrijven. Alles loopt nu via de RPC create_team,
+  // die de drie schrijfacties in ÉÉN transactie doet; een half aangemaakt team
+  // (team zonder hoofdtrainer) kan daardoor niet meer bestaan.
   function makeSignUpSupabase() {
     const calls: { table: string; op: string; payload: Row }[] = []
+    const rpcCalls: { fn: string; args?: Record<string, unknown> }[] = []
     const updateUserCalls: Row[] = []
     const supabase = {
       auth: {
@@ -283,6 +319,10 @@ describe('AC15/50 — signUp via de gewone registratiepagina', () => {
           return { data: {}, error: null }
         },
       },
+      rpc: async (fn: string, args?: Record<string, unknown>) => {
+        rpcCalls.push({ fn, args })
+        return { data: NIEUW_TEAM_ID, error: null }
+      },
       from: (table: string) => ({
         insert: (payload: Row) => {
           calls.push({ table, op: 'insert', payload })
@@ -290,7 +330,7 @@ describe('AC15/50 — signUp via de gewone registratiepagina', () => {
         },
       }),
     }
-    return { supabase, calls, updateUserCalls }
+    return { supabase, calls, rpcCalls, updateUserCalls }
   }
 
   function form(fields: Record<string, string>): FormData {
@@ -299,7 +339,7 @@ describe('AC15/50 — signUp via de gewone registratiepagina', () => {
     return fd
   }
 
-  it('maakt bij registratie de teams-rij, de owner-rij in team_members én settings.team_name aan, in exact die volgorde', async () => {
+  it('maakt bij registratie het team via create_team, in één transactie, en niet meer met drie losse inserts', async () => {
     const m = makeSignUpSupabase()
     vi.mocked(createClient).mockResolvedValue(m.supabase as unknown as Awaited<ReturnType<typeof createClient>>)
 
@@ -307,10 +347,11 @@ describe('AC15/50 — signUp via de gewone registratiepagina', () => {
       email: 'coach@example.com', password: 'correct-horse-battery', team_name: 'JO13-1',
     }))).rejects.toThrow('__redirect__:/')
 
-    expect(m.calls.map((c) => c.table)).toEqual(['teams', 'team_members', 'settings'])
+    expect(m.rpcCalls.map((c) => c.fn)).toEqual(['create_team'])
+    expect(m.calls).toHaveLength(0)
   })
 
-  it('geeft de teams-rij het user-id als primaire sleutel (teams.id === user.id) — de invariant waar fase 1 op rust', async () => {
+  it('geeft create_team de opgeschoonde teamnaam mee, met de idempotentie-vlag tegen een dubbele inzending', async () => {
     const m = makeSignUpSupabase()
     vi.mocked(createClient).mockResolvedValue(m.supabase as unknown as Awaited<ReturnType<typeof createClient>>)
 
@@ -318,10 +359,10 @@ describe('AC15/50 — signUp via de gewone registratiepagina', () => {
       email: 'coach@example.com', password: 'correct-horse-battery', team_name: 'JO13-1',
     }))).rejects.toThrow('__redirect__:/')
 
-    expect(m.calls.find((c) => c.table === 'teams')!.payload).toEqual({ id: TEAM_A })
+    expect(m.rpcCalls[0].args).toEqual({ p_naam: 'JO13-1', p_alleen_zonder_team: true })
   })
 
-  it('maakt de registrant owner met alle zes rechten, en de teamnaam-rij met de ingevoerde naam', async () => {
+  it('wist de metadata-vlag zodra het team bestaat', async () => {
     const m = makeSignUpSupabase()
     vi.mocked(createClient).mockResolvedValue(m.supabase as unknown as Awaited<ReturnType<typeof createClient>>)
 
@@ -329,16 +370,7 @@ describe('AC15/50 — signUp via de gewone registratiepagina', () => {
       email: 'coach@example.com', password: 'correct-horse-battery', team_name: 'JO13-1',
     }))).rejects.toThrow('__redirect__:/')
 
-    const lid = m.calls.find((c) => c.table === 'team_members')!.payload
-    expect(lid.team_id).toBe(TEAM_A)
-    expect(lid.user_id).toBe(TEAM_A)
-    expect(lid.rol).toBe('owner')
-    expect(rechtenNaarKolommen(ALLE_RECHTEN)).toMatchObject(
-      Object.fromEntries(Object.entries(lid).filter(([k]) => k.startsWith('mag_'))),
-    )
-
-    const naam = m.calls.find((c) => c.table === 'settings')!.payload
-    expect(naam).toEqual({ team_id: TEAM_A, key: 'team_name', value: 'JO13-1' })
+    expect(m.updateUserCalls).toEqual([{ data: { [TEAM_NAAM_METADATA_KEY]: null } }])
   })
 })
 
@@ -1039,7 +1071,7 @@ describe('Validator punt 8 — zelfherstel via getTeamContext() (acceptatienivea
       : { id: userId, user_metadata: { [TEAM_NAAM_METADATA_KEY]: teamNaam } }
   }
 
-  it('maakt bij de eerste context MET de metadata-vlag alsnog het team aan (teams, team_members, settings)', async () => {
+  it('maakt bij de eerste context MET de metadata-vlag alsnog het team aan (teams, team_members, settings) — sinds fase 2 via create_team', async () => {
     const m = makeSupabase({
       user: userMetUser(TEAM_A, 'JO13-1'),
       members: [],
@@ -1053,11 +1085,14 @@ describe('Validator punt 8 — zelfherstel via getTeamContext() (acceptatienivea
 
     const ctx = await getTeamContext()
 
-    expect(ctx?.teamId).toBe(TEAM_A)
+    // Het NIEUWE team krijgt een eigen uuid; de invariant teams.id = user.id
+    // gold alleen voor fase 1.
+    expect(ctx?.teamId).toBe(NIEUW_TEAM_ID)
+    expect(ctx?.teamId).not.toBe(ctx?.userId)
     expect(ctx?.rol).toBe('owner')
-    expect(m.store.teams).toEqual([{ id: TEAM_A }])
-    expect(m.store.team_members.some((r) => r.team_id === TEAM_A && r.user_id === TEAM_A && r.rol === 'owner')).toBe(true)
-    expect(m.store.settings.some((r) => r.team_id === TEAM_A && r.key === 'team_name' && r.value === 'JO13-1')).toBe(true)
+    expect(m.store.teams).toEqual([{ id: NIEUW_TEAM_ID }])
+    expect(m.store.team_members.some((r) => r.team_id === NIEUW_TEAM_ID && r.user_id === TEAM_A && r.rol === 'owner')).toBe(true)
+    expect(m.store.settings.some((r) => r.team_id === NIEUW_TEAM_ID && r.key === 'team_name' && r.value === 'JO13-1')).toBe(true)
   })
 
   it('maakt GEEN team aan zonder de metadata-vlag — nul lidmaatschappen blijft nul lidmaatschappen', async () => {
@@ -1155,15 +1190,20 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
     return { admin: { auth: { admin: { deleteUser } } }, deleteUser }
   }
 
-  const VOLLEDIGE_TABELLIJST = [
-    'oefeningen',
+  // Per eigen team: de dertien teamtabellen in FK-veilige volgorde, afgesloten
+  // met de teams-rij (waarvan de cascade team_members en team_invites
+  // opruimt). `oefeningen` volgt pas ná álle teams: dat is persoonlijk bezit
+  // (team_id = eigenaar-user) en de FK-cascade daarvan raakt koppelingen in
+  // trainingsplannen van ANDERE teams.
+  const TEAM_OPRUIMING = [
     'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
     'match_ratings', 'lineups', 'attendance', 'absence_periods',
     'categorie_metingen', 'metingen', 'events', 'players', 'settings',
     'teams',
   ]
+  const VOLLEDIGE_TABELLIJST = [...TEAM_OPRUIMING, 'oefeningen']
 
-  it('wist als owner de volledige tabellijst (incl. categorie_metingen), sluit af met de teams-rij, en verwijdert het auth-account', async () => {
+  it('wist als owner de volledige tabellijst (incl. categorie_metingen), sluit af met de teams-rij en de eigen oefeningen, en verwijdert het auth-account', async () => {
     const m = makeSupabase({
       user: { id: TEAM_A },
       members: [memberRow(TEAM_A, TEAM_A, 'owner', ALLE_RECHTEN)],
@@ -1194,10 +1234,7 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
     expect(m.calls.filter((c) => c.op === 'delete').map((c) => c.table)).toContain('categorie_metingen')
   })
 
-  it('de owner-guard laat de teamdata ONGEMOEID wanneer de actieve rol geen owner is — alleen de eigen oefeningen en het account zelf worden dan nog verwijderd', async () => {
-    // Fase 1 heeft geen assistenten (die komen in fase 2), maar de guard in
-    // deleteAccount zelf bestaat al nu (06-backend-fase1-samenvatting.md §6.5:
-    // "Wel al een ctx.rol === 'owner'-guard.") en is dus nu al testbaar.
+  it('laat de teamdata ONGEMOEID bij een assistent — alleen het eigen lidmaatschap, de eigen oefeningen en het account zelf verdwijnen', async () => {
     const m = makeSupabase({
       user: { id: ANDERE_USER },
       members: [memberRow(TEAM_A, ANDERE_USER, 'assistent', ALLE_RECHTEN)],
@@ -1210,10 +1247,70 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
     await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
 
     const verwijderdeTabellen = m.calls.filter((c) => c.op === 'delete').map((c) => c.table)
-    expect(verwijderdeTabellen).toEqual(['oefeningen']) // alleen het persoonlijke bezit, geen teamtabel
+    // Alleen de eigen lidmaatschapsrij en het persoonlijke bezit.
+    expect(verwijderdeTabellen).toEqual(['team_members', 'oefeningen'])
     expect(verwijderdeTabellen).not.toContain('teams')
     expect(verwijderdeTabellen).not.toContain('categorie_metingen')
+    // De teamnaam van TEAM_A staat er nog: teamdata van een ander team blijft
+    // volledig intact (AC 10/21).
+    expect(m.store.settings).toHaveLength(1)
     expect(deleteUser).toHaveBeenCalledWith(ANDERE_USER) // het account zelf verdwijnt nog wel (AVG)
+  })
+
+  // ── De rollen-lus (brief §2.6), naar fase 2 gehaald ──
+  // Met de ECHT filterende tabel-engine, zodat de team_id-filters daadwerkelijk
+  // worden toegepast in plaats van genegeerd zoals bij de chainable stub in
+  // app/actions/*.test.ts (geheugen.md, "Belangrijke gotchas").
+  it('ruimt als hoofdtrainer van TWEE teams beide teams op, en laat het team waar hij assistent is intact', async () => {
+    const m = makeSupabase({
+      user: { id: ANDERE_USER },
+      members: [
+        memberRow(TEAM_A, ANDERE_USER, 'owner', ALLE_RECHTEN),
+        memberRow(TEAM_B, ANDERE_USER, 'owner', ALLE_RECHTEN),
+        memberRow(VREEMD_TEAM, ANDERE_USER, 'assistent', ALLE_RECHTEN),
+      ],
+      settings: [
+        teamNameRow(TEAM_A, 'JO13-1'),
+        teamNameRow(TEAM_B, 'JO15-2'),
+        teamNameRow(VREEMD_TEAM, 'Team van iemand anders'),
+      ],
+      tables: {
+        players: [
+          { id: 'p-a', team_id: TEAM_A, name: 'Speler A' },
+          { id: 'p-b', team_id: TEAM_B, name: 'Speler B' },
+          { id: 'p-v', team_id: VREEMD_TEAM, name: 'Speler V' },
+        ],
+      },
+    })
+    useSupabase(m)
+    const { admin, deleteUser } = makeAdmin()
+    vi.mocked(createAdminClient).mockReturnValue(admin as unknown as ReturnType<typeof createAdminClient>)
+
+    await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
+
+    // Twee volledige opruimrondes, dan het eigen lidmaatschap bij het derde
+    // team, dan het persoonlijke bezit.
+    expect(m.calls.filter((c) => c.op === 'delete').map((c) => c.table)).toEqual([
+      ...TEAM_OPRUIMING, ...TEAM_OPRUIMING, 'team_members', 'oefeningen',
+    ])
+    // De data van BEIDE eigen teams is echt weg; die van het vreemde team
+    // staat er nog — persoonsgegevens van derden blijven bij hun eigen team.
+    expect(m.store.players.map((r) => r.team_id)).toEqual([VREEMD_TEAM])
+    expect(m.store.settings.map((r) => r.team_id)).toEqual([VREEMD_TEAM])
+    // Het eigen lidmaatschap bij het vreemde team is expliciet opgezegd.
+    expect(m.store.team_members.map((r) => r.team_id)).not.toContain(VREEMD_TEAM)
+    // LET OP — GRENS VAN DIT HARNAS: de owner-rijen van TEAM_A en TEAM_B staan
+    // hier nog in de store omdat deze tabel-engine geen FK-cascade nabootst.
+    // In de database ruimt `delete from teams` ze op (ON DELETE CASCADE,
+    // supabase/teams-en-leden.sql). Wat hier wél te bewijzen valt, is dat die
+    // delete voor BEIDE eigen teams is uitgevoerd — zonder de rollen-lus
+    // gebeurde dat maar voor één, en bleef de owner-rij van het andere team
+    // achter met een user_id die niet meer in auth.users bestaat. De
+    // sanity-check "geen team zonder hoofdtrainer" slaat daar juist NIET op
+    // aan: zo'n team is onbereikbaar maar ziet er gezond uit.
+    expect(m.store.team_members.every((r) => r.rol === 'owner')).toBe(true)
+    expect(m.calls.filter((c) => c.op === 'delete' && c.table === 'teams')).toHaveLength(2)
+    expect(deleteUser).toHaveBeenCalledWith(ANDERE_USER)
   })
 })
 
@@ -1230,6 +1327,8 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     // Ronde 2: het script is uitgebreid van 6 naar 13 blokken (addendum §8.7 —
     // vier nieuwe blokken voor de attendance-verruiming/RPC's, plus de
     // permanente sanity-check "geen team zonder hoofdtrainer" uit §8.6).
+    // Fase 2: blok 14 t/m 20 erbij (vervaltermijn, already_member, peek,
+    // staf beheren, één actieve link, vreemd team, create_team).
     const pad = path.resolve(__dirname, 'supabase', 'team-rls-verificatie.sql')
     const inhoud = readFileSync(pad, 'utf8')
 
@@ -1237,11 +1336,19 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     expect(inhoud).toMatch(/^rollback;/m)
 
     const blokken = inhoud.match(/^do \$\$/gm) ?? []
-    expect(blokken.length).toBeGreaterThanOrEqual(13)
+    expect(blokken.length).toBeGreaterThanOrEqual(20)
 
-    for (let i = 1; i <= 13; i++) {
+    for (let i = 1; i <= 20; i++) {
       expect(inhoud).toContain(`Blok ${i}`)
     }
+
+    // De fase-2-blokken staan VÓÓR de rollback, anders schrijven ze echt weg.
+    expect(inhoud.indexOf('Blok 20')).toBeLessThan(inhoud.search(/^rollback;/m))
+
+    // De vervaltermijn wordt UITSLUITEND in de database beoordeeld; blok 14
+    // legt beide randen vast.
+    expect(inhoud).toContain('verloopt_op = now() geeft invalid')
+    expect(inhoud).toContain("verloopt_op = now() + 1 second geeft ok")
 
     // Blok 7 (spelers-only) moet het bewust aanvaarde restrisico uit brief
     // §8.2 expliciet vastleggen als "aanvaard", niet als stilzwijgend lek —

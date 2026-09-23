@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { buildCsp } from '@/proxy'
+import { buildCsp, isPublicPath } from '@/proxy'
 
 // Regressietest bij de productiebug van 2026-08-09: het clublogo laadde nergens
 // (zijbalk én wedstrijdselectie-PDF) omdat `img-src` het Supabase-origin niet
@@ -68,5 +68,37 @@ describe('buildCsp', () => {
     expect(csp().get('frame-ancestors')).toEqual([`'none'`])
     expect(csp().get('base-uri')).toEqual([`'self'`])
     expect(csp().get('form-action')).toEqual([`'self'`])
+  })
+})
+
+// De uitnodigingsflow moet zonder sessie bereikbaar zijn: een genodigde die
+// nog geen account heeft, zou anders naar /login geduwd worden en zijn link
+// nooit kunnen openen.
+describe('isPublicPath', () => {
+  it('laat de herstelpagina publiek, zoals voorheen', () => {
+    expect(isPublicPath('/reset-password')).toBe(true)
+    expect(isPublicPath('/reset-password?code=x')).toBe(true)
+  })
+
+  it('laat de uitnodigingspagina en de registratie daaronder publiek', () => {
+    expect(isPublicPath('/invite/abcdefghijklmnop')).toBe(true)
+    expect(isPublicPath('/invite/abcdefghijklmnop/register')).toBe(true)
+    expect(isPublicPath('/invite')).toBe(true)
+  })
+
+  it('houdt de rest van de app achter de login', () => {
+    for (const pad of ['/', '/settings', '/players', '/events', '/oefeningen', '/inzichten']) {
+      expect(isPublicPath(pad), pad).toBe(false)
+    }
+  })
+
+  // Zonder deze grens zou een pad dat toevallig met dezelfde letters begint
+  // de hele app openzetten. (De reset-pagina gebruikt al sinds jaar en dag een
+  // kale prefix-match; die semantiek is hier bewust niet aangescherpt, want
+  // dat is een andere feature en er bestaat geen route die eronder valt.)
+  it('opent geen pad dat alleen met dezelfde letters begint als /invite', () => {
+    for (const pad of ['/invitees', '/inviteX', '/invitation/abcdefghijklmnop']) {
+      expect(isPublicPath(pad), pad).toBe(false)
+    }
   })
 })

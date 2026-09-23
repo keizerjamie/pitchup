@@ -45,10 +45,10 @@ function makePlayer(id: string, type: 'regular' | 'guest', overrides: Partial<Pl
   }
 }
 
-function renderAttendance(players: Player[], statuses: Record<string, AttendanceStatus>) {
+function renderAttendance(players: Player[], statuses: Record<string, AttendanceStatus>, canEdit = true) {
   return render(
     <DictProvider dict={nl}>
-      <TrainingAttendance eventId="e1" players={players} initialStatuses={statuses} />
+      <TrainingAttendance eventId="e1" players={players} initialStatuses={statuses} canEdit={canEdit} />
     </DictProvider>,
   )
 }

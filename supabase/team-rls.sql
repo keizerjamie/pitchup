@@ -288,6 +288,12 @@ create policy "teams: owner mag wissen" on teams for delete using (is_team_owner
 -- (supabase/team-bootstrap-policies-opruimen.sql) — niet in M5 zelf, want tussen
 -- M5 en die deploy draait de live app nog op deze policies. Zie het uitgebreide
 -- commentaar in supabase/teams-en-leden.sql voor de twee randen.
+--
+-- LET OP BIJ EEN HERHAALDE RUN NA M5b: dit blok ZET DE POLICIES TERUG. Is M5b
+-- al gedraaid (fase 2 staat live), sla dit blok dan over — of draai M5b erna
+-- opnieuw. Ze terugzetten is niet direct gevaarlijk (een gebruiker kan er
+-- alleen zijn EIGEN team <zijn user-id> mee maken), maar het opent wel weer de
+-- weg waarlangs een half aangemaakt team kan ontstaan.
 drop policy if exists "teams: eigen team bij registratie" on teams;
 create policy "teams: eigen team bij registratie" on teams for insert
   to authenticated with check (id = auth.uid());

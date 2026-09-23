@@ -12,6 +12,7 @@ import UploadIcon from '@/components/icons/UploadIcon'
 interface Props {
   events: FootballEvent[]
   attendanceMap: Record<string, { present: number; total: number }>
+  canEdit: boolean
 }
 
 // Type accent colours — chosen to read on both light and dark surfaces.
@@ -24,7 +25,7 @@ function eventTitle(event: FootballEvent, t: Dict): string {
   return t.calendar.trainingLabel
 }
 
-export default function CalendarView({ events, attendanceMap }: Props) {
+export default function CalendarView({ events, attendanceMap, canEdit }: Props) {
   const t = useDict()
   const locale = t.browserLocale
   const today = todayLocal()
@@ -94,18 +95,22 @@ export default function CalendarView({ events, attendanceMap }: Props) {
               className="h-9 px-3 rounded-xl text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors">
               {t.calendar.today}
             </button>
-            <Link href="/events/bulk"
-              className="hidden md:flex h-10 rounded-xl px-3 items-center gap-1.5 text-[13.5px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors flex-shrink-0">
-              {/* Inline SVG: "upload_file" zit niet in de gesubsette icoonfont
-                  en rendert daar als letterlijke tekst (zie UploadIcon.tsx). */}
-              <UploadIcon className="w-[19px] h-[19px]" />
-              <span>{t.event.bulk.fabLabel}</span>
-            </Link>
-            <Link href="/events/new" aria-label={t.home.newEvent}
-              className="h-10 rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0" style={{ background: 'var(--primary)' }}>
-              <span className="ms text-[19px]" aria-hidden="true">add</span>
-              <span className="hidden sm:inline">{t.home.newEvent}</span>
-            </Link>
+            {canEdit && (
+              <>
+                <Link href="/events/bulk"
+                  className="hidden md:flex h-10 rounded-xl px-3 items-center gap-1.5 text-[13.5px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors flex-shrink-0">
+                  {/* Inline SVG: "upload_file" zit niet in de gesubsette icoonfont
+                      en rendert daar als letterlijke tekst (zie UploadIcon.tsx). */}
+                  <UploadIcon className="w-[19px] h-[19px]" />
+                  <span>{t.event.bulk.fabLabel}</span>
+                </Link>
+                <Link href="/events/new" aria-label={t.home.newEvent}
+                  className="h-10 rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0" style={{ background: 'var(--primary)' }}>
+                  <span className="ms text-[19px]" aria-hidden="true">add</span>
+                  <span className="hidden sm:inline">{t.home.newEvent}</span>
+                </Link>
+              </>
+            )}
           </div>
         </div>
 

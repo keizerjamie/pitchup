@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { cache } from 'react'
 import { createClient } from '@/lib/supabase/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { errorCode, genericError, logError } from '@/lib/errors'
+import { genericError, logError } from '@/lib/errors'
 import {
   ALLE_RECHTEN,
   RECHT_KOLOM,
@@ -39,16 +39,27 @@ export const ACTIVE_TEAM_COOKIE = 'active_team'
 // bevestigt en daarna met nul lidmaatschappen inlogt. signUpViaInvite zet deze
 // metadata dus bewust niet, en dan gebeurt er hier niets.
 //
-// De vlag wordt gewist zodra het team bestaat, zodat hij niet later — als
-// iemand zijn laatste team verlaat (fase 2/3) — alsnog een team tovert.
+// De vlag wordt gewist zodra er een lidmaatschap bestaat, zodat hij niet later
+// — als iemand zijn laatste team verliest (removeMember in fase 2, leaveTeam/
+// deleteTeam in fase 3) — alsnog een team tovert. Zie `wisTeamNaamVlag` en
+// het blok daarboven voor waarom dat wissen in laadContext staat en niet
+// alleen in maakEigenTeam.
 //
 // VEILIGHEID: user-metadata is door de gebruiker zelf te schrijven
-// (auth.updateUser vanuit de browser). Dat is hier geen escalatie: het enige
-// wat je ermee kunt afdwingen is je EIGEN team met id = je eigen user-id —
-// precies wat een normale registratie ook oplevert, en precies wat de
-// bootstrap-policies in supabase/teams-en-leden.sql toestaan. De naam is
-// attacker-controlled en wordt daarom op dezelfde 80 tekens geknipt als in
-// signUp.
+// (auth.updateUser vanuit de browser). Dat is hier geen escalatie, maar de
+// reden is sinds fase 2 een andere dan hierboven ooit stond. Vroeger was het
+// argument "je kunt er alleen je eigen team met id = je user-id mee maken,
+// precies wat de bootstrap-policies toestaan" — die policies verdwijnen met
+// M5b en een nieuw team krijgt een gen_random_uuid(), dus dat argument geldt
+// niet meer. Wat er nu voor in de plaats komt:
+//   * de vlag kan hooguit create_team() laten draaien, en die functie maakt
+//     ALTIJD een vers, leeg team met de aanroeper als hoofdtrainer. Hij kan
+//     niet naar een bestaand team wijzen en de rol staat er hard in;
+//   * diezelfde handeling staat sowieso open via createTeam
+//     (app/actions/team.ts) — er is geen limiet op het aantal teams (BR 37).
+// Het enige wat een gebruiker met de vlag bereikt is dus een leeg team dat hij
+// ook gewoon met een knop had kunnen maken. De naam is attacker-controlled en
+// wordt daarom op dezelfde 80 tekens geknipt als in signUp.
 export const TEAM_NAAM_METADATA_KEY = 'pitchup_team_name'
 
 const MAX_TEAM_NAAM_LENGTE = 80
@@ -64,84 +75,74 @@ export function teamNaamUitMetadata(user: { user_metadata?: unknown } | null | u
   return waarde.trim().slice(0, MAX_TEAM_NAAM_LENGTE) || null
 }
 
-// Een unieke-sleutelschending betekent hier "stond er al" en is dus geen fout:
-// twee gelijktijdige requests kunnen allebei tegelijk het zelfherstel starten.
-const UNIQUE_VIOLATION = '23505'
-
-function bestaatAl(error: unknown): boolean {
-  return errorCode(error) === UNIQUE_VIOLATION
-}
-
-// Maakt het eigen team van één gebruiker: de teams-rij, de owner-rij in
-// team_members en de teamnaam in settings — in die volgorde, want de
-// settings-policy (settings_key_editable → is_team_owner) kan pas slagen als
-// de owner-rij bestaat, en die heeft de teams-rij als foreign key nodig.
+// Wist de geparkeerde teamnaam uit de user-metadata.
 //
-// teams.id IS BEWUST GELIJK AAN userId. Dat is de invariant waar de hele
-// fase-1-migratie op rust (supabase/teams-en-leden.sql): voor elk bestaand én
-// elk nieuw team geldt teams.id = user-id van de hoofdtrainer, dus
-// is_team_member(team_id) dekt exact dezelfde rijen als het oude
-// team_id = auth.uid(). Een willekeurige uuid zou een account dat tussen
-// migratie M1 en M2 wordt aangemaakt meteen onbruikbaar maken.
-// Fase 2 vervangt deze functie door de RPC create_team().
+// WAAROM DIT EEN LOSSE FUNCTIE IS, EN WAAROM LAADCONTEXT HEM OOK AANROEPT
+// (oplossing voor het fase-2/3-aandachtspunt uit validatieronde 2, punt 5):
+// deze update kan mislukken. Stond het wissen alleen in maakEigenTeam, dan
+// bleef de vlag na zo'n mislukking voorgoed staan — en zou hij vanaf fase 2,
+// zodra iemand via removeMember zijn laatste lidmaatschap verliest, alsnog een
+// leeg team terugtoveren.
 //
-// Idempotent: al bestaande rijen zijn geen fout. Gooit wél bij elke andere
-// fout op teams/team_members — zonder die twee rijen is het account
-// onbruikbaar en dat mag niet stilzwijgend gebeuren. Een mislukte
-// settings-insert wordt alleen gelogd: dan mist er enkel een teamnaam.
-export async function maakEigenTeam(
-  supabase: SupabaseClient,
-  userId: string,
-  teamNaam: string,
-): Promise<void> {
-  const { error: teamError } = await supabase.from('teams').insert({ id: userId })
-  if (teamError && !bestaatAl(teamError)) throw genericError('teamContext.maakEigenTeam.team', teamError)
-
-  const { error: memberError } = await supabase.from('team_members').insert({
-    team_id: userId,
-    user_id: userId,
-    rol: 'owner',
-    mag_spelers_bewerken: true,
-    mag_agenda_bewerken: true,
-    mag_aanwezigheid_bewerken: true,
-    mag_wedstrijd_bewerken: true,
-    mag_training_bewerken: true,
-    mag_periodisering_bewerken: true,
-  })
-  if (memberError && !bestaatAl(memberError)) {
-    throw genericError('teamContext.maakEigenTeam.lid', memberError)
-  }
-
-  const { error: settingsError } = await supabase.from('settings').insert({
-    team_id: userId,
-    key: 'team_name',
-    value: teamNaam,
-  })
-  if (settingsError && !bestaatAl(settingsError)) {
-    logError('teamContext.maakEigenTeam.naam', settingsError)
-  }
-
-  // Vlag wissen hoort bij "het team bestaat nu" en staat daarom hier, niet bij
-  // de aanroepers: zo kan geen enkele aanroeper het vergeten. Zonder dit zou de
-  // vlag blijven staan en vanaf fase 2 een team kunnen terugtoveren nadat
-  // iemand zijn laatste team heeft verlaten. Alleen loggen bij een fout — het
-  // team staat er dan al, en maakEigenTeam is idempotent.
-  //
-  // AANDACHTSPUNT VOOR FASE 2/3 — deze update KAN mislukken, en dan blijft de
-  // vlag staan. In fase 1 is dat onschadelijk (zolang er een lidmaatschap is,
-  // kijkt het zelfherstel niet naar de vlag), maar zodra `leaveTeam` en
-  // `deleteTeam` bestaan kan iemand op nul lidmaatschappen uitkomen en zou een
-  // achtergebleven vlag hem alsnog een nieuw team geven. Twee mogelijke
-  // oplossingen, te kiezen bij het bouwen van fase 2/3:
-  //   a) leaveTeam/deleteTeam wissen de vlag ook, of
-  //   b) het zelfherstel negeert de vlag zodra er ooit een team heeft bestaan
-  //      (bijvoorbeeld door in plaats van te wissen een afgehandeld-markering
-  //      te zetten in plaats van null).
-  // Bewust niet opgelost in fase 1: er is dan nog geen weg naar nul teams.
-  const { error: metadataError } = await supabase.auth.updateUser({
+// Gekozen oplossing: variant (b) uit die notitie — "de vlag telt alleen zolang
+// er nog nooit een lidmaatschap was". Dat is hier geïmplementeerd door hem te
+// wissen zodra er WEL een lidmaatschap is (zie laadContext). Die poging
+// herhaalt zich bij elke request tot hij lukt, dus de vlag convergeert naar
+// weg. Variant (a) — removeMember/leaveTeam laten wissen — is bewust NIET
+// gekozen: removeMember wordt uitgevoerd door de hoofdtrainer, en die kan de
+// user-metadata van een ánder account alleen met de service-role-key
+// aanpassen. Zonder die key (die optioneel is, zie lib/supabase/admin.ts) zou
+// het gat gewoon openblijven.
+//
+// Alleen loggen bij een fout: het team staat er dan al en de volgende request
+// probeert het opnieuw.
+export async function wisTeamNaamVlag(supabase: SupabaseClient): Promise<void> {
+  const { error } = await supabase.auth.updateUser({
     data: { [TEAM_NAAM_METADATA_KEY]: null },
   })
-  if (metadataError) logError('teamContext.maakEigenTeam.vlag', metadataError)
+  if (error) logError('teamContext.vlagWissen', error)
+}
+
+// Maakt het eigen team van één gebruiker en geeft het nieuwe team-id terug.
+//
+// SINDS FASE 2 LOOPT DIT VIA DE RPC create_team()
+// (supabase/team-aanmaken-rpc.sql). Twee redenen, en de eerste is dwingend:
+//   1. De bootstrap-INSERT-policies op teams en team_members worden ná de
+//      deploy van fase 2 gedropt (M5b). Vanaf dat moment is er geen enkele weg
+//      meer waarlangs een gewone client zelf een teams-rij of een owner-rij
+//      kan schrijven. De oude drie losse inserts zouden dus stilvallen en elk
+//      zelfherstel zou op 'Geen team' stranden.
+//   2. De drie inserts zijn nu één transactie. Faalde vroeger de tweede, dan
+//      bestond er een team ZONDER hoofdtrainer en was de gebruiker permanent
+//      buitengesloten van zijn eigen data, zonder dat iets dat detecteerde.
+//
+// `p_alleen_zonder_team: true` maakt de aanroep idempotent: bestaat er al een
+// lidmaatschap (twee gelijktijdige requests, of een dubbele formulierinzending),
+// dan geeft de functie dat team terug in plaats van een tweede aan te maken.
+// Vóór fase 2 deed de primaire sleutel teams.id = user.id dat werk; een
+// gen_random_uuid() botst nooit, dus die bescherming moest mee verhuizen.
+//
+// LET OP: het nieuwe team-id is NIET meer gelijk aan de user-id. De
+// fase-1-invariant gold alleen om fase 1 zonder gedragsverandering uit te
+// kunnen rollen; bestaande teams houden hun oude id.
+//
+// Gooit bij elke fout — zonder team is het account onbruikbaar en dat mag niet
+// stilzwijgend gebeuren.
+export async function maakEigenTeam(
+  supabase: SupabaseClient,
+  teamNaam: string,
+): Promise<string> {
+  const { data, error } = await supabase.rpc('create_team', {
+    p_naam: teamNaam,
+    p_alleen_zonder_team: true,
+  })
+  if (error) throw genericError('teamContext.maakEigenTeam', error)
+  if (typeof data !== 'string' || !data) {
+    throw genericError('teamContext.maakEigenTeam', { code: 'geen_team_id' })
+  }
+
+  await wisTeamNaamVlag(supabase)
+  return data
 }
 
 export type TeamLidmaatschap = {
@@ -179,6 +180,26 @@ function leesRol(waarde: unknown): TeamRol {
   return waarde === 'owner' ? 'owner' : 'assistent'
 }
 
+// Leest alle lidmaatschappen van één gebruiker.
+//
+// Expliciet op user_id filteren is niet optioneel: de RLS-policy op
+// team_members laat een hoofdtrainer ook de rijen van zijn assistenten zien.
+// Zonder dit filter zouden die rijen als eigen lidmaatschap meetellen.
+async function leesLidmaatschappen(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ rijen: (RuweMemberRij & { team_id: string })[]; error: unknown }> {
+  const { data, error } = await supabase
+    .from('team_members')
+    .select(MEMBER_KOLOMMEN)
+    .eq('user_id', userId)
+
+  const rijen = ((data ?? []) as unknown as RuweMemberRij[]).filter(
+    (rij): rij is RuweMemberRij & { team_id: string } => typeof rij.team_id === 'string',
+  )
+  return { rijen, error }
+}
+
 // Eén DB-roundtrip per request, gedeeld door layout, pages en elke server
 // action in diezelfde request. Zelfde cache()-patroon als getDict
 // (lib/i18n.ts). Buiten een React-render valt cache() terug op gewoon
@@ -188,22 +209,14 @@ const laadContext = cache(async (): Promise<ContextResultaat> => {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return LEEG
 
-  // Expliciet op user_id filteren is niet optioneel: de RLS-policy op
-  // team_members laat een hoofdtrainer ook de rijen van zijn assistenten zien.
-  // Zonder dit filter zouden die rijen als eigen lidmaatschap meetellen.
-  const { data: memberRows, error: memberError } = await supabase
-    .from('team_members')
-    .select(MEMBER_KOLOMMEN)
-    .eq('user_id', user.id)
+  const { rijen: eersteRonde, error: memberError } = await leesLidmaatschappen(supabase, user.id)
 
   if (memberError) {
     logError('teamContext.leden', memberError)
     return { ingelogd: true, ctx: null }
   }
 
-  let rijen = ((memberRows ?? []) as unknown as RuweMemberRij[]).filter(
-    (rij): rij is RuweMemberRij & { team_id: string } => typeof rij.team_id === 'string',
-  )
+  let rijen = eersteRonde
 
   // De teamnaam staat in settings onder de key 'team_name' — bewust geen
   // tweede kolom op `teams`, die zou meteen uit elkaar lopen met wat de
@@ -224,19 +237,45 @@ const laadContext = cache(async (): Promise<ContextResultaat> => {
   // gebeurt hooguit één keer per account. cache() zorgt dat het binnen één
   // request maar één keer draait; maakEigenTeam is idempotent voor het geval
   // twee requests tegelijk binnenkomen.
-  const teamNaamVlag = rijen.length === 0 ? teamNaamUitMetadata(user) : null
+  const teamNaamVlag = teamNaamUitMetadata(user)
   if (rijen.length === 0 && teamNaamVlag) {
     try {
-      await maakEigenTeam(supabase, user.id, teamNaamVlag)
+      const nieuwTeamId = await maakEigenTeam(supabase, teamNaamVlag)
+
+      // TWEEDE LEESRONDE, EN DIE IS NIET OPTIONEEL. De verleiding is om hier
+      // `[{ team_id: nieuwTeamId, rol: 'owner' }]` te construeren — dat
+      // scheelt een query. Maar dan verzint deze functie een rol in plaats van
+      // hem te lezen, en tussen de eerste lees en deze aanroep kan er in een
+      // ander tabblad een uitnodiging geaccepteerd zijn. Dat lidmaatschap zou
+      // dan óf ontbreken, óf (als create_team het had teruggegeven) als
+      // 'owner' worden bestempeld terwijl het een assistent-rij is. RLS zou
+      // elke echte schrijfactie nog tegenhouden, maar canEdit/assertIsOwner
+      // zouden één request lang openstaan — en dat maakt van de twee
+      // beschermingslagen (BR 45) er tijdelijk één.
+      const herlezen = await leesLidmaatschappen(supabase, user.id)
+      // Mislukt de herlees, dan valt hij terug op wat create_team net
+      // aantoonbaar heeft aangemaakt: die rij is er, met rol owner.
+      rijen = herlezen.error || herlezen.rijen.length === 0
+        ? [{ team_id: nieuwTeamId, rol: 'owner' }]
+        : herlezen.rijen
+      if (herlezen.error) logError('teamContext.ledenNaHerstel', herlezen.error)
+      // Vast alvast invullen; de settings-lees hieronder overschrijft hem met
+      // dezelfde waarde zodra create_team's rij zichtbaar is.
+      namen.set(nieuwTeamId, teamNaamVlag)
     } catch (fout) {
       // maakEigenTeam heeft al gelogd via genericError. Geen team = geen
       // context; de volgende request probeert het opnieuw.
       logError('teamContext.zelfherstel', fout)
       return { ingelogd: true, ctx: null }
     }
-    // Geen tweede leesronde: we weten precies welke rij er nu staat.
-    rijen = [{ team_id: user.id, rol: 'owner' }]
-    namen.set(user.id, teamNaamVlag)
+  } else if (rijen.length > 0 && teamNaamVlag) {
+    // Er is een lidmaatschap én er staat nog een vlag: die hoort hier niet
+    // meer te staan (het wissen in maakEigenTeam is een keer mislukt, of de
+    // gebruiker heeft hem zelf gezet — user-metadata is client-schrijfbaar).
+    // Wissen, zodat hij later nooit een leeg team kan terugtoveren wanneer dit
+    // account zijn laatste lidmaatschap verliest. Zie wisTeamNaamVlag voor de
+    // volledige onderbouwing van deze keuze.
+    await wisTeamNaamVlag(supabase)
   }
 
   if (rijen.length === 0) return { ingelogd: true, ctx: null }

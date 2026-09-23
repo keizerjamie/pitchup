@@ -23,9 +23,10 @@ interface Props {
   eventId: string
   players: Player[]
   initialStatuses: Record<string, AttendanceStatus>
+  canEdit: boolean
 }
 
-export default function TrainingAttendance({ eventId, players, initialStatuses }: Props) {
+export default function TrainingAttendance({ eventId, players, initialStatuses, canEdit }: Props) {
   const [statuses, setStatuses] = useState(initialStatuses)
   const [isPending, startTransition] = useTransition()
   const t = useDict()
@@ -98,15 +99,17 @@ export default function TrainingAttendance({ eventId, players, initialStatuses }
       {/* List header */}
       <div className="flex items-center justify-between">
         <span className="font-display text-[17px] font-bold text-ink">{t.event.attendance}</span>
-        <button
-          type="button"
-          onClick={handleMarkAll}
-          disabled={isPending}
-          className="h-9 px-3 rounded-lg text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors disabled:opacity-60"
-          style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)' }}
-        >
-          {t.event.markAllPresent}
-        </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={handleMarkAll}
+            disabled={isPending}
+            className="h-9 px-3 rounded-lg text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors disabled:opacity-60"
+            style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)' }}
+          >
+            {t.event.markAllPresent}
+          </button>
+        )}
       </div>
 
       {/* Player rows */}
@@ -128,12 +131,25 @@ export default function TrainingAttendance({ eventId, players, initialStatuses }
                 </span>
               </div>
               <div className="flex gap-2 flex-shrink-0">
-                <StatusButton
-                  active={s === 'present'} onClick={() => setStatus(player.id, 'present')} disabled={isPending}
-                  icon="check" label={t.event.presentStat} activeBg="var(--primary)" />
-                <StatusButton
-                  active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={isPending}
-                  icon="close" label={t.event.absentStat} activeBg="#dc2626" />
+                {canEdit ? (
+                  <>
+                    <StatusButton
+                      active={s === 'present'} onClick={() => setStatus(player.id, 'present')} disabled={isPending}
+                      icon="check" label={t.event.presentStat} activeBg="var(--primary)" />
+                    <StatusButton
+                      active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={isPending}
+                      icon="close" label={t.event.absentStat} activeBg="#dc2626" />
+                  </>
+                ) : (
+                  // Read-only: alleen de huidige status als badge, geen
+                  // klikbare knoppen zonder Aanwezigheid-recht.
+                  <span
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                    style={{ background: s === 'present' ? 'var(--primary)' : s === 'absent' ? '#dc2626' : 'var(--faint)' }}
+                  >
+                    {s === 'present' ? t.event.presentStat : s === 'absent' ? t.event.absentStat : t.event.unknownStat}
+                  </span>
+                )}
               </div>
             </div>
           )

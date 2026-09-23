@@ -24,6 +24,7 @@ function renderField(overrides: Partial<Parameters<typeof GatherTimeField>[0]> =
         onChange={onChange}
         isPending={overrides.isPending ?? false}
         error={'error' in overrides ? overrides.error ?? null : null}
+        canEdit={overrides.canEdit ?? true}
       />
     </DictProvider>,
   )
@@ -80,5 +81,17 @@ describe('GatherTimeField', () => {
     renderField({ isPending: true, value: '18:30' })
     expect(screen.getByRole('button', { name: nl.matchSquad.gatherTimeSave })).toBeDisabled()
     expect(screen.getByRole('button', { name: nl.matchSquad.gatherTimeClear })).toBeDisabled()
+  })
+
+  it('canEdit=false toont alleen de waarde, geen invoerveld of knoppen (brief §4.5)', () => {
+    renderField({ canEdit: false, value: '18:30' })
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: nl.matchSquad.gatherTimeSave })).not.toBeInTheDocument()
+    expect(screen.getByText('18:30')).toBeInTheDocument()
+  })
+
+  it('canEdit=false zonder waarde toont een streepje, niet leeg', () => {
+    renderField({ canEdit: false, value: null })
+    expect(screen.getByText('—')).toBeInTheDocument()
   })
 })

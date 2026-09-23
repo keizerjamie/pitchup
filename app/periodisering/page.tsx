@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
 import { actueleMetingen, ankerDatum, hermetingStand, computeCurrentSteps, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY, TrainingLogEntry, LastDoneEntry, CyclusCorrectie, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
 import { addDays, formatDate, formatDateLong, todayLocal } from '@/lib/utils'
@@ -20,6 +20,7 @@ const BAR_COLORS: Record<string, string> = {
 export default async function PeriodizationPage() {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
+  const magBewerken = canEdit(ctx, 'periodisering')
 
   // De correctie-rij loopt in dezelfde ronde mee als de metingen: één extra
   // rij, geen extra roundtrip. Beide team-gescoped.
@@ -205,6 +206,7 @@ export default async function PeriodizationPage() {
           huidigeWeek={cycleWeek}
           heeftCorrectie={correctie !== null}
           triggerClassName="text-xs font-bold text-white px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors active:scale-[0.97] flex-shrink-0"
+          canEdit={magBewerken}
         />
       </div>
       <div className="h-2 rounded-full overflow-hidden mt-3.5" style={{ background: 'rgba(255,255,255,.14)' }}>
@@ -326,7 +328,7 @@ export default async function PeriodizationPage() {
             </div>
           </div>
 
-          <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} />
+          <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} canEdit={magBewerken} />
         </div>
       ) : (
         <div className="max-w-lg w-full mx-auto flex flex-col gap-5">
@@ -341,10 +343,11 @@ export default async function PeriodizationPage() {
                 huidigeWeek={cycleWeek}
                 heeftCorrectie={correctie !== null}
                 triggerClassName="text-xs font-bold text-white px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-dark transition active:scale-[0.97]"
+                canEdit={magBewerken}
               />
             )}
           </div>
-          <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} />
+          <NulmetingManager metingen={metingen} peildatumExclusief={addDays(today, 1)} canEdit={magBewerken} />
         </div>
       )}
     </div>

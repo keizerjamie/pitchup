@@ -69,6 +69,11 @@ vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => {
     throw new Error(`__redirect__:${to}`)
   }),
+  // components/dashboard/JoinedBanner.tsx (validatiebevinding 3) leest
+  // ?joined=1 en router.replace() — hier altijd een lege/no-op variant,
+  // deze story gaat niet over de invite-bevestiging.
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined }),

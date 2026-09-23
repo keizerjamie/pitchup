@@ -55,7 +55,10 @@ import { nl } from '@/messages/nl'
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => { throw new Error(`__redirect__:${to}`) }),
   notFound: vi.fn(() => { throw new Error('__notFound__') }),
-  useRouter: vi.fn(() => ({ back: vi.fn(), push: vi.fn(), refresh: vi.fn() })),
+  useRouter: vi.fn(() => ({ back: vi.fn(), push: vi.fn(), refresh: vi.fn(), replace: vi.fn() })),
+  // components/dashboard/JoinedBanner.tsx (validatiebevinding 3) — deze
+  // story gaat niet over de invite-bevestiging.
+  useSearchParams: () => new URLSearchParams(),
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined }),

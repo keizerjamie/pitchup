@@ -1,6 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { updatePlayer, deletePlayer } from '@/app/actions/players'
 import BackButton from '@/components/BackButton'
 import DeleteButton from '@/components/DeleteButton'
@@ -16,6 +16,10 @@ export default async function EditPlayerPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
+  // De bewerkknop op het spelerprofiel is al verborgen zonder dit recht
+  // (brief §4.5); directe navigatie naar dit pad wordt hier hetzelfde
+  // afgehandeld — terug naar het profiel, geen formulier dat toch zou falen.
+  if (!canEdit(ctx, 'spelers')) redirect(`/players/${id}`)
 
   const { data: player } = await supabase.from('players').select('*').eq('id', id).eq('team_id', ctx.teamId).single()
   if (!player) notFound()

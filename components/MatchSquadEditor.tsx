@@ -39,6 +39,9 @@ interface Props {
   // readableAccentOnWhite). Optioneel, zodat bestaande aanroepen en
   // testharnassen ongewijzigd blijven werken.
   accentText?: string
+  // Wedstrijd-recht: bepaalt zowel de spelerselectie als de verzameltijd
+  // (die laatste valt sinds addendum §8.8 onder wedstrijd, niet agenda).
+  canEdit: boolean
 }
 
 export default function MatchSquadEditor({
@@ -59,6 +62,7 @@ export default function MatchSquadEditor({
   primaryColor,
   secondaryColor,
   accentText,
+  canEdit,
 }: Props) {
   const [selected, setSelected] = useState(() => new Set(initialSelectedIds))
   // Zuiver een zichtbaarheidsfilter (zie page.tsx): welke spelers voor dit
@@ -177,6 +181,7 @@ export default function MatchSquadEditor({
           onChange={saveGatherTime}
           isPending={gatherPending}
           error={gatherError}
+          canEdit={canEdit}
         />
 
         <div className="surface-card overflow-hidden">
@@ -201,19 +206,32 @@ export default function MatchSquadEditor({
                     <span className="ml-2 text-[11px] font-semibold text-faint">({t.matchSquad.notPresentLabel})</span>
                   ) : null}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => toggle(player.id)}
-                  disabled={isPending}
-                  aria-pressed={isSelected}
-                  aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
-                  className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
-                  style={isSelected
-                    ? { background: 'var(--primary)', color: '#fff' }
-                    : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
-                >
-                  <span className="ms text-[18px]">{isSelected ? 'check' : 'add'}</span>
-                </button>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => toggle(player.id)}
+                    disabled={isPending}
+                    aria-pressed={isSelected}
+                    aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
+                    className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
+                    style={isSelected
+                      ? { background: 'var(--primary)', color: '#fff' }
+                      : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
+                  >
+                    <span className="ms text-[18px]">{isSelected ? 'check' : 'add'}</span>
+                  </button>
+                ) : (
+                  // Read-only: alleen de huidige selectiestatus, geen knop.
+                  <span
+                    aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
+                    className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
+                    style={isSelected
+                      ? { background: 'var(--primary)', color: '#fff' }
+                      : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
+                  >
+                    <span className="ms text-[18px]">{isSelected ? 'check' : 'remove'}</span>
+                  </span>
+                )}
               </div>
             )
           })}

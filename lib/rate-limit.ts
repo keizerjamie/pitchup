@@ -61,6 +61,27 @@ export const SIGN_UP_IP_POLICY: RateLimitPolicy = {
   blockMs: 60 * MINUTE,
 }
 
+// Uitnodigingslink bekijken (peek_team_invite), per IP. Een token van 32
+// random bytes is niet te raden, maar zonder teller kan één bron wel
+// ongelimiteerd blijven proberen en ondertussen de database belasten. Ruim
+// genoeg voor normaal gebruik: iemand opent de link, registreert en opent hem
+// opnieuw — een handvol aanroepen per persoon. Een gedeeld IP (club, school,
+// NAT) waar een hele staf tegelijk wordt uitgenodigd past hier ook in.
+export const INVITE_PEEK_IP_POLICY: RateLimitPolicy = {
+  limit: 60,
+  windowMs: 15 * MINUTE,
+  blockMs: 15 * MINUTE,
+}
+
+// Uitnodiging verzilveren (accept_team_invite), per IP. Strenger dan peek:
+// accepteren is een eenmalige handeling per persoon, dus meer dan een paar
+// pogingen per kwartier is geen normaal gebruik.
+export const INVITE_ACCEPT_IP_POLICY: RateLimitPolicy = {
+  limit: 20,
+  windowMs: 15 * MINUTE,
+  blockMs: 15 * MINUTE,
+}
+
 // Wachtwoord-herstel: 3 mails per uur per e-mail+IP; verzoeken daarna worden een
 // uur lang genegeerd.
 export const PASSWORD_RESET_POLICY: RateLimitPolicy = {

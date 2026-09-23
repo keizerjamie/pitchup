@@ -54,10 +54,10 @@ function form(overrides: Partial<PlayerForm> = {}): PlayerForm {
 // De formatiepositie op x=50,y=48 in het 4-3-3 (lib/types.ts) heeft
 // position_label 'CM', wat via POSITION_LABEL_MAP naar 'Centrale
 // middenvelder' vertaalt — dezelfde positie als onze testspelers.
-function renderBuilder(players: Player[], playerForm: Record<string, PlayerForm>) {
+function renderBuilder(players: Player[], playerForm: Record<string, PlayerForm>, canEdit?: boolean) {
   return render(
     <DictProvider dict={nl}>
-      <LineupBuilder eventId="event-1" players={players} playerForm={playerForm} />
+      <LineupBuilder eventId="event-1" players={players} playerForm={playerForm} canEdit={canEdit} />
     </DictProvider>,
   )
 }
@@ -134,5 +134,27 @@ describe('LineupBuilder — spelersvorm in de popup', () => {
     expect(finnIdx).toBeGreaterThanOrEqual(0)
     expect(evaIdx).toBeGreaterThanOrEqual(0)
     expect(finnIdx).toBeLessThan(evaIdx)
+  })
+})
+
+describe('canEdit (assistent-trainers fase 2, brief §4.5)', () => {
+  it('canEdit=false verbergt "Automatisch opstellen", de opslaan-knop, en een tik op een slot doet niets', () => {
+    const players = [player({ id: 'p1', name: 'Eva Fontein' })]
+    const playerForm = { p1: form() }
+    renderBuilder(players, playerForm, false)
+
+    expect(screen.queryByText(nl.lineup.autoLineup)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: nl.lineup.save })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('CM'))
+    // Geen popup: geen "Eva" als selecteerbare speler in een lijst.
+    expect(screen.queryByText('Eva')).not.toBeInTheDocument()
+  })
+
+  it('canEdit=true (default) toont de auto-opstelknop en de opslaan-knop gewoon', () => {
+    const players = [player({ id: 'p1', name: 'Eva Fontein' })]
+    renderBuilder(players, { p1: form() })
+    expect(screen.getByText(nl.lineup.autoLineup)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: nl.lineup.save })).toBeInTheDocument()
   })
 })

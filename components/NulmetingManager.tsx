@@ -18,6 +18,11 @@ interface Props {
   // component en de serverpagina's kunnen nooit uit de pas lopen.
   metingen: CategorieMeting[]
   peildatumExclusief: string
+  // Periodisering-recht (brief §4.5). Default true, zelfde reden als
+  // components/LineupBuilder.tsx: geen bestaande aanroep breken. De
+  // geschiedenis blijft altijd leesbaar; alleen meten/bewerken/verwijderen
+  // verdwijnen.
+  canEdit?: boolean
 }
 
 // Vijf onafhankelijke onderdeelblokken (AC 1-2): elk onderdeel heeft zijn
@@ -25,7 +30,7 @@ interface Props {
 // rij met de HOOGSTE datum (over ALLE metingen, ook toekomstige — brief §6)
 // is bewerkbaar/verwijderbaar; dat is een client-side spiegeling van de
 // server-guard assertNieuwsteMeting in app/actions/periodisering.ts.
-export default function NulmetingManager({ metingen, peildatumExclusief }: Props) {
+export default function NulmetingManager({ metingen, peildatumExclusief, canEdit = true }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [openCategorie, setOpenCategorie] = useState<string | null>(null)
@@ -180,13 +185,15 @@ export default function NulmetingManager({ metingen, peildatumExclusief }: Props
                   </p>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => openNew(cat.key)}
-                className="text-xs font-bold text-white px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-dark transition active:scale-[0.97] flex-shrink-0"
-              >
-                {actueleMeting ? t.periodization.remeasureCta : t.periodization.measureCta}
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => openNew(cat.key)}
+                  className="text-xs font-bold text-white px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-dark transition active:scale-[0.97] flex-shrink-0"
+                >
+                  {actueleMeting ? t.periodization.remeasureCta : t.periodization.measureCta}
+                </button>
+              )}
             </div>
 
             {geschiedenis.length > 0 && (
@@ -221,7 +228,7 @@ export default function NulmetingManager({ metingen, peildatumExclusief }: Props
                               <div className="text-[12px] text-faint italic mt-0.5 truncate">{rij.notes}</div>
                             )}
                           </div>
-                          {i === 0 && (
+                          {canEdit && i === 0 && (
                             <div className="flex items-center gap-2 flex-shrink-0">
                               <button
                                 type="button"

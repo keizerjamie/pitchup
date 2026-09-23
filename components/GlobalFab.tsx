@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { useDict } from '@/lib/i18n-context'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
+import { canEditClient, useTeamContextClient } from '@/lib/team-context-client'
 
 // Exit is snappier than the springy entrance — asymmetric timing.
 const CLOSE_MS = 200
@@ -43,6 +44,7 @@ const emptySubscribe = () => () => {}
 
 export default function GlobalFab() {
   const t = useDict()
+  const teamCtx = useTeamContextClient()
   const [open, setOpen] = useState(false)
   const [visible, setVisible] = useState(false)
   const reduceMotion = useReducedMotion()
@@ -67,13 +69,18 @@ export default function GlobalFab() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
 
-  const items = [
+  // Elk item vraagt het onderdeel dat de actie erachter ook zelf vraagt
+  // (brief §4.5): agenda voor de drie event-aanmaakknoppen, spelers voor
+  // "Speler toevoegen". Geen recht op dat onderdeel -> het item verdwijnt
+  // hier volledig, i.p.v. een knop te tonen die pas bij het klikken faalt.
+  const alleItems = [
     {
       label: t.event.createTraining,
       href: '/events/new?type=training',
       icon: <TrainingIcon />,
       color: '#16a34a',
       bg: 'rgba(22,163,74,0.12)',
+      onderdeel: 'agenda' as const,
     },
     {
       label: t.event.createMatch,
@@ -81,6 +88,7 @@ export default function GlobalFab() {
       icon: <MatchIcon />,
       color: '#2563eb',
       bg: 'rgba(37,99,235,0.12)',
+      onderdeel: 'agenda' as const,
     },
     {
       label: t.event.bulk.fabLabel,
@@ -88,6 +96,7 @@ export default function GlobalFab() {
       icon: <MatchIcon />,
       color: '#2563eb',
       bg: 'rgba(37,99,235,0.12)',
+      onderdeel: 'agenda' as const,
     },
     {
       label: t.players.add,
@@ -95,8 +104,15 @@ export default function GlobalFab() {
       icon: <PlayerIcon />,
       color: '#0891b2',
       bg: 'rgba(8,145,178,0.12)',
+      onderdeel: 'spelers' as const,
     },
   ]
+  const items = alleItems.filter((item) => canEditClient(teamCtx, item.onderdeel))
+
+  // Blijft er niets over, dan render de FAB helemaal niet — geen knop die een
+  // leeg menu opent (brief §4.5). Ná alle hooks hierboven, zodat de
+  // hook-volgorde niet per render kan verschillen.
+  if (items.length === 0) return null
 
   const overlay = open && mounted ? createPortal(
     <>

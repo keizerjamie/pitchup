@@ -30,6 +30,8 @@ interface Props {
   // (validator-bevinding, zie PlayerStatsTab.tsx).
   statsError: boolean
   t: Dict
+  canEditSpelers: boolean
+  canEditAanwezigheid: boolean
 }
 
 const TAB_LABEL_KEY: Record<ProfielTab, keyof Pick<Dict['players'], 'profileTabInfo' | 'profileTabAttendance' | 'profileTabStats'>> = {
@@ -40,7 +42,7 @@ const TAB_LABEL_KEY: Record<ProfielTab, keyof Pick<Dict['players'], 'profileTabI
 
 // Client-parent: houdt de actieve tab bij. Bewust GEEN URL-sync bij het
 // wisselen — `?tab=` is uitsluitend de startwaarde (amendement 3 / brief §4.3).
-export default function PlayerProfile({ player, initialTab, events, periods, defaultStatus, stats, statsError, t }: Props) {
+export default function PlayerProfile({ player, initialTab, events, periods, defaultStatus, stats, statsError, t, canEditSpelers, canEditAanwezigheid }: Props) {
   const [tab, setTab] = useState<ProfielTab>(initialTab)
 
   const excludedHint = player.type === 'guest' || !player.active
@@ -50,7 +52,13 @@ export default function PlayerProfile({ player, initialTab, events, periods, def
       <PlayerProfileHeader player={player} t={t} />
 
       <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-5 lg:py-8 w-full flex flex-col gap-4">
-        <PlayerProfileActions player={player} t={t} onSignOff={() => setTab('aanwezigheid')} />
+        <PlayerProfileActions
+          player={player}
+          t={t}
+          onSignOff={() => setTab('aanwezigheid')}
+          canEditSpelers={canEditSpelers}
+          canEditAanwezigheid={canEditAanwezigheid}
+        />
 
         <div
           role="group"
@@ -84,6 +92,7 @@ export default function PlayerProfile({ player, initialTab, events, periods, def
               events={events}
               periods={periods}
               defaultStatus={defaultStatus}
+              canEdit={canEditAanwezigheid}
             />
           </div>
         )}

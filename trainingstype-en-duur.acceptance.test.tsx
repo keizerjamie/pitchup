@@ -7,7 +7,8 @@
 // fixtures, eigen aanpak waar dat sterker bewijst).
 //
 // ── Aanpak ──
-// UI-criteria: de ECHTE `TrainingPlanEditor` / `app/events/new/page.tsx`
+// UI-criteria: de ECHTE `TrainingPlanEditor` / `components/NewEventForm.tsx`
+// (losgetrokken uit app/events/new/page.tsx, zie validatiebevinding 2)
 // gerenderd tegen een gemockte Supabase-TABEL-ENGINE die `.eq/.gt/.lt/.in/
 // .order/.limit` ECHT toepast én insert/update ECHT muteert (patroon van
 // inzichten.acceptance.test.tsx / dashboard-vorm.acceptance.test.tsx,
@@ -90,7 +91,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createEvent, updateTrainingstype } from '@/app/actions/events'
 import { addOefeningToTraining, updateKoppeling, kopieerTrainingsplan } from '@/app/actions/training-plan'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
-import NewEventPage from '@/app/events/new/page'
+import NewEventForm from '@/components/NewEventForm'
 
 // ── team_members: de teamcontext van élke page en server action ──
 // lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
@@ -395,7 +396,7 @@ async function advanceDebounce() {
 
 describe('A1 — aanmaakformulier: precies twee opties, VCT default, afwezig bij wedstrijd', () => {
   function renderNew() {
-    return render(<DictProvider dict={nl}><NewEventPage /></DictProvider>)
+    return render(<DictProvider dict={nl}><NewEventForm /></DictProvider>)
   }
 
   it('toont VCT en Teamtactisch, VCT vooraf actief (default)', () => {

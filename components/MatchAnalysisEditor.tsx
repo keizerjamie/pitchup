@@ -29,6 +29,9 @@ interface Props {
   initialGoalsAgainst: number | null
   initialRatings: MatchRating[]
   initialEvents: MatchEvent[]
+  // Wedstrijd-recht (brief §4.5). Default true, zelfde reden als
+  // components/LineupBuilder.tsx: geen bestaande aanroep breken.
+  canEdit?: boolean
 }
 
 // Colour tokens per event kind. Cards (yellow/red) render as a coloured chip
@@ -60,6 +63,7 @@ function KindIndicator({ kind }: { kind: MatchEventKind }) {
 export default function MatchAnalysisEditor({
   eventId, presentPlayers, teamName, opponent, homeAway,
   initialGoalsFor, initialGoalsAgainst, initialRatings, initialEvents,
+  canEdit = true,
 }: Props) {
   const t = useDict()
   const router = useRouter()
@@ -195,10 +199,11 @@ export default function MatchAnalysisEditor({
       <input
         type="number" min={0} max={99} inputMode="numeric"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={handleSaveResult}
+        onChange={canEdit ? (e) => onChange(e.target.value) : undefined}
+        onBlur={canEdit ? handleSaveResult : undefined}
         disabled={isPending}
-        className="w-full text-center px-3 py-2.5 rounded-xl bg-surface-sunken text-ink font-display text-[22px] font-bold focus:outline-none disabled:opacity-60"
+        readOnly={!canEdit}
+        className="w-full text-center px-3 py-2.5 rounded-xl bg-surface-sunken text-ink font-display text-[22px] font-bold focus:outline-none disabled:opacity-60 read-only:opacity-70"
         style={{ border: '1px solid var(--border-soft)' }}
       />
     </label>
@@ -249,43 +254,55 @@ export default function MatchAnalysisEditor({
                   </span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => stepRating(player.id, -1)}
-                    disabled={rating !== null && rating <= 1}
-                    aria-label="−"
-                    className="w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
-                    style={{ background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }}
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number" min={1} max={10} inputMode="numeric"
-                    value={rating ?? ''}
-                    placeholder="–"
-                    onChange={(e) => onRatingInput(player.id, e.target.value)}
-                    aria-label={player.name}
-                    className="w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken focus:outline-none placeholder:text-faint"
-                    style={{ border: '1px solid var(--border-soft)' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => stepRating(player.id, 1)}
-                    disabled={rating === 10}
-                    aria-label="+"
-                    className="w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
-                    style={{ background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }}
-                  >
-                    +
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRating(player.id, null)}
-                    disabled={rating === null}
-                    className="h-9 px-2 rounded-lg text-[12px] font-bold text-muted hover:text-ink transition-colors disabled:opacity-30"
-                  >
-                    {t.analysis.clearRating}
-                  </button>
+                  {canEdit ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => stepRating(player.id, -1)}
+                        disabled={rating !== null && rating <= 1}
+                        aria-label="−"
+                        className="w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
+                        style={{ background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }}
+                      >
+                        −
+                      </button>
+                      <input
+                        type="number" min={1} max={10} inputMode="numeric"
+                        value={rating ?? ''}
+                        placeholder="–"
+                        onChange={(e) => onRatingInput(player.id, e.target.value)}
+                        aria-label={player.name}
+                        className="w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken focus:outline-none placeholder:text-faint"
+                        style={{ border: '1px solid var(--border-soft)' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => stepRating(player.id, 1)}
+                        disabled={rating === 10}
+                        aria-label="+"
+                        className="w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
+                        style={{ background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRating(player.id, null)}
+                        disabled={rating === null}
+                        className="h-9 px-2 rounded-lg text-[12px] font-bold text-muted hover:text-ink transition-colors disabled:opacity-30"
+                      >
+                        {t.analysis.clearRating}
+                      </button>
+                    </>
+                  ) : (
+                    <span
+                      aria-label={player.name}
+                      className="w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken flex items-center justify-center"
+                      style={{ border: '1px solid var(--border-soft)' }}
+                    >
+                      {rating ?? '–'}
+                    </span>
+                  )}
                 </div>
               </div>
             )
@@ -321,21 +338,24 @@ export default function MatchAnalysisEditor({
                 {ev.minute != null && (
                   <span className="text-[12.5px] font-bold text-faint tabular-nums flex-shrink-0">{ev.minute}′</span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleDeleteEvent(ev.id)}
-                  disabled={isPending}
-                  aria-label={t.analysis.delete}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:text-ink transition-colors disabled:opacity-40"
-                >
-                  <span className="ms text-[20px]">close</span>
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteEvent(ev.id)}
+                    disabled={isPending}
+                    aria-label={t.analysis.delete}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:text-ink transition-colors disabled:opacity-40"
+                  >
+                    <span className="ms text-[20px]">close</span>
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
 
-        {/* Add-event form */}
+        {/* Add-event form — alleen met Wedstrijd-recht */}
+        {canEdit && (
         <div className="surface-card p-4 flex flex-col gap-3">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-faint">{t.analysis.addEvent}</span>
 
@@ -397,6 +417,7 @@ export default function MatchAnalysisEditor({
             </button>
           </div>
         </div>
+        )}
       </section>
     </div>
   )

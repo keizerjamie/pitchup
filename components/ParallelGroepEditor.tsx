@@ -49,6 +49,9 @@ interface Props {
   leden: TrainingOefeningMetBezetting[]
   players: Player[]
   presentPlayerIds: string[]
+  // Training-recht (brief §4.5). Default true, zelfde reden als
+  // components/TeamIndelingEditor.tsx.
+  canEdit?: boolean
 }
 
 // Platte verdeling per lid, defensief gelezen (parallel_spelers is optioneel
@@ -61,7 +64,7 @@ function buildAssignments(leden: TrainingOefeningMetBezetting[]): Record<string,
   return out
 }
 
-export default function ParallelGroepEditor({ eventId, groepId, leden, players, presentPlayerIds }: Props) {
+export default function ParallelGroepEditor({ eventId, groepId, leden, players, presentPlayerIds, canEdit = true }: Props) {
   const t = useDict()
   const [, startTransition] = useTransition()
   const [assignments, setAssignments] = useState<Record<string, string[]>>(() => buildAssignments(leden))
@@ -314,7 +317,7 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
                       <span className="text-faint"> · {t.parallelGroep.geenEis}</span>
                     )}
                   </span>
-                  {selectedPlayerId !== null && !selectedAlreadyHere && (
+                  {canEdit && selectedPlayerId !== null && !selectedAlreadyHere && (
                     <button
                       type="button"
                       onClick={() => assignToMember(selectedPlayerId, lid.id)}
@@ -361,30 +364,36 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
                             : undefined
                         }
                       >
-                        <button
-                          type="button"
-                          onClick={() => player && handleChipClick(id)}
-                          onPointerDown={(e) => player && handleChipPointerDown(id, lid.id, e)}
-                          onPointerMove={handleChipPointerMove}
-                          onPointerUp={handleChipPointerUp}
-                          onPointerCancel={handleChipPointerCancel}
-                          disabled={!player}
-                          style={{ touchAction: 'none' }}
-                          className="truncate max-w-[110px]"
-                        >
-                          {displayName}
-                        </button>
+                        {canEdit ? (
+                          <button
+                            type="button"
+                            onClick={() => player && handleChipClick(id)}
+                            onPointerDown={(e) => player && handleChipPointerDown(id, lid.id, e)}
+                            onPointerMove={handleChipPointerMove}
+                            onPointerUp={handleChipPointerUp}
+                            onPointerCancel={handleChipPointerCancel}
+                            disabled={!player}
+                            style={{ touchAction: 'none' }}
+                            className="truncate max-w-[110px]"
+                          >
+                            {displayName}
+                          </button>
+                        ) : (
+                          <span className="truncate max-w-[110px]">{displayName}</span>
+                        )}
                         {absent && (
                           <span className="text-[10px] font-semibold text-panel-amber-ink">{t.parallelGroep.absentWarning}</span>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => removeFromGroup(id)}
-                          aria-label={`${t.parallelGroep.remove}: ${displayName}`}
-                          className="w-4 h-4 flex items-center justify-center text-faint hover:text-panel-red-ink flex-shrink-0"
-                        >
-                          ×
-                        </button>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => removeFromGroup(id)}
+                            aria-label={`${t.parallelGroep.remove}: ${displayName}`}
+                            className="w-4 h-4 flex items-center justify-center text-faint hover:text-panel-red-ink flex-shrink-0"
+                          >
+                            ×
+                          </button>
+                        )}
                       </span>
                     )
                   })}
@@ -409,6 +418,19 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
             <div className="flex flex-wrap gap-1.5">
               {pool.map((p) => {
                 const draggingThis = drag && drag.dragging && drag.playerId === p.id ? drag : null
+                const chipClassName = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                  selectedPlayerId === p.id
+                    ? 'bg-panel-orange text-panel-orange-ink border border-panel-orange-edge'
+                    : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
+                } ${draggingThis ? 'ring-2 ring-warning shadow-lg' : ''}`
+                if (!canEdit) {
+                  return (
+                    <span key={p.id} className={chipClassName}>
+                      <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
+                      {p.name.split(' ')[0]}
+                    </span>
+                  )
+                }
                 return (
                   <button
                     key={p.id}
@@ -424,11 +446,7 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
                         ? { transform: `translate(${draggingThis.x - draggingThis.startX}px, ${draggingThis.y - draggingThis.startY}px)`, position: 'relative', zIndex: 30 }
                         : undefined),
                     }}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                      selectedPlayerId === p.id
-                        ? 'bg-panel-orange text-panel-orange-ink border border-panel-orange-edge'
-                        : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
-                    } ${draggingThis ? 'ring-2 ring-warning shadow-lg' : ''}`}
+                    className={chipClassName}
                   >
                     <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
                     {p.name.split(' ')[0]}

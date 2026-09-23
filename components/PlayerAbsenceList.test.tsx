@@ -66,6 +66,7 @@ function listElement(overrides: Partial<Parameters<typeof PlayerAbsenceList>[0]>
         events={overrides.events ?? []}
         periods={overrides.periods ?? []}
         defaultStatus={overrides.defaultStatus ?? 'present'}
+        canEdit={overrides.canEdit ?? true}
       />
     </DictProvider>
   )

@@ -31,6 +31,12 @@ import {
 } from '@/lib/team-context'
 import { ONDERDELEN } from '@/lib/team-rechten'
 
+// Het team-id dat create_team teruggeeft. Bewust NIET de user-id: de
+// fase-1-invariant teams.id = user.id gold alleen om fase 1 zonder
+// gedragsverandering uit te kunnen rollen; nieuwe teams krijgen sinds fase 2
+// een eigen uuid.
+const NIEUW_TEAM_ID = '66666666-6666-4666-8666-666666666666'
+
 type MemberRij = Record<string, unknown>
 type SettingsRij = { team_id: string; value: string }
 
@@ -43,16 +49,28 @@ function makeSupabase(opts: {
   memberError?: unknown
   settings?: SettingsRij[]
   settingsError?: unknown
-  // Fout op precies één insert-doel, om het faalpad van maakEigenTeam te
-  // kunnen aansturen.
+  // Fout op precies één insert-doel, om faalpaden te kunnen aansturen.
   insertError?: { table: string; error: { code?: string; message: string } }
+  // Uitkomst van de RPC create_team. Sinds fase 2 maakt maakEigenTeam het team
+  // daarmee (supabase/team-aanmaken-rpc.sql) in plaats van met drie losse
+  // inserts — die weg verdwijnt zodra M5b de bootstrap-policies dropt.
+  createTeam?: { data: unknown; error?: { code?: string; message: string } | null }
+  updateUserError?: { code?: string; message: string }
+  // Wat de TWEEDE lees van team_members teruggeeft (de herlees ná het
+  // zelfherstel). Zo is te simuleren dat er tussen de eerste lees en de
+  // RPC-aanroep in een ander tabblad een uitnodiging is geaccepteerd.
+  membersNaHerstel?: MemberRij[]
+  membersNaHerstelError?: unknown
 } = {}) {
   const user = opts.user === undefined ? { id: 'user-1' } : opts.user
   const calls = {
     filters: [] as { table: string; op: string; col: string; val: unknown }[],
     inserts: [] as { table: string; payload: Record<string, unknown> }[],
     updateUser: [] as Record<string, unknown>[],
+    rpc: [] as { fn: string; args: Record<string, unknown> | undefined }[],
   }
+
+  let memberLeesTeller = 0
 
   function chain(table: string) {
     const c: Record<string, unknown> = {}
@@ -68,9 +86,16 @@ function makeSupabase(opts: {
       const fout = opts.insertError?.table === table ? opts.insertError.error : null
       return { then: (res: (v: unknown) => unknown) => res({ data: null, error: fout }) }
     }
-    const result = table === 'team_members'
-      ? { data: opts.members ?? [], error: opts.memberError ?? null }
-      : { data: opts.settings ?? [], error: opts.settingsError ?? null }
+    let result: { data: unknown; error: unknown }
+    if (table === 'team_members') {
+      const tweedeLees = memberLeesTeller > 0
+      memberLeesTeller += 1
+      result = tweedeLees && (opts.membersNaHerstel || opts.membersNaHerstelError)
+        ? { data: opts.membersNaHerstel ?? [], error: opts.membersNaHerstelError ?? null }
+        : { data: opts.members ?? [], error: opts.memberError ?? null }
+    } else {
+      result = { data: opts.settings ?? [], error: opts.settingsError ?? null }
+    }
     ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(result)
     return c
   }
@@ -79,11 +104,16 @@ function makeSupabase(opts: {
     calls,
     supabase: {
       from: (t: string) => chain(t),
+      rpc: async (fn: string, args?: Record<string, unknown>) => {
+        calls.rpc.push({ fn, args })
+        const uitkomst = opts.createTeam ?? { data: NIEUW_TEAM_ID }
+        return { data: uitkomst.data, error: uitkomst.error ?? null }
+      },
       auth: {
         getUser: async () => ({ data: { user } }),
         updateUser: async (attrs: Record<string, unknown>) => {
           calls.updateUser.push(attrs)
-          return { data: { user }, error: null }
+          return { data: { user }, error: opts.updateUserError ?? null }
         },
       },
     },
@@ -427,24 +457,34 @@ describe('zelfherstel bij nul lidmaatschappen', () => {
     use(m)
 
     const ctx = (await getTeamContext())!
-    expect(ctx.teamId).toBe('user-1')
+    expect(ctx.teamId).toBe(NIEUW_TEAM_ID)
     expect(ctx.rol).toBe('owner')
     expect(ctx.teams).toHaveLength(1)
     expect(ctx.teams[0].naam).toBe('JO13-1')
   })
 
-  it('schrijft teams, de owner-rij en de teamnaam — in die volgorde', async () => {
+  // SINDS FASE 2 via de RPC create_team en niet meer met drie losse inserts.
+  // Dwingend, niet cosmetisch: M5b dropt de bootstrap-INSERT-policies op teams
+  // en team_members ná de deploy van fase 2, dus vanaf dat moment kan een
+  // gewone client die rijen helemaal niet meer schrijven.
+  it('maakt het team via de RPC create_team, met idempotentie-vlag, en raakt geen tabel rechtstreeks aan', async () => {
     const m = makeSupabase({ user: metVlag('JO13-1'), members: [] })
     use(m)
 
     await getTeamContext()
 
-    expect(m.calls.inserts.map((i) => i.table)).toEqual(['teams', 'team_members', 'settings'])
-    expect(m.calls.inserts[0].payload).toEqual({ id: 'user-1' })
-    expect(m.calls.inserts[1].payload).toMatchObject({
-      team_id: 'user-1', user_id: 'user-1', rol: 'owner', mag_spelers_bewerken: true,
-    })
-    expect(m.calls.inserts[2].payload).toEqual({ team_id: 'user-1', key: 'team_name', value: 'JO13-1' })
+    expect(m.calls.rpc).toEqual([
+      { fn: 'create_team', args: { p_naam: 'JO13-1', p_alleen_zonder_team: true } },
+    ])
+    expect(m.calls.inserts).toHaveLength(0)
+  })
+
+  it('geeft het nieuwe team een eigen uuid — de fase-1-invariant teams.id = user.id geldt niet meer', async () => {
+    const m = makeSupabase({ user: metVlag('JO13-1'), members: [] })
+    use(m)
+
+    const ctx = (await getTeamContext())!
+    expect(ctx.teamId).not.toBe(ctx.userId)
   })
 
   it('wist de metadata-vlag daarna, zodat hij later geen team kan terugtoveren', async () => {
@@ -464,7 +504,7 @@ describe('zelfherstel bij nul lidmaatschappen', () => {
     use(m)
 
     expect(await getTeamContext()).toBeNull()
-    expect(m.calls.inserts).toHaveLength(0)
+    expect(m.calls.rpc).toHaveLength(0)
     expect(m.calls.updateUser).toHaveLength(0)
   })
 
@@ -477,7 +517,7 @@ describe('zelfherstel bij nul lidmaatschappen', () => {
       use(m)
 
       expect(await getTeamContext(), String(waarde)).toBeNull()
-      expect(m.calls.inserts, String(waarde)).toHaveLength(0)
+      expect(m.calls.rpc, String(waarde)).toHaveLength(0)
     }
   })
 
@@ -491,7 +531,7 @@ describe('zelfherstel bij nul lidmaatschappen', () => {
 
     const ctx = (await getTeamContext())!
     expect(ctx.teamId).toBe('t-bestaand')
-    expect(m.calls.inserts).toHaveLength(0)
+    expect(m.calls.rpc).toHaveLength(0)
   })
 
   it('knipt een te lange naam uit de metadata af op 80 tekens — die waarde is door de gebruiker zelf te zetten', async () => {
@@ -500,32 +540,173 @@ describe('zelfherstel bij nul lidmaatschappen', () => {
 
     const ctx = (await getTeamContext())!
     expect(ctx.teams[0].naam).toHaveLength(80)
+    expect((m.calls.rpc[0].args as { p_naam: string }).p_naam).toHaveLength(80)
   })
 
-  it('geeft geen context en logt alleen een contextlabel als de teams-rij niet geschreven kan worden', async () => {
+  it('geeft geen context en logt alleen een contextlabel als create_team faalt', async () => {
     const m = makeSupabase({
       user: metVlag('JO13-1'),
       members: [],
-      insertError: { table: 'teams', error: { code: '42501', message: 'permission denied for table teams' } },
+      createTeam: { data: null, error: { code: '42501', message: 'permission denied for table teams' } },
     })
     use(m)
 
     expect(await getTeamContext()).toBeNull()
     const gelogd = consoleError.mock.calls.map((args: unknown[]) => args.join(' ')).join('\n')
-    expect(gelogd).toContain('teamContext.maakEigenTeam.team')
+    expect(gelogd).toContain('teamContext.maakEigenTeam')
     expect(gelogd).not.toContain('permission denied')
   })
 
-  it('behandelt een al bestaande rij (23505) als "stond er al" — twee gelijktijdige requests botsen niet', async () => {
+  it('geeft geen context als create_team geen team-id teruggeeft', async () => {
+    const m = makeSupabase({ user: metVlag('JO13-1'), members: [], createTeam: { data: null } })
+    use(m)
+
+    expect(await getTeamContext()).toBeNull()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// De vlag opruimen zodra er WEL een lidmaatschap is.
+//
+// Dit is de gekozen oplossing voor het fase-2/3-aandachtspunt uit
+// validatieronde 2 (punt 5): het wissen in maakEigenTeam kan mislukken, en een
+// achtergebleven vlag zou vanaf fase 2 een leeg team kunnen terugtoveren zodra
+// iemand via removeMember zijn laatste lidmaatschap verliest. Door hem te
+// wissen zolang er een lidmaatschap ís, convergeert de vlag naar weg: elke
+// request probeert het opnieuw.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('achtergebleven metadata-vlag opruimen', () => {
+  it('wist een vlag die nog naast een bestaand lidmaatschap staat', async () => {
     const m = makeSupabase({
-      user: metVlag('JO13-1'),
-      members: [],
-      insertError: { table: 'teams', error: { code: '23505', message: 'duplicate key value' } },
+      user: metVlag('Ooit Bedoeld'),
+      members: [ownerRij('t-1')],
+      settings: [{ team_id: 't-1', value: 'Bestaand' }],
+    })
+    use(m)
+
+    await getTeamContext()
+
+    expect(m.calls.updateUser).toEqual([{ data: { [TEAM_NAAM_METADATA_KEY]: null } }])
+    // Wissen is géén team aanmaken.
+    expect(m.calls.rpc).toHaveLength(0)
+  })
+
+  it('raakt de metadata niet aan als er geen vlag staat — dat is het normale geval', async () => {
+    const m = makeSupabase({
+      user: { id: 'user-1' },
+      members: [ownerRij('t-1')],
+      settings: [{ team_id: 't-1', value: 'Bestaand' }],
+    })
+    use(m)
+
+    await getTeamContext()
+
+    expect(m.calls.updateUser).toHaveLength(0)
+  })
+
+  it('levert gewoon een context op als het wissen mislukt, en logt alleen een contextlabel', async () => {
+    const m = makeSupabase({
+      user: metVlag('Ooit Bedoeld'),
+      members: [ownerRij('t-1')],
+      settings: [{ team_id: 't-1', value: 'Bestaand' }],
+      updateUserError: { code: 'over_request_rate_limit', message: 'too many requests' },
     })
     use(m)
 
     const ctx = (await getTeamContext())!
-    expect(ctx.teamId).toBe('user-1')
-    expect(consoleError).not.toHaveBeenCalled()
+    expect(ctx.teamId).toBe('t-1')
+    const gelogd = consoleError.mock.calls.map((args: unknown[]) => args.join(' ')).join('\n')
+    expect(gelogd).toContain('teamContext.vlagWissen')
+    expect(gelogd).not.toContain('too many requests')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Herlezen ná het zelfherstel (validatiepunt 2).
+//
+// De verleiding is om na create_team `[{ team_id, rol: 'owner' }]` te
+// construeren — dat scheelt een query. Maar dan VERZINT deze functie een rol
+// in plaats van hem te lezen. Tussen de eerste lees en de RPC-aanroep kan in
+// een ander tabblad een uitnodiging geaccepteerd zijn; dat assistent-
+// lidmaatschap zou dan als 'owner' met ALLE_RECHTEN in de context belanden.
+// RLS en de RPC's houden elke echte schrijfactie nog tegen, maar canEdit en
+// assertIsOwner zouden één request lang openstaan — en dat maakt van de twee
+// beschermingslagen er tijdelijk één.
+// ═══════════════════════════════════════════════════════════════════════
+
+describe('zelfherstel — herlezen in plaats van de rij verzinnen', () => {
+  it('leest de lidmaatschappen opnieuw na create_team', async () => {
+    const m = makeSupabase({
+      user: metVlag('JO13-1'),
+      members: [],
+      membersNaHerstel: [ownerRij(NIEUW_TEAM_ID)],
+      settings: [{ team_id: NIEUW_TEAM_ID, value: 'JO13-1' }],
+    })
+    use(m)
+
+    const ctx = (await getTeamContext())!
+
+    expect(ctx.teamId).toBe(NIEUW_TEAM_ID)
+    // Twee leesrondes op team_members: vóór en ná het zelfherstel.
+    expect(m.calls.filters.filter((f) => f.table === 'team_members')).toHaveLength(2)
+  })
+
+  it('pikt een lidmaatschap op dat tijdens het zelfherstel in een ander tabblad ontstond, ZONDER het als owner te bestempelen', async () => {
+    const m = makeSupabase({
+      user: metVlag('Eigen team'),
+      members: [],
+      membersNaHerstel: [
+        ownerRij(NIEUW_TEAM_ID),
+        assistentRij('t-uitnodiging', { mag_training_bewerken: true }),
+      ],
+      settings: [
+        { team_id: NIEUW_TEAM_ID, value: 'Zebra' },
+        { team_id: 't-uitnodiging', value: 'Appel' },
+      ],
+    })
+    use(m)
+
+    const ctx = (await getTeamContext())!
+
+    expect(ctx.teams).toHaveLength(2)
+    const uitnodiging = ctx.teams.find((t) => t.teamId === 't-uitnodiging')!
+    expect(uitnodiging.rol).toBe('assistent')
+    expect(uitnodiging.rechten.training).toBe(true)
+    expect(uitnodiging.rechten.spelers).toBe(false)
+    // Het eigen team blijft owner met alle rechten.
+    expect(ctx.teams.find((t) => t.teamId === NIEUW_TEAM_ID)!.rol).toBe('owner')
+  })
+
+  it('valt bij een mislukte herlees terug op het team dat create_team aantoonbaar heeft aangemaakt', async () => {
+    const m = makeSupabase({
+      user: metVlag('JO13-1'),
+      members: [],
+      membersNaHerstelError: { code: '42501', message: 'permission denied for table team_members' },
+    })
+    use(m)
+
+    const ctx = (await getTeamContext())!
+
+    expect(ctx.teamId).toBe(NIEUW_TEAM_ID)
+    expect(ctx.rol).toBe('owner')
+    expect(ctx.teams[0].naam).toBe('JO13-1')
+    const gelogd = consoleError.mock.calls.map((args: unknown[]) => args.join(' ')).join('\n')
+    expect(gelogd).toContain('teamContext.ledenNaHerstel')
+    expect(gelogd).not.toContain('permission denied')
+  })
+
+  it('valt ook terug wanneer de herlees leeg is — replicatievertraging mag het net gemaakte team niet laten verdwijnen', async () => {
+    const m = makeSupabase({
+      user: metVlag('JO13-1'),
+      members: [],
+      membersNaHerstel: [],
+      membersNaHerstelError: null,
+    })
+    use(m)
+
+    // Met een lege herlees zonder fout valt hij terug op de RPC-uitkomst.
+    const ctx = await getTeamContext()
+    expect(ctx?.teamId).toBe(NIEUW_TEAM_ID)
   })
 })

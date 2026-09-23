@@ -4,9 +4,14 @@ import { createPlayer } from '@/app/actions/players'
 import PositionSelector from '@/components/PositionSelector'
 import RatingSelector from '@/components/RatingSelector'
 import { getDict } from '@/lib/i18n'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 
 export default async function NewPlayerPage() {
-  const t = await getDict()
+  const [t, ctx] = await Promise.all([getDict(), requireTeamContextOrLogin()])
+  // De "Speler toevoegen"-knop is al overal verborgen zonder dit recht
+  // (PlayerList.tsx, GlobalFab.tsx); directe navigatie hierheen wordt hier
+  // hetzelfde afgehandeld (brief §4.5).
+  if (!canEdit(ctx, 'spelers')) redirect('/players')
 
   async function handleSubmit(formData: FormData) {
     'use server'

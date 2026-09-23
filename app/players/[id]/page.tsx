@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { getDict } from '@/lib/i18n'
 import { todayLocal } from '@/lib/utils'
 import { isUuid } from '@/lib/authz'
@@ -91,6 +91,8 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
       stats={stats}
       statsError={statsError}
       t={t}
+      canEditSpelers={canEdit(ctx, 'spelers')}
+      canEditAanwezigheid={canEdit(ctx, 'aanwezigheid')}
     />
   )
 }

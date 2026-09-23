@@ -416,6 +416,7 @@ describe('Live-update — verzameltijd-wijziging beweegt het print-blok direct m
           formItems={[]}
           primaryColor="#004f3b"
           secondaryColor="#009966"
+          canEdit
         />
       </DictProvider>,
     )

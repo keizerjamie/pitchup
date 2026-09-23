@@ -322,6 +322,12 @@ body {
   a.surface-card:hover {
     background: var(--surface-sunken);
   }
+
+  /* Teamwisselaar-trigger (components/TeamSwitcher.tsx) — hover-tint alleen
+     op hover-capable devices, zodat touch geen sticky hover krijgt. */
+  .team-switcher-trigger:hover:not(:disabled) {
+    background: var(--surface-sunken);
+  }
 }
 
 /* Decorative background blobs — give glass elements something to blur */
@@ -508,6 +514,15 @@ body::after {
 
 .animate-fade-up  { animation: fadeUp  0.30s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-scale-in { animation: scaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Kopieerknop-labelwissel (components/settings/InviteLinkCard.tsx): blur
+   maskeert het overlappen van de oude en nieuwe tekst tijdens de crossfade,
+   i.p.v. alleen opacity — anders is heel even zowel "Kopiëren" als
+   "Gekopieerd" leesbaar over elkaar heen. */
+@keyframes invite-copy-label-in {
+  from { opacity: 0; filter: blur(2px); }
+  to   { opacity: 1; filter: blur(0); }
+}
 
 /* Stagger helpers */
 .stagger > * { animation: fadeUp 0.30s cubic-bezier(0.16, 1, 0.3, 1) both; }

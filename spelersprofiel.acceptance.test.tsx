@@ -498,7 +498,7 @@ describe('AC1 — spelerslijst navigeert direct naar het profiel', () => {
     }
     render(
       <DictProvider dict={nl}>
-        <PlayerList active={[player]} inactive={[]} />
+        <PlayerList active={[player]} inactive={[]} canEdit />
       </DictProvider>,
     )
     const row = screen.getByText('Jan Jansen').closest('a')

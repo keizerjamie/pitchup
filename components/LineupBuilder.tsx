@@ -52,9 +52,14 @@ interface Props {
   // Verplicht: enige bron voor ranking én auto-opstellen (zie rankScore
   // hieronder). Key = player.id; elke speler in `players` heeft een entry.
   playerForm: Record<string, PlayerForm>
+  // Wedstrijd-recht (brief §4.5). Default `true`: dit component werd al
+  // overal zonder deze prop gebruikt (o.a. bestaande tests) en las tot deze
+  // feature altijd als "iedereen mag bewerken" — dat gedrag blijft de default
+  // in plaats van elke bestaande aanroep te verplichten.
+  canEdit?: boolean
 }
 
-export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit = null, initialFormation = '4-3-3', initialPositions, playerForm }: Props) {
+export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit = null, initialFormation = '4-3-3', initialPositions, playerForm, canEdit = true }: Props) {
   const t = useDict()
 
   // Eén gedeelde kwaliteitsfunctie voor ranking én auto-opstellen, zodat de
@@ -199,28 +204,40 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
       <div>
         <div className="flex items-center justify-between mb-2">
           <label id="formatie-label" className="block text-[13px] font-bold text-muted">{t.lineup.formation}</label>
-          <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition" style={{ background: 'var(--color-accent)' }}>
-            <span className="ms text-[17px]">bolt</span>
-            {t.lineup.autoLineup}
-          </button>
+          {canEdit && (
+            <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition" style={{ background: 'var(--color-accent)' }}>
+              <span className="ms text-[17px]">bolt</span>
+              {t.lineup.autoLineup}
+            </button>
+          )}
         </div>
         {/* Uitklapbare kiezer: met 15 formaties is een open chiprij een muur.
             Dicht toont hij alleen de actieve formatie; open het volledige
             raster. `aria-labelledby` wijst naar het bestaande "Formatie"-label,
-            zodat er geen nieuwe vertaalsleutel voor nodig is. */}
-        <button
-          type="button"
-          id="formatie-kiezer"
-          aria-labelledby="formatie-label formatie-kiezer"
-          aria-expanded={formationOpen}
-          onClick={() => setFormationOpen((open) => !open)}
-          className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-[14px] font-bold text-ink bg-surface transition-colors"
-          style={{ border: '1px solid var(--border-soft)' }}
-        >
-          <span>{FORMATIONS[formation]?.label ?? formation}</span>
-          <ChevronIcon open={formationOpen} className="w-5 h-5 text-muted" />
-        </button>
-        {formationOpen && (
+            zodat er geen nieuwe vertaalsleutel voor nodig is.
+            Zonder wedstrijd-recht: platte tekst, geen uitklapbare knop. */}
+        {canEdit ? (
+          <button
+            type="button"
+            id="formatie-kiezer"
+            aria-labelledby="formatie-label formatie-kiezer"
+            aria-expanded={formationOpen}
+            onClick={() => setFormationOpen((open) => !open)}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-[14px] font-bold text-ink bg-surface transition-colors"
+            style={{ border: '1px solid var(--border-soft)' }}
+          >
+            <span>{FORMATIONS[formation]?.label ?? formation}</span>
+            <ChevronIcon open={formationOpen} className="w-5 h-5 text-muted" />
+          </button>
+        ) : (
+          <div
+            className="w-full px-4 py-2.5 rounded-xl text-[14px] font-bold text-ink bg-surface"
+            style={{ border: '1px solid var(--border-soft)' }}
+          >
+            {FORMATIONS[formation]?.label ?? formation}
+          </div>
+        )}
+        {canEdit && formationOpen && (
           <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
             {Object.keys(FORMATIONS).map((f) => {
               const active = formation === f
@@ -282,7 +299,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
         {/* Unclipped interactive layer — popup can overflow the pitch edges */}
         <div className="absolute inset-0">
           {/* Click-away backdrop — closes popup when tapping blank pitch area */}
-          {selectedSlot !== null && (
+          {canEdit && selectedSlot !== null && (
             <div className="absolute inset-0" style={{ zIndex: 5 }} onClick={() => setSelectedSlot(null)} />
           )}
 
@@ -316,8 +333,10 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
             return (
               <button
                 key={i}
-                onClick={() => setSelectedSlot(isSelected ? null : i)}
-                className={`absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 transition duration-150 ${isSelected ? 'scale-110' : ''}`}
+                type="button"
+                disabled={!canEdit}
+                onClick={canEdit ? () => setSelectedSlot(isSelected ? null : i) : undefined}
+                className={`absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-0.5 transition duration-150 disabled:cursor-default ${isSelected ? 'scale-110' : ''}`}
                 style={{ left: `${pos.x}%`, top: `${pos.y}%`, zIndex: 10 }}
               >
                 {/* Schokgolf: twee ringen die vanuit het poppetje naar buiten
@@ -547,11 +566,13 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
         </div>
       )}
 
-      <button onClick={handleSave} disabled={isPending}
-        className="w-full py-3 rounded-xl font-bold text-white transition active:scale-[0.98]"
-        style={{ background: saved ? '#22c55e' : isPending ? 'var(--faint)' : 'var(--primary)' }}>
-        {saved ? t.lineup.saved : isPending ? t.lineup.saving : t.lineup.save}
-      </button>
+      {canEdit && (
+        <button onClick={handleSave} disabled={isPending}
+          className="w-full py-3 rounded-xl font-bold text-white transition active:scale-[0.98]"
+          style={{ background: saved ? '#22c55e' : isPending ? 'var(--faint)' : 'var(--primary)' }}>
+          {saved ? t.lineup.saved : isPending ? t.lineup.saving : t.lineup.save}
+        </button>
+      )}
     </div>
   )
 }

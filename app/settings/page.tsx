@@ -3,6 +3,7 @@ import { getAllSettings, saveSettings } from '@/app/actions/settings'
 import { redirect } from 'next/navigation'
 import { getDict } from '@/lib/i18n'
 import { signOut } from '@/app/actions/auth'
+import { canEdit, getTeamContext } from '@/lib/team-context'
 import TrainingScheduleForm from '@/components/TrainingScheduleForm'
 import LanguageSwitcher from '@/components/LanguageSwitcher'
 import DeleteAccountSection from '@/components/DeleteAccountSection'
@@ -10,6 +11,8 @@ import ThemeSelect from '@/components/ThemeSelect'
 import TeamLogoSection from '@/components/TeamLogoSection'
 import ClubColorsSection from '@/components/ClubColorsSection'
 import ImageIcon from '@/components/icons/ImageIcon'
+import GroupIcon from '@/components/icons/GroupIcon'
+import StafSection from '@/components/settings/StafSection'
 
 // `icon` accepteert ofwel de naam van een glyph uit het zelf-gehoste,
 // gesubsette Material Symbols-icoonfont (`.ms`, app/globals.css:117-140) —
@@ -33,10 +36,34 @@ function SectionCard({ icon, title, children }: { icon: string | React.ReactNode
 }
 
 export default async function SettingsPage() {
-  const [settings, t] = await Promise.all([
+  const [settings, t, ctx] = await Promise.all([
     getAllSettings().catch(() => ({} as Record<string, string>)),
     getDict(),
+    getTeamContext(),
   ])
+
+  // Instellingen blijft bereikbaar zonder team (brief §4.2) — `ctx` is dan
+  // `null` en elke sectie hieronder die een team vereist blijft verborgen.
+  // De secties hieronder volgen brief §4.3 + beslissing 4 (goedkeuring):
+  // Weergave/Over/Uitloggen/accountverwijdering voor iedereen, Clublogo/
+  // Clubkleuren/Aanwezigheid-default/Staf uitsluitend voor de hoofdtrainer,
+  // Trainingsschema ook voor een assistent met Agenda-recht (de ENIGE
+  // uitzondering op "een assistent ziet alleen Weergave/Uitloggen/
+  // accountverwijdering"), Periodisering-link (mobiel) ook bij
+  // Periodisering-recht.
+  const isOwner = ctx?.rol === 'owner'
+  const magAgenda = ctx ? canEdit(ctx, 'agenda') : false
+  const magPeriodisering = ctx ? canEdit(ctx, 'periodisering') : false
+
+  // StafSection is zelf een async server component (haalt listTeamMembers()/
+  // getActiveInvite() op). Hier al AWAITEN i.p.v. als <StafSection /> JSX
+  // neerzetten: React's normale (niet-RSC) renderer — zoals de acceptatie-
+  // tests gebruiken die deze pagina rechtstreeks aanroepen en met
+  // testing-library renderen — kan een niet-geawaite, geneste async
+  // component niet zelf resolven ("Only Server Components can be async").
+  // Binnen de echte Next.js-RSC-pipeline maakt dit geen verschil: Next roept
+  // een async server component sowieso gewoon als functie aan.
+  const stafSection = isOwner ? await StafSection() : null
 
   const defaultAttendance = (settings['default_attendance'] ?? 'present') as 'present' | 'unknown'
   const seasonStart = settings['season_start'] ?? ''
@@ -75,78 +102,100 @@ export default async function SettingsPage() {
             </div>
           </SectionCard>
 
-          {/* Club logo */}
-          <SectionCard icon={<ImageIcon className="w-5 h-5" />} title={t.settings.logoSection}>
-            <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
-          </SectionCard>
-
-          {/* Club colours */}
-          <SectionCard icon="palette" title={t.settings.clubColorsSection}>
-            <ClubColorsSection
-              initialPrimary={settings['team_color_primary'] ?? null}
-              initialSecondary={settings['team_color_secondary'] ?? null}
-            />
-          </SectionCard>
-
-          {/* Attendance default */}
-          <form action={handleSave} className="flex flex-col gap-4">
-            <SectionCard icon="how_to_reg" title={t.settings.attendanceSection}>
-              <p className="text-[13.5px] font-medium text-muted -mt-1">{t.settings.attendanceQuestion}</p>
-              <div className="flex flex-col gap-3">
-                <label className={radioLabel}>
-                  <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-[var(--primary)]" />
-                  <div>
-                    <div className="font-bold text-ink flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center"><span className="ms text-[15px]" aria-hidden="true">check</span></span>
-                      {t.settings.everyonePresent}
-                    </div>
-                    <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
-                  </div>
-                </label>
-                <label className={radioLabel}>
-                  <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-[var(--faint)]" />
-                  <div>
-                    <div className="font-bold text-ink flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold" style={{ background: 'var(--faint)' }}>?</span>
-                      {t.settings.everyoneUnknown}
-                    </div>
-                    <div className="text-[13px] text-faint mt-0.5">{t.settings.everyoneUnknownHint}</div>
-                  </div>
-                </label>
-              </div>
+          {/* Club logo — owner-only (brief §4.3) */}
+          {isOwner && (
+            <SectionCard icon={<ImageIcon className="w-5 h-5" />} title={t.settings.logoSection}>
+              <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
             </SectionCard>
-            <button type="submit" className="w-full py-3 rounded-xl font-bold text-white active:scale-[0.98] transition" style={{ background: 'var(--primary)' }}>
-              {t.settings.save}
-            </button>
-          </form>
+          )}
 
-          {/* Periodization — mobile entry point */}
-          <Link href="/periodisering" className="block lg:hidden">
-            <div className="surface-card px-5 py-4 flex items-center gap-3 hover:bg-surface-sunken transition-colors">
-              <span className="ms text-[22px] text-primary-strong flex-shrink-0">monitoring</span>
-              <div className="flex-1">
-                <h2 className="font-bold text-ink text-[15px]">{t.settings.periodizationSection}</h2>
-                <p className="text-[13px] text-faint">{t.settings.periodizationHint}</p>
+          {/* Club colours — owner-only */}
+          {isOwner && (
+            <SectionCard icon="palette" title={t.settings.clubColorsSection}>
+              <ClubColorsSection
+                initialPrimary={settings['team_color_primary'] ?? null}
+                initialSecondary={settings['team_color_secondary'] ?? null}
+              />
+            </SectionCard>
+          )}
+
+          {/* Attendance default — owner-only */}
+          {isOwner && (
+            <form action={handleSave} className="flex flex-col gap-4">
+              <SectionCard icon="how_to_reg" title={t.settings.attendanceSection}>
+                <p className="text-[13.5px] font-medium text-muted -mt-1">{t.settings.attendanceQuestion}</p>
+                <div className="flex flex-col gap-3">
+                  <label className={radioLabel}>
+                    <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-[var(--primary)]" />
+                    <div>
+                      <div className="font-bold text-ink flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center"><span className="ms text-[15px]" aria-hidden="true">check</span></span>
+                        {t.settings.everyonePresent}
+                      </div>
+                      <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
+                    </div>
+                  </label>
+                  <label className={radioLabel}>
+                    <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-[var(--faint)]" />
+                    <div>
+                      <div className="font-bold text-ink flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold" style={{ background: 'var(--faint)' }}>?</span>
+                        {t.settings.everyoneUnknown}
+                      </div>
+                      <div className="text-[13px] text-faint mt-0.5">{t.settings.everyoneUnknownHint}</div>
+                    </div>
+                  </label>
+                </div>
+              </SectionCard>
+              <button type="submit" className="w-full py-3 rounded-xl font-bold text-white active:scale-[0.98] transition" style={{ background: 'var(--primary)' }}>
+                {t.settings.save}
+              </button>
+            </form>
+          )}
+
+          {/* Periodization — mobile entry point, owner of Periodisering-recht */}
+          {(isOwner || magPeriodisering) && (
+            <Link href="/periodisering" className="block lg:hidden">
+              <div className="surface-card px-5 py-4 flex items-center gap-3 hover:bg-surface-sunken transition-colors">
+                <span className="ms text-[22px] text-primary-strong flex-shrink-0">monitoring</span>
+                <div className="flex-1">
+                  <h2 className="font-bold text-ink text-[15px]">{t.settings.periodizationSection}</h2>
+                  <p className="text-[13px] text-faint">{t.settings.periodizationHint}</p>
+                </div>
+                <span className="ms text-[20px] text-faint">chevron_right</span>
               </div>
-              <span className="ms text-[20px] text-faint">chevron_right</span>
-            </div>
-          </Link>
+            </Link>
+          )}
 
         </div>
 
         <div className="flex flex-col gap-5">
 
-          {/* Training schedule */}
-          <SectionCard icon="calendar_month" title={t.settings.scheduleSection}>
-            <p className="text-[13px] text-faint -mt-2">{t.settings.scheduleHint}</p>
-            <TrainingScheduleForm
-              initialSeasonStart={seasonStart}
-              initialSeasonEnd={seasonEnd}
-              initialDays={trainingDays}
-              initialTime={trainingTime}
-              initialLocation={trainingLocation}
-            />
-          </SectionCard>
+          {/* Training schedule — owner OF assistent met Agenda-recht.
+              Dit is de ENIGE uitzondering op "een assistent ziet alleen
+              Weergave/Uitloggen/accountverwijdering" (beslissing 4). */}
+          {(isOwner || magAgenda) && (
+            <SectionCard icon="calendar_month" title={t.settings.scheduleSection}>
+              <p className="text-[13px] text-faint -mt-2">{t.settings.scheduleHint}</p>
+              <TrainingScheduleForm
+                initialSeasonStart={seasonStart}
+                initialSeasonEnd={seasonEnd}
+                initialDays={trainingDays}
+                initialTime={trainingTime}
+                initialLocation={trainingLocation}
+              />
+            </SectionCard>
+          )}
+
+          {/* Staf — owner-only (brief §4.3). listTeamMembers() gooit zelf
+              'Geen toegang' voor een assistent, dus deze sectie NOOIT
+              renderen buiten isOwner om. */}
+          {isOwner && (
+            <SectionCard icon={<GroupIcon className="w-5 h-5" />} title={t.staf.section}>
+              <p className="text-[13px] text-faint -mt-2">{t.staf.sectionHint}</p>
+              {stafSection}
+            </SectionCard>
+          )}
 
           {/* About */}
           <div className="surface-card px-5 py-4">

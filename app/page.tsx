@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS, PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
 import { actueleMetingen, onderdeelStatus, getTrainingLog, computeCurrentSteps } from '@/lib/periodization'
 import { addDays, daysUntil, todayLocal } from '@/lib/utils'
@@ -14,6 +14,7 @@ import Availability, { AvailabilityItem } from '@/components/dashboard/Availabil
 import PeriodiseringStatus from '@/components/dashboard/PeriodiseringStatus'
 import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import ChartBarIcon from '@/components/icons/ChartBarIcon'
+import JoinedBanner from '@/components/dashboard/JoinedBanner'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
 import { OPKOMST_DOEL } from '@/lib/inzichten'
@@ -341,6 +342,11 @@ export default async function DashboardPage() {
 
   return (
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
+      {/* Eenmalige bevestiging ná het accepteren van een uitnodiging (brief
+          §2.3 punt 3, validatiebevinding 3) — zie components/dashboard/
+          JoinedBanner.tsx voor waarom en hoe de ?joined=1-param verdwijnt. */}
+      <JoinedBanner teamName={teamName || t.team.activeTeam} />
+
       {/* Topbar */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex flex-col leading-tight">
@@ -349,14 +355,16 @@ export default async function DashboardPage() {
             {greeting} 👋
           </span>
         </div>
-        <Link
-          href="/events/new"
-          className="h-[42px] rounded-xl px-[18px] flex items-center gap-2 text-[13.5px] font-bold text-white"
-          style={{ background: 'var(--brand-btn)' }}
-        >
-          <span className="ms text-[19px]">add</span>
-          {t.home.newEvent}
-        </Link>
+        {canEdit(ctx, 'agenda') && (
+          <Link
+            href="/events/new"
+            className="h-[42px] rounded-xl px-[18px] flex items-center gap-2 text-[13.5px] font-bold text-white"
+            style={{ background: 'var(--brand-btn)' }}
+          >
+            <span className="ms text-[19px]">add</span>
+            {t.home.newEvent}
+          </Link>
+        )}
       </div>
 
       {heroEvent ? (
@@ -399,7 +407,15 @@ export default async function DashboardPage() {
           detailpagina. */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4 items-start">
         <div className="flex flex-col gap-4 min-w-0">
-          <TodoList items={todoItems} />
+          <TodoList
+            items={todoItems}
+            canEditTask={{
+              training_plan: canEdit(ctx, 'training'),
+              squad: canEdit(ctx, 'wedstrijd'),
+              lineup: canEdit(ctx, 'wedstrijd'),
+              analysis: canEdit(ctx, 'wedstrijd'),
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3.5">
             <StatCard

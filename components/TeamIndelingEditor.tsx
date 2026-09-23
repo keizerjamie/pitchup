@@ -51,6 +51,11 @@ interface Props {
   initialIndeling: Spelerindeling
   players: Player[]
   presentPlayerIds: string[]
+  // Training-recht (brief §4.5). Default true, zelfde reden als
+  // components/LineupBuilder.tsx: geen bestaande aanroep breken. De chips
+  // blijven zichtbaar (waarde leesbaar); alleen drag/klik/auto-indelen/
+  // verwijderen verdwijnen.
+  canEdit?: boolean
 }
 
 // Normaliseert defensief naar exact `teamCount` sub-arrays (index = teamIndex),
@@ -76,7 +81,7 @@ function hasSize(team: OefeningTeam): boolean {
   return Number.isFinite(team.grootte) && team.grootte > 0
 }
 
-export default function TeamIndelingEditor({ koppelingId, eventId, teams, initialIndeling, players, presentPlayerIds }: Props) {
+export default function TeamIndelingEditor({ koppelingId, eventId, teams, initialIndeling, players, presentPlayerIds, canEdit = true }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [indeling, setIndeling] = useState<string[][]>(() => normalize(initialIndeling, teams.length).teams)
@@ -301,18 +306,20 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
       <div className="print:hidden space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold text-muted uppercase tracking-wide">{t.teamIndeling.heading}</h3>
-          <button
-            type="button"
-            onClick={handleAutoAssign}
-            disabled={isPending}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white whitespace-nowrap flex-shrink-0 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100"
-            style={{ background: 'var(--color-accent)' }}
-          >
-            {t.teamIndeling.autoAssign}
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={handleAutoAssign}
+              disabled={isPending}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white whitespace-nowrap flex-shrink-0 active:scale-95 transition disabled:opacity-50 disabled:active:scale-100"
+              style={{ background: 'var(--color-accent)' }}
+            >
+              {t.teamIndeling.autoAssign}
+            </button>
+          )}
         </div>
 
-        <p className="text-[11px] text-faint">{t.teamIndeling.dragHint}</p>
+        {canEdit && <p className="text-[11px] text-faint">{t.teamIndeling.dragHint}</p>}
 
         {droppedPlayerCount > 0 && (
           <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
@@ -353,7 +360,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
             >
               <div className="flex items-center justify-between gap-2 mb-2">
                 <span className="text-xs font-semibold text-ink">{teamLabel} · {detail}</span>
-                {selectedPlayerId !== null && !selectedAlreadyHere && (
+                {canEdit && selectedPlayerId !== null && !selectedAlreadyHere && (
                   <button
                     type="button"
                     onClick={() => assignToTeam(selectedPlayerId, i)}
@@ -395,30 +402,36 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                           : undefined
                       }
                     >
-                      <button
-                        type="button"
-                        onClick={() => player && handleChipClick(id)}
-                        onPointerDown={(e) => player && handleChipPointerDown(id, i, e)}
-                        onPointerMove={handleChipPointerMove}
-                        onPointerUp={handleChipPointerUp}
-                        onPointerCancel={handleChipPointerCancel}
-                        disabled={!player}
-                        style={{ touchAction: 'none' }}
-                        className="truncate max-w-[110px]"
-                      >
-                        {displayName}
-                      </button>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          onClick={() => player && handleChipClick(id)}
+                          onPointerDown={(e) => player && handleChipPointerDown(id, i, e)}
+                          onPointerMove={handleChipPointerMove}
+                          onPointerUp={handleChipPointerUp}
+                          onPointerCancel={handleChipPointerCancel}
+                          disabled={!player}
+                          style={{ touchAction: 'none' }}
+                          className="truncate max-w-[110px]"
+                        >
+                          {displayName}
+                        </button>
+                      ) : (
+                        <span className="truncate max-w-[110px]">{displayName}</span>
+                      )}
                       {absent && (
                         <span className="text-[10px] font-semibold text-panel-amber-ink">{t.teamIndeling.absentWarning}</span>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => removeFromTeams(id)}
-                        aria-label={`${t.teamIndeling.remove}: ${displayName}`}
-                        className="w-4 h-4 flex items-center justify-center text-faint hover:text-panel-red-ink flex-shrink-0"
-                      >
-                        ×
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => removeFromTeams(id)}
+                          aria-label={`${t.teamIndeling.remove}: ${displayName}`}
+                          className="w-4 h-4 flex items-center justify-center text-faint hover:text-panel-red-ink flex-shrink-0"
+                        >
+                          ×
+                        </button>
+                      )}
                     </span>
                   )
                 })}
@@ -443,6 +456,19 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
           <div className="flex flex-wrap gap-1.5">
             {pool.map((p) => {
               const draggingThis = drag && drag.dragging && drag.playerId === p.id ? drag : null
+              const chipClassName = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                selectedPlayerId === p.id
+                  ? 'bg-panel-orange text-panel-orange-ink border border-panel-orange-edge'
+                  : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
+              } ${draggingThis ? 'ring-2 ring-warning shadow-lg' : ''}`
+              if (!canEdit) {
+                return (
+                  <span key={p.id} className={chipClassName}>
+                    <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
+                    {p.name.split(' ')[0]}
+                  </span>
+                )
+              }
               return (
                 <button
                   key={p.id}
@@ -458,11 +484,7 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
                       ? { transform: `translate(${draggingThis.x - draggingThis.startX}px, ${draggingThis.y - draggingThis.startY}px)`, position: 'relative', zIndex: 30 }
                       : undefined),
                   }}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                    selectedPlayerId === p.id
-                      ? 'bg-panel-orange text-panel-orange-ink border border-panel-orange-edge'
-                      : 'bg-surface-sunken text-muted border border-[var(--border-soft)] hover:border-warning/50'
-                  } ${draggingThis ? 'ring-2 ring-warning shadow-lg' : ''}`}
+                  className={chipClassName}
                 >
                   <span className="font-bold text-faint">{p.jersey_number ?? '#'}</span>
                   {p.name.split(' ')[0]}

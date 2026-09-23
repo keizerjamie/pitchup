@@ -28,6 +28,23 @@ export function buildCsp(nonce: string): string {
   ].join('; ')
 }
 
+// Paden die zonder sessie bereikbaar moeten blijven.
+//
+// `/invite/*` staat hier omdat de hele uitnodigingsflow anders onbereikbaar
+// is: een genodigde zonder account zou naar /login geduwd worden en de link
+// nooit kunnen openen. De pagina daarachter toont alleen de teamnaam bij een
+// geldig token (peek_team_invite) en verder niets.
+//
+// Pure functie zodat proxy.test.ts hem kan afdekken zonder een hele
+// NextRequest en een Supabase-sessie na te bouwen.
+export function isPublicPath(path: string): boolean {
+  // Reset page must stay reachable in both states: the recovery link arrives
+  // without cookies, and completing it happens with a recovery session.
+  return path.startsWith('/reset-password')
+    || path === '/invite'
+    || path.startsWith('/invite/')
+}
+
 export async function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
   const csp = buildCsp(nonce)
@@ -60,9 +77,6 @@ export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname
   const isAuthPage = path.startsWith('/login') || path.startsWith('/register') ||
     path.startsWith('/forgot-password')
-  // Reset page must stay reachable in both states: the recovery link arrives
-  // without cookies, and completing it happens with a recovery session.
-  const isResetPage = path.startsWith('/reset-password')
 
   // Redirect responses must carry any refreshed auth cookies, otherwise the
   // rotated refresh token is lost and the session breaks.
@@ -71,14 +85,27 @@ export async function proxy(request: NextRequest) {
     url.pathname = pathname
     const response = NextResponse.redirect(url)
     supabaseResponse.cookies.getAll().forEach((cookie) => response.cookies.set(cookie))
+    setSecurityHeaders(response, csp)
     return response
   }
 
-  if (!user && !isAuthPage && !isResetPage) return redirectWithCookies('/login')
+  if (!user && !isAuthPage && !isPublicPath(path)) return redirectWithCookies('/login')
   if (user && isAuthPage) return redirectWithCookies('/')
 
-  supabaseResponse.headers.set('Content-Security-Policy', csp)
+  setSecurityHeaders(supabaseResponse, csp)
   return supabaseResponse
+}
+
+// `same-origin` zorgt dat de browser bij een klik naar een EXTERN domein geen
+// Referer meestuurt — en dus ook niet het uitnodigingstoken dat in het pad
+// /invite/<token> staat. Zonder deze header lekt zo'n token naar elke externe
+// link die ooit op een pagina komt te staan.
+//
+// App-breed en niet alleen op /invite: een security-header die per pad
+// aan- en uitgaat is een header die iemand vergeet.
+function setSecurityHeaders(response: NextResponse, csp: string) {
+  response.headers.set('Content-Security-Policy', csp)
+  response.headers.set('Referrer-Policy', 'same-origin')
 }
 
 export const config = {

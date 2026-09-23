@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player } from '@/lib/types'
 import PlayerList from '@/components/PlayerList'
 
@@ -20,7 +20,7 @@ export default async function PlayersPage() {
 
   return (
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8">
-      <PlayerList active={active} inactive={inactive} />
+      <PlayerList active={active} inactive={inactive} canEdit={canEdit(ctx, 'spelers')} />
     </div>
   )
 }
