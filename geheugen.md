@@ -3430,3 +3430,123 @@ wat `supabase/inzichten.sql` al deed; de andere keuze zou juist een nieuwe incon
 ### Suite-status bij afronden
 `typecheck` en `lint` groen; 3211/3213 tests groen. De twee falen zijn `cyclusweek-correctie`
 AC1/AC12 via `PeriodizationPage` — pre-existing rood sinds 2026-09-14, niet van deze feature.
+
+## Assistent-trainers fase 2: uitnodigen, rechten per onderdeel, teamwisselaar (2026-09-23, commit `75decdc`, live)
+Vervolg op fase 1 (zie hierboven). Werkdocumenten in
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-assistent/` (12 backend, 14 frontend,
+13/15/17 validator, 16 test-verifier). Migraties: M4 `team-invites-rpc.sql` en M5
+`team-aanmaken-rpc.sql` **vóór** de deploy (alleen functies toevoegen), M5b
+`team-bootstrap-policies-opruimen.sql` **ná** de deploy en ná een geslaagde registratie-rooktest.
+
+### Datamodel en RPC's
+- **Vijf `security definer`-RPC's op `team_invites`** (`peek_team_invite` ook voor `anon`,
+  beslissing 12; `accept_team_invite`, `create_team_invite`, `revoke_team_invite`,
+  `active_team_invite` alleen `authenticated`). Er staat bewust géén INSERT/UPDATE-policy op
+  `team_invites`: schrijven kan uitsluitend via de RPC's, zodat "één actieve link per team" en de
+  eigenaarscheck op één plek staan. `peek` geeft één ononderscheidbare `invalid` voor
+  verlopen/gebruikt/ingetrokken/onbekend. `accept` doet `for update`, `verloopt_op <= now()` is
+  de enige vervaltoets in de hele feature, `already_member` laat de link ongebruikt, rol en
+  rechten staan hard (assistent, zes maal false). `create_team_invite` neemt een
+  `pg_advisory_xact_lock` per team omdat `for update` niets lockt als er nog geen rij is
+  (dubbelklik). `active_team_invite` bestaat omdat de vervaltoets in de database moet blijven en
+  nooit als PostgREST-filter met een JS-`Date`.
+- **`create_team(p_naam, p_alleen_zonder_team)`**: teams-rij (eigen uuid), owner-rij met alle
+  rechten, `settings.team_name`, in één transactie. De vlag is alleen voor het zelfherstel
+  (`maakEigenTeam`): advisory lock per gebruiker en teruggave van een bestaand **owner**-team
+  (`m.rol = 'owner'` is essentieel; zonder dat filter kon een net geaccepteerd assistent-team als
+  eigen team terugkomen). De fase-1-invariant `teams.id = user.id` geldt vanaf nu alleen nog
+  voor bestaande teams.
+- **Bootstrap-policies** `"teams: eigen team bij registratie"` en
+  `"team_members: eigen owner-rij bij registratie"` zijn na M5b weg. **Let op:** `team-rls.sql`
+  (M2) en `teams-en-leden.sql` (M1) zetten ze bij een herhaalde run terug; beide scripts
+  waarschuwen daarvoor. Regel: noteer bij elk `create policy` welk script hem weer weghaalt.
+
+### Code
+- `lib/invite-token.ts`: 32 random bytes → base64url (43 tekens), sha256-hex, `isInviteToken`,
+  `veiligeNextPath` (strikte regex `^/invite/[A-Za-z0-9_-]{16,128}$`, anders `/`).
+- `lib/team-invites.ts` (plain lib): `verzilverInvite`, `zetActiefTeamCookie`,
+  `NA_ACCEPTATIE_PAD = '/?joined=1'`. **Bewust geen tweede export uit het `'use server'`-bestand:
+  elke export daar is een publiek endpoint** en zou de IP-rate-limit van `acceptInvite` omzeilbaar
+  maken. Nieuwe gotcha naast de type-re-export-gotcha.
+- `app/actions/team-invites.ts`: `createInvite` (URL uitsluitend via `getSiteUrl()`; het ruwe
+  token bestaat één keer, in dit antwoord), `getActiveInvite` (nooit het token), `revokeInvite`,
+  `peekInvite` (rate-limited, valt bij limiet terug op `invalid` — geen orakel op de publieke
+  pagina), `acceptInvite` (`ok` → redirect naar `/?joined=1`, `already_member`, `invalid`,
+  `rate_limited`). `app/actions/team-members.ts`: `listTeamMembers` (e-mail via admin-client,
+  strikt beperkt tot de user-ids van dit team, degradeert naar `null` zonder service-role-key),
+  `updateMemberRights`, `removeMember` — één melding voor eigen rij, owner-rij en vreemd lid.
+- `app/actions/auth.ts`: `signUpViaInvite` zet de metadata-vlag **niet** (BR 51) en maakt geen
+  team; `signUp` via `create_team`; `signIn` met `next`. **`deleteAccount` loopt nu de
+  rollen-lus** (brief §2.6, naar fase 2 gehaald omdat fase 2 meerdere lidmaatschappen bereikbaar
+  maakt): owner-teams volledig (`TEAM_TABELLEN`, 13 tabellen, logo, `teams`-rij), assistent-
+  lidmaatschappen alleen de eigen rij, oefeningen als laatste (cascade raakt andere teams), auth-
+  account pas als alles weg is; logs met volgnummer, nooit team-id.
+- `lib/team-context.ts`: zelfherstel via `create_team(..., true)` en daarna **herlezen** van de
+  lidmaatschappen (`leesLidmaatschappen`) i.p.v. een owner-rij construeren; de metadata-vlag
+  wordt gewist zodra er een lidmaatschap is (variant b — `removeMember` kan andermans metadata
+  niet wissen zonder service-role-key).
+- `proxy.ts`: `isPublicPath` (pure export, testbaar) met `/invite/*`; `Referrer-Policy:
+  same-origin` app-breed, ook op redirect-responses.
+- **Frontend**: `TeamSwitcher` (popover desktop / bottom-sheet mobiel, motion volgens brief §4.1,
+  exit-duur als module-constante, bij één team platte tekst), `EmptyTeamState` wordt **in
+  `app/layout.tsx` server-side geconstrueerd en als `emptyState`-prop aan `AppShell` gegeven** —
+  een async server component direct renderen vanuit een `'use client'`-bestand brak `next build`
+  (`next/headers` in de clientbundel); vitest/typecheck zien dat niet, alleen `next build`.
+  `lib/team-context-client.tsx` (context voor `GlobalFab`). Instellingen: secties op rol/recht;
+  Trainingsschema ook bij Agenda-recht (beslissing 4), periodisering-link ook bij
+  Periodisering-recht (bevestigd door de eigenaar als tweede uitzondering op AC 6). Staf-sectie:
+  `RechtenToggles` (optimistic + rollback), `InviteLinkCard` (link één keer zichtbaar; vervaldatum
+  via `VervalLabel` pas ná mount, anders hydratiemismatch tussen server-UTC en browsertijdzone).
+  `/events/new` en `/events/bulk` zijn nu server-wrappers met `canEdit(ctx,'agenda')` +
+  client-formulieren (`NewEventForm`, `BulkMatchesForm`). `JoinedBanner` leest `?joined=1` en
+  wist hem. `app/error.tsx` is een dev-only vangnet: in productie saneert Next `error.message`,
+  dus `'Geen team'`/`'Geen toegang'` komen daar niet aan; `AppShell` neemt het over.
+- **Rechten-toewijzing in de UI** (spiegel van de RLS): verzameltijd → wedstrijd, trainingstype →
+  training, afmeldperiodes → aanwezigheid, to-do per `task_type`, teambrede instellingen alleen
+  owner. Regel: knop weg of veld read-only, waarde blijft leesbaar; nooit een disabled knop zonder
+  uitleg. Autorisatie in de UI is alleen presentatie; elke action toetst zelf.
+
+### Tests
+- `assistent-rechten.acceptance.test.tsx` (32) en `teamwisselaar.acceptance.test.tsx` (12) met de
+  echt filterende tabel-engine en `team_id ≠ user.id`; regressietests op "AppShell importeert
+  EmptyTeamState niet" en "hasTeam bereikt SidebarNav". `components/AppShell-lege-staat.test.tsx`.
+  `vitest.setup.ts` heeft nu een globale `matchMedia`-stub (guard op `typeof window`).
+- Verificatiescript blok 14–20 (vervaltermijn beide randen, already_member, peek voor anon, staf
+  beheren als assistent geweigerd, één actieve link, vreemd team, `create_team` bij een
+  assistent) + handmatig twee-tabbladen-recept voor de race. `scripts/smoke.mjs` controleert
+  `/invite/<random>`: geen redirect naar `/login`, geen teamnaam.
+- Suite-status bij afronden: 3422 groen, alleen `cyclusweek-correctie` AC1/AC12 rood;
+  `nulmeting` AC20 blijft intermitterend.
+
+### Productie-incident bij de rooktest (2026-09-23) — FK's die niet in de repo stonden
+De eerste registratie na de deploy faalde: `create_team` liep stuk op `23503
+settings_team_id_fkey ... not present in table "users"`. In productie hadden **vijf tabellen**
+(`players`, `events`, `attendance`, `lineups`, `settings`) een foreign key `team_id →
+auth.users(id) on delete cascade` die **nergens in `supabase/*.sql` staat** — ooit handmatig in
+het dashboard aangemaakt. Zolang `teams.id = user.id` gold, viel dat niet op; het eerste team
+met een eigen uuid brak erop. Fix: `supabase/team-fk-naar-teams.sql` (M5c) verlegt de vijf
+sleutels naar `teams(id) on delete cascade` (bestaande rijen voldoen al). `oefeningen.team_id`
+krijgt bewust géén FK naar `teams` (eigenaar-user).
+**Les:** de keten (researcher, PM, validator) keek alleen naar de SQL in de repo; de echte
+database kan afwijken. Bij elke migratie die een tenant-sleutel of een id-semantiek verandert:
+**eerst in productie `pg_constraint` bevragen** (niet `information_schema`, die verbergt
+`auth.users` voor de `postgres`-rol):
+`select conname, conrelid::regclass, confrelid::regclass from pg_constraint where contype='f'
+and connamespace='public'::regnamespace`. Reproduceren zonder te schrijven kan in de SQL Editor
+met `begin; set local role authenticated; set local request.jwt.claims = '{"sub":"<uuid>",
+"role":"authenticated"}'; select create_team('x', true); rollback;`.
+Volgorde fase 2 is daarmee: M4 → M5 → **M5c** → deploy → rooktest registratie → M5b.
+
+### Bewust geaccepteerd / opruimlijst
+- IP-rate-limit op `peek`/`accept` is geen harde grens: PostgREST is met de anon-key direct
+  aanroepbaar; de echte bescherming tegen tokenraden is de 256-bits entropie.
+- Assistent met alleen Spelers-recht kan via een directe aanroep een aanwezigheidsstatus zetten
+  (fase-1-restrisico, blok 7).
+- Twee dynamische foutstrings van `signUpViaInvite` (wachtwoordlengte, rate-limit-minuten)
+  blijven onvertaald Nederlands, net als bij `signUp`.
+- Opruimlijst (pre-existing, niet van deze feature): `err.message` rechtstreeks in de UI in
+  `NewEventForm`, `TrainingScheduleForm`, `OefeningPicker`, `OefeningLibrary`, `OefeningEditor`,
+  `PlayerAbsenceList` — hoort een vaste i18n-melding te zijn (patroon `RechtenToggles`).
+- Fase 3 (los team verwijderen, `TeamsSection`) en fase 4 (persoonlijke oefeningen, kopiëren)
+  zijn nog te bouwen. Fase-2/3-aandachtspunt: het zelfherstel kan na het verliezen van het laatste
+  lidmaatschap alleen nog een leeg team maken als élke wispoging van de vlag mislukte (cosmetisch).
