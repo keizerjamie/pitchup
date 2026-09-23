@@ -135,6 +135,27 @@ import { saveTeamColor, resetTeamColor } from '@/app/actions/team-colors'
 import SettingsPage from '@/app/settings/page'
 import TrainingPlanPage from '@/app/events/[id]/training-plan/page'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 const mockSave = saveTeamColor as unknown as ReturnType<typeof vi.fn>
 const mockReset = resetTeamColor as unknown as ReturnType<typeof vi.fn>
 
@@ -173,10 +194,13 @@ function settingsSupabaseClient(rows: { key: string; value: string }[]) {
   const chain: Record<string, unknown> = {}
   chain.select = () => chain
   chain.eq = () => chain
+  // `.in()` hoort erbij sinds getTeamContext de teamnaam per lidmaatschap
+  // ophaalt met settings.select('team_id, value').in('team_id', ...).
+  chain.in = () => chain
   ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) => resolve({ data: rows })
   return {
     auth: { getUser: async () => ({ data: { user: { id: 'team-1' } } }) },
-    from: () => chain,
+    from: (t: string) => (t === 'team_members' ? teamMembersChain('team-1') : chain),
   }
 }
 
@@ -221,7 +245,8 @@ async function renderTrainingPlanPage(opts: {
     oefeningen: { data: [] },
   }
   vi.mocked(createClient).mockResolvedValue({
-    from: (t: string) => tableChain(tables[t] ?? { data: [] }),
+    from: (t: string) =>
+      t === 'team_members' ? teamMembersChain('team-1') : tableChain(tables[t] ?? { data: [] }),
     auth: { getUser: async () => ({ data: { user: { id: 'team-1' } } }) },
   } as unknown as Awaited<ReturnType<typeof createClient>>)
 

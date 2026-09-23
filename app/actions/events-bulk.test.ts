@@ -25,6 +25,17 @@ import { createBulkMatches, getExistingMatchKeys, parseBulkMatchFile } from '@/a
 
 type TableResult = { data?: unknown; error?: unknown }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -44,7 +55,7 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const eqs: Eq[] = []
     const ins: { col: string; vals: unknown[] }[] = []
     const gtes: Eq[] = []
@@ -607,7 +618,13 @@ describe('getExistingMatchKeys', () => {
     use(m)
 
     await expect(getExistingMatchKeys(['morgen'])).resolves.toEqual([])
-    expect(m.calls.select).toHaveLength(0)
+    // De teamcontext (lib/team-context.ts) leest vóór élke action team_members
+    // en de teamnaam uit settings. Die twee horen niet bij de action zelf; waar
+    // het hier om gaat is dat er geen enkele INHOUDELIJKE query gedaan wordt.
+    const zonderContext = m.calls.select.filter(
+      (s) => s.table !== 'team_members' && s.table !== 'settings',
+    )
+    expect(zonderContext).toHaveLength(0)
   })
 
   it('weigert zonder ingelogde gebruiker', async () => {

@@ -76,6 +76,27 @@ import OefeningEditor from '@/components/OefeningEditor'
 import LineupBuilder from '@/components/LineupBuilder'
 import type { Player } from '@/lib/types'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 // Vaste "vandaag" — dezelfde datum als de voorbeelden in de technische brief
 // (correctiedatum 2026-09-08), zodat todayLocal() deterministisch is.
 const TODAY = '2026-09-08'
@@ -258,7 +279,8 @@ function makeMutableDb(seed: Record<string, Row[]> = {}) {
 function installMutableDb(db: ReturnType<typeof makeMutableDb>, user: { id: string } | null = { id: TEAM }) {
   vi.mocked(createClient).mockResolvedValue({
     auth: { getUser: async () => ({ data: { user } }) },
-    from: (t: string) => db.from(t),
+    from: (t: string) =>
+      t === 'team_members' ? teamMembersChain(user?.id) : db.from(t),
   } as unknown as Awaited<ReturnType<typeof createClient>>)
 }
 

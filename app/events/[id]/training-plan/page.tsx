@@ -1,5 +1,6 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import { actueleMetingen, ankerDatum, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
@@ -20,14 +21,13 @@ interface Props {
 export default async function TrainingPlanPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const { data: event } = await supabase
     .from('events')
     .select('*')
     .eq('id', id)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .single()
 
   if (!event || event.type !== 'training') notFound()
@@ -36,10 +36,10 @@ export default async function TrainingPlanPage({ params }: Props) {
   // De settings-query loopt in dezelfde batch mee (geen extra roundtrip) en is
   // net als de andere queries op team_id gescoped.
   const [{ data: playersData }, { data: attendanceData }, { data: settingsRows }] = await Promise.all([
-    supabase.from('players').select('*').eq('team_id', user.id).eq('active', true)
+    supabase.from('players').select('*').eq('team_id', ctx.teamId).eq('active', true)
       .order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
-    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('settings').select('key, value').eq('team_id', user.id)
+    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('settings').select('key, value').eq('team_id', ctx.teamId)
       .in('key', ['team_color_primary', 'team_color_secondary', 'team_name', 'team_logo_url', CYCLUS_CORRECTIE_KEY]),
   ])
   const activePlayers: Player[] = playersData ?? []
@@ -65,11 +65,13 @@ export default async function TrainingPlanPage({ params }: Props) {
   // "kies uit bibliotheek"-lijst nodig heeft die de bestaande koppeling-query
   // niet levert (die geeft alleen al-gekoppelde oefeningen).
   const [categorieMetingenResult, oefeningenResult, libraryResult] = await Promise.all([
-    supabase.from('categorie_metingen').select('*').eq('team_id', user.id)
+    supabase.from('categorie_metingen').select('*').eq('team_id', ctx.teamId)
       .order('datum', { ascending: false }).order('created_at', { ascending: false }),
-    supabase.from('training_oefeningen').select('*, oefeningen(*)').eq('event_id', id).eq('team_id', user.id)
+    supabase.from('training_oefeningen').select('*, oefeningen(*)').eq('event_id', id).eq('team_id', ctx.teamId)
       .order('volgorde').order('created_at', { ascending: true }).order('id', { ascending: true }),
-    supabase.from('oefeningen').select('*').eq('team_id', user.id).order('naam'),
+    // oefeningen.team_id is de EIGENAAR-USER, geen teams.id (zie
+    // app/oefeningen/page.tsx).
+    supabase.from('oefeningen').select('*').eq('team_id', ctx.userId).order('naam'),
   ])
 
   const metingen: CategorieMeting[] = categorieMetingenResult.data ?? []
@@ -123,7 +125,7 @@ export default async function TrainingPlanPage({ params }: Props) {
   const { data: eerdereTrainingen } = await supabase
     .from('events')
     .select('id, date')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('type', 'training')
     .lt('date', event.date)
     .order('date', { ascending: false })
@@ -141,7 +143,7 @@ export default async function TrainingPlanPage({ params }: Props) {
         .from('training_oefeningen')
         .select('event_id')
         .in('event_id', eerdereIds)
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
     : { data: [] }
 
   const aantalPerEvent = new Map<string, number>()
@@ -163,7 +165,7 @@ export default async function TrainingPlanPage({ params }: Props) {
   // Eén rekenpad voor stap + cyclusweek (AC 17/18): getTrainingLog telt per
   // onderdeel de trainingen sinds zijn EIGEN meetdatum en levert currentSteps
   // meteen mee; alleen currentSteps wordt op deze pagina gebruikt.
-  const { currentSteps } = await getTrainingLog(supabase, user.id, actueel, event.date)
+  const { currentSteps } = await getTrainingLog(supabase, ctx.teamId, actueel, event.date)
 
   // ── Cycle-week suggestion: which categories are due this week ──
   // Een training vóór de correctiedatum blijft op het afgeleide anker; vanaf de

@@ -9,6 +9,7 @@ import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
 import { genericError, logError } from '@/lib/errors'
 import { TEAM_LOGO_BUCKET, teamLogoPath } from '@/lib/logo-upload'
 import { getSiteUrl } from '@/lib/site-url'
+import { TEAM_NAAM_METADATA_KEY, getTeamContext, maakEigenTeam } from '@/lib/team-context'
 import {
   PASSWORD_RESET_POLICY,
   SIGN_IN_IP_POLICY,
@@ -88,7 +89,17 @@ export async function signUp(_prevState: { error: string } | null, formData: For
   }
   await Promise.all([recordAttempt(key, SIGN_UP_POLICY), recordAttempt(ipKey, SIGN_UP_IP_POLICY)])
 
-  const { data, error } = await supabase.auth.signUp({ email, password })
+  // De teamnaam gaat als user-metadata mee. Staat e-mailbevestiging aan in
+  // Supabase, dan is er hieronder nog geen sessie en kunnen de teamrijen niet
+  // geschreven worden (RLS); het zelfherstel in lib/team-context.ts maakt het
+  // team dan alsnog aan bij de eerste request mét sessie. Zie
+  // TEAM_NAAM_METADATA_KEY daar voor de volledige onderbouwing, inclusief
+  // waarom dit een expliciete vlag is en geen "nul teams → maak een team".
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { [TEAM_NAAM_METADATA_KEY]: teamName } },
+  })
 
   if (error) {
     // Eén generieke melding voor élke registratiefout — ook voor "e-mailadres
@@ -100,19 +111,27 @@ export async function signUp(_prevState: { error: string } | null, formData: For
   }
   if (!data.user) return { error: 'Registratie mislukt, probeer opnieuw' }
 
-  // With email confirmation enabled there is no session yet; the settings
-  // insert would silently fail under RLS and the redirect would bounce back
-  // to /login without explanation.
+  // Met e-mailbevestiging aan is er nog geen sessie; de teamrijen zouden onder
+  // RLS stil mislukken. De metadata-vlag hierboven zorgt dat het zelfherstel
+  // in lib/team-context.ts het team alsnog aanmaakt zodra deze gebruiker voor
+  // het eerst mét sessie een pagina opent. Dit account is dus NIET stuk.
   if (!data.session) {
     return { error: 'Bevestig eerst je e-mailadres via de link in je inbox, en log daarna in' }
   }
 
-  const { error: settingsError } = await supabase.from('settings').insert({
-    team_id: data.user.id,
-    key: 'team_name',
-    value: teamName,
-  })
-  if (settingsError) logError('auth.signUp.settings', settingsError)
+  // Is er wél meteen een sessie, dan maken we het team hier al aan: dat scheelt
+  // de gebruiker een halve pagina-render wachten en houdt het faalpad
+  // zichtbaar. maakEigenTeam gooit bij een mislukte teams- of owner-rij —
+  // zonder die twee is het account onbruikbaar, dus dat mag niet stil gebeuren.
+  // De vlag blijft in dat geval staan, zodat het zelfherstel het bij de
+  // volgende login alsnog probeert.
+  try {
+    await maakEigenTeam(supabase, data.user.id, teamName)
+  } catch {
+    // maakEigenTeam heeft al gelogd via genericError; hier geen tweede log en
+    // nooit de ruwe fout naar de client.
+    return { error: 'Je account is aangemaakt, maar het opzetten van je team is niet gelukt. Log in om het opnieuw te proberen.' }
+  }
 
   revalidatePath('/', 'layout')
   redirect('/')
@@ -195,6 +214,16 @@ export async function deleteAccount() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Niet ingelogd')
 
+  // Bewust getTeamContext() en NIET requireTeamContext(): iemand zonder team
+  // moet zijn account kunnen blijven verwijderen (AVG). Dan is er simpelweg
+  // geen teamdata om op te ruimen.
+  //
+  // FASE 1: een account heeft precies één team en is daar owner van, dus deze
+  // ene context volstaat. De lus over álle rollen (eigen teams verwijderen,
+  // assistent-lidmaatschappen opzeggen) hoort bij fase 3.
+  const ctx = await getTeamContext()
+  const teamId = ctx?.rol === 'owner' ? ctx.teamId : null
+
   // Eerst controleren, dán pas verwijderen: anders zou de data gewist worden
   // terwijl het auth-account blijft bestaan. Faalt hard in plaats van de
   // auth-verwijdering stilzwijgend over te slaan.
@@ -211,17 +240,59 @@ export async function deleteAccount() {
   // opruiming niet stil kan laten missen.
   // Bewust logError en géén throw: een ontbrekend object — een team dat nooit
   // een logo uploadde — mag de accountverwijdering niet blokkeren.
-  const { error: storageError } = await supabase.storage
-    .from(TEAM_LOGO_BUCKET)
-    .remove([teamLogoPath(user.id)])
-  if (storageError) logError('auth.deleteAccount.storage', storageError)
+  if (teamId) {
+    const { error: storageError } = await supabase.storage
+      .from(TEAM_LOGO_BUCKET)
+      .remove([teamLogoPath(teamId)])
+    if (storageError) logError('auth.deleteAccount.storage', storageError)
+  }
 
-  // Delete all data owned by this team. RLS restricts each delete to the
-  // caller's own rows; events/players cascade to attendance, lineups,
-  // metingen and oefeningen, but we clear every table explicitly to be sure.
-  for (const table of ['oefeningen', 'metingen', 'attendance', 'lineups', 'events', 'players', 'settings']) {
-    const { error } = await supabase.from(table).delete().eq('team_id', user.id)
-    if (error) throw genericError(`auth.deleteAccount.${table}`, error)
+  // Oefeningen zijn PERSOONLIJK bezit (oefeningen.team_id = de eigenaar-user,
+  // geen teams.id) en horen dus bij het account, niet bij het team. Ze gaan
+  // altijd mee, ook als dit account nergens hoofdtrainer is. De FK-cascade op
+  // training_oefeningen.oefening_id ruimt daarna elke koppeling op — óók in
+  // trainingsplannen van andere teams; een cascade wordt op databaseniveau
+  // uitgevoerd en is niet aan RLS onderworpen.
+  // `eigenaarId` en niet `teamId`: oefeningen.team_id is de EIGENAAR-USER.
+  // De naam maakt zichtbaar dat hier bewust de user-id staat en niet de
+  // tenant-sleutel.
+  const eigenaarId = user.id
+  const { error: oefeningError } = await supabase
+    .from('oefeningen')
+    .delete()
+    .eq('team_id', eigenaarId)
+  if (oefeningError) throw genericError('auth.deleteAccount.oefeningen', oefeningError)
+
+  if (teamId) {
+    // De volledige lijst, in FK-veilige volgorde. Eerder stonden hier alleen
+    // zeven tabellen met de aanname dat de rest wel zou cascaden. Dat klopte
+    // niet voor categorie_metingen (alleen een team_id, geen FK naar events of
+    // players): de nulmetingen per onderdeel bleven als wees achter. RLS
+    // beperkt elke delete tot rijen van dit team; het expliciete filter is de
+    // tweede laag.
+    for (const table of [
+      'training_oefeningen',
+      'task_overrides',
+      'match_squad',
+      'match_events',
+      'match_ratings',
+      'lineups',
+      'attendance',
+      'absence_periods',
+      'categorie_metingen',
+      'metingen',
+      'events',
+      'players',
+      'settings',
+    ]) {
+      const { error } = await supabase.from(table).delete().eq('team_id', teamId)
+      if (error) throw genericError(`auth.deleteAccount.${table}`, error)
+    }
+
+    // Als laatste het team zelf: de cascade op team_members en team_invites
+    // ruimt de lidmaatschappen op, inclusief die van eventuele assistenten.
+    const { error: teamError } = await supabase.from('teams').delete().eq('id', teamId)
+    if (teamError) throw genericError('auth.deleteAccount.teams', teamError)
   }
 
   const { error: authError } = await admin.auth.admin.deleteUser(user.id)

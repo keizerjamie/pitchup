@@ -20,9 +20,21 @@ import {
   haalUitParallelGroep,
   saveParallelIndeling,
   verplaatsParallelSpeler,
+  saveDoelstelling,
 } from '@/app/actions/training-plan'
 
 type TableResult = { data?: unknown; error?: unknown }
+
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
 
 function makeSupabase(opts: {
   user?: { id: string } | null
@@ -33,6 +45,7 @@ function makeSupabase(opts: {
   // de blok-normalisatie) met verschillende vormen. Zelfde patroon als
   // app/actions/attendance.test.ts.
   queues?: Record<string, TableResult[]>
+  rpcError?: { code?: string; message: string }
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
@@ -46,6 +59,10 @@ function makeSupabase(opts: {
     insert: [] as { table: string; payload: Record<string, unknown> }[],
     update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
     delete: [] as { table: string }[],
+    // De kolom-begrensde RPC set_event_doelstelling uit
+    // supabase/team-rls-gevolgacties.sql. `rpcError` bootst de SQLSTATE na die
+    // die functie gooit: 42501 = geen recht, P0002 = niet gevonden.
+    rpc: [] as { fn: string; args: Record<string, unknown> }[],
     eq: [] as { table: string; col: string; val: unknown }[],
   }
 
@@ -54,7 +71,7 @@ function makeSupabase(opts: {
   function nextResult(table: string): TableResult {
     const queue = queues[table]
     if (queue && queue.length > 0) return queue.length === 1 ? queue[0] : queue.shift()!
-    return tables[table] ?? { data: [], error: null }
+    return tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
   }
 
   function chain(table: string) {
@@ -75,6 +92,10 @@ function makeSupabase(opts: {
   }
   const supabase = {
     from: (t: string) => chain(t),
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.rpc.push({ fn, args })
+      return { data: null, error: opts.rpcError ?? null }
+    },
     auth: { getUser: async () => ({ data: { user } }) },
   }
   return { supabase, calls }
@@ -1597,5 +1618,120 @@ describe('verplaatsParallelSpeler', () => {
     use(m)
     await expect(verplaatsParallelSpeler('vreemd', 'k1', 'k2', P1)).rejects.toThrow('Event niet gevonden')
     expect(m.calls.update).toHaveLength(0)
+  })
+})
+
+// ────────────────────────────────────────────────
+// saveDoelstelling — via de kolom-begrensde RPC (brief §8-addendum)
+//
+// De doelstelling hoort bij Training, maar staat als kolom op `events` — en de
+// events-policy blijft op 'agenda'. Daarom schrijft deze action via
+// set_event_doelstelling (supabase/team-rls-gevolgacties.sql) in plaats van
+// rechtstreeks.
+// ────────────────────────────────────────────────
+
+describe('saveDoelstelling', () => {
+  // `type` hoort erbij sinds saveDoelstelling assertOwnTrainingEvent gebruikt:
+  // die guard eist een event van dit team ÉN type = 'training'.
+  function eigenTraining(rpcError?: { code?: string; message: string }) {
+    return makeSupabase({ rpcError, tables: { events: { data: { id: 'e1', type: 'training' } } } })
+  }
+
+  // BRONCONTRACT: de parameternamen moeten exact overeenkomen met de SQL.
+  // PostgREST geeft bij een onbekende parameternaam geen fout maar NULL, dus
+  // een hernoeming zou hier stil de doelstelling wissen.
+  it('roept set_event_doelstelling aan met exact de verwachte parameternamen, zonder directe events-update', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await saveDoelstelling('e1', 'Positiespel in de opbouw')
+
+    expect(m.calls.rpc).toEqual([
+      {
+        fn: 'set_event_doelstelling',
+        args: { p_event_id: 'e1', p_doelstelling: 'Positiespel in de opbouw' },
+      },
+    ])
+    expect(m.calls.update.filter((u) => u.table === 'events')).toHaveLength(0)
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/training-plan')
+  })
+
+  it('knipt op 500 tekens en stuurt een lege doelstelling als null door', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await saveDoelstelling('e1', 'x'.repeat(600))
+    expect((m.calls.rpc[0].args.p_doelstelling as string)).toHaveLength(500)
+
+    await saveDoelstelling('e1', '')
+    expect(m.calls.rpc[1].args.p_doelstelling).toBeNull()
+  })
+
+  it('vertaalt 42501 uit de RPC naar "Geen toegang"', async () => {
+    const m = eigenTraining({ code: '42501', message: 'Geen toegang' })
+    use(m)
+
+    await expect(saveDoelstelling('e1', 'x')).rejects.toThrow('Geen toegang')
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('vertaalt P0002 uit de RPC naar "Event niet gevonden"', async () => {
+    const m = eigenTraining({ code: 'P0002', message: 'Event niet gevonden' })
+    use(m)
+
+    await expect(saveDoelstelling('e1', 'x')).rejects.toThrow('Event niet gevonden')
+  })
+
+  it('geeft een generieke melding bij een onverwachte databasefout en lekt niets', async () => {
+    const m = eigenTraining({ code: '40001', message: 'deadlock detected on events' })
+    use(m)
+
+    await expect(saveDoelstelling('e1', 'x')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+  })
+
+  it('weigert zonder trainingsrecht — vóór enige RPC', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1', type: 'training' } },
+        team_members: {
+          data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', mag_agenda_bewerken: true }],
+          error: null,
+        },
+      },
+    })
+    use(m)
+
+    await expect(saveDoelstelling('e1', 'x')).rejects.toThrow('Geen toegang')
+    expect(m.calls.rpc).toHaveLength(0)
+  })
+
+  // ── Forged-id-guard vóór de RPC (lib/authz.ts, assertOwnTrainingEvent) ──
+  it('weigert een event van een ander team zonder de RPC aan te roepen', async () => {
+    const m = makeSupabase({ tables: { events: { data: null } } })
+    use(m)
+
+    await expect(saveDoelstelling('vreemd', 'x')).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.rpc).toHaveLength(0)
+  })
+
+  it('weigert een event dat geen training is, met dezelfde melding', async () => {
+    const m = makeSupabase({ tables: { events: { data: { id: 'e1', type: 'match' } } } })
+    use(m)
+
+    await expect(saveDoelstelling('e1', 'x')).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.rpc).toHaveLength(0)
+  })
+
+  it('haalt het event team-gescoped op vóór de RPC', async () => {
+    const m = eigenTraining()
+    use(m)
+
+    await saveDoelstelling('e1', 'x')
+
+    const eventsSelect = m.calls.select.find((s) => s.table === 'events')!
+    expect(eventsSelect.eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
   })
 })

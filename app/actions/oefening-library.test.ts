@@ -15,6 +15,17 @@ import {
 
 type TableResult = { data?: unknown; error?: unknown; count?: number }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -28,7 +39,7 @@ function makeSupabase(opts: {
     eq: [] as { table: string; col: string; val: unknown }[],
   }
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const c: Record<string, unknown> = {}
     for (const m of ['select', 'gt', 'lt', 'gte', 'lte', 'in', 'order', 'limit', 'neq']) {
       c[m] = () => c

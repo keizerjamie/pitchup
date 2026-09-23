@@ -1,17 +1,16 @@
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player } from '@/lib/types'
 import PlayerList from '@/components/PlayerList'
 
 export default async function PlayersPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const { data: players } = await supabase
     .from('players')
     .select('*')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .order('jersey_number', { ascending: true, nullsFirst: false })
     .order('name')
 

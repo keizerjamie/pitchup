@@ -37,6 +37,17 @@ const RATING_ROWS = [
   { event_id: 'e2', datum: '2026-09-12', tegenstander: 'SVW', rating: 8 },
 ]
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -52,7 +63,7 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const eqs: Eq[] = []
     const filters: Filter[] = []
     const c: Record<string, unknown> = {}
@@ -136,18 +147,23 @@ describe('getSpelerRatingReeks — succes', () => {
     expect(m.calls.rpc).toEqual([
       {
         fn: 'inzichten_rating_speler',
-        args: { p_player: PLAYER_A, p_start: '2026-08-01', p_end: '2027-06-30' },
+        args: { p_team_id: 'team-1', p_player: PLAYER_A, p_start: '2026-08-01', p_end: '2027-06-30' },
       },
     ])
   })
 
-  it('stuurt bewust GEEN team_id mee — de RPC filtert zelf op auth.uid()', async () => {
+  // Was eerder: "stuurt bewust GEEN team_id mee". Sinds de assistent-trainers
+  // is auth.uid() niet meer gelijk aan het team, dus de RPC KAN het team niet
+  // meer zelf afleiden. p_team_id staat vooraan en komt uit de teamcontext,
+  // nooit van de client (supabase/inzichten-team-id.sql).
+  it('stuurt p_team_id uit de teamcontext mee, als eerste argument', async () => {
     const m = eigenTeam()
     use(m)
 
     await getSpelerRatingReeks(PLAYER_A)
 
-    expect(Object.keys(m.calls.rpc[0].args)).toEqual(['p_player', 'p_start', 'p_end'])
+    expect(Object.keys(m.calls.rpc[0].args)).toEqual(['p_team_id', 'p_player', 'p_start', 'p_end'])
+    expect(m.calls.rpc[0].args.p_team_id).toBe('team-1')
   })
 
   it('controleert de speler team-gescoped voordat er data wordt opgehaald', async () => {
@@ -169,7 +185,11 @@ describe('getSpelerRatingReeks — succes', () => {
 
     await getSpelerRatingReeks(PLAYER_A)
 
-    const settingsSelect = m.calls.select.find((s) => s.table === 'settings')!
+    // Twee settings-selects: eerst die van getTeamContext (de teamnaam per
+    // lidmaatschap, gefilterd met .in op team_id + .eq op de key), daarna die
+    // van getAllSettings. Alleen de laatste hoort bij deze action.
+    const settingsSelects = m.calls.select.filter((s) => s.table === 'settings')
+    const settingsSelect = settingsSelects[settingsSelects.length - 1]
     expect(settingsSelect.eqs).toEqual([{ col: 'team_id', val: 'team-1' }])
   })
 
@@ -265,7 +285,10 @@ describe('getSpelerRatingReeks — weigeringen', () => {
     use(m)
 
     await expect(getSpelerRatingReeks('geen-uuid')).rejects.toThrow('Speler niet gevonden')
-    expect(m.calls.select).toHaveLength(0)
+    // De teamcontext leest vóór elke action team_members (+ de teamnaam uit
+    // settings); dat is onvermijdelijk en raakt geen spelerdata. Waar het om
+    // gaat: geen players-lookup en geen RPC voor een ongeldig id.
+    expect(m.calls.select.filter((s) => s.table === 'players')).toHaveLength(0)
     expect(m.calls.rpc).toHaveLength(0)
   })
 
@@ -274,7 +297,7 @@ describe('getSpelerRatingReeks — weigeringen', () => {
     use(m)
 
     await expect(getSpelerRatingReeks('')).rejects.toThrow('Speler niet gevonden')
-    expect(m.calls.select).toHaveLength(0)
+    expect(m.calls.select.filter((s) => s.table === 'players')).toHaveLength(0)
     expect(m.calls.rpc).toHaveLength(0)
   })
 
@@ -389,17 +412,20 @@ describe('getSpelerStatistieken — succes', () => {
     await getSpelerStatistieken(PLAYER_A)
 
     const rpc = m.calls.rpc.find((r) => r.fn === 'inzichten_aanwezigheid_per_speler')!
-    expect(rpc.args).toEqual({ p_start: '2026-08-01', p_end: GISTEREN, p_player: PLAYER_A })
+    expect(rpc.args).toEqual({ p_team_id: 'team-1', p_start: '2026-08-01', p_end: GISTEREN, p_player: PLAYER_A })
   })
 
-  it('stuurt bewust GEEN team_id naar de RPC — die filtert zelf op auth.uid()', async () => {
+  // Was eerder: "stuurt bewust GEEN team_id". Zie de toelichting bij
+  // getSpelerRatingReeks hierboven — p_team_id staat nu vooraan.
+  it('stuurt p_team_id uit de teamcontext mee, als eerste argument', async () => {
     const m = statsTeam()
     use(m)
 
     await getSpelerStatistieken(PLAYER_A)
 
     const rpc = m.calls.rpc.find((r) => r.fn === 'inzichten_aanwezigheid_per_speler')!
-    expect(Object.keys(rpc.args)).toEqual(['p_start', 'p_end', 'p_player'])
+    expect(Object.keys(rpc.args)).toEqual(['p_team_id', 'p_start', 'p_end', 'p_player'])
+    expect(rpc.args.p_team_id).toBe('team-1')
   })
 
   it('haalt de wedstrijden over het VOLLE seizoen op — ratings en kaarten zijn per definitie verleden', async () => {
@@ -447,7 +473,9 @@ describe('getSpelerStatistieken — weigeringen', () => {
     use(m)
 
     await expect(getSpelerStatistieken('geen-uuid')).rejects.toThrow('Speler niet gevonden')
-    expect(m.calls.select).toHaveLength(0)
+    // Zie de toelichting bij getSpelerRatingReeks: de teamcontext-reads zijn
+    // onvermijdelijk; geen players-lookup en geen RPC is wat telt.
+    expect(m.calls.select.filter((s) => s.table === 'players')).toHaveLength(0)
     expect(m.calls.rpc).toHaveLength(0)
   })
 
@@ -456,7 +484,7 @@ describe('getSpelerStatistieken — weigeringen', () => {
     use(m)
 
     await expect(getSpelerStatistieken('')).rejects.toThrow('Speler niet gevonden')
-    expect(m.calls.select).toHaveLength(0)
+    expect(m.calls.select.filter((s) => s.table === 'players')).toHaveLength(0)
     expect(m.calls.rpc).toHaveLength(0)
   })
 

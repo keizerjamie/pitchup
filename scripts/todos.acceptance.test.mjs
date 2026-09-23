@@ -599,13 +599,15 @@ test('AC16: open lineup/training-taak zichtbaar in [vandaag, +7], vervalt na de 
 // ═══════════════════════════════════════════════════════════════════════════
 
 // AC17: Tenant-isolatie — elke query in de To-do data-opbouw is geschermd op
-// team_id = user.id.
-test('AC17 (codeniveau): elke Supabase-query voor de To-do-opbouw is geschermd met .eq(\'team_id\', user.id)', () => {
+// het team. De tenant-sleutel is sinds de assistent-trainers ctx.teamId (de
+// teams.id van het ACTIEVE team) in plaats van user.id; user.id is nu alleen
+// nog de identiteit van de ingelogde persoon. Zie lib/team-context.ts.
+test('AC17 (codeniveau): elke Supabase-query voor de To-do-opbouw is geschermd met .eq(\'team_id\', ctx.teamId)', () => {
   const pageSrc = readFileSync(path.join(ROOT, 'app/page.tsx'), 'utf8')
   const relevantTables = ['events', 'lineups', 'match_ratings', 'match_events', 'training_oefeningen', 'task_overrides']
   for (const table of relevantTables) {
-    const re = new RegExp(`from\\('${table}'\\)[^;]*?\\.eq\\('team_id',\\s*user\\.id\\)`, 's')
-    assert.ok(re.test(pageSrc), `query op '${table}' moet .eq('team_id', user.id) bevatten`)
+    const re = new RegExp(`from\\('${table}'\\)[^;]*?\\.eq\\('team_id',\\s*ctx\\.teamId\\)`, 's')
+    assert.ok(re.test(pageSrc), `query op '${table}' moet .eq('team_id', ctx.teamId) bevatten`)
   }
 })
 
@@ -618,13 +620,13 @@ test('AC18 (codeniveau): markTaskDone/reopenTask roepen assertOwnEvent aan vóó
   const markMatch = actionsSrc.match(/export async function markTaskDone[\s\S]*?^}/m)
   assert.ok(markMatch, 'markTaskDone niet gevonden')
   const markBody = markMatch[0]
-  assert.ok(/await assertOwnEvent\(supabase, eventId, user\.id\)/.test(markBody), 'markTaskDone moet assertOwnEvent aanroepen')
+  assert.ok(/await assertOwnEvent\(supabase, eventId, ctx\.teamId\)/.test(markBody), 'markTaskDone moet assertOwnEvent aanroepen met het TEAM-id')
   assert.ok(markBody.indexOf('assertOwnEvent') < markBody.indexOf(".from('task_overrides')"), 'assertOwnEvent moet vóór de schrijfactie komen')
 
   const reopenMatch = actionsSrc.match(/export async function reopenTask[\s\S]*?^}/m)
   assert.ok(reopenMatch, 'reopenTask niet gevonden')
   const reopenBody = reopenMatch[0]
-  assert.ok(/await assertOwnEvent\(supabase, eventId, user\.id\)/.test(reopenBody), 'reopenTask moet assertOwnEvent aanroepen')
+  assert.ok(/await assertOwnEvent\(supabase, eventId, ctx\.teamId\)/.test(reopenBody), 'reopenTask moet assertOwnEvent aanroepen met het TEAM-id')
   assert.ok(reopenBody.indexOf('assertOwnEvent') < reopenBody.indexOf(".from('task_overrides')"), 'assertOwnEvent moet vóór de schrijfactie komen')
 
   const authzSrc = readFileSync(path.join(ROOT, 'lib/authz.ts'), 'utf8')

@@ -3,6 +3,16 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 // Guard against callers passing ids of another team's rows: RLS keeps the
 // data invisible, but unique constraints (event_id, player_id) would still
 // let a forged insert block the owning team's own writes.
+//
+// WELKE WAARDE GAAT ER IN `teamId`? Sinds de assistent-trainers vallen "wie
+// ben ik" en "voor welk team werk ik" niet meer samen:
+//   * assertOwnEvent / assertOwnMatchEvent / assertOwnTrainingEvent /
+//     assertOwnPlayer / getOwnPlayerIds krijgen ALTIJD `ctx.teamId` — dit is
+//     teamdata.
+//   * assertOwnOefening krijgt ALTIJD `ctx.userId` — oefeningen zijn
+//     persoonlijk bezit (zie de docstring daar).
+// Nooit `user.id` uit de sessie rechtstreeks: die is alleen nog de identiteit
+// van de ingelogde persoon.
 
 export async function assertOwnEvent(supabase: SupabaseClient, eventId: string, teamId: string) {
   const { data } = await supabase.from('events').select('id').eq('id', eventId).eq('team_id', teamId).maybeSingle()
@@ -31,6 +41,14 @@ export async function assertOwnPlayer(supabase: SupabaseClient, playerId: string
   if (!data) throw new Error('Speler niet gevonden')
 }
 
+// LET OP — de enige guard in dit bestand die GEEN team-id wil.
+// `oefeningen.team_id` betekent EIGENAAR-USER (auth.users.id), geen teams.id:
+// een oefening is persoonlijk bezit van de maker en verhuist niet met het
+// actieve team mee. Geef hier dus `ctx.userId`, nooit `ctx.teamId` — met
+// ctx.teamId zou een assistent zijn eigen oefeningen niet meer kunnen
+// bewerken, en zou hij die van de hoofdtrainer wél kunnen aanraken. De
+// parameter heet `teamId` omdat de kolom zo heet; hernoemen van die kolom
+// raakt ~40 call sites zonder functioneel verschil (bewust besluit).
 export async function assertOwnOefening(supabase: SupabaseClient, oefeningId: string, teamId: string) {
   const { data } = await supabase.from('oefeningen').select('id').eq('id', oefeningId).eq('team_id', teamId).maybeSingle()
   if (!data) throw new Error('Oefening niet gevonden')

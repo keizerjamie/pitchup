@@ -18,6 +18,17 @@ type TableResult = { data?: unknown; error?: unknown }
 // Harnas overgenomen van app/actions/training-plan.test.ts, met één toevoeging:
 // `upsert` naast `insert`, inclusief de onConflict-sleutel. Die sleutel IS het
 // idempotentiecontract van deze feature (AC 26) en moet dus meetbaar zijn.
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -46,7 +57,7 @@ function makeSupabase(opts: {
   function nextResult(table: string): TableResult {
     const queue = queues[table]
     if (queue && queue.length > 0) return queue.length === 1 ? queue[0] : queue.shift()!
-    return tables[table] ?? { data: [], error: null }
+    return tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
   }
 
   function chain(table: string) {
@@ -348,7 +359,13 @@ describe('saveCategorieMeting — bewerken', () => {
     const m = bestaandeMeting()
     use(m)
     await expect(saveCategorieMeting({ ...bewerk, datum: '2026-02-30' })).rejects.toThrow('Ongeldige datum')
-    expect(m.calls.select).toHaveLength(0)
+    // De teamcontext (lib/team-context.ts) leest vóór élke action team_members
+    // en de teamnaam uit settings. Die twee horen niet bij de action zelf; waar
+    // het hier om gaat is dat er geen enkele INHOUDELIJKE query gedaan wordt.
+    const zonderContext = m.calls.select.filter(
+      (s) => s.table !== 'team_members' && s.table !== 'settings',
+    )
+    expect(zonderContext).toHaveLength(0)
     expect(m.calls.update).toHaveLength(0)
   })
 

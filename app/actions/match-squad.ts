@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { assertOwnMatchEvent, assertOwnPlayer } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 
 // Zet één speler in of uit de wedstrijdselectie. De aanwezigheid van de rij ís
 // de selectie, dus selected=true schrijft een rij en selected=false verwijdert
@@ -15,21 +16,21 @@ export async function toggleSquadPlayer(
   selected: boolean,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'wedstrijd')
 
   if (typeof selected !== 'boolean') throw new Error('Ongeldige selectie')
 
   await Promise.all([
-    assertOwnMatchEvent(supabase, eventId, user.id),
-    assertOwnPlayer(supabase, playerId, user.id),
+    assertOwnMatchEvent(supabase, eventId, ctx.teamId),
+    assertOwnPlayer(supabase, playerId, ctx.teamId),
   ])
 
   const { error } = selected
     ? await supabase
         .from('match_squad')
         .upsert(
-          { event_id: eventId, player_id: playerId, team_id: user.id },
+          { event_id: eventId, player_id: playerId, team_id: ctx.teamId },
           { onConflict: 'event_id,player_id', ignoreDuplicates: true },
         )
     : await supabase
@@ -37,7 +38,7 @@ export async function toggleSquadPlayer(
         .delete()
         .eq('event_id', eventId)
         .eq('player_id', playerId)
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('match-squad.toggleSquadPlayer', error)
 

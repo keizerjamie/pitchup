@@ -20,14 +20,30 @@ import { createEvent, updateGatherTime, updateTrainingstype } from '@/app/action
 
 type TableResult = { data?: unknown; error?: unknown }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
+  rpcError?: { code?: string; message: string }
+  // Laat uitsluitend de DELETE op deze tabel falen. Nodig voor de compensatie:
+  // daar moet de events-INSERT slagen en juist de opruim-DELETE mislukken.
+  deleteError?: { table: string; error: { code?: string; message: string } }
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
   type Eq = { col: string; val: unknown }
   const calls = {
+    rpc: [] as { fn: string; args: Record<string, unknown> }[],
     select: [] as { table: string; eqs: Eq[] }[],
     insert: [] as { table: string; payload: unknown }[],
     update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
@@ -35,11 +51,15 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const eqs: Eq[] = []
     const c: Record<string, unknown> = {}
     c.select = () => { calls.select.push({ table, eqs }); return c }
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // `.in()` hoort erbij sinds getTeamContext de teamnamen ophaalt met
+    // settings.select('team_id, value').in('team_id', ...). Alleen doorgeven:
+    // deze stub past filters toch niet toe.
+    c.in = () => c
     // Datumfilters en sortering van de afmeldperiode-query: alleen doorgeven,
     // niet vastleggen — de eq-lijst blijft zo de tenant-check.
     c.gte = () => c
@@ -50,15 +70,30 @@ function makeSupabase(opts: {
       calls.update.push({ table, payload, eqs })
       return c
     }
-    c.delete = () => { calls.delete.push({ table, eqs }); return c }
-    c.maybeSingle = () => Promise.resolve(result)
-    c.single = () => Promise.resolve(result)
-    ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(result)
+    let deleting = false
+    c.delete = () => { calls.delete.push({ table, eqs }); deleting = true; return c }
+    function uitkomst() {
+      if (deleting && opts.deleteError?.table === table) {
+        return { data: null, error: opts.deleteError.error }
+      }
+      return result
+    }
+    c.maybeSingle = () => Promise.resolve(uitkomst())
+    c.single = () => Promise.resolve(uitkomst())
+    ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(uitkomst())
     return c
   }
 
   const supabase = {
     from: (t: string) => chain(t),
+    // De vier kolom-begrensde RPC's uit supabase/team-rls-gevolgacties.sql
+    // (set_event_doelstelling, set_match_result, set_gather_time,
+    // set_trainingstype). `rpcError` laat een test de SQLSTATE nabootsen die
+    // die functies gooien: 42501 = geen recht, P0002 = niet gevonden.
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.rpc.push({ fn, args })
+      return { data: null, error: opts.rpcError ?? null }
+    },
     auth: { getUser: async () => ({ data: { user } }) },
   }
   return { supabase, calls }
@@ -69,8 +104,9 @@ function use(mock: ReturnType<typeof makeSupabase>) {
 }
 
 // Standaard: eigen wedstrijd e1; insert/update slagen.
-function eigenTeam(extra: Record<string, TableResult> = {}) {
+function eigenTeam(extra: Record<string, TableResult> = {}, rpcError?: { code?: string; message: string }) {
   return makeSupabase({
+    rpcError,
     tables: {
       events: { data: { id: 'e1', type: 'match' }, error: null },
       players: { data: [], error: null },
@@ -172,6 +208,78 @@ describe('createEvent — verzameltijd', () => {
     await expect(createEvent(form({ ...WEDSTRIJD, gather_time: '25:00' })))
       .rejects.toThrow('Ongeldig tijdstip')
     expect(m.calls.insert).toHaveLength(0)
+  })
+})
+
+// ────────────────────────────────────────────────
+// createEvent — compensatie bij een mislukte attendance-insert
+//
+// Deze fout werd vóór het §8-addendum genegeerd: het event stond er dan wél,
+// maar zonder aanwezigheidsrijen, en de trainer merkte niets. Nu wordt het
+// zojuist gemaakte event teruggedraaid en faalt de action zichtbaar — zelfde
+// compensatiepatroon als markAbsentForPeriod in app/actions/attendance.ts.
+// ────────────────────────────────────────────────
+
+describe('createEvent — mislukte aanwezigheidsrijen', () => {
+  function metAttendanceFout() {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: 'e1', type: 'training' }, error: null },
+        players: { data: [{ id: 'p1' }], error: null },
+        attendance: { data: null, error: { code: '42501', message: 'permission denied for table attendance' } },
+        absence_periods: { data: [], error: null },
+      },
+    })
+  }
+
+  it('verwijdert het zojuist gemaakte event weer, tenant-gescoped', async () => {
+    const m = metAttendanceFout()
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    const eventDelete = m.calls.delete.find((d) => d.table === 'events')!
+    expect(eventDelete.eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('faalt zichtbaar met een generieke melding en lekt de ruwe fout niet', async () => {
+    use(metAttendanceFout())
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('events.createEvent.attendance')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
+  })
+
+  it('redirect niet — er is geen half event om naartoe te navigeren', async () => {
+    use(metAttendanceFout())
+
+    await expect(createEvent(form(TRAINING))).rejects.not.toThrow('__redirect__')
+  })
+
+  it('logt het apart als de compensatie zélf mislukt — dan blijft er een half event achter', async () => {
+    use(makeSupabase({
+      deleteError: { table: 'events', error: { code: '42501', message: 'permission denied for table events' } },
+      tables: {
+        events: { data: { id: 'e1', type: 'training' }, error: null },
+        players: { data: [{ id: 'p1' }], error: null },
+        attendance: { data: null, error: { code: '23503', message: 'insert or update violates foreign key' } },
+        absence_periods: { data: [], error: null },
+      },
+    }))
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    // Beide contextlabels: de oorzaak én het feit dat de opruiming faalde.
+    expect(logged()).toContain('events.createEvent.attendance')
+    expect(logged()).toContain('events.createEvent.compensatie')
+    // Nog steeds geen ruwe melding, van geen van beide fouten.
+    expect(logged()).not.toContain('permission denied')
+    expect(logged()).not.toContain('violates foreign key')
   })
 })
 
@@ -541,8 +649,9 @@ describe('createEvent — trainingstype', () => {
 // ────────────────────────────────────────────────
 
 // Standaard: eigen training e1.
-function eigenTraining(extra: Record<string, TableResult> = {}) {
+function eigenTraining(extra: Record<string, TableResult> = {}, rpcError?: { code?: string; message: string }) {
   return makeSupabase({
+    rpcError,
     tables: {
       events: { data: { id: 'e1', type: 'training' }, error: null },
       ...extra,
@@ -551,19 +660,21 @@ function eigenTraining(extra: Record<string, TableResult> = {}) {
 }
 
 describe('updateTrainingstype — succes', () => {
-  it('werkt het type bij met alle drie de filters, inclusief team_id en type', async () => {
+  // BRONCONTRACT: de parameternamen moeten exact overeenkomen met
+  // set_trainingstype in supabase/team-rls-gevolgacties.sql. Een hernoemde
+  // parameter geeft bij PostgREST geen fout maar een NULL-waarde, dus dit moet
+  // hard vastliggen. Er gaat GEEN events-update meer rechtstreeks de deur uit:
+  // de events-policy blijft op 'agenda' en deze ene kolom loopt via de RPC.
+  it('schrijft via set_trainingstype met exact de verwachte parameternamen, niet via een directe update', async () => {
     const m = eigenTraining()
     use(m)
 
     await updateTrainingstype('e1', 'teamtactisch')
 
-    const update = m.calls.update.find((u) => u.table === 'events')!
-    expect(update.payload).toEqual({ trainingstype: 'teamtactisch' })
-    expect(update.eqs).toEqual([
-      { col: 'id', val: 'e1' },
-      { col: 'team_id', val: 'team-1' },
-      { col: 'type', val: 'training' },
+    expect(m.calls.rpc).toEqual([
+      { fn: 'set_trainingstype', args: { p_event_id: 'e1', p_trainingstype: 'teamtactisch' } },
     ])
+    expect(m.calls.update.filter((u) => u.table === 'events')).toHaveLength(0)
   })
 
   it('zet ook terug naar vct', async () => {
@@ -572,7 +683,7 @@ describe('updateTrainingstype — succes', () => {
 
     await updateTrainingstype('e1', 'vct')
 
-    expect(m.calls.update.find((u) => u.table === 'events')!.payload).toEqual({ trainingstype: 'vct' })
+    expect(m.calls.rpc[0].args.p_trainingstype).toBe('vct')
   })
 
   it('haalt het event team-gescoped op vóór het bijwerken', async () => {
@@ -616,7 +727,13 @@ describe('updateTrainingstype — weigeringen', () => {
 
     await expect(updateTrainingstype('e1', 'onzin' as unknown as 'vct'))
       .rejects.toThrow('Ongeldig trainingstype')
-    expect(m.calls.select).toHaveLength(0)
+    // De teamcontext (lib/team-context.ts) leest vóór élke action team_members
+    // en de teamnaam uit settings. Die twee horen niet bij de action zelf; waar
+    // het hier om gaat is dat er geen enkele INHOUDELIJKE query gedaan wordt.
+    const zonderContext = m.calls.select.filter(
+      (s) => s.table !== 'team_members' && s.table !== 'settings',
+    )
+    expect(zonderContext).toHaveLength(0)
     expect(m.calls.update).toHaveLength(0)
   })
 
@@ -637,20 +754,47 @@ describe('updateTrainingstype — weigeringen', () => {
     expect(m.calls.update).toHaveLength(0)
   })
 
-  it('geeft een generieke melding bij een databasefout en lekt niets', async () => {
-    use(eigenTraining({
-      events: {
-        data: { id: 'e1', type: 'training' },
-        error: { code: '42501', message: 'permission denied for table events' },
-      },
-    }))
+  it('geeft een generieke melding bij een onverwachte databasefout en lekt niets', async () => {
+    const m = eigenTraining()
+    m.supabase.rpc = async () => ({ data: null, error: { code: '40001', message: 'deadlock detected on events' } })
+    use(m)
 
     await expect(updateTrainingstype('e1', 'teamtactisch')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
 
     expect(logged()).toContain('events.updateTrainingstype')
-    expect(logged()).toContain('42501')
-    expect(logged()).not.toContain('permission denied')
+    expect(logged()).toContain('40001')
+    expect(logged()).not.toContain('deadlock detected')
     expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  // ── Errcode-vertaling van de RPC (lib/errors.ts, rpcEventError) ──
+  it('vertaalt 42501 uit set_trainingstype naar "Geen toegang", zonder log-ruis', async () => {
+    const m = eigenTraining({}, { code: '42501', message: 'Geen toegang' })
+    use(m)
+
+    await expect(updateTrainingstype('e1', 'teamtactisch')).rejects.toThrow('Geen toegang')
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('vertaalt P0002 uit set_trainingstype naar "Event niet gevonden"', async () => {
+    const m = eigenTraining({}, { code: 'P0002', message: 'Event niet gevonden' })
+    use(m)
+
+    await expect(updateTrainingstype('e1', 'teamtactisch')).rejects.toThrow('Event niet gevonden')
+  })
+
+  it('weigert zonder trainingsrecht — vóór enige query of RPC', async () => {
+    const m = eigenTraining({
+      team_members: {
+        data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', mag_agenda_bewerken: true }],
+        error: null,
+      },
+    })
+    use(m)
+
+    await expect(updateTrainingstype('e1', 'teamtactisch')).rejects.toThrow('Geen toegang')
+    expect(m.calls.rpc).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(0)
   })
 })
 
@@ -659,19 +803,19 @@ describe('updateTrainingstype — weigeringen', () => {
 // ────────────────────────────────────────────────
 
 describe('updateGatherTime — succes', () => {
-  it('werkt de verzameltijd bij met alle drie de filters, inclusief team_id', async () => {
+  // BRONCONTRACT: parameternamen exact gelijk aan set_gather_time in
+  // supabase/team-rls-gevolgacties.sql — zie de toelichting bij
+  // set_trainingstype hierboven.
+  it('schrijft via set_gather_time met exact de verwachte parameternamen, niet via een directe update', async () => {
     const m = eigenTeam()
     use(m)
 
     await updateGatherTime('e1', '13:45')
 
-    const update = m.calls.update.find((u) => u.table === 'events')!
-    expect(update.payload).toEqual({ gather_time: '13:45' })
-    expect(update.eqs).toEqual([
-      { col: 'id', val: 'e1' },
-      { col: 'team_id', val: 'team-1' },
-      { col: 'type', val: 'match' },
+    expect(m.calls.rpc).toEqual([
+      { fn: 'set_gather_time', args: { p_event_id: 'e1', p_gather_time: '13:45' } },
     ])
+    expect(m.calls.update.filter((u) => u.table === 'events')).toHaveLength(0)
   })
 
   it('wist de verzameltijd met null', async () => {
@@ -680,7 +824,7 @@ describe('updateGatherTime — succes', () => {
 
     await updateGatherTime('e1', null)
 
-    expect(m.calls.update.find((u) => u.table === 'events')!.payload).toEqual({ gather_time: null })
+    expect(m.calls.rpc[0].args.p_gather_time).toBeNull()
   })
 
   it('behandelt een lege string als wissen, niet als ongeldige invoer', async () => {
@@ -689,7 +833,7 @@ describe('updateGatherTime — succes', () => {
 
     await updateGatherTime('e1', '')
 
-    expect(m.calls.update.find((u) => u.table === 'events')!.payload).toEqual({ gather_time: null })
+    expect(m.calls.rpc[0].args.p_gather_time).toBeNull()
   })
 
   it('accepteert de randen van de dag', async () => {
@@ -699,10 +843,7 @@ describe('updateGatherTime — succes', () => {
     await updateGatherTime('e1', '00:00')
     await updateGatherTime('e1', '23:59')
 
-    expect(m.calls.update.map((u) => u.payload)).toEqual([
-      { gather_time: '00:00' },
-      { gather_time: '23:59' },
-    ])
+    expect(m.calls.rpc.map((r) => r.args.p_gather_time)).toEqual(['00:00', '23:59'])
   })
 
   it('haalt het event team-gescoped op vóór het bijwerken', async () => {
@@ -780,16 +921,42 @@ describe('updateGatherTime — weigeringen', () => {
     expect(m.calls.update).toHaveLength(0)
   })
 
-  it('geeft een generieke melding bij een databasefout en lekt niets', async () => {
-    use(eigenTeam({
-      events: { data: { id: 'e1', type: 'match' }, error: { code: '42501', message: 'permission denied for table events' } },
-    }))
+  it('geeft een generieke melding bij een onverwachte databasefout en lekt niets', async () => {
+    use(eigenTeam({}, { code: '40001', message: 'deadlock detected on events' }))
 
     await expect(updateGatherTime('e1', '13:45')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
 
     expect(logged()).toContain('events.updateGatherTime')
-    expect(logged()).toContain('42501')
-    expect(logged()).not.toContain('permission denied')
+    expect(logged()).toContain('40001')
+    expect(logged()).not.toContain('deadlock detected')
     expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  // ── Errcode-vertaling van de RPC (lib/errors.ts, rpcEventError) ──
+  it('vertaalt 42501 uit set_gather_time naar "Geen toegang"', async () => {
+    use(eigenTeam({}, { code: '42501', message: 'Geen toegang' }))
+
+    await expect(updateGatherTime('e1', '13:45')).rejects.toThrow('Geen toegang')
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('vertaalt P0002 uit set_gather_time naar "Event niet gevonden"', async () => {
+    use(eigenTeam({}, { code: 'P0002', message: 'Event niet gevonden' }))
+
+    await expect(updateGatherTime('e1', '13:45')).rejects.toThrow('Event niet gevonden')
+  })
+
+  it('weigert zonder wedstrijdrecht — vóór enige query of RPC', async () => {
+    const m = eigenTeam({
+      team_members: {
+        data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', mag_agenda_bewerken: true }],
+        error: null,
+      },
+    })
+    use(m)
+
+    await expect(updateGatherTime('e1', '13:45')).rejects.toThrow('Geen toegang')
+    expect(m.calls.rpc).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(0)
   })
 })

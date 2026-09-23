@@ -1,16 +1,15 @@
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { FootballEvent } from '@/lib/types'
 import CalendarView from '@/components/CalendarView'
 
 export default async function EventsPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const [{ data: events }, { data: attendance }] = await Promise.all([
-    supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').order('date', { ascending: false }),
-    supabase.from('attendance').select('event_id, status').eq('team_id', user.id),
+    supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').order('date', { ascending: false }),
+    supabase.from('attendance').select('event_id, status').eq('team_id', ctx.teamId),
   ])
 
   const allEvents: FootballEvent[] = events ?? []

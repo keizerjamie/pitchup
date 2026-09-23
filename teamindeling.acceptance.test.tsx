@@ -32,6 +32,27 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { createClient } from '@/lib/supabase/server'
 import { saveSpelerindeling } from '@/app/actions/training-plan'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -68,7 +89,8 @@ function makeSupabase(opts: {
     return c
   }
   const supabase = {
-    from: (t: string) => chain(t),
+    from: (t: string) =>
+      t === 'team_members' ? teamMembersChain(user?.id) : chain(t),
     auth: { getUser: async () => ({ data: { user } }) },
   }
   return { supabase, calls }
@@ -380,9 +402,12 @@ describe('AC6 — twee koppelingen van dezelfde bibliotheek-oefening zijn onafha
 
     const supabase = {
       from: (t: string) => {
+        if (t === 'team_members') return teamMembersChain('team-1')
         if (t === 'events') return eventsChain()
         if (t === 'training_oefeningen') return trainingOefeningenChain()
         if (t === 'players') return playersChain()
+        // getTeamContext leest de teamnaam uit settings; lege set volstaat.
+        if (t === 'settings') return teamMembersChain(undefined)
         throw new Error(`onverwachte tabel in AC6-mock: ${t}`)
       },
       auth: { getUser: async () => ({ data: { user: { id: 'team-1' } } }) },

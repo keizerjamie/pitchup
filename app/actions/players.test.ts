@@ -9,9 +9,20 @@ vi.mock('@/app/actions/settings', () => ({ getDefaultAttendance: vi.fn(async () 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
-import { createPlayer, markInjured, markRecovered, updatePlayer } from '@/app/actions/players'
+import { createPlayer, deletePlayer, markInjured, markRecovered, updatePlayer } from '@/app/actions/players'
 
 type TableResult = { data?: unknown; error?: unknown }
+
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
 
 function makeSupabase(opts: {
   user?: { id: string } | null
@@ -28,7 +39,7 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const filters: Filter[] = []
     const c: Record<string, unknown> = {}
     c.select = () => { calls.select.push({ table, filters }); return c }
@@ -457,5 +468,85 @@ describe('updatePlayer — spelertype', () => {
 
     await expect(updatePlayer(PLAYER_A, form({ ...BASIS, type: 'guest' }))).rejects.toThrow('Niet ingelogd')
     expect(m.calls.update).toHaveLength(0)
+  })
+})
+
+// ────────────────────────────────────────────────
+// Bewerkrecht per onderdeel (assistent-trainers, fase 1)
+//
+// De applicatielaag is de EERSTE van twee lagen: assertCanEdit weigert vóór
+// enige query. De RLS-policy op players (can_edit(team_id,'spelers')) is de
+// tweede en wordt hier niet bewezen — vitest praat nooit met een database.
+// Zie supabase/team-rls-verificatie.sql voor die kant.
+// ────────────────────────────────────────────────
+
+function assistentZonderSpelersrecht(extra: Record<string, TableResult> = {}) {
+  return makeSupabase({
+    tables: {
+      team_members: {
+        data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', mag_spelers_bewerken: false }],
+        error: null,
+      },
+      players: { data: { id: PLAYER_A }, error: null },
+      events: { data: [{ id: 'e1' }], error: null },
+      attendance: { data: null, error: null },
+      ...extra,
+    },
+  })
+}
+
+describe('assertCanEdit — spelers', () => {
+  it('weigert createPlayer voor een assistent zonder spelersrecht, zonder insert', async () => {
+    const m = assistentZonderSpelersrecht()
+    use(m)
+
+    await expect(createPlayer(form(BASIS))).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('weigert updatePlayer en deletePlayer zonder spelersrecht, zonder write', async () => {
+    const m = assistentZonderSpelersrecht()
+    use(m)
+
+    await expect(updatePlayer(PLAYER_A, form(BASIS))).rejects.toThrow('Geen toegang')
+    await expect(deletePlayer(PLAYER_A)).rejects.toThrow('Geen toegang')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('weigert markInjured en markRecovered zonder spelersrecht', async () => {
+    const m = assistentZonderSpelersrecht()
+    use(m)
+
+    await expect(markInjured(PLAYER_A)).rejects.toThrow('Geen toegang')
+    await expect(markRecovered(PLAYER_A)).rejects.toThrow('Geen toegang')
+    expect(m.calls.update).toHaveLength(0)
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('laat een assistent MET spelersrecht wél door', async () => {
+    const m = assistentZonderSpelersrecht({
+      team_members: {
+        data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', mag_spelers_bewerken: true }],
+        error: null,
+      },
+    })
+    use(m)
+
+    await createPlayer(form(BASIS))
+    expect(inserts(m)).toHaveLength(1)
+  })
+
+  it('laat een hoofdtrainer altijd door, ook met alle zes vlaggen op false', async () => {
+    const m = assistentZonderSpelersrecht({
+      team_members: {
+        data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'owner', mag_spelers_bewerken: false }],
+        error: null,
+      },
+    })
+    use(m)
+
+    await createPlayer(form(BASIS))
+    expect(inserts(m)).toHaveLength(1)
   })
 })

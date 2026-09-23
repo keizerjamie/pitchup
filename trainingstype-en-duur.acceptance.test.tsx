@@ -92,6 +92,27 @@ import { addOefeningToTraining, updateKoppeling, kopieerTrainingsplan } from '@/
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import NewEventPage from '@/app/events/new/page'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 const TEAM = 'team-1'
 const OTHER_TEAM = 'team-2'
 
@@ -210,7 +231,46 @@ function maakEngine(opts: {
     return c
   }
 
-  const supabase = { from: (t: string) => chain(t), auth: { getUser: async () => ({ data: { user } }) } }
+  // De kolom-begrensde RPC's uit supabase/team-rls-gevolgacties.sql, hier
+  // nagebootst tegen dezelfde in-memory store. Ze bestaan omdat de
+  // events-policy op 'agenda' blijft terwijl trainingstype en doelstelling bij
+  // Training horen; deze engine repliceert hun contract: team_id uit de rij,
+  // type-check, exact één kolom. Het rechtendeel (can_edit) hoort bij de
+  // database en wordt hier bewust niet nagebootst — de applicatielaag toetst
+  // dat al met assertCanEdit, en de RLS-kant staat in
+  // supabase/team-rls-verificatie.sql.
+  const EVENT_RPCS: Record<string, { type: string; kolom: (args: Row) => Row }> = {
+    set_trainingstype: { type: 'training', kolom: (a) => ({ trainingstype: a.p_trainingstype }) },
+    set_event_doelstelling: { type: 'training', kolom: (a) => ({ doelstelling: a.p_doelstelling ?? null }) },
+    set_match_result: {
+      type: 'match',
+      kolom: (a) => ({ goals_for: a.p_goals_for, goals_against: a.p_goals_against }),
+    },
+    set_gather_time: { type: 'match', kolom: (a) => ({ gather_time: a.p_gather_time ?? null }) },
+  }
+
+  const supabase = {
+    from: (t: string) => (t === 'team_members' ? teamMembersChain(user?.id) : chain(t)),
+    rpc: async (fn: string, args: Row) => {
+      const def = EVENT_RPCS[fn]
+      if (!def) throw new Error(`Onverwachte RPC in test: ${fn}`)
+      // `failOnce: { table: 'events', op: 'update' }` werkt ook op deze weg:
+      // de RPC IS de events-update sinds de gevolgacties-migratie. Bewust een
+      // fout ZONDER herkenbare code, zodat rpcEventError hem doorstuurt naar
+      // genericError — precies wat de rollback-test wil bewijzen.
+      if (fail && fail.table === 'events' && fail.op === 'update') {
+        fail = null
+        return { data: null, error: { message: 'RUWE_TESTFOUT_update' } }
+      }
+      const rij = (db.events ?? []).find((r) => r.id === args.p_event_id && r.type === def.type)
+      // Zelfde SQLSTATE als de echte functie, zodat rpcEventError in
+      // lib/errors.ts hier hetzelfde vertaalt als in productie.
+      if (!rij) return { data: null, error: { code: 'P0002', message: 'Event niet gevonden' } }
+      Object.assign(rij, def.kolom(args))
+      return { data: null, error: null }
+    },
+    auth: { getUser: async () => ({ data: { user } }) },
+  }
   return { db, supabase }
 }
 

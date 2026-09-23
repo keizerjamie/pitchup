@@ -15,6 +15,17 @@ import { saveTeamColor, resetTeamColor } from '@/app/actions/team-colors'
 
 type TableResult = { data?: unknown; error?: unknown }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -28,11 +39,15 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: null, error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: null, error: null })
     const eqs: Eq[] = []
     const c: Record<string, unknown> = {}
     c.select = () => c
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // `.in()` hoort erbij sinds getTeamContext de teamnamen ophaalt met
+    // settings.select('team_id, value').in('team_id', ...). Alleen doorgeven:
+    // deze stub past filters toch niet toe.
+    c.in = () => c
     c.upsert = (payload: Record<string, unknown>, options?: unknown) => {
       calls.upsert.push({ table, payload, options })
       return c
@@ -369,5 +384,45 @@ describe('clubkleuren — randgevallen', () => {
     expect(opnieuw).toEqual({ error: null, value: '#222222' })
     expect(m.calls.delete).toHaveLength(1)
     expect(m.calls.upsert).toHaveLength(2)
+  })
+})
+
+// ────────────────────────────────────────────────
+// Owner-only (assistent-trainers, fase 1)
+//
+// Clubkleuren zijn hoofdtrainer-werk, ook voor een assistent met alle zes
+// bewerkrechten. Deze actions throwen niet maar geven { error } terug — de
+// melding hoort naast het veld te verschijnen.
+// ────────────────────────────────────────────────
+
+const ASSISTENT_ALLE_RECHTEN = {
+  data: [{
+    team_id: 'team-1', user_id: 'team-1', rol: 'assistent',
+    mag_spelers_bewerken: true, mag_agenda_bewerken: true,
+    mag_aanwezigheid_bewerken: true, mag_wedstrijd_bewerken: true,
+    mag_training_bewerken: true, mag_periodisering_bewerken: true,
+  }],
+  error: null,
+}
+
+describe('clubkleuren — alleen de hoofdtrainer', () => {
+  it('weigert saveTeamColor voor een assistent met alle zes rechten, zonder upsert', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ALLE_RECHTEN } })
+    use(m)
+
+    const result = await saveTeamColor('primary', '#a1b2c3')
+
+    expect(result.error).toBe('Alleen de hoofdtrainer kan de clubkleuren wijzigen.')
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('weigert resetTeamColor voor diezelfde assistent, zonder delete', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ALLE_RECHTEN } })
+    use(m)
+
+    const result = await resetTeamColor('primary')
+
+    expect(result.error).toBe('Alleen de hoofdtrainer kan de clubkleuren wijzigen.')
+    expect(m.calls.delete).toHaveLength(0)
   })
 })

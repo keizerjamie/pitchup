@@ -16,6 +16,17 @@ import { uploadTeamLogo, deleteTeamLogo } from '@/app/actions/team-logo'
 
 type TableResult = { data?: unknown; error?: unknown }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -34,11 +45,15 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: null, error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: null, error: null })
     const eqs: Eq[] = []
     const c: Record<string, unknown> = {}
     c.select = () => c
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // `.in()` hoort erbij sinds getTeamContext de teamnamen ophaalt met
+    // settings.select('team_id, value').in('team_id', ...). Alleen doorgeven:
+    // deze stub past filters toch niet toe.
+    c.in = () => c
     c.upsert = (payload: Record<string, unknown>, options?: unknown) => {
       calls.upsert.push({ table, payload, options })
       return c
@@ -398,5 +413,47 @@ describe('deleteTeamLogo', () => {
     expect(logged()).toContain('team-logo.deleteTeamLogo.settings')
     expect(logged()).not.toContain('permission denied')
     expect(revalidatePath).toHaveBeenCalledWith('/', 'layout')
+  })
+})
+
+// ────────────────────────────────────────────────
+// Owner-only (assistent-trainers, fase 1)
+//
+// Het clublogo is hoofdtrainer-werk, ook voor een assistent met alle zes
+// bewerkrechten. De storage-policy op de bucket eist datzelfde
+// (supabase/team-rls.sql); dit is de eerste van die twee lagen.
+// ────────────────────────────────────────────────
+
+const ASSISTENT_ALLE_RECHTEN = {
+  data: [{
+    team_id: 'team-1', user_id: 'team-1', rol: 'assistent',
+    mag_spelers_bewerken: true, mag_agenda_bewerken: true,
+    mag_aanwezigheid_bewerken: true, mag_wedstrijd_bewerken: true,
+    mag_training_bewerken: true, mag_periodisering_bewerken: true,
+  }],
+  error: null,
+}
+
+describe('clublogo — alleen de hoofdtrainer', () => {
+  it('weigert uploadTeamLogo voor een assistent met alle zes rechten, en raakt Storage niet aan', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ALLE_RECHTEN } })
+    use(m)
+
+    const result = await uploadTeamLogo(form(imageFile(PNG_HEADER)))
+
+    expect(result.error).toBe('Alleen de hoofdtrainer kan het clublogo wijzigen.')
+    expect(m.calls.upload).toHaveLength(0)
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('weigert deleteTeamLogo voor diezelfde assistent, en verwijdert niets', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ALLE_RECHTEN } })
+    use(m)
+
+    const result = await deleteTeamLogo()
+
+    expect(result.error).toBe('Alleen de hoofdtrainer kan het clublogo wijzigen.')
+    expect(m.calls.remove).toHaveLength(0)
+    expect(m.calls.delete).toHaveLength(0)
   })
 })

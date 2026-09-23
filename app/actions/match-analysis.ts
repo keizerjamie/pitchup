@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { assertOwnEvent, assertOwnPlayer } from '@/lib/authz'
 import type { MatchEventKind } from '@/lib/types'
 import { clampGoals, isValidRating, isValidKind, isValidMinute } from '@/lib/match-analysis.mjs'
-import { genericError } from '@/lib/errors'
+import { genericError, rpcEventError } from '@/lib/errors'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 
 // Revalidate both the analysis sub-page and the event page (which shows the
 // analysis ActionCard + done-state) after every mutation.
@@ -14,25 +15,33 @@ function revalidateEvent(eventId: string) {
   revalidatePath(`/events/${eventId}`)
 }
 
+// De uitslag hoort bij Wedstrijd, maar staat als kolom op `events` — en de
+// events-policy blijft op 'agenda'. Daarom loopt dit ene kolommenpaar via de
+// kolom-begrensde RPC set_match_result (supabase/team-rls-gevolgacties.sql),
+// die zelf can_edit(team,'wedstrijd') toetst en het team-id uit de rij haalt.
+// clampGoals blijft de ENIGE bron van waarheid voor het bereik en draait
+// daarom vóór de aanroep; de RPC klemt bewust niet nog een keer.
 export async function saveMatchResult(
   eventId: string,
   goalsFor: number | null,
   goalsAgainst: number | null,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'wedstrijd')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  // Strikt genomen overbodig naast de RPC (die zoekt het team zelf op), maar
+  // bewust behouden: dit is de forged-id-guard die dit project overal gebruikt
+  // en hij geeft dezelfde melding als de RPC bij een onbekend event.
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
-  const { error } = await supabase
-    .from('events')
-    .update({ goals_for: clampGoals(goalsFor), goals_against: clampGoals(goalsAgainst) })
-    .eq('id', eventId)
-    .eq('team_id', user.id)
-    .eq('type', 'match')
+  const { error } = await supabase.rpc('set_match_result', {
+    p_event_id: eventId,
+    p_goals_for: clampGoals(goalsFor),
+    p_goals_against: clampGoals(goalsAgainst),
+  })
 
-  if (error) throw genericError('matchAnalysis.saveMatchResult', error)
+  if (error) throw rpcEventError('matchAnalysis.saveMatchResult', error)
   revalidateEvent(eventId)
 }
 
@@ -42,12 +51,12 @@ export async function saveMatchRating(
   rating: number | null,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'wedstrijd')
 
   await Promise.all([
-    assertOwnEvent(supabase, eventId, user.id),
-    assertOwnPlayer(supabase, playerId, user.id),
+    assertOwnEvent(supabase, eventId, ctx.teamId),
+    assertOwnPlayer(supabase, playerId, ctx.teamId),
   ])
 
   if (rating === null) {
@@ -56,7 +65,7 @@ export async function saveMatchRating(
       .delete()
       .eq('event_id', eventId)
       .eq('player_id', playerId)
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
     if (error) throw genericError('matchAnalysis.saveMatchRating.delete', error)
     return
   }
@@ -66,7 +75,7 @@ export async function saveMatchRating(
   const { error } = await supabase
     .from('match_ratings')
     .upsert(
-      { event_id: eventId, player_id: playerId, rating, team_id: user.id },
+      { event_id: eventId, player_id: playerId, rating, team_id: ctx.teamId },
       { onConflict: 'event_id,player_id' },
     )
 
@@ -85,12 +94,12 @@ export async function addMatchEvent(
   minute: number | null,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'wedstrijd')
 
   await Promise.all([
-    assertOwnEvent(supabase, eventId, user.id),
-    assertOwnPlayer(supabase, playerId, user.id),
+    assertOwnEvent(supabase, eventId, ctx.teamId),
+    assertOwnPlayer(supabase, playerId, ctx.teamId),
   ])
 
   if (!isValidKind(kind)) throw new Error('Ongeldige gebeurtenis')
@@ -98,7 +107,7 @@ export async function addMatchEvent(
 
   const { error } = await supabase
     .from('match_events')
-    .insert({ event_id: eventId, player_id: playerId, kind, minute, team_id: user.id })
+    .insert({ event_id: eventId, player_id: playerId, kind, minute, team_id: ctx.teamId })
 
   if (error) throw genericError('matchAnalysis.addMatchEvent', error)
   revalidateEvent(eventId)
@@ -106,14 +115,14 @@ export async function addMatchEvent(
 
 export async function deleteMatchEvent(id: string, eventId: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'wedstrijd')
 
   const { error } = await supabase
     .from('match_events')
     .delete()
     .eq('id', id)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('matchAnalysis.deleteMatchEvent', error)
   revalidateEvent(eventId)

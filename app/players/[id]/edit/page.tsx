@@ -1,5 +1,6 @@
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { updatePlayer, deletePlayer } from '@/app/actions/players'
 import BackButton from '@/components/BackButton'
 import DeleteButton from '@/components/DeleteButton'
@@ -14,10 +15,9 @@ interface Props {
 export default async function EditPlayerPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
-  const { data: player } = await supabase.from('players').select('*').eq('id', id).eq('team_id', user.id).single()
+  const { data: player } = await supabase.from('players').select('*').eq('id', id).eq('team_id', ctx.teamId).single()
   if (!player) notFound()
 
   async function handleUpdate(formData: FormData) {

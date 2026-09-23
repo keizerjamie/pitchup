@@ -1,6 +1,7 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, MatchRating, MatchEvent } from '@/lib/types'
 import MatchAnalysisEditor from '@/components/MatchAnalysisEditor'
 import { getDict } from '@/lib/i18n'
@@ -12,15 +13,14 @@ interface Props {
 export default async function AnalysisPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const [{ data: event }, { data: attendance }, { data: ratings }, { data: matchEvents }, { data: teamNameRow }] = await Promise.all([
-    supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
-    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('match_ratings').select('id,event_id,player_id,rating,created_at').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('match_events').select('id,event_id,player_id,kind,minute,created_at').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('settings').select('value').eq('team_id', user.id).eq('key', 'team_name').maybeSingle(),
+    supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
+    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('match_ratings').select('id,event_id,player_id,rating,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('match_events').select('id,event_id,player_id,kind,minute,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('settings').select('value').eq('team_id', ctx.teamId).eq('key', 'team_name').maybeSingle(),
   ])
 
   if (!event || event.type !== 'match') notFound()
@@ -34,7 +34,7 @@ export default async function AnalysisPage({ params }: Props) {
   const { data: allPlayers } = await supabase
     .from('players')
     .select('*')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('active', true)
     .order('jersey_number', { ascending: true, nullsFirst: false })
     .order('name')

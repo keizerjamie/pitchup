@@ -7,6 +7,7 @@ import InactivityLogout from '@/components/InactivityLogout'
 import { getDict } from '@/lib/i18n'
 import { DictProvider } from '@/lib/i18n-context'
 import { createClient } from '@/lib/supabase/server'
+import { getTeamContext } from '@/lib/team-context'
 import ThemeInit from '@/components/ThemeInit'
 
 // Display font for headings/numbers; body font for everything else.
@@ -59,19 +60,23 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   // Team + user context for the sidebar chrome (read-only, tenant-scoped).
   // Null on auth pages where there is no session — AppShell hides chrome there.
+  //
+  // De teamnaam komt uit getTeamContext(): die leest de lidmaatschappen én de
+  // namen al in één keer, en kent het ACTIEVE team (de active_team-cookie,
+  // getoetst aan de database). Het clublogo hangt niet aan de context maar aan
+  // dat ene actieve team, en wordt daarom apart en team-gescoped opgehaald.
+  const ctx = await getTeamContext()
   const { data: { user } } = await supabase.auth.getUser()
-  let teamName: string | null = null
+  const teamName = ctx?.teams.find((team) => team.teamId === ctx.teamId)?.naam.trim() || null
   let teamLogoUrl: string | null = null
-  if (user) {
+  if (ctx) {
     const { data } = await supabase
       .from('settings')
-      .select('key, value')
-      .eq('team_id', user.id)
-      .in('key', ['team_name', 'team_logo_url'])
-    for (const row of data ?? []) {
-      if (row.key === 'team_name') teamName = row.value?.trim() || null
-      else if (row.key === 'team_logo_url') teamLogoUrl = row.value || null
-    }
+      .select('value')
+      .eq('team_id', ctx.teamId)
+      .eq('key', 'team_logo_url')
+      .maybeSingle()
+    teamLogoUrl = (data?.value as string | undefined) || null
   }
 
   return (

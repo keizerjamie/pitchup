@@ -113,6 +113,27 @@ import { notFound, redirect } from 'next/navigation'
 import MatchSquadPage from '@/app/events/[id]/squad/page'
 import EventDetailPage from '@/app/events/[id]/page'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -407,7 +428,8 @@ function makeSupabaseMock(opts: {
   }
   return {
     auth: { getUser: async () => ({ data: { user } }) },
-    from: (t: string) => (factories[t] ?? tableFactory([]))(),
+    from: (t: string) =>
+      t === 'team_members' ? teamMembersChain(user?.id) : (factories[t] ?? tableFactory([]))(),
   }
 }
 
@@ -1333,7 +1355,10 @@ describe('Validator-bevinding (Gap 3) — de vorm-query in app/events/[id]/squad
     expect(end, 'vorm-query moet .limit(5) bevatten (nooit meer dan 5 resultaten)').toBeGreaterThanOrEqual(0)
     const query = queryChunk!.slice(0, end + '.limit(5)'.length)
 
-    expect(query, "tenant-isolatie: .eq('team_id', user.id) verplicht").toContain(".eq('team_id', user.id)")
+    // Tenant-sleutel is sinds de assistent-trainers ctx.teamId (de teams.id van
+    // het ACTIEVE team) in plaats van user.id — user.id is nu alleen nog de
+    // identiteit van de ingelogde persoon. Zie lib/team-context.ts.
+    expect(query, "tenant-isolatie: .eq('team_id', ctx.teamId) verplicht").toContain(".eq('team_id', ctx.teamId)")
     expect(query, "alleen wedstrijden: .eq('type', 'match')").toContain(".eq('type', 'match')")
     expect(query, "het huidige event moet zichzelf uitsluiten: .neq('id', id)").toContain(".neq('id', id)")
     expect(query, "cutoff: strikt .lt('date', todayLocal())").toContain(".lt('date', todayLocal())")

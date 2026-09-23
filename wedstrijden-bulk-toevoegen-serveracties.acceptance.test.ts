@@ -50,6 +50,27 @@ import { CSV_EMPTY_ERROR, CSV_HEADER_ERROR, CSV_TOO_MANY_ERROR } from '@/lib/bul
 import { MAX_XLSX_SCAN_ROWS, XLSX_TOO_MANY_SCAN_ROWS_ERROR } from '@/lib/bulk-matches-xlsx'
 import { createBulkMatches, getExistingMatchKeys, parseBulkMatchFile } from '@/app/actions/events-bulk'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 // ────────────────────────────────────────────────
 // Test-dubbel voor Supabase — mimickt precies de chain-vorm die
 // app/actions/events-bulk.ts gebruikt (.select/.insert/.eq/.in, thenable),
@@ -89,7 +110,8 @@ function makeSupabase(opts: { user?: { id: string } | null; tables?: Record<stri
   }
 
   const supabase = {
-    from: (table: string) => chain(table),
+    from: (table: string) =>
+      table === 'team_members' ? teamMembersChain(user?.id) : chain(table),
     auth: { getUser: async () => ({ data: { user } }) },
   }
   return { supabase, inserts, selects }

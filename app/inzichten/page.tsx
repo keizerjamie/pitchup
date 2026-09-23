@@ -1,6 +1,6 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { getAllSettings } from '@/app/actions/settings'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
@@ -100,8 +100,7 @@ export default async function InzichtenPage({
   // Onbekende of ontbrekende waarde valt terug op het hele seizoen — een
   // tikfout in de URL mag nooit stilzwijgend een smaller venster opleveren.
   const periode: Periode = isPeriode(params.periode) ? params.periode : PERIODE_STANDAARD
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const settings = await getAllSettings()
   // Huisstijl voor het print-rapport. Geen extra query: getAllSettings() is
@@ -156,14 +155,18 @@ export default async function InzichtenPage({
     doelpuntenResult,
     spelersResult,
   ] = await Promise.all([
-    supabase.rpc('inzichten_aanwezigheid', { p_start: verleden.start, p_end: verleden.end }),
-    supabase.rpc('inzichten_training_opkomst_per_maand', { p_start: verleden.start, p_end: verleden.end }),
-    supabase.rpc('inzichten_rating_team_per_wedstrijd', { p_start: venster.start, p_end: venster.end }),
-    supabase.rpc('inzichten_rating_per_speler', { p_start: venster.start, p_end: venster.end }),
-    supabase.rpc('inzichten_aanwezigheid_per_speler', { p_start: verleden.start, p_end: verleden.end }),
+    // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
+    // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
+    // functies kunnen het team niet zelf meer afleiden. Ze doen daarbovenop een
+    // lidmaatschapscheck. Vereist supabase/inzichten-team-id.sql (M3a).
+    supabase.rpc('inzichten_aanwezigheid', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    supabase.rpc('inzichten_training_opkomst_per_maand', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    supabase.rpc('inzichten_rating_team_per_wedstrijd', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_rating_per_speler', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_aanwezigheid_per_speler', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
     supabase.from('events')
       .select('id, date, goals_for, goals_against')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('type', 'match')
       .gte('date', venster.start)
       .lte('date', venster.end)
@@ -174,7 +177,7 @@ export default async function InzichtenPage({
       .limit(5),
     supabase.from('events')
       .select('id, date, opponent, match_type, goals_for, goals_against')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('type', 'match')
       .gte('date', venster.start)
       .lte('date', venster.end)
@@ -188,7 +191,7 @@ export default async function InzichtenPage({
     // grafiek op.
     supabase.from('players')
       .select('id, name')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('active', true)
       .eq('type', 'regular')
       .order('name', { ascending: true }),
@@ -258,7 +261,7 @@ export default async function InzichtenPage({
   // buiten om het venster inclusief te maken.
   const inhoudTellingen = await countCategoryOccurrences(
     supabase,
-    user.id,
+    ctx.teamId,
     addDays(verleden.start, -1),
     addDays(verleden.end, 1),
   )

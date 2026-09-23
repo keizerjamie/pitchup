@@ -1,6 +1,7 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player } from '@/lib/types'
 import LineupBuilder from '@/components/LineupBuilder'
 import { getDict } from '@/lib/i18n'
@@ -17,19 +18,18 @@ interface Props {
 export default async function LineupPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const [{ data: event }, { data: attendance }, { data: lineup }, { data: squad }, { data: settingsRows }] = await Promise.all([
-    supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
-    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('lineups').select('*').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
+    supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
+    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('lineups').select('*').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
     // De wedstrijdselectie: de aanwezigheid van een rij ís de selectie
     // (app/actions/match-squad.ts). Nul rijen = nog niet gekozen.
-    supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', user.id),
+    supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', ctx.teamId),
     // Alleen de twee kleursleutels — nooit een open select op settings, waar
     // ook team_logo_url en season_start in leven.
-    supabase.from('settings').select('key, value').eq('team_id', user.id)
+    supabase.from('settings').select('key, value').eq('team_id', ctx.teamId)
       .in('key', [CLUB_COLOR_KEYS.primary, CLUB_COLOR_KEYS.secondary]),
   ])
 
@@ -85,20 +85,21 @@ export default async function LineupPage({ params }: Props) {
     supabase
       .from('players')
       .select('*')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('active', true)
       .order('jersey_number', { ascending: true, nullsFirst: false })
       .order('name'),
     // Vormvenster: de laatste wedstrijden vóór dit event. Bewust GEEN filter op
     // match_type — friendly/league/cup tellen allemaal mee, net als in de
-    // vorm-strook op het dashboard (app/page.tsx:60-68), waarvan ook de
-    // tie-break (date → created_at → id, alles desc) letterlijk is overgenomen.
+    // vorm-strook op het dashboard (de recentMatchRows-query in app/page.tsx),
+    // waarvan ook de tie-break (date → created_at → id, alles desc) letterlijk
+    // is overgenomen.
     // Cutoff is `event.date`, niet de klok: twee kale DATE-waarden uit dezelfde
     // database vergelijken als 'YYYY-MM-DD'-string is tijdzone-onafhankelijk.
     supabase
       .from('events')
       .select('id, date, created_at')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('type', 'match')
       .lt('date', event.date)
       .order('date', { ascending: false })
@@ -119,12 +120,13 @@ export default async function LineupPage({ params }: Props) {
   // Ronde 3 — beoordelingen, afhankelijk van ronde 2. Nooit een open select op
   // match_ratings: de in()-lijst is per constructie hooguit FORM_MATCH_HORIZON
   // team-eigen event-ids vóór de peildatum. Zonder eerdere wedstrijden slaan we
-  // de rondtrip helemaal over (zelfde vorm als app/page.tsx:90-92).
+  // de rondtrip helemaal over (zelfde vorm als de attendanceRows-query in
+  // app/page.tsx, die bij een lege allEventIds ook niets ophaalt).
   const { data: formRatingRows, error: formRatingError } = formMatchIds.length > 0
     ? await supabase
         .from('match_ratings')
         .select('event_id, player_id, rating')
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .in('event_id', formMatchIds)
     : { data: [] as FormRatingRow[], error: null }
 

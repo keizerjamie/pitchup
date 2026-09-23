@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/server'
 import { EventType, MatchType, HomeAway, VALID_TRAININGSTYPES, type TrainingsType } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { assertOwnMatchEvent, assertOwnTrainingEvent } from '@/lib/authz'
-import { genericError } from '@/lib/errors'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
+import { genericError, logError, rpcEventError } from '@/lib/errors'
 import { isTimeString } from '@/lib/utils'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
@@ -22,8 +23,8 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export async function createEvent(formData: FormData) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
 
   const type = formData.get('type') as EventType
   if (!VALID_EVENT_TYPES.includes(type)) throw new Error('Ongeldig event type')
@@ -37,7 +38,7 @@ export async function createEvent(formData: FormData) {
   const location = ((formData.get('location') as string) || null)?.slice(0, 200) ?? null
   const notes = ((formData.get('notes') as string) || null)?.slice(0, 2000) ?? null
 
-  const payload: Record<string, unknown> = { type, date, time: timeRaw, location, notes, team_id: user.id }
+  const payload: Record<string, unknown> = { type, date, time: timeRaw, location, notes, team_id: ctx.teamId }
 
   if (type === 'training') {
     const trainingstype = formData.get('trainingstype') as TrainingsType
@@ -79,10 +80,10 @@ export async function createEvent(formData: FormData) {
     const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] = await Promise.all([
       // `injured` hoort erbij: een geblesseerde speler moet ook op een NIEUW
       // event meteen op 'absent' komen, net als markInjured dat voor bestaande
-      // events doet (app/actions/players.ts:124-132). `type` idem voor
+      // events doet (markInjured in app/actions/players.ts). `type` idem voor
       // gastspelers: die staan altijd afwezig. Het active-filter blijft staan —
       // een gast is gewoon actief en krijgt dus wél een rij.
-      supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', user.id),
+      supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', ctx.teamId),
       getDefaultAttendance().catch(() => 'present' as const),
       // Lopende afmeldperiodes die déze datum dekken (grenzen inclusief):
       // from_date <= date <= to_date. Vaste sortering zodat de herkomst bij
@@ -90,7 +91,7 @@ export async function createEvent(formData: FormData) {
       supabase
         .from('absence_periods')
         .select('id, player_id, from_date, to_date')
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .lte('from_date', date)
         .gte('to_date', date)
         .order('created_at', { ascending: true })
@@ -107,19 +108,44 @@ export async function createEvent(formData: FormData) {
 
     if (players && players.length > 0) {
       const periodByPlayer = periodIdByPlayerForDate(periods ?? [], date)
-      await supabase.from('attendance').insert(
+      const { error: attendanceError } = await supabase.from('attendance').insert(
         // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
         // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
         players.map((p) => buildAttendanceRow({
           eventId: data.id,
           playerId: p.id,
-          teamId: user.id,
+          teamId: ctx.teamId,
           defaultStatus,
           injured: p.injured === true,
           periodId: periodByPlayer.get(p.id) ?? null,
           isGuest: p.type === 'guest',
         }))
       )
+
+      if (attendanceError) {
+        // Deze fout werd eerder genegeerd. Een event zonder aanwezigheidsrijen
+        // is een halve waarheid: de trainer ziet een lege aanwezigheidslijst en
+        // weet niet dat er iets misging. Compensatie volgens het patroon dat al
+        // in deze codebase staat (markAbsentForPeriod in
+        // app/actions/attendance.ts draait de zojuist gemaakte
+        // absence_periods-rij terug bij een mislukte upsert): het net gemaakte
+        // event weer weg, tenant-gescoped, en dan zichtbaar falen.
+        //
+        // Staat vóór de redirect() hieronder, dus geen conflict met de
+        // NEXT_REDIRECT-throw.
+        const { error: compensatieError } = await supabase
+          .from('events')
+          .delete()
+          .eq('id', data.id)
+          .eq('team_id', ctx.teamId)
+        // Mislukt óók de compensatie, dan blijft er een event zonder
+        // aanwezigheidsrijen achter. Dat mag niet onzichtbaar zijn: alleen
+        // loggen (de gebruiker krijgt hoe dan ook de generieke melding
+        // hieronder, en een tweede, andere melding helpt hem niet), maar wél
+        // met een eigen contextlabel zodat het in de logs terug te vinden is.
+        if (compensatieError) logError('events.createEvent.compensatie', compensatieError)
+        throw genericError('events.createEvent.attendance', attendanceError)
+      }
     }
   }
 
@@ -134,25 +160,30 @@ export async function createEvent(formData: FormData) {
 // aanroeper is dezelfde selectiepagina.
 export async function updateGatherTime(eventId: string, gatherTime: string | null): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  // Onderdeel WEDSTRIJD, niet agenda: de verzameltijd wordt op de
+  // wedstrijdselectie-pagina gezet en is voor de gebruiker wedstrijdwerk. De
+  // events-policy blijft wél op 'agenda', dus deze ene kolom loopt via de
+  // kolom-begrensde RPC set_gather_time (supabase/team-rls-gevolgacties.sql),
+  // die zelf can_edit(team,'wedstrijd') toetst.
+  assertCanEdit(ctx, 'wedstrijd')
 
   // Checkt eigenaarschap én type = 'match' in één query, met een melding die
   // niet verraadt wélke van de twee misging.
-  await assertOwnMatchEvent(supabase, eventId, user.id)
+  await assertOwnMatchEvent(supabase, eventId, ctx.teamId)
 
   // Lege string uit een leeggemaakt tijdveld betekent "wissen", niet "ongeldig".
+  // Deze vormcheck blijft de eerste bron; de RPC heeft alleen het TIME-type als
+  // tweede vangnet.
   const value = gatherTime === '' ? null : gatherTime
   if (value !== null && !isTimeString(value)) throw new Error('Ongeldig tijdstip')
 
-  const { error } = await supabase
-    .from('events')
-    .update({ gather_time: value })
-    .eq('id', eventId)
-    .eq('team_id', user.id)
-    .eq('type', 'match')
+  const { error } = await supabase.rpc('set_gather_time', {
+    p_event_id: eventId,
+    p_gather_time: value,
+  })
 
-  if (error) throw genericError('events.updateGatherTime', error)
+  if (error) throw rpcEventError('events.updateGatherTime', error)
 
   revalidatePath(`/events/${eventId}/squad`)
   revalidatePath(`/events/${eventId}`)
@@ -163,24 +194,28 @@ export async function updateGatherTime(eventId: string, gatherTime: string | nul
 // { error } terug te geven — zelfde contract als updateGatherTime hierboven.
 export async function updateTrainingstype(eventId: string, trainingstype: TrainingsType): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  // Onderdeel TRAINING, niet agenda: het trainingstype wordt op de
+  // trainingsplan-pagina gezet en stuurt de periodisering. De events-policy
+  // blijft op 'agenda', dus deze ene kolom loopt via de kolom-begrensde RPC
+  // set_trainingstype (supabase/team-rls-gevolgacties.sql), die zelf
+  // can_edit(team,'training') toetst.
+  assertCanEdit(ctx, 'training')
 
   // Vóór elke query: een ongeldige waarde hoort de database nooit te bereiken.
+  // De RPC herhaalt deze whitelist als tweede vangnet.
   if (!VALID_TRAININGSTYPES.includes(trainingstype)) throw new Error('Ongeldig trainingstype')
 
   // Checkt eigenaarschap én type = 'training' in één query, met een melding die
   // niet verraadt wélke van de twee misging.
-  await assertOwnTrainingEvent(supabase, eventId, user.id)
+  await assertOwnTrainingEvent(supabase, eventId, ctx.teamId)
 
-  const { error } = await supabase
-    .from('events')
-    .update({ trainingstype })
-    .eq('id', eventId)
-    .eq('team_id', user.id)
-    .eq('type', 'training')
+  const { error } = await supabase.rpc('set_trainingstype', {
+    p_event_id: eventId,
+    p_trainingstype: trainingstype,
+  })
 
-  if (error) throw genericError('events.updateTrainingstype', error)
+  if (error) throw rpcEventError('events.updateTrainingstype', error)
 
   // Het type stuurt de telling op alle pagina's die de periodisering tonen; die
   // moeten dus alle vier opnieuw.
@@ -192,14 +227,14 @@ export async function updateTrainingstype(eventId: string, trainingstype: Traini
 
 export async function deleteEvent(id: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
 
   const { error } = await supabase
     .from('events')
     .delete()
     .eq('id', id)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('events.deleteEvent', error)
   revalidatePath('/events')

@@ -94,6 +94,27 @@ import InzichtenPage from '@/app/inzichten/page'
 import AppLauncher from '@/components/AppLauncher'
 import { getSpelerRatingReeks } from '@/app/actions/inzichten'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 const TEAM = 'team-1'
 const OTHER_TEAM = 'team-2'
 // Echte UUID's (isUuid() in lib/authz.ts eist exact dit formaat) — nodig
@@ -502,6 +523,7 @@ function makeSupabaseMock(opts: {
     __fromCalls: fromCalls,
     auth: { getUser: async () => ({ data: { user } }) },
     from: (table: string) => {
+      if (table === 'team_members') return teamMembersChain(user?.id)
       fromCalls.push(table)
       if (table === 'events') return eventsFactory()
       if (table === 'players') return playersFactory()
@@ -905,9 +927,9 @@ describe('toekomstige events tellen niet mee in de aanwezigheidscijfers', () => 
     expect(aanwezigheidPercentage()).toBe('100%')
 
     const aanwezigheidCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid')!
-    expect(aanwezigheidCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+    expect(aanwezigheidCall.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2026-10-14' })
     const opkomstCall = rpcCalls.find((c) => c.name === 'inzichten_training_opkomst_per_maand')!
-    expect(opkomstCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+    expect(opkomstCall.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2026-10-14' })
   })
 
   it('een training van vandaag telt (nog) niet mee — zelfde grens als de vorm-cutoff', async () => {
@@ -955,7 +977,7 @@ describe('toekomstige events tellen niet mee in de aanwezigheidscijfers', () => 
     })
 
     const teamRatingCall = rpcCalls.find((c) => c.name === 'inzichten_rating_team_per_wedstrijd')!
-    expect(teamRatingCall.args).toEqual({ p_start: '2026-07-01', p_end: '2027-06-30' })
+    expect(teamRatingCall.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2027-06-30' })
   })
 })
 
@@ -975,10 +997,10 @@ describe('per-speler-RPC\'s voor top 5 / worst 5', () => {
     })
 
     const ratingCall = rpcCalls.find((c) => c.name === 'inzichten_rating_per_speler')!
-    expect(ratingCall.args).toEqual({ p_start: '2026-07-01', p_end: '2027-06-30' })
+    expect(ratingCall.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2027-06-30' })
 
     const aanwezigheidCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid_per_speler')!
-    expect(aanwezigheidCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+    expect(aanwezigheidCall.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2026-10-14' })
   })
 
   it('een falende per-speler-RPC blokkeert de bestaande kaarten niet en lekt geen ruwe fout', async () => {
@@ -1844,7 +1866,7 @@ describe('FC1 — team-Aanwezigheid combineert verleden én toekomst binnen éé
     expect(aanwezigheidPercentage()).toBe('0%')
 
     const call = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid')!
-    expect(call.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+    expect(call.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2026-10-14' })
   })
 })
 
@@ -1895,7 +1917,7 @@ describe('FC3 — Top 5 / worst 5 spelerratings', () => {
 
     // De RPC voor dit onderwerp krijgt het volle (niet-geclampte) seizoensvenster.
     const call = rpcCalls.find((c) => c.name === 'inzichten_rating_per_speler')!
-    expect(call.args).toEqual({ p_start: '2026-07-01', p_end: '2026-12-31' })
+    expect(call.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2026-12-31' })
   })
 
   it('0 spelers met ratings binnen het venster → lege staat op de kaart, geen verzonnen cijfers', async () => {
@@ -1944,7 +1966,7 @@ describe('FC4 — Top 5 / worst 5 aanwezigheid per speler', () => {
     const teamCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid')!
     const perSpelerCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid_per_speler')!
     expect(perSpelerCall.args).toEqual(teamCall.args)
-    expect(perSpelerCall.args).toEqual({ p_start: '2026-07-01', p_end: '2026-10-14' })
+    expect(perSpelerCall.args).toEqual({ p_team_id: 'team-1', p_start: '2026-07-01', p_end: '2026-10-14' })
   })
 
   it('alleen actieve spelers, 0-registraties (null%) uitgesloten, 0%-spelers (wél registraties) tellen wél mee, en kleine selecties overlappen', async () => {
@@ -2000,10 +2022,10 @@ describe('FC4 — Top 5 / worst 5 aanwezigheid per speler', () => {
 
 // ═══════════════════════════════════════════════════════════════════════
 // FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC's: nooit data van een
-// ander team, en nooit een team_id-achtige parameter vanuit de aanroeper.
+// ander team, en het team-id komt uit de teamcontext (nooit van de client).
 // ═══════════════════════════════════════════════════════════════════════
 describe('FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC\'s', () => {
-  it('spelers/ratings/aanwezigheid van een ander team_id komen niet terug in de top/worst-kaarten, en de RPC-args bevatten geen team_id', async () => {
+  it('spelers/ratings/aanwezigheid van een ander team_id komen niet terug in de top/worst-kaarten, en p_team_id komt uit de teamcontext', async () => {
     const OTHER_PLAYER = 'eeeeeeee-0000-0000-0000-000000000001'
     const { rpcCalls } = await renderInzichten({
       settings: seasonSettings('2026-07-01', '2026-12-31'),
@@ -2043,12 +2065,16 @@ describe('FC5 — tenant-isolatie op de 2 nieuwe per-speler-RPC\'s', () => {
 
     const ratingCall = rpcCalls.find((c) => c.name === 'inzichten_rating_per_speler')!
     const aanwCall = rpcCalls.find((c) => c.name === 'inzichten_aanwezigheid_per_speler')!
+    // CONTRACTWIJZIGING (assistent-trainers, fase 1): de RPC kan het team niet
+    // meer zelf afleiden — auth.uid() is sinds de teams-tabel niet meer gelijk
+    // aan team_id. Het team-id gaat daarom mee als p_team_id, maar UITSLUITEND
+    // uit de teamcontext (lib/team-context.ts, getoetst aan team_members),
+    // nooit uit een URL- of clientwaarde. De RPC doet daarbovenop zelf een
+    // lidmaatschapscheck (supabase/inzichten-team-id.sql).
     for (const call of [ratingCall, aanwCall]) {
-      const keys = Object.keys(call.args as Record<string, unknown>)
-      expect(keys).not.toContain('team_id')
-      expect(keys).not.toContain('p_team')
-      expect(keys).not.toContain('teamId')
-      expect(keys.sort()).toEqual(['p_end', 'p_start'])
+      const args = call.args as Record<string, unknown>
+      expect(Object.keys(args).sort()).toEqual(['p_end', 'p_start', 'p_team_id'])
+      expect(args.p_team_id).toBe(TEAM)
     }
   })
 })

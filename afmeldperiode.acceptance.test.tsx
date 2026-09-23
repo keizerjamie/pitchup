@@ -60,6 +60,27 @@ import { markInjured, markRecovered } from '@/app/actions/players'
 import { saveCategorieMeting } from '@/app/actions/periodisering'
 import MatchSquadPage from '@/app/events/[id]/squad/page'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -257,7 +278,8 @@ function makeDb(seed: Record<string, Row[]> = {}) {
 function makeClient(db: ReturnType<typeof makeDb>, user: { id: string } | null) {
   return {
     auth: { getUser: async () => ({ data: { user } }) },
-    from: (t: string) => db.from(t),
+    from: (t: string) =>
+      t === 'team_members' ? teamMembersChain(user?.id) : db.from(t),
   }
 }
 

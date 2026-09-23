@@ -34,3 +34,26 @@ export function genericError(context: string, error: unknown): Error {
   logError(context, error)
   return new Error(GENERIC_ERROR_MESSAGE)
 }
+
+// Vertaalt de fouten van de kolom-begrensde security-definer-RPC's
+// (set_event_doelstelling, set_match_result, set_gather_time,
+// set_trainingstype — supabase/team-rls-gevolgacties.sql) naar de meldingen
+// die de rest van de app al gebruikt.
+//
+// Die RPC's bestaan omdat een assistent met alleen Training- of
+// Wedstrijd-recht wél één kolom van een events-rij mag zetten, maar de
+// events-policy zelf op 'agenda' blijft staan. Ze gooien met een eigen
+// SQLSTATE zodat de aanroeper de twee gevallen uit elkaar kan houden:
+//   42501 = wel gevonden, geen recht        -> 'Geen toegang'
+//   P0002 = niet gevonden / verkeerd type   -> 'Event niet gevonden'
+// Alles daarbuiten is een echte databasefout en gaat via genericError, dus
+// zonder ruwe melding naar client of log.
+export function rpcEventError(context: string, error: unknown): Error {
+  const code = errorCode(error)
+  if (code === '42501') return new Error('Geen toegang')
+  // Bewust dezelfde melding als assertOwnEvent in lib/authz.ts: die verraadt
+  // niet of het event niet bestaat, van een ander team is, of het verkeerde
+  // type heeft.
+  if (code === 'P0002') return new Error('Event niet gevonden')
+  return genericError(context, error)
+}

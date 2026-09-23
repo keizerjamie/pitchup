@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { assertOwnPlayer, isUuid } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
+import { requireTeamContext } from '@/lib/team-context'
 import {
   seizoensVenster,
   periodeVenster,
@@ -34,15 +35,14 @@ import type {
 // supabase/inzichten.sql).
 export async function getSpelerRatingReeks(playerId: string, periode?: string): Promise<SpelerRatingPunt[]> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
 
   // Vormcheck vóór elke databasetoegang: een player_id is altijd een UUID.
   // Bewust dezelfde melding als assertOwnPlayer hieronder (lib/authz.ts:20-23),
   // zodat "bestaat niet", "van een ander team" en "geen geldig id" van buitenaf
   // niet uit elkaar te houden zijn.
   if (!isUuid(playerId)) throw new Error('Speler niet gevonden')
-  await assertOwnPlayer(supabase, playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, ctx.teamId)
 
   // Het seizoensvenster komt server-side opnieuw uit settings — nooit van de
   // client aannemen, anders kan een aanroeper zijn eigen datumbereik opgeven.
@@ -59,9 +59,13 @@ export async function getSpelerRatingReeks(playerId: string, periode?: string): 
   // Een aanroeper kan daarmee nog steeds geen zelfgekozen bereik afdwingen.
   const venster = periodeVenster(seizoen, isPeriode(periode) ? periode : PERIODE_STANDAARD)
 
-  // De RPC is security invoker en filtert zelf op team_id = auth.uid() bovenop
-  // RLS; er gaat daarom bewust géén team_id-parameter mee.
+  // De RPC is security invoker (RLS blijft dus gelden) en filtert daarbovenop
+  // expliciet op p_team_id, met een lidmaatschapscheck erbij. Het team-id komt
+  // altijd uit de teamcontext, nooit van de client — sinds de
+  // assistent-trainers is auth.uid() niet meer gelijk aan het team.
+  // Vereist supabase/inzichten-team-id.sql (M3a).
   const { data, error } = await supabase.rpc('inzichten_rating_speler', {
+    p_team_id: ctx.teamId,
     p_player: playerId,
     p_start: venster.start,
     p_end: venster.end,
@@ -84,11 +88,10 @@ export async function getSpelerRatingReeks(playerId: string, periode?: string): 
 // settings, nooit van de client, en er is bewust geen periode-parameter.
 export async function getSpelerStatistieken(playerId: string): Promise<SpelerStatistieken | null> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
 
   if (!isUuid(playerId)) throw new Error('Speler niet gevonden')
-  await assertOwnPlayer(supabase, playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, ctx.teamId)
 
   const settings = await getAllSettings()
   const seizoen = seizoensVenster(settings)
@@ -108,10 +111,11 @@ export async function getSpelerStatistieken(playerId: string): Promise<SpelerSta
   // vaste volgorde wint; genericError heeft dan al gelogd.
   const [aanwezigheidResultaat, ratingResultaat, tellingenResultaat] = await Promise.allSettled([
     (async () => {
-      // De RPC is security invoker en filtert zelf op team_id = auth.uid()
-      // bovenop RLS; p_player is daarbovenop een extra beperking binnen de al
-      // afgeschermde set. Daarom gaat er bewust geen team_id-parameter mee.
+      // Zelfde RPC-contract als hierboven: p_team_id vooraan uit de
+      // teamcontext, p_player daarbovenop als extra beperking binnen de al
+      // afgeschermde set. Vereist supabase/inzichten-team-id.sql (M3a).
       const { data, error } = await supabase.rpc('inzichten_aanwezigheid_per_speler', {
+        p_team_id: ctx.teamId,
         p_start: verleden.start,
         p_end: verleden.end,
         p_player: playerId,
@@ -142,7 +146,7 @@ export async function getSpelerStatistieken(playerId: string): Promise<SpelerSta
       const { data: events, error: eventsError } = await supabase
         .from('events')
         .select('id')
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .eq('type', 'match')
         .gte('date', seizoen.start)
         .lte('date', seizoen.end)
@@ -156,7 +160,7 @@ export async function getSpelerStatistieken(playerId: string): Promise<SpelerSta
       const { data: rows, error } = await supabase
         .from('match_events')
         .select('kind')
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .eq('player_id', playerId)
         .in('event_id', eventIds)
         .limit(MAX_SPELER_MATCH_EVENTS)

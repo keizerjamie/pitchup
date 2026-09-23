@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { AttendanceStatus } from '@/lib/types'
 import { assertKnownPlayerId, assertOwnEvent, assertOwnPlayer, getOwnPlayerIds, isUuid } from '@/lib/authz'
 import { genericError } from '@/lib/errors'
@@ -11,7 +12,7 @@ import { getDefaultAttendance } from '@/app/actions/settings'
 import { resolveAttendanceStatus } from '@/lib/attendance-rows'
 
 // Maximale lengte van een `.in()`-lijst, gelijk aan de batchgrootte van
-// generateSeasonTrainings (app/actions/settings.ts:174): een periode kan een
+// generateSeasonTrainings (app/actions/settings.ts): een periode kan een
 // heel seizoen beslaan, en een URL-filter met honderden ids loopt tegen de
 // lengtegrens van PostgREST aan.
 const ID_CHUNK = 50
@@ -28,21 +29,21 @@ export async function updateAttendance(
   status: AttendanceStatus
 ) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'aanwezigheid')
 
   const VALID_STATUSES: AttendanceStatus[] = ['present', 'absent', 'unknown']
   if (!VALID_STATUSES.includes(status)) throw new Error('Ongeldige status')
 
   await Promise.all([
-    assertOwnEvent(supabase, eventId, user.id),
-    assertOwnPlayer(supabase, playerId, user.id),
+    assertOwnEvent(supabase, eventId, ctx.teamId),
+    assertOwnPlayer(supabase, playerId, ctx.teamId),
   ])
 
   const { error } = await supabase
     .from('attendance')
     .upsert(
-      { event_id: eventId, player_id: playerId, status, team_id: user.id },
+      { event_id: eventId, player_id: playerId, status, team_id: ctx.teamId },
       { onConflict: 'event_id,player_id' }
     )
 
@@ -65,8 +66,8 @@ export async function markAbsentForPeriod(
   toDate: string,
 ): Promise<{ periodId: string; affected: number }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'aanwezigheid')
 
   // isDateString weigert óók niet-bestaande datums als 2026-02-30, die een pure
   // vormcheck zou doorlaten en pas in de database zouden stranden.
@@ -75,11 +76,11 @@ export async function markAbsentForPeriod(
   // chronologisch, zonder Date-conversie en dus zonder tijdzone-invloed.
   if (fromDate > toDate) throw new Error('Startdatum moet voor einddatum liggen')
 
-  await assertOwnPlayer(supabase, playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, ctx.teamId)
 
   const { data: period, error: periodError } = await supabase
     .from('absence_periods')
-    .insert({ team_id: user.id, player_id: playerId, from_date: fromDate, to_date: toDate })
+    .insert({ team_id: ctx.teamId, player_id: playerId, from_date: fromDate, to_date: toDate })
     .select('id')
     .single()
 
@@ -91,7 +92,7 @@ export async function markAbsentForPeriod(
     .select('id, type')
     .gte('date', fromDate)
     .lte('date', toDate)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .neq('type', 'meting')
 
   if (eventsError) {
@@ -99,7 +100,7 @@ export async function markAbsentForPeriod(
     // Stil doorgaan zou `affected: 0` opleveren — niet te onderscheiden van "er
     // vielen geen events in de periode". Dus hard falen én compenseren, zoals bij
     // een mislukte upsert hieronder.
-    await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', user.id)
+    await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', ctx.teamId)
     throw genericError('attendance.markAbsentForPeriod.events', eventsError)
   }
 
@@ -113,7 +114,7 @@ export async function markAbsentForPeriod(
       event_id: e.id,
       player_id: playerId,
       status: 'absent' as AttendanceStatus,
-      team_id: user.id,
+      team_id: ctx.teamId,
       absence_period_id: periodId,
     }))
 
@@ -124,7 +125,7 @@ export async function markAbsentForPeriod(
     if (error) {
       // Compenseren: zonder de attendance-rijen zou een blijvende periode een
       // halve waarheid zijn (wel "afgemeld" in de lijst, niet in de events).
-      await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', user.id)
+      await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', ctx.teamId)
       throw genericError('attendance.markAbsentForPeriod', error)
     }
   }
@@ -154,8 +155,8 @@ export async function markAbsentForPeriod(
 // toekomstige events aanraakt.
 export async function revokeAbsencePeriod(periodId: string): Promise<{ restored: number }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'aanwezigheid')
 
   // Vormcheck vóór de query: een niet-UUID levert anders een ruwe 22P02 op.
   // Onbekend, van een ander team en ongeldig geven alle drie dezelfde melding,
@@ -166,7 +167,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
     .from('absence_periods')
     .select('id, player_id, from_date, to_date')
     .eq('id', periodId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
 
   if (!period) throw new Error('Periode niet gevonden')
@@ -175,7 +176,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
   const { data: rows, error: rowsError } = await supabase
     .from('attendance')
     .select('event_id, status, injury_set')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('absence_period_id', periodId)
   if (rowsError) throw genericError('attendance.revokeAbsencePeriod.rows', rowsError)
 
@@ -192,7 +193,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
       const { data, error } = await supabase
         .from('events')
         .select('id, date, type')
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .in('id', chunk)
       if (error) throw genericError('attendance.revokeAbsencePeriod.events', error)
       events.push(...((data ?? []) as { id: string; date: string; type: string }[]))
@@ -206,7 +207,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
     const { data: others, error: othersError } = await supabase
       .from('absence_periods')
       .select('id, player_id, from_date, to_date')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('player_id', playerId)
       .neq('id', periodId)
       .order('created_at', { ascending: true })
@@ -225,7 +226,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
       .from('players')
       .select('type')
       .eq('id', playerId)
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .maybeSingle()
     if (playerError) throw genericError('attendance.revokeAbsencePeriod.player', playerError)
     const restoreStatus = resolveAttendanceStatus({
@@ -270,7 +271,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
         const { error } = await supabase
           .from('attendance')
           .update({ absence_period_id: targetPeriodId })
-          .eq('team_id', user.id)
+          .eq('team_id', ctx.teamId)
           .eq('absence_period_id', periodId)
           .in('event_id', chunk)
         if (error) throw genericError('attendance.revokeAbsencePeriod.transfer', error)
@@ -281,7 +282,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
       const { error } = await supabase
         .from('attendance')
         .update({ absence_period_id: null })
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .eq('absence_period_id', periodId)
         .in('event_id', chunk)
       if (error) throw genericError('attendance.revokeAbsencePeriod.clear', error)
@@ -291,7 +292,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
       const { error } = await supabase
         .from('attendance')
         .update({ status: restoreStatus, absence_period_id: null })
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .eq('absence_period_id', periodId)
         .in('event_id', chunk)
       if (error) throw genericError('attendance.revokeAbsencePeriod.restore', error)
@@ -305,7 +306,7 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
     .from('absence_periods')
     .delete()
     .eq('id', periodId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   if (deleteError) throw genericError('attendance.revokeAbsencePeriod.delete', deleteError)
 
   revalidatePath(`/players/${playerId}/absence`)
@@ -322,14 +323,14 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
 
 export async function markAllPresent(eventId: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'aanwezigheid')
 
   const { error } = await supabase
     .from('attendance')
     .update({ status: 'present' })
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('attendance.markAllPresent', error)
   revalidatePath(`/events/${eventId}`)
@@ -344,10 +345,10 @@ export async function saveLineup(
   positions: { player_id: string | null; x: number; y: number; position_label: string; position_number?: number }[]
 ) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'wedstrijd')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   if (typeof formation !== 'string' || formation.length > 20) throw new Error('Ongeldige formatie')
   if (!Array.isArray(positions) || positions.length > 30) throw new Error('Ongeldige opstelling')
@@ -356,7 +357,7 @@ export async function saveLineup(
   // maar de opstelling gaat als JSONB de lineups-rij in en zou anders een
   // vreemd (of willekeurig lang) id kunnen bevatten. Zelfde patroon als
   // saveSpelerindeling in app/actions/training-plan.ts.
-  const ownPlayerIds = await getOwnPlayerIds(supabase, user.id)
+  const ownPlayerIds = await getOwnPlayerIds(supabase, ctx.teamId)
 
   const cleanPositions = positions.map((p) => ({
     player_id: p.player_id === null || p.player_id === undefined
@@ -371,7 +372,7 @@ export async function saveLineup(
   const { error } = await supabase
     .from('lineups')
     .upsert(
-      { event_id: eventId, formation, positions: cleanPositions, team_id: user.id },
+      { event_id: eventId, formation, positions: cleanPositions, team_id: ctx.teamId },
       { onConflict: 'event_id' }
     )
 

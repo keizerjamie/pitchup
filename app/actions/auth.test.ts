@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
+import { TEAM_NAAM_METADATA_KEY } from '@/lib/team-context'
 import { TEAM_LOGO_BUCKET, teamLogoPath } from '@/lib/logo-upload'
 import {
   SIGN_IN_POLICY,
@@ -46,9 +47,9 @@ function makeSupabase(opts: {
     deletes: [] as { table: string; eqs: Eq[] }[],
     inserts: [] as { table: string; payload: Record<string, unknown> }[],
     signIn: [] as { email: string; password: string }[],
-    signUp: [] as { email: string; password: string }[],
+    signUp: [] as { email: string; password: string; options?: { data?: Record<string, unknown> } }[],
     resetPassword: [] as { email: string; options?: { redirectTo?: string } }[],
-    updateUser: [] as { password?: string }[],
+    updateUser: [] as { password?: string; data?: Record<string, unknown> }[],
     signOut: 0,
   }
 
@@ -56,10 +57,18 @@ function makeSupabase(opts: {
     const eqs: Eq[] = []
     const result = opts.tableError?.table === table
       ? { data: null, error: opts.tableError.error }
-      : { data: null, error: null }
+      : table === 'team_members'
+        // De teamcontext (lib/team-context.ts) leest team_members vóór elke
+        // action. Zonder deze rij heeft deleteAccount geen team om op te
+        // ruimen. In fase 1 geldt teams.id === user.id.
+        ? { data: user ? [{ team_id: user.id, user_id: user.id, rol: 'owner' }] : [], error: null }
+        : { data: null, error: null }
     const c: Record<string, unknown> = {}
     c.select = () => c
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // `.in()` hoort erbij sinds getTeamContext de teamnamen ophaalt met
+    // settings.select('team_id, value').in('team_id', ...).
+    c.in = () => c
     c.delete = () => { calls.deletes.push({ table, eqs }); return c }
     c.insert = (payload: Record<string, unknown>) => { calls.inserts.push({ table, payload }); return c }
     c.maybeSingle = () => Promise.resolve(result)
@@ -84,7 +93,7 @@ function makeSupabase(opts: {
         calls.signIn.push(creds)
         return { error: opts.signInError ?? null }
       },
-      signUp: async (creds: { email: string; password: string }) => {
+      signUp: async (creds: { email: string; password: string; options?: { data?: Record<string, unknown> } }) => {
         calls.signUp.push(creds)
         return opts.signUpResult ?? { data: { user: { id: 'new-team' }, session: { access_token: 'x' } }, error: null }
       },
@@ -92,7 +101,7 @@ function makeSupabase(opts: {
         calls.resetPassword.push({ email, options })
         return { error: null }
       },
-      updateUser: async (attrs: { password?: string }) => {
+      updateUser: async (attrs: { password?: string; data?: Record<string, unknown> }) => {
         calls.updateUser.push(attrs)
         return { data: { user }, error: opts.updateUserError ?? null }
       },
@@ -367,6 +376,69 @@ describe('signUp', () => {
     expect(m.calls.signUp).toHaveLength(1)
   })
 
+  // ── Team aanmaken bij registratie (assistent-trainers, fase 1) ──
+  it('maakt na registratie de teams-rij, de owner-rij in team_members én de teamnaam aan, in die volgorde', async () => {
+    const m = makeSupabase()
+    use(m)
+
+    await expect(signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))).rejects.toThrow('__redirect__:/')
+
+    // De volgorde is niet cosmetisch: de settings-policy
+    // (settings_key_editable -> is_team_owner) kan pas slagen als de owner-rij
+    // bestaat, en die heeft de teams-rij als foreign key nodig.
+    expect(m.calls.inserts.map((i) => i.table)).toEqual(['teams', 'team_members', 'settings'])
+  })
+
+  it('geeft de teams-rij bewust het USER-ID als primaire sleutel — de invariant teams.id === user.id waar fase 1 op rust', async () => {
+    const m = makeSupabase()
+    use(m)
+
+    await expect(signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))).rejects.toThrow('__redirect__:/')
+
+    const team = m.calls.inserts.find((i) => i.table === 'teams')!
+    expect(team.payload).toEqual({ id: 'new-team' })
+  })
+
+  it('maakt de registrant hoofdtrainer met alle zes rechten', async () => {
+    const m = makeSupabase()
+    use(m)
+
+    await expect(signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))).rejects.toThrow('__redirect__:/')
+
+    const lid = m.calls.inserts.find((i) => i.table === 'team_members')!
+    expect(lid.payload).toEqual({
+      team_id: 'new-team',
+      user_id: 'new-team',
+      rol: 'owner',
+      mag_spelers_bewerken: true,
+      mag_agenda_bewerken: true,
+      mag_aanwezigheid_bewerken: true,
+      mag_wedstrijd_bewerken: true,
+      mag_training_bewerken: true,
+      mag_periodisering_bewerken: true,
+    })
+  })
+
+  it('maakt geen team aan als er nog geen sessie is (e-mailbevestiging staat aan)', async () => {
+    const m = makeSupabase({
+      signUpResult: { data: { user: { id: 'new-team' }, session: null }, error: null },
+    })
+    use(m)
+
+    const result = await signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))
+
+    expect(result?.error).toContain('Bevestig eerst je e-mailadres')
+    expect(m.calls.inserts).toHaveLength(0)
+  })
+
   it('verraadt niet dat een e-mailadres al bestaat', async () => {
     use(makeSupabase({
       signUpResult: {
@@ -400,16 +472,86 @@ describe('signUp', () => {
     expect(result?.error).toBe('Registratie is niet gelukt. Controleer je gegevens en probeer het opnieuw.')
   })
 
-  it('lekt de ruwe fout niet als het opslaan van de teamnaam faalt', async () => {
-    use(makeSupabase({ tableError: { table: 'settings', error: { code: '23505', message: 'duplicate key value: JO13-1' } } }))
+  it('lekt de ruwe fout niet als het opslaan van de teamnaam faalt — en laat de registratie doorgaan', async () => {
+    // Alleen de teamnaam mist dan; het account is gewoon bruikbaar. Bewust
+    // GEEN 23505: dat betekent "stond er al" en is dus geen fout (zie de test
+    // hieronder). Het logboek krijgt het contextlabel van maakEigenTeam, want
+    // daar woont deze insert sinds hij gedeeld wordt met het zelfherstel.
+    use(makeSupabase({
+      tableError: { table: 'settings', error: { code: '42501', message: 'permission denied for table settings' } },
+    }))
 
     await expect(signUp(null, form({
       email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
     }))).rejects.toThrow('__redirect__:/')
 
-    expect(loggedText()).toContain('auth.signUp.settings')
-    expect(loggedText()).toContain('23505')
-    expect(loggedText()).not.toContain('duplicate key value')
+    expect(loggedText()).toContain('teamContext.maakEigenTeam.naam')
+    expect(loggedText()).toContain('42501')
+    expect(loggedText()).not.toContain('permission denied')
+  })
+
+  it('behandelt een al bestaande rij (23505) als "stond er al" en logt niets — maakEigenTeam is idempotent', async () => {
+    // Twee gelijktijdige requests kunnen allebei het zelfherstel starten; de
+    // verliezer mag daar niet op stuklopen.
+    use(makeSupabase({
+      tableError: { table: 'teams', error: { code: '23505', message: 'duplicate key value violates unique constraint' } },
+    }))
+
+    await expect(signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))).rejects.toThrow('__redirect__:/')
+
+    expect(loggedText()).toBe('')
+  })
+
+  it('faalt hard en zichtbaar als de teams-rij niet aangemaakt kan worden — zonder die rij is het account onbruikbaar', async () => {
+    use(makeSupabase({
+      tableError: { table: 'teams', error: { code: '42501', message: 'permission denied for table teams' } },
+    }))
+
+    const result = await signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))
+
+    expect(result?.error).toContain('het opzetten van je team is niet gelukt')
+    expect(loggedText()).toContain('teamContext.maakEigenTeam.team')
+    expect(loggedText()).not.toContain('permission denied')
+  })
+
+  it('faalt hard als de owner-rij in team_members niet aangemaakt kan worden', async () => {
+    use(makeSupabase({
+      tableError: { table: 'team_members', error: { code: '42501', message: 'permission denied for table team_members' } },
+    }))
+
+    const result = await signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))
+
+    expect(result?.error).toContain('het opzetten van je team is niet gelukt')
+    expect(loggedText()).toContain('teamContext.maakEigenTeam.lid')
+  })
+
+  // ── Registratie zonder directe sessie (e-mailbevestiging staat aan) ──
+  it('parkeert de teamnaam als user-metadata, zodat het zelfherstel hem later kan gebruiken', async () => {
+    const m = makeSupabase()
+    use(m)
+
+    await expect(signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))).rejects.toThrow('__redirect__:/')
+
+    expect(m.calls.signUp[0].options?.data).toEqual({ [TEAM_NAAM_METADATA_KEY]: 'JO13-1' })
+  })
+
+  it('wist de metadata-vlag zodra het team bestaat, zodat hij later geen team kan terugtoveren', async () => {
+    const m = makeSupabase()
+    use(m)
+
+    await expect(signUp(null, form({
+      email: 'bob@example.com', password: STRONG_PASSWORD, team_name: 'JO13-1',
+    }))).rejects.toThrow('__redirect__:/')
+
+    expect(m.calls.updateUser).toContainEqual({ data: { [TEAM_NAAM_METADATA_KEY]: null } })
   })
 
   it('throttlet herhaalde registratiepogingen op hetzelfde e-mailadres + IP', async () => {
@@ -628,11 +770,24 @@ describe('deleteAccount', () => {
 
     await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
 
+    // De volledige lijst uit de technische brief, in FK-veilige volgorde.
+    // `oefeningen` staat VOORAAN en hangt aan het ACCOUNT (persoonlijk bezit,
+    // team_id = eigenaar-user); de rest is teamdata. `categorie_metingen` is
+    // nieuw in deze lijst: die tabel heeft alleen een team_id en cascadede dus
+    // nergens vanaf — de nulmetingen per onderdeel bleven als wees achter.
+    // `teams` sluit af; de cascade ruimt team_members en team_invites op.
     expect(m.calls.deletes.map((d) => d.table)).toEqual([
-      'oefeningen', 'metingen', 'attendance', 'lineups', 'events', 'players', 'settings',
+      'oefeningen',
+      'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
+      'match_ratings', 'lineups', 'attendance', 'absence_periods',
+      'categorie_metingen', 'metingen', 'events', 'players', 'settings',
+      'teams',
     ])
     for (const del of m.calls.deletes) {
-      expect(del.eqs).toEqual([{ col: 'team_id', val: 'team-1' }])
+      // `teams` wordt op zijn primaire sleutel gewist, de rest op team_id.
+      expect(del.eqs).toEqual([
+        { col: del.table === 'teams' ? 'id' : 'team_id', val: 'team-1' },
+      ])
     }
     expect(deleteUser).toHaveBeenCalledWith('team-1')
     expect(m.calls.signOut).toBe(1)
@@ -680,8 +835,18 @@ describe('deleteAccount', () => {
 
     await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
 
+    // De volledige lijst uit de technische brief, in FK-veilige volgorde.
+    // `oefeningen` staat VOORAAN en hangt aan het ACCOUNT (persoonlijk bezit,
+    // team_id = eigenaar-user); de rest is teamdata. `categorie_metingen` is
+    // nieuw in deze lijst: die tabel heeft alleen een team_id en cascadede dus
+    // nergens vanaf — de nulmetingen per onderdeel bleven als wees achter.
+    // `teams` sluit af; de cascade ruimt team_members en team_invites op.
     expect(m.calls.deletes.map((d) => d.table)).toEqual([
-      'oefeningen', 'metingen', 'attendance', 'lineups', 'events', 'players', 'settings',
+      'oefeningen',
+      'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
+      'match_ratings', 'lineups', 'attendance', 'absence_periods',
+      'categorie_metingen', 'metingen', 'events', 'players', 'settings',
+      'teams',
     ])
     expect(deleteUser).toHaveBeenCalledWith('team-1')
     expect(m.calls.signOut).toBe(1)

@@ -1,6 +1,6 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
 import { actueleMetingen, ankerDatum, hermetingStand, computeCurrentSteps, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY, TrainingLogEntry, LastDoneEntry, CyclusCorrectie, CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
 import { addDays, formatDate, formatDateLong, todayLocal } from '@/lib/utils'
@@ -19,8 +19,7 @@ const BAR_COLORS: Record<string, string> = {
 
 export default async function PeriodizationPage() {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   // De correctie-rij loopt in dezelfde ronde mee als de metingen: één extra
   // rij, geen extra roundtrip. Beide team-gescoped.
@@ -28,13 +27,13 @@ export default async function PeriodizationPage() {
     supabase
       .from('categorie_metingen')
       .select('*')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .order('datum', { ascending: false })
       .order('created_at', { ascending: false }),
     supabase
       .from('settings')
       .select('value')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('key', CYCLUS_CORRECTIE_KEY)
       .maybeSingle(),
   ])
@@ -61,7 +60,7 @@ export default async function PeriodizationPage() {
 
   if (anker !== null) {
     const { log, lastByCategory: last, currentSteps: steps } = await getTrainingLog(
-      supabase, user.id, actueel, addDays(today, 1),
+      supabase, ctx.teamId, actueel, addDays(today, 1),
     )
     trainingLog = log.slice(0, 6)
     lastByCategory = last
@@ -88,7 +87,7 @@ export default async function PeriodizationPage() {
   const { data: komendeTrainingen } = await supabase
     .from('events')
     .select('id, date, time')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('type', 'training')
     .gte('date', today)
     .order('date', { ascending: true })

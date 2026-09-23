@@ -10,6 +10,17 @@ import { toggleSquadPlayer } from '@/app/actions/match-squad'
 
 type TableResult = { data?: unknown; error?: unknown }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -24,11 +35,15 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const eqs: Eq[] = []
     const c: Record<string, unknown> = {}
     c.select = () => { calls.select.push({ table, eqs }); return c }
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
+    // `.in()` hoort erbij sinds getTeamContext de teamnamen ophaalt met
+    // settings.select('team_id, value').in('team_id', ...). Alleen doorgeven:
+    // deze stub past filters toch niet toe.
+    c.in = () => c
     c.upsert = (payload: Record<string, unknown>, options?: unknown) => {
       calls.upsert.push({ table, payload, options, eqs })
       return c

@@ -14,14 +14,21 @@ export const MAX_LOGO_BYTES = 2 * 1024 * 1024 // 2MB
 export const TEAM_LOGO_BUCKET = 'team-logos'
 
 // Padconventie: team-logos/<team_id>/logo. Het eerste padsegment ÍS de
-// tenant-grens: de RLS op storage.objects eist
-// (storage.foldername(name))[1] = auth.uid() (supabase/team-logo.sql,
-// supabase/rls.sql). Wijzigt deze functie, dan moet die policy mee — en
-// andersom. De userId komt altijd uit de sessie, nooit uit client-invoer.
+// tenant-grens: de RLS op storage.objects eist dat het de `teams.id` is van
+// een team waarvan de aanroeper hoofdtrainer is (supabase/team-rls.sql).
+// Wijzigt deze functie, dan moet die policy mee — en andersom.
+//
+// LET OP: het eerste padsegment is `ctx.teamId` (de teams.id van het ACTIEVE
+// team), niet `auth.uid()`. Voor teams die vóór de assistent-trainers
+// bestonden zijn dat dezelfde waarde — de backfill in
+// supabase/teams-en-leden.sql zet teams.id gelijk aan de user-id van de
+// hoofdtrainer — maar een nieuw team heeft een eigen uuid. De waarde komt
+// altijd uit de teamcontext, nooit uit client-invoer.
+//
 // Vaste, extensieloze bestandsnaam, zodat een vervangende upload met upsert
 // hetzelfde object overschrijft en er geen wees-bestand kan ontstaan.
-export function teamLogoPath(userId: string): string {
-  return `${userId}/logo`
+export function teamLogoPath(teamId: string): string {
+  return `${teamId}/logo`
 }
 
 export type LogoMimeType = 'image/png' | 'image/jpeg' | 'image/webp'

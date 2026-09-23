@@ -20,6 +20,7 @@ import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { parseMatchesFromCsv } from '@/lib/bulk-matches-csv'
 import { parseMatchesFromXlsx } from '@/lib/bulk-matches-xlsx'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 
 // Dit bestand exporteert UITSLUITEND async functies. Types, constanten en pure
 // functies staan in lib/bulk-matches*.ts: een export van iets anders dan een
@@ -151,8 +152,7 @@ export async function getExistingMatchKeys(
   dates: string[],
 ): Promise<{ date: string; opponent: string | null }[]> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error(NOT_LOGGED_IN)
+  const ctx = await requireTeamContext()
 
   // Onvertrouwde invoer: ontdubbelen, alleen echte kalenderdatums, en nooit meer
   // dan een preview groot kan zijn.
@@ -163,8 +163,9 @@ export async function getExistingMatchKeys(
   const { data, error } = await supabase
     .from('events')
     .select('date, opponent')
-    // Tenant-grens, expliciet naast de RLS-policy (supabase/rls.sql:18-21).
-    .eq('team_id', user.id)
+    // Tenant-grens, expliciet naast de RLS-policy "events: lid mag lezen"
+    // (supabase/team-rls.sql).
+    .eq('team_id', ctx.teamId)
     .eq('type', 'match')
     .in('date', unique)
 
@@ -185,8 +186,8 @@ export async function getExistingMatchKeys(
 // bewust NIET teruggedraaid — de trainer heeft dan wél zijn programma.
 export async function createBulkMatches(rows: BulkMatchInput[]): Promise<BulkCreateResult> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error(NOT_LOGGED_IN)
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
 
   if (!Array.isArray(rows) || rows.length === 0) throw new Error('Geen wedstrijden om op te slaan')
   if (rows.length > MAX_BULK_MATCHES) {
@@ -213,7 +214,7 @@ export async function createBulkMatches(rows: BulkMatchInput[]): Promise<BulkCre
     opponent: row.opponent.trim(),
     home_away: row.home_away.trim(),
     // Tenant-grens: altijd uit de sessie, nooit uit de payload.
-    team_id: user.id,
+    team_id: ctx.teamId,
   }))
 
   const { data: inserted, error } = await supabase
@@ -226,7 +227,7 @@ export async function createBulkMatches(rows: BulkMatchInput[]): Promise<BulkCre
   if (error) throw genericError('events.bulkCreate', error)
 
   const events = (inserted ?? []) as { id: string; date: string }[]
-  const attendanceFailed = await createAttendanceFor(supabase, user.id, events)
+  const attendanceFailed = await createAttendanceFor(supabase, ctx.teamId, events)
 
   revalidatePath('/events')
   revalidatePath('/')
@@ -239,12 +240,15 @@ export async function createBulkMatches(rows: BulkMatchInput[]): Promise<BulkCre
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 
 // Zet voor elke nieuwe wedstrijd een aanwezigheidsrij per actieve speler klaar,
-// met dezelfde afmeldperiode-regels als createEvent (app/actions/events.ts:62-99).
+// met dezelfde afmeldperiode-regels als createEvent (app/actions/events.ts).
 // Geeft true terug als dat mislukte; gooit nooit — de wedstrijden zijn dan al
 // opgeslagen en die mogen niet alsnog als "mislukt" bij de trainer landen.
 async function createAttendanceFor(
   supabase: SupabaseClient,
-  userId: string,
+  // De TENANT-sleutel (ctx.teamId), niet de user-id van de ingelogde persoon —
+  // sinds de assistent-trainers zijn dat twee verschillende dingen. Zelfde
+  // afspraak als de teamId-parameter van de guards in lib/authz.ts.
+  teamId: string,
   events: { id: string; date: string }[],
 ): Promise<boolean> {
   if (events.length === 0) return false
@@ -254,26 +258,28 @@ async function createAttendanceFor(
     // we halen alle periodes op die met het BEREIK overlappen (from_date <=
     // maxDate && to_date >= minDate) en filteren daarna per event in geheugen.
     // Kale YYYY-MM-DD-strings, lexicografisch te vergelijken — geen Date-object,
-    // dus geen servertijdzone die meebeslist (zie lib/absence-periods.ts:6-10).
+    // dus geen servertijdzone die meebeslist (zie periodIdByPlayerForDate in
+    // lib/absence-periods.ts).
     const dates = events.map((event) => event.date)
     const minDate = dates.reduce((a, b) => (a <= b ? a : b))
     const maxDate = dates.reduce((a, b) => (a >= b ? a : b))
 
-    // Spelerslijst één keer voor de hele batch (patroon uit
-    // app/actions/events.ts:63-66 en app/actions/settings.ts:166-175).
+    // Spelerslijst één keer voor de hele batch (zelfde patroon als createEvent
+    // in app/actions/events.ts en generateSeasonTrainings in
+    // app/actions/settings.ts).
     const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] =
       await Promise.all([
         // `type` hoort erbij: een gastspeler staat altijd afwezig. Het
         // active-filter blijft staan — een gast is gewoon actief en krijgt dus
         // wél een rij.
-        supabase.from('players').select('id, type').eq('active', true).eq('team_id', userId),
+        supabase.from('players').select('id, type').eq('active', true).eq('team_id', teamId),
         getDefaultAttendance().catch(() => 'present' as const),
         // Tenant-grens expliciet, naast de RLS-policy. Vaste sortering zodat de
         // herkomst bij overlappende periodes deterministisch is, net als daar.
         supabase
           .from('absence_periods')
           .select('id, player_id, from_date, to_date')
-          .eq('team_id', userId)
+          .eq('team_id', teamId)
           .lte('from_date', maxDate)
           .gte('to_date', minDate)
           .order('created_at', { ascending: true })
@@ -305,7 +311,7 @@ async function createAttendanceFor(
       return players.map((player: { id: string; type: string }) => buildAttendanceRow({
         eventId: event.id,
         playerId: player.id,
-        teamId: userId,
+        teamId,
         defaultStatus,
         injured: false,
         periodId: periodByPlayer.get(player.id) ?? null,

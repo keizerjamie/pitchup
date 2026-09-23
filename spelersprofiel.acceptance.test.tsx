@@ -77,6 +77,27 @@ import PlayerAbsencePage from '@/app/players/[id]/absence/page'
 import EditPlayerPage from '@/app/players/[id]/edit/page'
 import PlayerList from '@/components/PlayerList'
 
+// ── team_members: de teamcontext van élke page en server action ──
+// lib/team-context.ts (requireTeamContext) leest team_members vóór alles;
+// zonder lidmaatschapsrij komt geen enkele pagina of action voorbij zijn
+// eerste regel ('Geen team'). Deze ene tabel wordt daarom apart bediend, los
+// van de mock hieronder. In fase 1 is elke gebruiker owner van precies één
+// team en geldt teams.id === user.id — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersChain(userId: string | undefined) {
+  const rows = userId ? [{ team_id: userId, user_id: userId, rol: 'owner' }] : []
+  const chain: Record<string, unknown> = {}
+  for (const op of ['select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte', 'order', 'limit']) {
+    chain[op] = () => chain
+  }
+  chain.maybeSingle = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  chain.single = () => Promise.resolve({ data: rows[0] ?? null, error: null })
+  ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+    resolve({ data: rows, error: null, count: rows.length })
+  return chain
+}
+
+
 const TEAM = 'team-1'
 const OTHER_TEAM = 'team-2'
 // Echte UUID's: isUuid() (lib/authz.ts) eist exact dit formaat, en de pagina
@@ -363,7 +384,8 @@ function makeClient(
 ) {
   return {
     auth: { getUser: async () => ({ data: { user } }) },
-    from: (t: string) => db.from(t),
+    from: (t: string) =>
+      t === 'team_members' ? teamMembersChain(user?.id) : db.from(t),
     rpc: (name: string, args: Row) => {
       if (rpcErrors[name]) return Promise.resolve({ data: null, error: rpcErrors[name] })
       const handler = RPC_HANDLERS[name]
@@ -1050,7 +1072,10 @@ describe('AC26 — ongeldig id', () => {
     useDb(db)
 
     await expect(PlayerProfilePage({ params: Promise.resolve({ id: INVALID_ID }) })).rejects.toThrow('__notFound__')
-    expect(db.queryLog.length).toBe(0)
+    // De teamcontext (lib/team-context.ts) leest vóór élke pagina team_members
+    // en de teamnaam uit settings; die twee staan los van deze pagina. Waar het
+    // hier om gaat: geen enkele query naar spelerdata.
+    expect(db.queryLog.filter((q) => q.table !== 'settings')).toHaveLength(0)
   })
 })
 

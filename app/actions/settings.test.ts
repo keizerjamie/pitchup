@@ -15,6 +15,17 @@ import {
 
 type TableResult = { data?: unknown; error?: unknown }
 
+// Elke server action haalt sinds deze feature eerst de teamcontext op
+// (lib/team-context.ts, requireTeamContext). Die leest team_members; zonder
+// een lidmaatschapsrij komt geen enkele action voorbij zijn eerste regel
+// ('Geen team'). In fase 1 geldt teams.id === user.id, dus de owner-rij wijst
+// naar hetzelfde id als de sessie-user — vanaf fase 2 kan team_id daarvan
+// afwijken en is dit de plek om dat na te bootsen.
+function teamMembersFixture(userId: string | undefined) {
+  if (!userId) return { data: [], error: null }
+  return { data: [{ team_id: userId, user_id: userId, rol: 'owner' }], error: null }
+}
+
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
@@ -30,7 +41,7 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? { data: [], error: null }
+    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const filters: Filter[] = []
     const c: Record<string, unknown> = {}
     c.select = () => { calls.select.push({ table, filters }); return c }
@@ -138,6 +149,56 @@ describe('saveSettings', () => {
     expect(logged()).toContain('settings.saveSettings')
     expect(logged()).toContain('42501')
     expect(logged()).not.toContain('permission denied')
+  })
+})
+
+// ────────────────────────────────────────────────
+// Owner-only vs. onderdeel-recht (assistent-trainers, fase 1)
+//
+// De standaard-aanwezigheid is een teambrede instelling: alleen de
+// hoofdtrainer. De agenda-sleutels zijn dat niet — daar volstaat het
+// agenda-bewerkrecht. Dezelfde splitsing staat in de SQL-functie
+// settings_key_editable() (supabase/teams-en-leden.sql).
+// ────────────────────────────────────────────────
+
+const ASSISTENT_ALLE_RECHTEN = { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent',
+        mag_spelers_bewerken: true, mag_agenda_bewerken: true,
+        mag_aanwezigheid_bewerken: true, mag_wedstrijd_bewerken: true,
+        mag_training_bewerken: true, mag_periodisering_bewerken: true }], error: null }
+
+const ASSISTENT_ZONDER_RECHTEN =
+  { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null }
+
+describe('rechten op de instellingen', () => {
+  it('weigert saveSettings voor een assistent MET alle zes rechten — dit is hoofdtrainer-werk', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ALLE_RECHTEN } })
+    gebruikSupabase(m)
+
+    await expect(saveSettings(form({ default_attendance: 'unknown' }))).rejects.toThrow('Geen toegang')
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('laat saveScheduleSettings wél door voor een assistent met agendarecht', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ALLE_RECHTEN } })
+    gebruikSupabase(m)
+
+    await saveScheduleSettings(form({
+      season_start: '2026-01-01', season_end: '2026-06-30',
+      training_days: '1,3', training_time: '19:00', training_location: 'Veld 2',
+    }))
+
+    expect(m.calls.upsert).toHaveLength(1)
+  })
+
+  it('weigert saveScheduleSettings zonder agendarecht, zonder write', async () => {
+    const m = makeSupabase({ tables: { team_members: ASSISTENT_ZONDER_RECHTEN } })
+    gebruikSupabase(m)
+
+    await expect(saveScheduleSettings(form({
+      season_start: '2026-01-01', season_end: '2026-06-30',
+      training_days: '1,3', training_time: '19:00', training_location: 'Veld 2',
+    }))).rejects.toThrow('Geen toegang')
+    expect(m.calls.upsert).toHaveLength(0)
   })
 })
 

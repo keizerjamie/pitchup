@@ -1,6 +1,6 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS, PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
 import { actueleMetingen, onderdeelStatus, getTrainingLog, computeCurrentSteps } from '@/lib/periodization'
 import { addDays, daysUntil, todayLocal } from '@/lib/utils'
@@ -32,8 +32,7 @@ function initialsOf(name: string): string {
 
 export default async function DashboardPage() {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const today = todayLocal()
   const windowEnd = addDays(today, FORWARD)
@@ -49,20 +48,20 @@ export default async function DashboardPage() {
     { data: guestPlayerRows, error: guestPlayerError },
     { data: categorieMetingenRows },
   ] = await Promise.all([
-    supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
-    supabase.from('players').select('id, name, position, jersey_number, injured, type').eq('team_id', user.id).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
-    supabase.from('settings').select('value').eq('team_id', user.id).eq('key', 'team_name').maybeSingle(),
+    supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
+    supabase.from('players').select('id, name, position, jersey_number, injured, type').eq('team_id', ctx.teamId).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
+    supabase.from('settings').select('value').eq('team_id', ctx.teamId).eq('key', 'team_name').maybeSingle(),
     // Kandidaat-events voor de To-do: alles binnen het venster, ongeacht status
     // (zichtbaarheid wordt verderop bepaald door isTaskVisible).
-    supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', fetchStart).lte('date', windowEnd).order('date', { ascending: true }),
+    supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').gte('date', fetchStart).lte('date', windowEnd).order('date', { ascending: true }),
     // Trainingsdatums voor de live analyse-deadline — bewust ONbegrensd naar
     // voren (geen lte windowEnd): never-miss, zie lib/todos.mjs isTaskVisible.
-    supabase.from('events').select('date').eq('team_id', user.id).eq('type', 'training').gte('date', fetchStart).order('date', { ascending: true }),
+    supabase.from('events').select('date').eq('team_id', ctx.teamId).eq('type', 'training').gte('date', fetchStart).order('date', { ascending: true }),
     // Recente vorm (W/G/V) van de laatste 5 afgeronde wedstrijden — alle
     // match_type's tellen mee, oefenwedstrijden inclusief.
     supabase.from('events')
       .select('id, date, goals_for, goals_against')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('type', 'match')
       .lt('date', today)
       .order('date', { ascending: false })
@@ -75,11 +74,11 @@ export default async function DashboardPage() {
     // active-filter: de telling kijkt vandaag naar álle attendance-rijen van de
     // aankomende events, ook die van inactief geworden spelers, en dat gedrag
     // blijft ongewijzigd.
-    supabase.from('players').select('id').eq('team_id', user.id).eq('type', 'guest'),
+    supabase.from('players').select('id').eq('team_id', ctx.teamId).eq('type', 'guest'),
     // Periodisering per onderdeel (vervangt de vroegere alles-of-niets
     // count-query op `metingen`). Team-gescoped, nieuwste eerst — zelfde vorm
     // als backend-samenvatting §"Voor fase 2 relevant".
-    supabase.from('categorie_metingen').select('*').eq('team_id', user.id)
+    supabase.from('categorie_metingen').select('*').eq('team_id', ctx.teamId)
       .order('datum', { ascending: false }).order('created_at', { ascending: false }),
   ])
 
@@ -113,7 +112,7 @@ export default async function DashboardPage() {
 
   const allEventIds = upcoming.map((e) => e.id)
   const { data: attendanceRows } = allEventIds.length > 0
-    ? await supabase.from('attendance').select('event_id, player_id, status').eq('team_id', user.id).in('event_id', allEventIds)
+    ? await supabase.from('attendance').select('event_id, player_id, status').eq('team_id', ctx.teamId).in('event_id', allEventIds)
     : { data: [] }
   const allAttendance = attendanceRows ?? []
 
@@ -173,29 +172,29 @@ export default async function DashboardPage() {
     trainingLogResult,
   ] = await Promise.all([
     matchCandidateIds.length > 0
-      ? supabase.from('match_squad').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      ? supabase.from('match_squad').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
-      ? supabase.from('lineups').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      ? supabase.from('lineups').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
-      ? supabase.from('match_ratings').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      ? supabase.from('match_ratings').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
-      ? supabase.from('match_events').select('event_id').eq('team_id', user.id).in('event_id', matchCandidateIds)
+      ? supabase.from('match_events').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     trainingCandidateIds.length > 0
-      ? supabase.from('training_oefeningen').select('event_id').eq('team_id', user.id).in('event_id', trainingCandidateIds)
+      ? supabase.from('training_oefeningen').select('event_id').eq('team_id', ctx.teamId).in('event_id', trainingCandidateIds)
       : Promise.resolve({ data: [] }),
     allCandidateIds.length > 0
-      ? supabase.from('task_overrides').select('event_id, task_type').eq('team_id', user.id).in('event_id', allCandidateIds)
+      ? supabase.from('task_overrides').select('event_id, task_type').eq('team_id', ctx.teamId).in('event_id', allCandidateIds)
       : Promise.resolve({ data: [] }),
     // Periodisering: alleen echt bevragen zolang er iets te bevragen valt —
     // getTrainingLog zelf doet ook al geen query zonder actuele meting, maar
     // de guard hier maakt dat expliciet (D3: 0 extra round-trips voor een
     // team zonder nulmetingen), consistent met de guards hierboven.
     heeftActueleMeting
-      ? getTrainingLog(supabase, user.id, actueel, addDays(today, 1))
+      ? getTrainingLog(supabase, ctx.teamId, actueel, addDays(today, 1))
       : Promise.resolve({ log: [], lastByCategory: {}, occurrences: {}, currentSteps: computeCurrentSteps(actueel, {}) }),
   ])
 

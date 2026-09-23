@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { assertCanEdit, assertIsOwner, getTeamContext, requireTeamContext } from '@/lib/team-context'
 import { genericError } from '@/lib/errors'
 import { MAX_SEASON_DAYS, isDateString, seasonTrainingDates } from '@/lib/season-dates'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
@@ -10,13 +11,13 @@ import { AttendanceStatus } from '@/lib/types'
 
 export async function getDefaultAttendance(): Promise<'present' | 'unknown'> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return 'present'
+  const ctx = await getTeamContext()
+  if (!ctx) return 'present'
 
   const { data } = await supabase
     .from('settings')
     .select('value')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('key', 'default_attendance')
     .single()
   return (data?.value as 'present' | 'unknown') ?? 'present'
@@ -24,10 +25,10 @@ export async function getDefaultAttendance(): Promise<'present' | 'unknown'> {
 
 export async function getAllSettings(): Promise<Record<string, string>> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return {}
+  const ctx = await getTeamContext()
+  if (!ctx) return {}
 
-  const { data } = await supabase.from('settings').select('key, value').eq('team_id', user.id)
+  const { data } = await supabase.from('settings').select('key, value').eq('team_id', ctx.teamId)
   const map: Record<string, string> = {}
   for (const row of data ?? []) map[row.key] = row.value
   return map
@@ -35,15 +36,18 @@ export async function getAllSettings(): Promise<Record<string, string>> {
 
 export async function saveSettings(formData: FormData) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  // Owner-only: de standaard-aanwezigheid is een teambrede instelling, net als
+  // clublogo en clubkleuren. De settings-policy (settings_key_editable) weigert
+  // de sleutel 'default_attendance' voor een assistent ook op databaseniveau.
+  assertIsOwner(ctx)
 
   const defaultAttendance = formData.get('default_attendance') as string
   if (!['present', 'unknown'].includes(defaultAttendance)) throw new Error('Ongeldige waarde')
 
   const { error } = await supabase
     .from('settings')
-    .upsert({ team_id: user.id, key: 'default_attendance', value: defaultAttendance }, { onConflict: 'team_id,key' })
+    .upsert({ team_id: ctx.teamId, key: 'default_attendance', value: defaultAttendance }, { onConflict: 'team_id,key' })
   if (error) throw genericError('settings.saveSettings', error)
 
   revalidatePath('/settings')
@@ -51,8 +55,8 @@ export async function saveSettings(formData: FormData) {
 
 export async function saveScheduleSettings(formData: FormData) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
 
   // isDateString weigert naast een verkeerd formaat ook niet-bestaande datums
   // (2026-02-30), die `Date` stilzwijgend zou doorrollen.
@@ -61,11 +65,11 @@ export async function saveScheduleSettings(formData: FormData) {
   if (!isDateString(seasonStart) || !isDateString(seasonEnd)) throw new Error('Ongeldige datum')
 
   const entries = [
-    { team_id: user.id, key: 'season_start', value: seasonStart },
-    { team_id: user.id, key: 'season_end', value: seasonEnd },
-    { team_id: user.id, key: 'training_days', value: formData.get('training_days') as string },
-    { team_id: user.id, key: 'training_time', value: (formData.get('training_time') as string) || '' },
-    { team_id: user.id, key: 'training_location', value: (formData.get('training_location') as string) || '' },
+    { team_id: ctx.teamId, key: 'season_start', value: seasonStart },
+    { team_id: ctx.teamId, key: 'season_end', value: seasonEnd },
+    { team_id: ctx.teamId, key: 'training_days', value: formData.get('training_days') as string },
+    { team_id: ctx.teamId, key: 'training_time', value: (formData.get('training_time') as string) || '' },
+    { team_id: ctx.teamId, key: 'training_location', value: (formData.get('training_location') as string) || '' },
   ]
 
   const { error } = await supabase.from('settings').upsert(entries, { onConflict: 'team_id,key' })
@@ -76,8 +80,8 @@ export async function saveScheduleSettings(formData: FormData) {
 
 export async function deleteSeasonTrainings(): Promise<{ deleted: number }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
 
   const settings = await getAllSettings()
   const seasonStart = settings['season_start']
@@ -88,7 +92,7 @@ export async function deleteSeasonTrainings(): Promise<{ deleted: number }> {
   const { data, error } = await supabase
     .from('events')
     .delete()
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('type', 'training')
     .gte('date', seasonStart)
     .lte('date', seasonEnd)
@@ -102,8 +106,8 @@ export async function deleteSeasonTrainings(): Promise<{ deleted: number }> {
 
 export async function generateSeasonTrainings(): Promise<{ created: number; skipped: number }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
 
   const settings = await getAllSettings()
 
@@ -127,7 +131,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
   const { data: existing } = await supabase
     .from('events')
     .select('date')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('type', 'training')
   const existingDates = new Set((existing ?? []).map((e) => e.date))
 
@@ -150,7 +154,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
       date,
       time: trainingTime,
       location: trainingLocation,
-      team_id: user.id,
+      team_id: ctx.teamId,
     }))
 
   if (toCreate.length === 0) {
@@ -165,7 +169,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
   const { data: periods, error: periodsError } = await supabase
     .from('absence_periods')
     .select('id, player_id, from_date, to_date')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .lte('from_date', seasonEnd)
     .gte('to_date', seasonStart)
     .order('created_at', { ascending: true })
@@ -186,10 +190,10 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
 
     // `injured` hoort erbij: een geblesseerde speler moet ook op een nieuw
     // gegenereerde training meteen op 'absent' komen, net als markInjured dat
-    // voor bestaande events doet (app/actions/players.ts:124-132). `type` idem
+    // voor bestaande events doet (markInjured in app/actions/players.ts). `type` idem
     // voor gastspelers: die staan altijd afwezig. Het active-filter blijft
     // staan — een gast is gewoon actief en krijgt dus wél een rij.
-    const { data: players, error: playersError } = await supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', user.id)
+    const { data: players, error: playersError } = await supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', ctx.teamId)
     // Hard falen, zoals bij de periodequery hierboven: stil doorgaan zou elke
     // gegenereerde training de standaardstatus geven terwijl de speler
     // geblesseerd of afgemeld is.
@@ -207,7 +211,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
         return players.map((p) => buildAttendanceRow({
           eventId: ev.id,
           playerId: p.id,
-          teamId: user.id,
+          teamId: ctx.teamId,
           defaultStatus,
           injured: p.injured === true,
           periodId: periodByPlayer.get(p.id) ?? null,

@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { assertOwnEvent, getOwnPlayerIds } from '@/lib/authz'
+import { assertOwnEvent, assertOwnTrainingEvent, getOwnPlayerIds } from '@/lib/authz'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 import { validateSpelerindeling } from '@/lib/spelerindeling'
 import { validateParallelSpelers, assertGeenOverlap } from '@/lib/parallel-groep'
@@ -11,7 +12,7 @@ import { normalizeOefeningTeams, type AantallenOverride } from '@/lib/types'
 import { joinedCategorie } from '@/lib/periodization'
 import { clampDuurMin } from '@/lib/sessie-tijdlijn'
 import { clampStapOverride, berekenDuurUitStap } from '@/lib/periodization-stappen'
-import { genericError, logError } from '@/lib/errors'
+import { genericError, logError, rpcEventError } from '@/lib/errors'
 import { kopieerKoppelingen, type BronKoppeling } from '@/lib/kopieer-trainingsplan'
 
 // ────────────────────────────────────────────────
@@ -42,17 +43,20 @@ function clampSteps(steps: MetingSteps): MetingSteps {
 
 export async function saveMeting(eventId: string, steps: MetingSteps, notes: string | null) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  // Legacy-meting: de action woont hier, maar de DATA is periodisering — net
+  // als categorie_metingen in app/actions/periodisering.ts. Vandaar dit
+  // onderdeel en niet 'training'.
+  assertCanEdit(ctx, 'periodisering')
 
   // Verify event belongs to this team
   const { data: event } = await supabase
-    .from('events').select('id').eq('id', eventId).eq('team_id', user.id).single()
+    .from('events').select('id').eq('id', eventId).eq('team_id', ctx.teamId).single()
   if (!event) throw new Error('Event niet gevonden')
 
   const { error } = await supabase.from('metingen').upsert({
     event_id: eventId,
-    team_id: user.id,
+    team_id: ctx.teamId,
     ...clampSteps(steps),
     notes: notes?.slice(0, 1000) ?? null,
   }, { onConflict: 'event_id' })
@@ -66,18 +70,31 @@ export async function saveMeting(eventId: string, steps: MetingSteps, notes: str
 // Doelstelling
 // ────────────────────────────────────────────────
 
+// De doelstelling hoort bij Training, maar staat als kolom op `events` — en de
+// events-policy blijft op 'agenda' (dat onderdeel kan als enige events-rijen
+// maken en wissen). Daarom loopt deze ene kolom via de kolom-begrensde RPC
+// set_event_doelstelling (supabase/team-rls-gevolgacties.sql), die zelf
+// can_edit(team,'training') toetst en het team-id uit de rij haalt.
+// assertCanEdit hieronder blijft de eerste van die twee lagen.
 export async function saveDoelstelling(eventId: string, doelstelling: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  const { error } = await supabase
-    .from('events')
-    .update({ doelstelling: doelstelling.slice(0, 500) || null })
-    .eq('id', eventId)
-    .eq('team_id', user.id)
+  // Forged-id-guard vóór de RPC, net als bij de drie andere RPC-aanroepers
+  // (updateGatherTime, updateTrainingstype, saveMatchResult). Checkt
+  // eigenaarschap én type = 'training' in één query, met dezelfde
+  // niet-onthullende melding als de RPC zelf bij een onbekend id — zo is van
+  // buitenaf niet te zien of het event niet bestaat, van een ander team is of
+  // gewoon geen training is (lib/authz.ts).
+  await assertOwnTrainingEvent(supabase, eventId, ctx.teamId)
 
-  if (error) throw genericError('trainingPlan.saveDoelstelling', error)
+  const { error } = await supabase.rpc('set_event_doelstelling', {
+    p_event_id: eventId,
+    p_doelstelling: doelstelling.slice(0, 500) || null,
+  })
+
+  if (error) throw rpcEventError('trainingPlan.saveDoelstelling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
 }
 
@@ -107,24 +124,26 @@ async function nextVolgordeForEvent(
 // onafhankelijke koppelingsrij onderaan het plan.
 export async function addOefeningToTraining(eventId: string, oefeningId: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
   const [, oefeningResult] = await Promise.all([
-    assertOwnEvent(supabase, eventId, user.id),
+    assertOwnEvent(supabase, eventId, ctx.teamId),
     // Doet zelf de tenant-check (id + team_id) én levert meteen de bibliotheek-
     // duur, die de nieuwe koppeling EENMALIG overneemt. Zelfde melding als
     // assertOwnOefening, zodat het faalpad ongewijzigd blijft.
+    // oefeningen.team_id is de EIGENAAR-USER, geen teams.id: een oefening is
+    // persoonlijk bezit. Daarom ctx.userId en niet ctx.teamId.
     supabase.from('oefeningen').select('id, duur_min')
-      .eq('id', oefeningId).eq('team_id', user.id).maybeSingle(),
+      .eq('id', oefeningId).eq('team_id', ctx.userId).maybeSingle(),
   ])
   const oefening = oefeningResult.data as { id: string; duur_min: number | null } | null
   if (!oefening) throw new Error('Oefening niet gevonden')
 
-  const volgorde = await nextVolgordeForEvent(supabase, eventId, user.id)
+  const volgorde = await nextVolgordeForEvent(supabase, eventId, ctx.teamId)
 
   const { error } = await supabase.from('training_oefeningen').insert({
-    team_id: user.id,
+    team_id: ctx.teamId,
     event_id: eventId,
     oefening_id: oefeningId,
     volgorde,
@@ -143,25 +162,25 @@ export async function createAndAddOefening(
   input: OefeningInput,
 ): Promise<{ oefeningId: string }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
   const v = validateOefening(input)
 
   const { data: created, error } = await supabase
     .from('oefeningen')
-    .insert(oefeningRow(v, user.id))
+    .insert(oefeningRow(v, ctx.userId))
     .select('id')
     .single()
 
   if (error) throw genericError('trainingPlan.createAndAddOefening', error)
   const oefeningId = created.id
 
-  const volgorde = await nextVolgordeForEvent(supabase, eventId, user.id)
+  const volgorde = await nextVolgordeForEvent(supabase, eventId, ctx.teamId)
 
   const { error: linkError } = await supabase.from('training_oefeningen').insert({
-    team_id: user.id,
+    team_id: ctx.teamId,
     event_id: eventId,
     oefening_id: oefeningId,
     volgorde,
@@ -180,10 +199,10 @@ export async function createAndAddOefening(
 // Koppeling verwijderen (laat de bibliotheek-oefening zelf staan).
 export async function removeOefeningFromTraining(koppelingId: string, eventId: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   // Eerst de eventuele parallelle groep lezen: na het verwijderen is niet meer
   // te achterhalen bij welke groep deze koppeling hoorde. Op event_id gescoped,
@@ -194,7 +213,7 @@ export async function removeOefeningFromTraining(koppelingId: string, eventId: s
     .select('id, parallel_groep_id')
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
   const groepId = (koppeling as { parallel_groep_id?: string | null } | null)?.parallel_groep_id ?? null
 
@@ -203,13 +222,13 @@ export async function removeOefeningFromTraining(koppelingId: string, eventId: s
     .delete()
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('trainingPlan.removeOefeningFromTraining', error)
 
   // Blijft er één lid over, dan is het geen parallelle groep meer.
-  await ruimEenzameGroepOp(supabase, eventId, user.id, groepId)
-  await normaliseerBlokVolgorde(supabase, eventId, user.id)
+  await ruimEenzameGroepOp(supabase, eventId, ctx.teamId, groepId)
+  await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId)
 
   revalidatePath(`/events/${eventId}/training-plan`)
 }
@@ -226,8 +245,8 @@ export async function updateKoppeling(
   },
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
   const update: Record<string, number | string | null> = {}
 
@@ -254,7 +273,7 @@ export async function updateKoppeling(
         .select('id, oefeningen(categorie)')
         .eq('id', koppelingId)
         .eq('event_id', eventId)
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .maybeSingle()
       if (!koppeling) throw new Error('Koppeling niet gevonden')
 
@@ -283,7 +302,7 @@ export async function updateKoppeling(
         .select('id')
         .eq('id', patch.genest_in)
         .eq('event_id', eventId)
-        .eq('team_id', user.id)
+        .eq('team_id', ctx.teamId)
         .maybeSingle()
       if (!parent) throw new Error('Ongeldige nesting')
       update.genest_in = patch.genest_in
@@ -297,7 +316,7 @@ export async function updateKoppeling(
     .update(update)
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('trainingPlan.updateKoppeling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -313,10 +332,10 @@ export async function saveSpelerindeling(
   spelerindeling: string[][],
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   // Koppeling ophalen + tenant/event-scopen, inclusief de teamconfig van de
   // gejoinde bibliotheek-oefening (om teamCount te bepalen).
@@ -325,7 +344,7 @@ export async function saveSpelerindeling(
     .select('id, oefeningen(teams)')
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
   if (!koppeling) throw new Error('Koppeling niet gevonden')
 
@@ -343,7 +362,7 @@ export async function saveSpelerindeling(
   const { data: playerRows } = await supabase
     .from('players')
     .select('id')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   const ownPlayerIds = new Set((playerRows ?? []).map((r) => r.id))
 
   const clean = validateSpelerindeling(spelerindeling, { teamCount, ownPlayerIds })
@@ -352,7 +371,7 @@ export async function saveSpelerindeling(
     .from('training_oefeningen')
     .update({ spelerindeling: clean })
     .eq('id', koppelingId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('trainingPlan.saveSpelerindeling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -377,10 +396,10 @@ export async function saveAantallenOverride(
   override: AantallenOverride | null,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   // Koppeling ophalen + tenant/event-scopen, inclusief de grenzen van de
   // gejoinde bibliotheek-oefening.
@@ -389,7 +408,7 @@ export async function saveAantallenOverride(
     .select('id, oefeningen(teams, aantal_neutralen, aantal_neutralen_max)')
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
   if (!koppeling) throw new Error('Koppeling niet gevonden')
 
@@ -418,7 +437,7 @@ export async function saveAantallenOverride(
     .update({ aantallen_override: clean })
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('trainingPlan.saveAantallenOverride', error)
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -431,12 +450,12 @@ export async function saveAantallenOverride(
 // die invariant breken. De client-signatuur blijft ongewijzigd.
 export async function reorderKoppelingen(eventId: string, orderedIds: string[]): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
-  await normaliseerBlokVolgorde(supabase, eventId, user.id, orderedIds)
+  await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId, orderedIds)
 
   revalidatePath(`/events/${eventId}/training-plan`)
 }
@@ -560,10 +579,10 @@ export async function vormParallelGroep(
   koppelingIds: string[],
 ): Promise<{ groepId: string }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   const ids = [...new Set(koppelingIds)]
   if (ids.length < 2) throw new Error('Minimaal twee oefeningen voor een parallelle groep')
@@ -575,7 +594,7 @@ export async function vormParallelGroep(
     .select('id, parallel_groep_id')
     .in('id', ids)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   const rijen = Array.isArray(data) ? (data as { id: string; parallel_groep_id: string | null }[]) : []
   if (rijen.length !== ids.length) throw new Error('Koppeling niet gevonden')
   if (rijen.some((rij) => rij.parallel_groep_id)) {
@@ -590,12 +609,12 @@ export async function vormParallelGroep(
       .update({ parallel_groep_id: groepId })
       .eq('id', id)
       .eq('event_id', eventId)
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
     if (error) throw genericError('trainingPlan.vormParallelGroep', error)
   }
 
   // Het blok neemt de laagste volgorde van zijn leden over; de rest schuift op.
-  await normaliseerBlokVolgorde(supabase, eventId, user.id)
+  await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId)
 
   revalidatePath(`/events/${eventId}/training-plan`)
   return { groepId }
@@ -609,17 +628,17 @@ export async function voegToeAanParallelGroep(
   groepId: string,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   const { data: koppeling } = await supabase
     .from('training_oefeningen')
     .select('id, parallel_groep_id')
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
   if (!koppeling) throw new Error('Koppeling niet gevonden')
   if ((koppeling as { parallel_groep_id?: string | null }).parallel_groep_id) {
@@ -633,7 +652,7 @@ export async function voegToeAanParallelGroep(
     .from('training_oefeningen')
     .select('id')
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('parallel_groep_id', groepId)
     .limit(1)
     .maybeSingle()
@@ -644,10 +663,10 @@ export async function voegToeAanParallelGroep(
     .update({ parallel_groep_id: groepId, parallel_spelers: [] })
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   if (error) throw genericError('trainingPlan.voegToeAanParallelGroep', error)
 
-  await normaliseerBlokVolgorde(supabase, eventId, user.id)
+  await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId)
 
   revalidatePath(`/events/${eventId}/training-plan`)
 }
@@ -656,17 +675,17 @@ export async function voegToeAanParallelGroep(
 // geen groep heeft levert geen fout op.
 export async function haalUitParallelGroep(eventId: string, koppelingId: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   const { data: koppeling } = await supabase
     .from('training_oefeningen')
     .select('id, parallel_groep_id')
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
   if (!koppeling) throw new Error('Koppeling niet gevonden')
   const groepId = (koppeling as { parallel_groep_id?: string | null }).parallel_groep_id ?? null
@@ -677,12 +696,12 @@ export async function haalUitParallelGroep(eventId: string, koppelingId: string)
     .update({ parallel_groep_id: null, parallel_spelers: [] })
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   if (error) throw genericError('trainingPlan.haalUitParallelGroep', error)
 
   if (groepId) {
-    await ruimEenzameGroepOp(supabase, eventId, user.id, groepId)
-    await normaliseerBlokVolgorde(supabase, eventId, user.id)
+    await ruimEenzameGroepOp(supabase, eventId, ctx.teamId, groepId)
+    await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId)
   }
 
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -698,17 +717,17 @@ export async function saveParallelIndeling(
   spelerIds: string[],
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   const { data: koppeling } = await supabase
     .from('training_oefeningen')
     .select('id, parallel_groep_id')
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .maybeSingle()
   if (!koppeling) throw new Error('Koppeling niet gevonden')
   const groepId = (koppeling as { parallel_groep_id?: string | null }).parallel_groep_id ?? null
@@ -720,7 +739,7 @@ export async function saveParallelIndeling(
     .from('training_oefeningen')
     .select('id, parallel_spelers')
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('parallel_groep_id', groepId)
     .neq('id', koppelingId)
   const andereLeden = Array.isArray(andere)
@@ -729,7 +748,7 @@ export async function saveParallelIndeling(
 
   // Validatieset: alle eigen spelers (geen active-filter — zelfde afweging als
   // saveSpelerindeling).
-  const ownPlayerIds = await getOwnPlayerIds(supabase, user.id)
+  const ownPlayerIds = await getOwnPlayerIds(supabase, ctx.teamId)
   const clean = validateParallelSpelers(spelerIds, { ownPlayerIds })
   assertGeenOverlap(clean, andereLeden.map((lid) => lid.parallel_spelers))
 
@@ -738,7 +757,7 @@ export async function saveParallelIndeling(
     .update({ parallel_spelers: clean })
     .eq('id', koppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('trainingPlan.saveParallelIndeling', error)
   revalidatePath(`/events/${eventId}/training-plan`)
@@ -757,10 +776,10 @@ export async function verplaatsParallelSpeler(
   spelerId: string,
 ): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
-  await assertOwnEvent(supabase, eventId, user.id)
+  await assertOwnEvent(supabase, eventId, ctx.teamId)
 
   if (vanKoppelingId === naarKoppelingId) throw new Error('Bron en doel zijn dezelfde oefening')
 
@@ -771,7 +790,7 @@ export async function verplaatsParallelSpeler(
     .select('id, parallel_groep_id, parallel_spelers')
     .in('id', [vanKoppelingId, naarKoppelingId])
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   const rijen = Array.isArray(data)
     ? (data as { id: string; parallel_groep_id: string | null; parallel_spelers?: string[] | null }[])
     : []
@@ -802,7 +821,7 @@ export async function verplaatsParallelSpeler(
     .from('training_oefeningen')
     .select('id, parallel_spelers')
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('parallel_groep_id', groepId)
     .neq('id', vanKoppelingId)
     .neq('id', naarKoppelingId)
@@ -810,7 +829,7 @@ export async function verplaatsParallelSpeler(
     ? (andere as { id: string; parallel_spelers?: string[] | null }[])
     : []
 
-  const ownPlayerIds = await getOwnPlayerIds(supabase, user.id)
+  const ownPlayerIds = await getOwnPlayerIds(supabase, ctx.teamId)
   const cleanNaar = validateParallelSpelers([...naarSpelers, spelerId], { ownPlayerIds })
   assertGeenOverlap(cleanNaar, andereLeden.map((lid) => lid.parallel_spelers))
 
@@ -824,7 +843,7 @@ export async function verplaatsParallelSpeler(
     .update({ parallel_spelers: cleanVan })
     .eq('id', vanKoppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   if (vanError) throw genericError('trainingPlan.verplaatsParallelSpeler.van', vanError)
 
   const { error: naarError } = await supabase
@@ -832,7 +851,7 @@ export async function verplaatsParallelSpeler(
     .update({ parallel_spelers: cleanNaar })
     .eq('id', naarKoppelingId)
     .eq('event_id', eventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (naarError) {
     // Twee rijen, geen transactie: slaagt de eerste update en faalt de tweede,
@@ -846,7 +865,7 @@ export async function verplaatsParallelSpeler(
       .update({ parallel_spelers: vanSpelers })
       .eq('id', vanKoppelingId)
       .eq('event_id', eventId)
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
     if (herstelError) logError('trainingPlan.verplaatsParallelSpeler.herstel', herstelError)
     throw genericError('trainingPlan.verplaatsParallelSpeler.naar', naarError)
   }
@@ -873,23 +892,23 @@ export async function kopieerTrainingsplan(
   bronEventId: string,
 ): Promise<{ aantal: number }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
 
   if (doelEventId === bronEventId) throw new Error('Bron en doel zijn dezelfde training')
 
   // Beide events moeten van dit team zijn. Zonder de bron-check zou een
   // aanroeper het plan van een andere gebruiker kunnen binnenhalen.
   await Promise.all([
-    assertOwnEvent(supabase, doelEventId, user.id),
-    assertOwnEvent(supabase, bronEventId, user.id),
+    assertOwnEvent(supabase, doelEventId, ctx.teamId),
+    assertOwnEvent(supabase, bronEventId, ctx.teamId),
   ])
 
   const { data: bronRijen, error: leesError } = await supabase
     .from('training_oefeningen')
     .select('oefening_id, volgorde, stap_override, duur_min, parallel_groep_id')
     .eq('event_id', bronEventId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .order('volgorde')
     .order('created_at', { ascending: true })
     .order('id', { ascending: true })
@@ -898,11 +917,11 @@ export async function kopieerTrainingsplan(
   const bron = bronRijen ?? []
   if (bron.length === 0) return { aantal: 0 }
 
-  const offset = await nextVolgordeForEvent(supabase, doelEventId, user.id)
+  const offset = await nextVolgordeForEvent(supabase, doelEventId, ctx.teamId)
   const nieuw = kopieerKoppelingen(bron as BronKoppeling[], offset, () => crypto.randomUUID())
 
   const { error } = await supabase.from('training_oefeningen').insert(
-    nieuw.map((rij) => ({ ...rij, team_id: user.id, event_id: doelEventId })),
+    nieuw.map((rij) => ({ ...rij, team_id: ctx.teamId, event_id: doelEventId })),
   )
   if (error) throw genericError('trainingPlan.kopieerTrainingsplan', error)
 

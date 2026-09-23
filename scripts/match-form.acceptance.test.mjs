@@ -10,7 +10,7 @@
 //
 //   supabase.from('events')
 //     .select('id, date, goals_for, goals_against')
-//     .eq('team_id', user.id)
+//     .eq('team_id', ctx.teamId)
 //     .eq('type', 'match')
 //     .lt('date', today)
 //     .order('date', { ascending: false })
@@ -95,7 +95,7 @@ function compareRows(a, b) {
  */
 function selectRecentForm(rows, { teamId = TEAM, today = TODAY, limit = LIMIT } = {}) {
   return rows
-    .filter((r) => r.team_id === teamId) // .eq('team_id', user.id) — tenant-isolatie
+    .filter((r) => r.team_id === teamId) // .eq('team_id', ctx.teamId) — tenant-isolatie
     .filter((r) => r.type === 'match') // .eq('type', 'match')
     .filter((r) => r.date < today) // .lt('date', today) — strikt vóór vandaag
     .sort(compareRows) // de drie .order()-clausules
@@ -314,7 +314,9 @@ test('AC (codeniveau): de vorm-query in app/page.tsx volgt het afgesproken contr
 
   assert.ok(query.includes("goals_for"), 'select moet goals_for ophalen')
   assert.ok(query.includes("goals_against"), 'select moet goals_against ophalen')
-  assert.ok(query.includes(".eq('team_id', user.id)"), "tenant-isolatie: .eq('team_id', user.id) verplicht")
+  // Tenant-sleutel is sinds de assistent-trainers ctx.teamId (teams.id van het
+  // actieve team), niet meer user.id — zie lib/team-context.ts.
+  assert.ok(query.includes(".eq('team_id', ctx.teamId)"), "tenant-isolatie: .eq('team_id', ctx.teamId) verplicht")
   assert.ok(query.includes(".eq('type', 'match')"), "alleen wedstrijden: .eq('type', 'match')")
   assert.ok(query.includes(".lt('date', today)"), "cutoff: strikt .lt('date', today)")
   assert.ok(/\.order\('date', \{ ascending: false/.test(query), 'sorteren op date aflopend')

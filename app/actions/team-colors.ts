@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE, logError } from '@/lib/errors'
 import { CLUB_COLOR_KEYS, isClubColorSlot, normalizeHexColor } from '@/lib/club-colors'
+import { requireTeamContext } from '@/lib/team-context'
 
 // Clubkleuren leven als twee rijen in de bestaande settings-tabel
 // (team_color_primary / team_color_secondary). Keys, validatie en fallback staan
@@ -16,6 +17,10 @@ import { CLUB_COLOR_KEYS, isClubColorSlot, normalizeHexColor } from '@/lib/club-
 // te verschijnen. Zelfde contract als app/actions/team-logo.ts.
 
 const NOT_LOGGED_IN = 'Je bent niet (meer) ingelogd. Log opnieuw in en probeer het nogmaals.'
+const NO_PERMISSION = 'Alleen de hoofdtrainer kan de clubkleuren wijzigen.'
+// Zelfde tekst als de melding van assertCanEdit/assertIsOwner: neutraal, en
+// verraadt niet of het aan de rol, het team of iets anders ligt.
+const NO_ACCESS = 'Geen toegang'
 const UNKNOWN_SLOT = 'Onbekende kleurinstelling.'
 const INVALID_COLOR = 'Gebruik een geldige hexadecimale kleurcode, bijvoorbeeld #1a4f8b.'
 
@@ -24,8 +29,17 @@ export async function saveTeamColor(
   value: string,
 ): Promise<{ error: string | null; value?: string }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: NOT_LOGGED_IN }
+  // requireTeamContext onderscheidt 'Niet ingelogd' van 'Geen team'; die twee
+  // mogen niet dezelfde melding krijgen. "Log opnieuw in" helpt niemand die
+  // wél is ingelogd maar (vanaf fase 2) geen enkel team meer heeft.
+  const ctx = await requireTeamContext().catch((fout: Error) => fout)
+  if (ctx instanceof Error) {
+    return { error: ctx.message === 'Geen team' ? NO_ACCESS : NOT_LOGGED_IN }
+  }
+  // Clubkleuren zijn hoofdtrainer-werk, ook voor een assistent met alle zes
+  // bewerkrechten. Hier geen assertIsOwner(): deze actions geven { error }
+  // terug in plaats van te throwen, zodat de melding naast het veld verschijnt.
+  if (ctx.rol !== 'owner') return { error: NO_PERMISSION }
 
   // Whitelist vóór alles: zonder deze check zou een client via `slot` elke
   // andere settings-key van zijn team kunnen overschrijven.
@@ -34,12 +48,12 @@ export async function saveTeamColor(
   const color = normalizeHexColor(value)
   if (!color) return { error: INVALID_COLOR }
 
-  // team_id komt uit de sessie, nooit uit client-invoer. De RLS op settings
-  // (team_id = auth.uid()) is het tweede vangnet, niet het enige.
+  // team_id komt uit de teamcontext, nooit uit client-invoer. De RLS op
+  // settings (settings_key_editable) is het tweede vangnet, niet het enige.
   const { error } = await supabase
     .from('settings')
     .upsert(
-      { team_id: user.id, key: CLUB_COLOR_KEYS[slot], value: color },
+      { team_id: ctx.teamId, key: CLUB_COLOR_KEYS[slot], value: color },
       { onConflict: 'team_id,key' },
     )
 
@@ -58,8 +72,17 @@ export async function saveTeamColor(
 
 export async function resetTeamColor(slot: string): Promise<{ error: string | null }> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: NOT_LOGGED_IN }
+  // requireTeamContext onderscheidt 'Niet ingelogd' van 'Geen team'; die twee
+  // mogen niet dezelfde melding krijgen. "Log opnieuw in" helpt niemand die
+  // wél is ingelogd maar (vanaf fase 2) geen enkel team meer heeft.
+  const ctx = await requireTeamContext().catch((fout: Error) => fout)
+  if (ctx instanceof Error) {
+    return { error: ctx.message === 'Geen team' ? NO_ACCESS : NOT_LOGGED_IN }
+  }
+  // Clubkleuren zijn hoofdtrainer-werk, ook voor een assistent met alle zes
+  // bewerkrechten. Hier geen assertIsOwner(): deze actions geven { error }
+  // terug in plaats van te throwen, zodat de melding naast het veld verschijnt.
+  if (ctx.rol !== 'owner') return { error: NO_PERMISSION }
 
   if (!isClubColorSlot(slot)) return { error: UNKNOWN_SLOT }
 
@@ -69,7 +92,7 @@ export async function resetTeamColor(slot: string): Promise<{ error: string | nu
   const { error } = await supabase
     .from('settings')
     .delete()
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('key', CLUB_COLOR_KEYS[slot])
 
   // Anders dan bij deleteTeamLogo slikken we deze fout niet: daar was het

@@ -14,6 +14,7 @@ import {
 import { isDateString } from '@/lib/season-dates'
 import { addDays, todayLocal } from '@/lib/utils'
 import { genericError } from '@/lib/errors'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 
 // ────────────────────────────────────────────────
 // Nulmeting per periodiseringsonderdeel
@@ -92,8 +93,8 @@ export async function saveCategorieMeting(input: {
   notes: string | null
 }): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'periodisering')
 
   // Bij een nieuwe meting komt de categorie van de client en moet ze in de
   // whitelist staan; bij bewerken komt ze uit de opgehaalde rij en wordt het
@@ -114,7 +115,7 @@ export async function saveCategorieMeting(input: {
     // idempotentie-sleutel, de laatste waarde wint.
     const { error } = await supabase.from('categorie_metingen').upsert(
       {
-        team_id: user.id,
+        team_id: ctx.teamId,
         categorie,
         datum: input.datum,
         stap: stapVoor(input.stap, categorie),
@@ -124,15 +125,15 @@ export async function saveCategorieMeting(input: {
     )
     if (error) throw genericError('periodisering.saveCategorieMeting', error)
   } else {
-    const bestaand = await haalEigenMeting(supabase, input.id, user.id)
-    await assertNieuwsteMeting(supabase, bestaand, user.id)
+    const bestaand = await haalEigenMeting(supabase, input.id, ctx.teamId)
+    await assertNieuwsteMeting(supabase, bestaand, ctx.teamId)
 
     // Verplaatsen naar een datum waarop dit onderdeel al een meting heeft zou
     // op de UNIQUE-constraint stuklopen; die ruwe fout mag de client niet zien.
     const { data: bezet } = await supabase
       .from('categorie_metingen')
       .select('id')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('categorie', bestaand.categorie)
       .eq('datum', input.datum)
       .neq('id', input.id)
@@ -147,7 +148,7 @@ export async function saveCategorieMeting(input: {
         notes,
       })
       .eq('id', input.id)
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
     if (error) throw genericError('periodisering.saveCategorieMeting', error)
   }
 
@@ -159,17 +160,17 @@ export async function saveCategorieMeting(input: {
 // geschiedenis blijft staan.
 export async function deleteCategorieMeting(id: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'periodisering')
 
-  const bestaand = await haalEigenMeting(supabase, id, user.id)
-  await assertNieuwsteMeting(supabase, bestaand, user.id)
+  const bestaand = await haalEigenMeting(supabase, id, ctx.teamId)
+  await assertNieuwsteMeting(supabase, bestaand, ctx.teamId)
 
   const { error } = await supabase
     .from('categorie_metingen')
     .delete()
     .eq('id', id)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('periodisering.deleteCategorieMeting', error)
 
@@ -194,8 +195,8 @@ export async function deleteCategorieMeting(id: string): Promise<void> {
 // correctie van de dag wint.
 export async function saveCyclusWeekCorrectie(week: number): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'periodisering')
 
   // Weigert ook 3.5, NaN, Infinity en '6' als string: de cyclus telt zes hele
   // weken en alles daarbuiten zou stil een verkeerde week opleveren.
@@ -212,7 +213,7 @@ export async function saveCyclusWeekCorrectie(week: number): Promise<void> {
   const { data: metingRijen } = await supabase
     .from('categorie_metingen')
     .select('id, categorie, datum, stap, notes')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   const anker = ankerDatum(
     actueleMetingen((metingRijen ?? []) as CategorieMeting[], addDays(vandaag, 1)),
@@ -222,7 +223,7 @@ export async function saveCyclusWeekCorrectie(week: number): Promise<void> {
   // de client stuurt alleen het weeknummer.
   const { error } = await supabase.from('settings').upsert(
     {
-      team_id: user.id,
+      team_id: ctx.teamId,
       key: CYCLUS_CORRECTIE_KEY,
       value: serializeCyclusCorrectie({ week, datum: vandaag, ankerBijCorrectie: anker }),
     },
@@ -242,15 +243,15 @@ export async function saveCyclusWeekCorrectie(week: number): Promise<void> {
 // geen fout.
 export async function deleteCyclusWeekCorrectie(): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'periodisering')
 
   // Beide filters zijn verplicht: zonder .eq('key', ...) zou dit álle settings
   // van het team wissen (les uit resetTeamColor).
   const { error } = await supabase
     .from('settings')
     .delete()
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('key', CYCLUS_CORRECTIE_KEY)
   if (error) throw genericError('periodisering.deleteCyclusWeekCorrectie', error)
 

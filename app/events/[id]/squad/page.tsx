@@ -1,6 +1,7 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import BackButton from '@/components/BackButton'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player } from '@/lib/types'
 import { formatDateLong, todayLocal } from '@/lib/utils'
 import { toMatchFormItems } from '@/lib/match-form'
@@ -15,15 +16,14 @@ interface Props {
 export default async function MatchSquadPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const [{ data: event }, { data: squad }, { data: allPlayers }, { data: attendance }, { data: settingsRows }, { data: formRows }] = await Promise.all([
-    supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
-    supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('players').select('*').eq('team_id', user.id).order('name'),
-    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('settings').select('key, value').eq('team_id', user.id)
+    supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
+    supabase.from('match_squad').select('player_id').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('players').select('*').eq('team_id', ctx.teamId).order('name'),
+    supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('settings').select('key, value').eq('team_id', ctx.teamId)
       .in('key', ['team_name', 'team_logo_url', 'team_color_primary', 'team_color_secondary']),
     // Vorm van de laatste 5 afgeronde wedstrijden (dit event zelf uitgesloten,
     // ongeacht zijn eigen datum) — zelfde order-clausules als de
@@ -31,7 +31,7 @@ export default async function MatchSquadPage({ params }: Props) {
     // backend-engineer voor toMatchFormItems().
     supabase.from('events')
       .select('id, date, opponent, goals_for, goals_against, home_away')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('type', 'match')
       .neq('id', id)
       .lt('date', todayLocal())

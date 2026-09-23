@@ -1,5 +1,6 @@
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { getDict } from '@/lib/i18n'
 import { todayLocal } from '@/lib/utils'
 import { isUuid } from '@/lib/authz'
@@ -20,8 +21,7 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
   const { id } = await params
   const sp = searchParams ? await searchParams : {}
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   // Vóór elke DB-aanroep: een ongeldig id mag nooit als Postgres-cast-fout/500
   // eindigen (AC26).
@@ -38,10 +38,10 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
   // gooit nooit), dán pas de statistiekenloader — precies de mitigatie die
   // brief §4.1 en backend.md voorschrijven.
   const [{ data: player }, { data: events }, { data: attendance }, { data: periods }, defaultStatus] = await Promise.all([
-    supabase.from('players').select('*').eq('id', id).eq('team_id', user.id).single(),
-    supabase.from('events').select('*').eq('team_id', user.id).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(60),
-    supabase.from('attendance').select('event_id, status').eq('player_id', id).eq('team_id', user.id),
-    supabase.from('absence_periods').select('id, player_id, from_date, to_date').eq('player_id', id).eq('team_id', user.id).order('from_date', { ascending: true }).limit(60),
+    supabase.from('players').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
+    supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(60),
+    supabase.from('attendance').select('event_id, status').eq('player_id', id).eq('team_id', ctx.teamId),
+    supabase.from('absence_periods').select('id, player_id, from_date, to_date').eq('player_id', id).eq('team_id', ctx.teamId).order('from_date', { ascending: true }).limit(60),
     getDefaultAttendance(),
   ])
 

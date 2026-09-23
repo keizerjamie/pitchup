@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, AttendanceStatus } from '@/lib/types'
 import { formatDateLong, formatTime } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
@@ -21,19 +22,18 @@ interface Props {
 export default async function EventDetailPage({ params }: Props) {
   const { id } = await params
   const [supabase, t] = await Promise.all([createClient(), getDict()])
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const ctx = await requireTeamContextOrLogin()
 
   const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }] = await Promise.all([
-    supabase.from('events').select('*').eq('id', id).eq('team_id', user.id).single(),
-    supabase.from('players').select('*').eq('team_id', user.id).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
-    supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('lineups').select('id').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
-    supabase.from('metingen').select('*').eq('event_id', id).eq('team_id', user.id).maybeSingle(),
-    supabase.from('training_oefeningen').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
-    supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', user.id),
-    supabase.from('match_squad').select('id').eq('event_id', id).eq('team_id', user.id).limit(1),
+    supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
+    supabase.from('players').select('*').eq('team_id', ctx.teamId).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
+    supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('lineups').select('id').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
+    supabase.from('metingen').select('*').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
+    supabase.from('training_oefeningen').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
+    supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('match_squad').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
   ])
 
   if (!event) notFound()
@@ -106,7 +106,7 @@ export default async function EventDetailPage({ params }: Props) {
     const { data: periods, error: periodsError } = await supabase
       .from('absence_periods')
       .select('id, player_id, from_date, to_date')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .in('player_id', missingPlayers.map((p) => p.id))
       .lte('from_date', event.date)
       .gte('to_date', event.date)
@@ -133,7 +133,7 @@ export default async function EventDetailPage({ params }: Props) {
     const backfillRows = missingPlayers.map((p) => buildAttendanceRow({
       eventId: id,
       playerId: p.id,
-      teamId: user.id,
+      teamId: ctx.teamId,
       defaultStatus: 'unknown',
       injured: p.injured === true,
       periodId: periodByPlayer.get(p.id) ?? null,

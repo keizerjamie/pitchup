@@ -7,6 +7,7 @@ import { getDefaultAttendance } from '@/app/actions/settings'
 import { todayLocal } from '@/lib/utils'
 import { genericError } from '@/lib/errors'
 import { assertOwnPlayer } from '@/lib/authz'
+import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { resolveAttendanceStatus } from '@/lib/attendance-rows'
 
 function validatePlayerInput(formData: FormData) {
@@ -45,8 +46,8 @@ function validatePlayerInput(formData: FormData) {
 
 export async function createPlayer(formData: FormData) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'spelers')
 
   const { name, position, jersey_number, rating, secondary_positions, type } = validatePlayerInput(formData)
 
@@ -57,7 +58,7 @@ export async function createPlayer(formData: FormData) {
     // Beoordeling kan al bij het aanmaken mee; leeg blijft null.
     rating,
     active: true,
-    team_id: user.id,
+    team_id: ctx.teamId,
     secondary_positions,
     // Een gast is gewoon actief; `type` staat los van `active`.
     type,
@@ -69,8 +70,8 @@ export async function createPlayer(formData: FormData) {
 
 export async function updatePlayer(id: string, formData: FormData) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'spelers')
 
   const { name, position, jersey_number, rating, secondary_positions, type } = validatePlayerInput(formData)
   const active = formData.get('active') === 'true'
@@ -79,7 +80,7 @@ export async function updatePlayer(id: string, formData: FormData) {
     .from('players')
     .update({ name, position, jersey_number, active, rating, secondary_positions, type })
     .eq('id', id)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('players.updatePlayer', error)
   revalidatePath('/players')
@@ -88,25 +89,30 @@ export async function updatePlayer(id: string, formData: FormData) {
 
 export async function deletePlayer(id: string) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'spelers')
 
   const { error } = await supabase
     .from('players')
     .delete()
     .eq('id', id)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
 
   if (error) throw genericError('players.deletePlayer', error)
   revalidatePath('/players')
 }
 
+// Eén onderdeel, niet twee: blessure melden is spelerswerk. Dat er
+// attendance-rijen uit volgen is een gevolg van die handeling, geen tweede
+// handeling — de attendance-policy is daarom verruimd met
+// can_edit(team,'spelers') voor INSERT en UPDATE (zie
+// supabase/team-rls-gevolgacties.sql). Zelfde verhaal voor markRecovered.
 export async function markInjured(playerId: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'spelers')
 
-  await assertOwnPlayer(supabase, playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, ctx.teamId)
 
   const today = todayLocal()
 
@@ -114,7 +120,7 @@ export async function markInjured(playerId: string): Promise<void> {
   const { data: events, error: eventsError } = await supabase
     .from('events')
     .select('id')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .neq('type', 'meting')
     .gte('date', today)
   if (eventsError) throw genericError('players.markInjured.events', eventsError)
@@ -126,7 +132,7 @@ export async function markInjured(playerId: string): Promise<void> {
     const { data: existing, error: existingError } = await supabase
       .from('attendance')
       .select('event_id, status')
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('player_id', playerId)
       .in('event_id', eventIds)
     if (existingError) throw genericError('players.markInjured.attendance', existingError)
@@ -140,7 +146,7 @@ export async function markInjured(playerId: string): Promise<void> {
       .map((id) => ({
         event_id: id,
         player_id: playerId,
-        team_id: user.id,
+        team_id: ctx.teamId,
         status: 'absent' as AttendanceStatus,
         injury_set: true,
       }))
@@ -157,7 +163,7 @@ export async function markInjured(playerId: string): Promise<void> {
     .from('players')
     .update({ injured: true })
     .eq('id', playerId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   if (playerError) throw genericError('players.markInjured.player', playerError)
 
   revalidatePath('/players')
@@ -171,17 +177,17 @@ export async function markInjured(playerId: string): Promise<void> {
 
 export async function markRecovered(playerId: string): Promise<void> {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Niet ingelogd')
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'spelers')
 
-  await assertOwnPlayer(supabase, playerId, user.id)
+  await assertOwnPlayer(supabase, playerId, ctx.teamId)
 
   const today = todayLocal()
 
   const { data: events, error: eventsError } = await supabase
     .from('events')
     .select('id')
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .neq('type', 'meting')
     .gte('date', today)
   if (eventsError) throw genericError('players.markRecovered.events', eventsError)
@@ -199,7 +205,7 @@ export async function markRecovered(playerId: string): Promise<void> {
       .from('players')
       .select('type')
       .eq('id', playerId)
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .maybeSingle()
     if (playerTypeError) throw genericError('players.markRecovered.type', playerTypeError)
     const restoreStatus = resolveAttendanceStatus({
@@ -216,7 +222,7 @@ export async function markRecovered(playerId: string): Promise<void> {
     const { error: restoreError } = await supabase
       .from('attendance')
       .update({ status: restoreStatus, injury_set: false })
-      .eq('team_id', user.id)
+      .eq('team_id', ctx.teamId)
       .eq('player_id', playerId)
       .eq('injury_set', true)
       .eq('status', 'absent')
@@ -231,7 +237,7 @@ export async function markRecovered(playerId: string): Promise<void> {
   const { error: clearError } = await supabase
     .from('attendance')
     .update({ injury_set: false })
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
     .eq('player_id', playerId)
     .eq('injury_set', true)
   if (clearError) throw genericError('players.markRecovered.clear', clearError)
@@ -240,7 +246,7 @@ export async function markRecovered(playerId: string): Promise<void> {
     .from('players')
     .update({ injured: false })
     .eq('id', playerId)
-    .eq('team_id', user.id)
+    .eq('team_id', ctx.teamId)
   if (playerError) throw genericError('players.markRecovered.player', playerError)
 
   revalidatePath('/players')
