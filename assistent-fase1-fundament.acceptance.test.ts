@@ -1327,8 +1327,9 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     // Ronde 2: het script is uitgebreid van 6 naar 13 blokken (addendum §8.7 —
     // vier nieuwe blokken voor de attendance-verruiming/RPC's, plus de
     // permanente sanity-check "geen team zonder hoofdtrainer" uit §8.6).
-    // Fase 2: blok 14 t/m 20 erbij (vervaltermijn, already_member, peek,
-    // staf beheren, één actieve link, vreemd team, create_team).
+    // Fase 2: blok 14 t/m 21 erbij (vervaltermijn, already_member, peek,
+    // staf beheren, één actieve link, vreemd team, create_team, en de vijf
+    // foreign keys die in productie nog naar auth.users wezen — M5c).
     const pad = path.resolve(__dirname, 'supabase', 'team-rls-verificatie.sql')
     const inhoud = readFileSync(pad, 'utf8')
 
@@ -1336,14 +1337,14 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     expect(inhoud).toMatch(/^rollback;/m)
 
     const blokken = inhoud.match(/^do \$\$/gm) ?? []
-    expect(blokken.length).toBeGreaterThanOrEqual(20)
+    expect(blokken.length).toBeGreaterThanOrEqual(21)
 
-    for (let i = 1; i <= 20; i++) {
+    for (let i = 1; i <= 21; i++) {
       expect(inhoud).toContain(`Blok ${i}`)
     }
 
     // De fase-2-blokken staan VÓÓR de rollback, anders schrijven ze echt weg.
-    expect(inhoud.indexOf('Blok 20')).toBeLessThan(inhoud.search(/^rollback;/m))
+    expect(inhoud.indexOf('Blok 21')).toBeLessThan(inhoud.search(/^rollback;/m))
 
     // De vervaltermijn wordt UITSLUITEND in de database beoordeeld; blok 14
     // legt beide randen vast.

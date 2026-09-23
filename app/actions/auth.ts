@@ -397,7 +397,11 @@ export async function deleteAccount() {
 
     // Als laatste het team zelf: de cascade op team_members en team_invites
     // ruimt de lidmaatschappen op, inclusief die van eventuele assistenten.
-    // Hun accounts blijven bestaan (AC 14).
+    // Hun accounts blijven bestaan (AC 14). Sinds M5c
+    // (supabase/team-fk-naar-teams.sql) neemt deze delete óók players, events,
+    // attendance, lineups en settings mee via hun nieuwe FK naar teams — dat
+    // overlapt met de lus hierboven en is onschadelijk, want die heeft er dan
+    // al niets meer in staan.
     const { error: teamError } = await supabase.from('teams').delete().eq('id', teamId)
     if (teamError) throw genericError(`${teamLabel}.teams`, teamError)
   }
@@ -436,6 +440,12 @@ export async function deleteAccount() {
   // Alle teamdata is hier weg. Andersom zou een mislukking halverwege data
   // achterlaten die aan een niet-bestaand account hangt en die niemand meer
   // kan benaderen.
+  //
+  // DEZE FUNCTIE LEUNT NERGENS OP EEN CASCADE VANUIT auth.users, en dat is
+  // sinds M5c (supabase/team-fk-naar-teams.sql) ook niet meer mogelijk: de
+  // vijf foreign keys die in productie op auth.users(id) stonden wijzen nu
+  // naar teams(id). Alle dertien teamtabellen worden hierboven expliciet en
+  // per team gewist; het auth-account gaat er als laatste af.
   const { error: authError } = await admin.auth.admin.deleteUser(user.id)
   if (authError) throw genericError('auth.deleteAccount.authUser', authError)
 

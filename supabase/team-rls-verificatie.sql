@@ -41,6 +41,8 @@
 --   * blok 3 t/m 12           — vereisen een echte assistent in TEAM_A (M2b)
 --   * blok 14 t/m 19          — vereisen M4 (supabase/team-invites-rpc.sql)
 --   * blok 20                 — vereist M5 (supabase/team-aanmaken-rpc.sql)
+--   * blok 21                 — vereist M5c (supabase/team-fk-naar-teams.sql);
+--                               leest alleen de catalogus, geen testaccount nodig
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -979,6 +981,71 @@ begin
   raise notice 'OK blok 20: p_alleen_zonder_team maakt geen tweede team';
 end $$;
 
+-- ── Blok 21: de vijf FK's wijzen naar teams, niet naar auth.users ──
+-- M5c (supabase/team-fk-naar-teams.sql). Dit blok bestaat door een echt
+-- productie-incident: players, events, attendance, lineups en settings hadden
+-- een handmatig, nooit in de repo vastgelegd `team_id -> auth.users(id)`.
+-- Sinds create_team() krijgt een nieuw team een eigen uuid, en die staat per
+-- definitie niet in auth.users — elke eerste rij van zo'n team liep stuk met
+-- 23503.
+--
+-- Bewust pg_constraint en NIET information_schema: die views verbergen voor de
+-- postgres-rol de constraints die naar het auth-schema wijzen, en precies
+-- daardoor bleven deze vijf jarenlang onzichtbaar.
+do $$
+declare v_con record; n int;
+begin
+  reset role;
+
+  -- 1. Alle vijf moeten bestaan en naar teams wijzen, met cascade.
+  for v_con in
+    select unnest(array['players','events','attendance','lineups','settings']) as tabel
+  loop
+    select count(*) into n
+      from pg_constraint con
+      join pg_attribute att
+        on att.attrelid = con.conrelid and att.attnum = any (con.conkey)
+     where con.contype = 'f'
+       and con.conrelid = format('public.%I', v_con.tabel)::regclass
+       and att.attname = 'team_id'
+       and con.confrelid = 'public.teams'::regclass
+       and con.confdeltype = 'c';
+    if n <> 1 then
+      raise exception 'KAPOT: %.team_id heeft geen enkele (of meer dan één) foreign key naar teams(id) on delete cascade — draai supabase/team-fk-naar-teams.sql (M5c)', v_con.tabel;
+    end if;
+  end loop;
+  raise notice 'OK blok 21: alle vijf de team_id-FK''s wijzen naar teams(id) met cascade';
+
+  -- 2. Nergens meer een team_id-FK naar auth.users. Dit vangt ook een tabel op
+  --    die nog niet in de lijst van M5c stond.
+  select count(*) into n
+    from pg_constraint con
+    join pg_attribute att
+      on att.attrelid = con.conrelid and att.attnum = any (con.conkey)
+   where con.contype = 'f'
+     and att.attname = 'team_id'
+     and con.confrelid = 'auth.users'::regclass;
+  if n <> 0 then
+    raise exception 'KAPOT: % foreign key(s) op een team_id-kolom wijzen nog naar auth.users', n;
+  end if;
+  raise notice 'OK blok 21: geen enkele team_id-FK wijst nog naar auth.users';
+
+  -- 3. oefeningen.team_id is de EIGENAAR-USER en hoort JUIST geen FK naar
+  --    teams te hebben. Zou die er ooit bij komen, dan kan een assistent geen
+  --    eigen oefening meer maken.
+  select count(*) into n
+    from pg_constraint con
+    join pg_attribute att
+      on att.attrelid = con.conrelid and att.attnum = any (con.conkey)
+   where con.contype = 'f'
+     and con.conrelid = 'public.oefeningen'::regclass
+     and att.attname = 'team_id';
+  if n <> 0 then
+    raise exception 'KAPOT: oefeningen.team_id heeft een foreign key gekregen — dat is de EIGENAAR-USER, geen teams.id';
+  end if;
+  raise notice 'OK blok 21: oefeningen.team_id heeft terecht geen foreign key';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -986,7 +1053,8 @@ rollback;
 -- met een "function set_event_doelstelling does not exist"-fout, dan staat M2b
 -- nog niet in deze database. Blok 14 t/m 19 vereisen M4
 -- (supabase/team-invites-rpc.sql), blok 20 vereist M5
--- (supabase/team-aanmaken-rpc.sql).
+-- (supabase/team-aanmaken-rpc.sql) en blok 21 vereist M5c
+-- (supabase/team-fk-naar-teams.sql).
 --
 -- NIET IN DIT SCRIPT TE VANGEN — HANDMATIG, MET TWEE SQL-TABBLADEN:
 --

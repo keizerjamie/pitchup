@@ -7,9 +7,32 @@
 -- De inzichtenpagina (/inzichten) voegt geen tabellen of kolommen toe, maar wel
 -- zes aggregatiefuncties (RPC) plus twee indexen — draai daarvoor ook
 -- inzichten.sql; zonder dat bestaan de RPC's niet en blijft /inzichten leeg.
+--
+-- FOREIGN KEY OP team_id — LEES DIT BIJ EEN VERSE INSTALLATIE.
+-- Dit bestand declareert team_id bewust zonder `references`: het draait op een
+-- FRESH project, waar de tabel `teams` nog niet bestaat (die komt uit
+-- supabase/teams-en-leden.sql, M1). Een inline FK zou de verse installatie
+-- hier laten stuklopen.
+--
+-- De constraint hoort er wél te komen, en dat gebeurt in
+-- supabase/team-fk-naar-teams.sql (M5c) — draai dat script ná M1, ook bij een
+-- verse installatie. Vijf tabellen krijgen daar
+-- `team_id -> teams(id) on delete cascade`: players, events, attendance,
+-- lineups en settings.
+--
+-- WAAROM DIT HIER STAAT: in de PRODUCTIEDATABASE hadden precies die vijf
+-- tabellen al zo'n FK, maar dan naar `auth.users(id)` — ooit handmatig in het
+-- Supabase-dashboard aangemaakt, nooit in deze repo vastgelegd. Sinds
+-- create_team() krijgt een nieuw team een eigen uuid, die per definitie niet
+-- in auth.users voorkomt; elke eerste rij van zo'n team liep daardoor stuk met
+-- 23503. M5c legt die FK's om naar `teams`. `information_schema` toont zulke
+-- constraints niet aan de postgres-rol — gebruik `pg_constraint` als je wilt
+-- controleren wat er écht staat.
 
 CREATE TABLE IF NOT EXISTS players (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- team_id krijgt zijn foreign key naar teams(id) pas in
+  -- supabase/team-fk-naar-teams.sql (M5c); zie het kopcommentaar.
   team_id UUID NOT NULL,
   name TEXT NOT NULL,
   position TEXT NOT NULL CHECK (position IN (
@@ -34,6 +57,8 @@ CREATE TABLE IF NOT EXISTS players (
 
 CREATE TABLE IF NOT EXISTS events (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- team_id krijgt zijn foreign key naar teams(id) pas in
+  -- supabase/team-fk-naar-teams.sql (M5c); zie het kopcommentaar.
   team_id UUID NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('training', 'match', 'meting')),
   date DATE NOT NULL,
@@ -69,6 +94,8 @@ CREATE TABLE IF NOT EXISTS absence_periods (
 
 CREATE TABLE IF NOT EXISTS attendance (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- team_id krijgt zijn foreign key naar teams(id) pas in
+  -- supabase/team-fk-naar-teams.sql (M5c); zie het kopcommentaar.
   team_id UUID NOT NULL,
   event_id UUID REFERENCES events(id) ON DELETE CASCADE NOT NULL,
   player_id UUID REFERENCES players(id) ON DELETE CASCADE NOT NULL,
@@ -85,6 +112,8 @@ CREATE TABLE IF NOT EXISTS attendance (
 
 CREATE TABLE IF NOT EXISTS lineups (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  -- team_id krijgt zijn foreign key naar teams(id) pas in
+  -- supabase/team-fk-naar-teams.sql (M5c); zie het kopcommentaar.
   team_id UUID NOT NULL,
   event_id UUID REFERENCES events(id) ON DELETE CASCADE NOT NULL UNIQUE,
   formation TEXT NOT NULL,

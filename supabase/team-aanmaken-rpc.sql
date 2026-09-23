@@ -9,8 +9,10 @@
 -- Volgorde van de hele fase 2 — niet cosmetisch:
 --   M4  supabase/team-invites-rpc.sql               vóór deploy
 --   M5  supabase/team-aanmaken-rpc.sql              vóór deploy  (dit bestand)
+--   M5c supabase/team-fk-naar-teams.sql             vóór deploy
 --       deploy fase 2: uitnodigen/accepteren, rechten-UI, teamwisselaar,
 --                      signUp + zelfherstel via create_team()
+--       ==> rooktest: registreer één nieuw account -> moet een team opleveren
 --   M5b supabase/team-bootstrap-policies-opruimen.sql  ná deploy
 --
 -- WAAROM VÓÓR DE DEPLOY: de fase-2-code (app/actions/team.ts createTeam,

@@ -2,6 +2,12 @@
 -- Run this in the Supabase SQL Editor.
 -- The app upserts with onConflict 'team_id,key', so the primary key is composite.
 
+-- team_id krijgt zijn foreign key naar teams(id) pas in
+-- supabase/team-fk-naar-teams.sql (M5c) — hier niet inline, want dit bestand
+-- kan op een fresh project draaien waar `teams` nog niet bestaat. In
+-- PRODUCTIE stond hier een handmatig aangemaakte FK naar auth.users(id); die
+-- liet create_team() stuklopen met 23503 zodra een nieuw team een eigen uuid
+-- kreeg. Zie het kopcommentaar van M5c.
 CREATE TABLE IF NOT EXISTS settings (
   team_id UUID NOT NULL,
   key TEXT NOT NULL,

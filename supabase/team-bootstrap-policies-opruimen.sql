@@ -6,7 +6,9 @@
 --
 --   M4  supabase/team-invites-rpc.sql               vóór deploy
 --   M5  supabase/team-aanmaken-rpc.sql              vóór deploy
+--   M5c supabase/team-fk-naar-teams.sql             vóór deploy
 --       deploy fase 2
+--       ==> rooktest: registreer één nieuw account -> moet een team opleveren
 --   M5b supabase/team-bootstrap-policies-opruimen.sql  ná deploy  (dit bestand)
 --
 -- WAAROM PAS NA DE DEPLOY — dit is dezelfde valkuil als M3a/M3b in fase 1.
