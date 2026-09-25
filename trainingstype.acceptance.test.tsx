@@ -178,6 +178,7 @@ function renderPlan(
         startTijd={null}
         kopieerOpties={[]}
         initialTrainingstype={opts.initialTrainingstype ?? 'vct'}
+        userId="team1"
       />
     </DictProvider>,
   )

@@ -193,6 +193,7 @@ function renderPlan(
         suggestion={null}
         players={[]}
         presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId="team-1"
       />
     </DictProvider>,
   )

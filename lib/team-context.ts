@@ -41,9 +41,9 @@ export const ACTIVE_TEAM_COOKIE = 'active_team'
 //
 // De vlag wordt gewist zodra er een lidmaatschap bestaat, zodat hij niet later
 // — als iemand zijn laatste team verliest (removeMember in fase 2, leaveTeam/
-// deleteTeam in fase 3) — alsnog een team tovert. Zie `wisTeamNaamVlag` en
-// het blok daarboven voor waarom dat wissen in laadContext staat en niet
-// alleen in maakEigenTeam.
+// deleteTeam in fase 3) — alsnog een team tovert. Zie `wisTeamNaamVlag` voor
+// de twee wismomenten (laadContext als basis, naVerliesVanTeam als
+// aanvulling).
 //
 // VEILIGHEID: user-metadata is door de gebruiker zelf te schrijven
 // (auth.updateUser vanuit de browser). Dat is hier geen escalatie, maar de
@@ -77,25 +77,31 @@ export function teamNaamUitMetadata(user: { user_metadata?: unknown } | null | u
 
 // Wist de geparkeerde teamnaam uit de user-metadata.
 //
-// WAAROM DIT EEN LOSSE FUNCTIE IS, EN WAAROM LAADCONTEXT HEM OOK AANROEPT
-// (oplossing voor het fase-2/3-aandachtspunt uit validatieronde 2, punt 5):
-// deze update kan mislukken. Stond het wissen alleen in maakEigenTeam, dan
-// bleef de vlag na zo'n mislukking voorgoed staan — en zou hij vanaf fase 2,
-// zodra iemand via removeMember zijn laatste lidmaatschap verliest, alsnog een
+// WAAROM DIT EEN LOSSE FUNCTIE IS: deze update kan mislukken. Stond het wissen
+// alleen in maakEigenTeam, dan bleef de vlag na zo'n mislukking voorgoed staan
+// — en zou hij, zodra iemand zijn laatste lidmaatschap verliest, alsnog een
 // leeg team terugtoveren.
 //
-// Gekozen oplossing: variant (b) uit die notitie — "de vlag telt alleen zolang
-// er nog nooit een lidmaatschap was". Dat is hier geïmplementeerd door hem te
-// wissen zodra er WEL een lidmaatschap is (zie laadContext). Die poging
-// herhaalt zich bij elke request tot hij lukt, dus de vlag convergeert naar
-// weg. Variant (a) — removeMember/leaveTeam laten wissen — is bewust NIET
-// gekozen: removeMember wordt uitgevoerd door de hoofdtrainer, en die kan de
-// user-metadata van een ánder account alleen met de service-role-key
-// aanpassen. Zonder die key (die optioneel is, zie lib/supabase/admin.ts) zou
-// het gat gewoon openblijven.
+// Er zijn daarom twee wismomenten, met elk een eigen rol:
 //
-// Alleen loggen bij een fout: het team staat er dan al en de volgende request
-// probeert het opnieuw.
+//   1. BASIS — laadContext (variant b uit validatieronde 2, punt 5): "de vlag
+//      telt alleen zolang er nog nooit een lidmaatschap was". Zodra er WEL een
+//      lidmaatschap is, wist laadContext de vlag. Die poging herhaalt zich bij
+//      elke request tot hij lukt, dus de vlag convergeert naar weg. Dit dekt
+//      ook removeMember: dat draait als de hoofdtrainer, en die kan de
+//      user-metadata van een ánder account alleen met de (optionele)
+//      service-role-key aanpassen — variant (a), wissen bij removeMember, is
+//      daarom bewust niet gekozen.
+//
+//   2. AANVULLING — naVerliesVanTeam in app/actions/team.ts: wanneer
+//      deleteTeam of leaveTeam de aanroeper met NUL teams achterlaat, wist hij
+//      de vlag nog één keer zelf. Daar kan het wél, want het gaat om de eigen
+//      metadata. Het dekt het randgeval dat élke eerdere wispoging in
+//      laadContext mislukte; zonder deze stap kon het zelfherstel direct na het
+//      verwijderen of verlaten van het laatste team een leeg team maken.
+//
+// Alleen loggen bij een fout: het team (of het verlies ervan) is dan al een
+// feit, en de volgende request probeert het opnieuw.
 export async function wisTeamNaamVlag(supabase: SupabaseClient): Promise<void> {
   const { error } = await supabase.auth.updateUser({
     data: { [TEAM_NAAM_METADATA_KEY]: null },
@@ -387,6 +393,11 @@ export function assertCanEdit(ctx: TeamContext, onderdeel: Onderdeel): void {
 // Zonder teamId gaat het over het actieve team. Met teamId wordt het
 // lidmaatschap van dát team opgezocht in de context — nooit los uit de
 // database, zodat een meegegeven id nooit meer kan dan wat de gebruiker al is.
+//
+// LET OP bij een teamId dat van de client komt (een action-argument): valideer
+// het eerst met isUuid (lib/authz.ts). Een ontbrekende waarde betekent hier
+// "het actieve team" — zonder die vormcheck keurt deleteTeam(undefined) dus
+// het actieve team goed als doel. Zie deleteTeam in app/actions/team.ts.
 export function assertIsOwner(ctx: TeamContext, teamId?: string): void {
   const doel = teamId ?? ctx.teamId
   const lidmaatschap = ctx.teams.find((team) => team.teamId === doel)

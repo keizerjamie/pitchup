@@ -164,6 +164,7 @@ function renderPlan(
         presentPlayerIds={[]}
         startTijd={null}
         kopieerOpties={[]} initialTrainingstype="vct"
+        userId="team-1"
       />
     </DictProvider>,
   )
@@ -295,6 +296,7 @@ describe('AC2 — trainingskaart: opslaan werkt de oefening bij en sluit het for
           initialOefeningen={[makeKoppeling({ id: 'k1', oefening_id: 'o1', oefeningen: { ...oefening, naam: 'Rondo bijgewerkt' } })]}
           library={[]} currentSteps={{}} hasNulmeting={false} suggestion={null}
           players={[]} presentPlayerIds={[]} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+          userId="team-1"
         />
       </DictProvider>,
     )

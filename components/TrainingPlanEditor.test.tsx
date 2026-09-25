@@ -26,6 +26,9 @@ vi.mock('@/app/actions/oefening-library', () => ({
   createOefening: vi.fn(),
   updateOefening: vi.fn().mockResolvedValue(undefined),
   deleteOefening: vi.fn(),
+  // Fase 4: CopyOefeningButton (gerenderd zodra een koppeling van een
+  // teamgenoot is) roept dit rechtstreeks aan.
+  kopieerOefeningNaarBibliotheek: vi.fn(),
 }))
 
 import { saveSpelerindeling, updateKoppeling, reorderKoppelingen, vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
@@ -107,6 +110,7 @@ function renderPlan(koppelingen: TrainingOefeningMetBezetting[]) {
         suggestion={null}
         players={players}
         presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId="team1"
       />
     </DictProvider>,
   )
@@ -204,6 +208,7 @@ function renderPlanWith(koppeling: TrainingOefeningMetBezetting) {
         suggestion={null}
         players={players}
         presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId="team1"
       />
     </DictProvider>,
   )
@@ -552,6 +557,7 @@ function renderPlanWithDict(koppelingen: TrainingOefeningMetBezetting[], dict: D
         suggestion={null}
         players={players}
         presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId="team1"
       />
     </DictProvider>,
   )
@@ -694,4 +700,62 @@ describe('TrainingPlanEditor — oefening bewerken vanaf de kaart', () => {
   // Twee trainers/tabbladen die tegelijk dezelfde oefening bewerken: geen
   // locking, laatste server-call wint (bestaand, niet-getest gedrag van
   // updateOefening zelf — zie brief sectie 6c).
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// Fase 4 — oefeningen van een teamgenoot (brief §4.6, AC 20, 35, BR 54/55).
+// `oefeningen.team_id` is de EIGENAAR-USER (zie de fixtures hierboven, die
+// hem al op 'team1' zetten). `userId` bepaalt hier of dat de aanroeper zelf
+// is. `userId` is een VERPLICHTE prop (validatieronde fase 3+4, punt 1: zelfde
+// les als `emptyState` in fase 2) — er is dus bewust geen scenario meer
+// "zonder userId-prop"; TypeScript weigert dat nu al bij het compileren.
+// ────────────────────────────────────────────────────────────────────────────
+function renderPlanAls(koppeling: TrainingOefeningMetBezetting, userId: string) {
+  return render(
+    <DictProvider dict={nl}>
+      <TrainingPlanEditor
+        eventId="e1"
+        initialDoelstelling={null}
+        initialOefeningen={[koppeling]}
+        library={[]}
+        currentSteps={{}}
+        hasNulmeting={false}
+        suggestion={null}
+        players={players}
+        presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId={userId}
+      />
+    </DictProvider>,
+  )
+}
+
+describe('TrainingPlanEditor — eigenaarschap van de gekoppelde oefening (fase 4)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('userId === oefeningen.team_id: eigen oefening, geen badge, geen kopieerknop, potlood zichtbaar', () => {
+    const k = makeKoppeling({ oefeningen: { team_id: 'ik', naam: 'Rondo' } as unknown as Oefening })
+    renderPlanAls(k, 'ik')
+
+    expect(screen.queryByText(nl.oefeningen.fromTeammate)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: nl.oefeningen.copyToLibrary })).not.toBeInTheDocument()
+    expect(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo'))).toBeInTheDocument()
+  })
+
+  it('userId !== oefeningen.team_id: badge + kopieerknop zichtbaar, potlood verdwijnt (AC 35)', () => {
+    const k = makeKoppeling({ oefeningen: { team_id: 'teamgenoot', naam: 'Rondo' } as unknown as Oefening })
+    renderPlanAls(k, 'ik')
+
+    expect(screen.getByText(nl.oefeningen.fromTeammate)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: nl.oefeningen.copyToLibrary })).toBeInTheDocument()
+    expect(screen.queryByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Rondo'))).not.toBeInTheDocument()
+  })
+
+  it('ontkoppelen blijft mogelijk bij een oefening van een teamgenoot (beslissing 3: Training-recht, geen eigenaarschap)', () => {
+    const k = makeKoppeling({ oefeningen: { team_id: 'teamgenoot', naam: 'Rondo' } as unknown as Oefening })
+    renderPlanAls(k, 'ik')
+
+    expect(screen.getByLabelText(nl.trainingPlan.unlink)).toBeInTheDocument()
+  })
 })

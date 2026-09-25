@@ -14,11 +14,7 @@ import { useState, useSyncExternalStore, useTransition } from 'react'
 import { createInvite } from '@/app/actions/team-invites'
 import { useDict } from '@/lib/i18n-context'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
-
-// Crossfade-duur voor de kopieerknop-labelwissel (blur maskeert het
-// overlappen van twee teksten) en hoe lang "Gekopieerd" blijft staan.
-const COPY_LABEL_CROSSFADE_MS = 200
-const COPY_SUCCESS_HOLD_MS = 1600
+import { COPY_LABEL_CROSSFADE_MS, COPY_SUCCESS_HOLD_MS } from '@/components/copy-feedback'
 
 interface Props {
   initialActiveInvite: { verlooptOp: string } | null

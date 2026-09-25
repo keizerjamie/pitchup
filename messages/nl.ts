@@ -477,6 +477,12 @@ export const nl = {
     neutralsBadgeRange: '{min}–{max} neutralen',
     shapeLabel: 'Vorm',
     fitsPresentChip: 'Past bij aanwezigen ({n})',
+    // Fase 4 — oefeningen van teamgenoten in het trainingsplan (AC 20, BR 56).
+    fromTeammate: 'Van een teamgenoot',
+    copyToLibrary: 'Kopiëren naar mijn bibliotheek',
+    copying: 'Kopiëren...',
+    copied: 'Gekopieerd',
+    copyFailed: 'Kopiëren mislukt. Probeer het opnieuw.',
   },
   periodization: {
     nextTrainingTitle: 'Volgende training',
@@ -983,6 +989,18 @@ export const nl = {
     haveAccount: 'Ik heb al een account',
     confirmEmailFirst: 'Bevestig eerst je e-mailadres en open daarna de uitnodigingslink opnieuw.',
     rateLimited: 'Te veel pogingen. Probeer het later opnieuw.',
+  },
+  teamsBeheer: {
+    section: 'Teams',
+    sectionHint: 'Beheer de teams waarvan je hoofdtrainer bent.',
+    deleteTeam: 'Team verwijderen',
+    deleteTeamTitle: 'Team verwijderen',
+    deleteTeamHint: 'Dit verwijdert {team} met alle spelers, agenda, aanwezigheid, wedstrijden, trainingsplannen en nulmetingen. De accounts van assistenten blijven bestaan. Oefeningen blijven in ieders eigen bibliotheek — alleen hun koppelingen aan dit team verdwijnen. Je andere teams blijven ongemoeid. Dit kan niet ongedaan worden gemaakt.',
+    deleteTeamAssistants: '{n} assistent(en) verliezen hierdoor hun toegang tot dit team.',
+    deleting: 'Verwijderen...',
+    deleteFailed: 'Verwijderen mislukt. Probeer het opnieuw.',
+    infoFailed: 'Ophalen van de teamgegevens mislukt. Probeer het opnieuw.',
+    loadingInfo: 'Bezig met laden…',
   },
 }
 

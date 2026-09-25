@@ -136,6 +136,7 @@ function renderPlan(koppelingen: TrainingOefeningMetBezetting[], startTijd: stri
         startTijd={startTijd}
         kopieerOpties={[]}
         initialTrainingstype="vct"
+        userId="team1"
       />
     </DictProvider>,
   )

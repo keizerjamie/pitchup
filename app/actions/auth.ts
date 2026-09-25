@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-policy'
 import { genericError, logError } from '@/lib/errors'
-import { TEAM_LOGO_BUCKET, teamLogoPath } from '@/lib/logo-upload'
+import { ruimTeamOp } from '@/lib/team-opruimen'
 import { getSiteUrl } from '@/lib/site-url'
 import { isInviteToken, veiligeNextPath } from '@/lib/invite-token'
 import { TEAM_NAAM_METADATA_KEY, maakEigenTeam } from '@/lib/team-context'
@@ -297,27 +297,6 @@ export async function signOut() {
   redirect('/login')
 }
 
-// De teamdata van ÉÉN team, in FK-veilige volgorde. De lijst is bewust
-// volledig en niet "de rest cascadet wel": categorie_metingen heeft alleen een
-// team_id en geen FK naar events of players, dus de nulmetingen per onderdeel
-// bleven vroeger als wees achter. RLS beperkt elke delete tot rijen waar dit
-// account bij mag; het expliciete team_id-filter is de tweede laag.
-const TEAM_TABELLEN = [
-  'training_oefeningen',
-  'task_overrides',
-  'match_squad',
-  'match_events',
-  'match_ratings',
-  'lineups',
-  'attendance',
-  'absence_periods',
-  'categorie_metingen',
-  'metingen',
-  'events',
-  'players',
-  'settings',
-] as const
-
 // AVG / right to erasure: wist alle teams waarvan dit account hoofdtrainer is,
 // zegt elk assistent-lidmaatschap op, verwijdert de persoonlijke oefeningen en
 // daarna het auth-account zelf. Vereist de service-role-key; zonder die key
@@ -376,34 +355,10 @@ export async function deleteAccount() {
   // het id — daar zou een tenant-sleutel mee in de log belanden), zodat een
   // gedeeltelijke mislukking terug te vinden is.
   for (const [index, teamId] of eigenTeams.entries()) {
-    const teamLabel = `auth.deleteAccount.team${index + 1}`
-
-    // Het clublogo staat in Storage en hangt dus aan geen enkele tabel; zonder
-    // deze stap zou het bestand na accountverwijdering blijven bestaan (AVG).
-    // Bucket en pad komen uit lib/logo-upload.ts — dezelfde bron als
-    // app/actions/team-logo.ts, zodat een wijziging van de padconventie deze
-    // opruiming niet stil kan laten missen.
-    // Bewust logError en géén throw: een ontbrekend object — een team dat nooit
-    // een logo uploadde — mag de accountverwijdering niet blokkeren.
-    const { error: storageError } = await supabase.storage
-      .from(TEAM_LOGO_BUCKET)
-      .remove([teamLogoPath(teamId)])
-    if (storageError) logError(`${teamLabel}.storage`, storageError)
-
-    for (const table of TEAM_TABELLEN) {
-      const { error } = await supabase.from(table).delete().eq('team_id', teamId)
-      if (error) throw genericError(`${teamLabel}.${table}`, error)
-    }
-
-    // Als laatste het team zelf: de cascade op team_members en team_invites
-    // ruimt de lidmaatschappen op, inclusief die van eventuele assistenten.
-    // Hun accounts blijven bestaan (AC 14). Sinds M5c
-    // (supabase/team-fk-naar-teams.sql) neemt deze delete óók players, events,
-    // attendance, lineups en settings mee via hun nieuwe FK naar teams — dat
-    // overlapt met de lus hierboven en is onschadelijk, want die heeft er dan
-    // al niets meer in staan.
-    const { error: teamError } = await supabase.from('teams').delete().eq('id', teamId)
-    if (teamError) throw genericError(`${teamLabel}.teams`, teamError)
+    // Logo, de dertien teamtabellen en de teams-rij — exact dezelfde opruiming
+    // als deleteTeam (app/actions/team.ts), via de gedeelde helper in
+    // lib/team-opruimen.ts. BR 49 eist dat die twee niet uit elkaar lopen.
+    await ruimTeamOp(supabase, teamId, `auth.deleteAccount.team${index + 1}`)
   }
 
   // ── 2. Teams van anderen: alleen het eigen lidmaatschap ───

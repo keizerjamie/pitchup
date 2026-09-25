@@ -147,6 +147,58 @@ function clampDecimal(value: number | null | undefined, min: number, max: number
 }
 
 // Bouwt de DB-rij voor een bibliotheek-oefening (gedeeld door create-flows).
+//
+// De tweede parameter is de EIGENAAR-USER (`ctx.userId`), geen teams.id:
+// oefeningen.team_id betekent sinds de assistent-trainers "van wie is deze
+// oefening" (supabase/oefeningen-persoonlijk.sql). De naam `teamId` volgt de
+// kolom; die is bewust niet hernoemd.
 export function oefeningRow(v: ValidatedOefening, teamId: string) {
   return { team_id: teamId, ...v }
+}
+
+// De INHOUD van een bibliotheek-oefening: elke kolom behalve id, team_id (de
+// eigenaar) en created_at. Dit is precies wat een kopie overneemt
+// (kopieerOefeningNaarBibliotheek, AC 20 / BR 56).
+//
+// Gelijk aan de sleutels van ValidatedOefening — lib/oefening.test.ts faalt
+// zodra er een veld bij komt dat hier ontbreekt, anders zou een kopie dat veld
+// stil laten vallen.
+export const OEFENING_INHOUD_KOLOMMEN = [
+  'naam',
+  'beschrijving',
+  'categorie',
+  'duur_min',
+  'breedte_m',
+  'lengte_m',
+  'orientatie',
+  'veldzone',
+  'teams',
+  'aantal_neutralen',
+  'aantal_neutralen_max',
+  'diagram',
+] as const satisfies readonly (keyof ValidatedOefening)[]
+
+// Bouwt de insert-rij voor een KOPIE van een bestaande oefening.
+//
+//   * alle inhoudelijke velden letterlijk overgenomen — ook de naam
+//     (beslissing 10: geen "(kopie)"-suffix);
+//   * `team_id` = de nieuwe eigenaar; staat bewust ná de inhoud, zodat een bron
+//     met een team_id-veld die nooit kan overschrijven;
+//   * géén id en géén created_at: die krijgt de nieuwe rij van de database;
+//   * géén herkomstveld (beslissing 2): de kopie is volledig los.
+//
+// Bewust NIET door validateOefening: die normaliseert en clampt, en een kopie
+// hoort dezelfde inhoud te hebben als het origineel (AC 20). De bron is al
+// eerder gevalideerd opgeslagen; de CHECK-constraints van de tabel blijven het
+// vangnet. Een kolom die in de bron ontbreekt wordt weggelaten, zodat de
+// kolomdefault geldt in plaats van een NULL op een NOT NULL-kolom.
+export function oefeningKopieRij(
+  bron: Record<string, unknown>,
+  eigenaarId: string,
+): Record<string, unknown> {
+  const inhoud: Record<string, unknown> = {}
+  for (const kolom of OEFENING_INHOUD_KOLOMMEN) {
+    if (kolom in bron && bron[kolom] !== undefined) inhoud[kolom] = bron[kolom]
+  }
+  return { ...inhoud, team_id: eigenaarId }
 }

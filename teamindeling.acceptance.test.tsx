@@ -182,6 +182,7 @@ function renderPlan(koppeling: TrainingOefeningMetBezetting, opts: { players?: P
         suggestion={null}
         players={opts.players ?? players4}
         presentPlayerIds={opts.presentPlayerIds ?? ['p1', 'p2', 'p3', 'p4']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId="team-1"
       />
     </DictProvider>,
   )

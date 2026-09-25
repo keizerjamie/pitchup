@@ -257,6 +257,7 @@ export default async function TrainingPlanPage({ params }: Props) {
             kopieerOpties={kopieerOpties}
             initialTrainingstype={event.trainingstype ?? 'vct'}
             canEdit={canEdit(ctx, 'training')}
+            userId={ctx.userId}
           />
         </div>
       </div>

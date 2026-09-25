@@ -500,7 +500,7 @@ describe('Addendum §8.8 — verzameltijd onder wedstrijd, trainingstype onder t
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[]} library={[]} currentSteps={{}}
           hasNulmeting={false} suggestion={null} players={[]} presentPlayerIds={[]} startTijd={null}
-          kopieerOpties={[]} initialTrainingstype="vct" canEdit={canEdit(ctx, 'training')}
+          kopieerOpties={[]} initialTrainingstype="vct" canEdit={canEdit(ctx, 'training')} userId={ctx.userId}
         />
       </DictProvider>,
     )
@@ -514,7 +514,7 @@ describe('Addendum §8.8 — verzameltijd onder wedstrijd, trainingstype onder t
         <TrainingPlanEditor
           eventId="e1" initialDoelstelling={null} initialOefeningen={[]} library={[]} currentSteps={{}}
           hasNulmeting={false} suggestion={null} players={[]} presentPlayerIds={[]} startTijd={null}
-          kopieerOpties={[]} initialTrainingstype="vct" canEdit={canEdit(ctx, 'training')}
+          kopieerOpties={[]} initialTrainingstype="vct" canEdit={canEdit(ctx, 'training')} userId={ctx.userId}
         />
       </DictProvider>,
     )

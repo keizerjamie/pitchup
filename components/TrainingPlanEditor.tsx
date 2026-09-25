@@ -20,6 +20,7 @@ import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningPicker from '@/components/OefeningPicker'
 import OefeningEditor from '@/components/OefeningEditor'
+import CopyOefeningButton from '@/components/CopyOefeningButton'
 import ChevronIcon from '@/components/icons/ChevronIcon'
 import TeamIndelingEditor from '@/components/TeamIndelingEditor'
 import ParallelGroepEditor from '@/components/ParallelGroepEditor'
@@ -50,6 +51,20 @@ interface Props {
   // aanroep breken. Regelt doelstelling, trainingstype, oefening toevoegen/
   // verwijderen/herordenen, stap_override en de teamindeling (TeamIndelingEditor).
   canEdit?: boolean
+  /** `ctx.userId` van de ingelogde gebruiker (fase 4, brief §4.6/§4.7). Bepaalt
+   *  per koppeling of `o` (de gejoinde bibliotheek-oefening) EIGEN bezit is
+   *  (`o.team_id === userId`, want `oefeningen.team_id` is de eigenaar-user,
+   *  geen teams.id) — dat regelt de badge "Van een teamgenoot",
+   *  `CopyOefeningButton` en of de bewerkknop op de kaart verschijnt (AC 35).
+   *  Verplicht, en bewust géén optionele prop met een "alles is eigen"-
+   *  fallback: dat zou een toekomstige aanroeper die hem vergeet stil het
+   *  potlood op andermans oefening laten tonen (server weigert het bewerken
+   *  dan nog wel, maar de UI liegt) — zelfde les als de `emptyState`-prop in
+   *  `AppShell.tsx` (fase 2, validatieronde). Elke caller moet hem nu expliciet
+   *  meegeven; `app/events/[id]/training-plan/page.tsx` doet dat al. Los van
+   *  `canEdit`: dat is het Training-koppelrecht, dit is eigenaarschap van de
+   *  oefening zelf — twee verschillende assen (BR 55). */
+  userId: string
 }
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
@@ -63,7 +78,7 @@ const ALL_CATS = PERIODIZATION_CATEGORIES
 // de referentie stabiel zolang `spelerindeling` zelf niet verandert.
 const EMPTY_INDELING: Spelerindeling = []
 
-export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties, initialTrainingstype, canEdit = true }: Props) {
+export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties, initialTrainingstype, canEdit = true, userId }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
@@ -660,6 +675,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   >
                     {blok.leden.map((k, ledenIndex) => {
               const o = k.oefeningen
+              // Fase 4 (AC 20, 35, BR 54/55): oefeningen.team_id is de
+              // EIGENAAR-USER, niet het team.
+              const isEigen = o.team_id === userId
               const catStep = currentSteps[o.categorie]
               const catMeta = ALL_CATS.find(c => c.key === o.categorie)
               const parent = k.genest_in ? koppelingen.find((other) => other.id === k.genest_in) : null
@@ -750,16 +768,18 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   >
                     <ChevronIcon open={isExpanded} className="w-4 h-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openOefeningEditor(o)}
-                    aria-label={t.oefeningen.editAriaNamed.replace('{name}', o.naam)}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
+                  {isEigen && (
+                    <button
+                      type="button"
+                      onClick={() => openOefeningEditor(o)}
+                      aria-label={t.oefeningen.editAriaNamed.replace('{name}', o.naam)}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
                   {canEdit && (unlinkConfirm === k.id ? (
                     <div className="flex gap-1">
                       <button type="button" onClick={() => handleUnlink(k.id)}
@@ -929,6 +949,17 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                           <span className="text-xs text-faint">
                             {t.trainingPlan.nestedInBadge.replace('{name}', parent.oefeningen.naam)}
                           </span>
+                        )}
+                        {/* Fase 4 (AC 20, BR 56): oefening van een teamgenoot —
+                            badge + kopieerknop, los van het Training-recht:
+                            elk teamlid dat dit plan kan lezen mag kopiëren. */}
+                        {!isEigen && (
+                          <>
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface-sunken text-faint">
+                              {t.oefeningen.fromTeammate}
+                            </span>
+                            <CopyOefeningButton oefeningId={o.id} />
+                          </>
                         )}
                       </div>
 

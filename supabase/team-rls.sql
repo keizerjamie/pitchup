@@ -220,11 +220,68 @@ create policy "categorie_metingen: recht mag wijzigen" on categorie_metingen for
   using (can_edit(team_id,'periodisering')) with check (can_edit(team_id,'periodisering'));
 create policy "categorie_metingen: recht mag wissen"   on categorie_metingen for delete using (can_edit(team_id,'periodisering'));
 
--- ── training_oefeningen → onderdeel 'training' ───────────────
--- Ook stap_override staat op deze tabel en is inhoudelijk periodisering. Een
--- policy kan niet per kolom beslissen en het veld wordt op de
+-- >>> training_oefeningen-blok — WOORDELIJK GELIJK in team-rls.sql (M2) en oefeningen-koppeling-eigenaar.sql (M6b)
+-- ── training_oefeningen → onderdeel 'training', koppelen alleen van eigen oefeningen ──
+--
+-- LET OP — DIT BLOK STAAT WOORDELIJK GELIJK IN supabase/team-rls.sql (M2) EN IN
+-- supabase/oefeningen-koppeling-eigenaar.sql (M6b). DAT IS BEWUST EN MOET ZO
+-- BLIJVEN. M6b is de latere, strengere variant; stond hier in M2 nog de oude
+-- policy, dan zou een herhaalde run van M2 de eigenaarscheck stilzwijgend
+-- terugdraaien — en daarmee het leesgat van M6 weer openzetten. Door beide
+-- bestanden hetzelfde te laten schrijven is het eindresultaat gelijk, ongeacht
+-- de volgorde, en werkt een verse installatie ook met alleen M2. Wijzig je hier
+-- iets, wijzig het dan in het andere bestand mee; een structuurtest in
+-- assistent-fase1-fundament.acceptance.test.ts vergelijkt de twee letterlijk.
+--
+-- Onderdeel: ook stap_override staat op deze tabel en is inhoudelijk
+-- periodisering. Een policy kan niet per kolom beslissen en het veld wordt op de
 -- trainingsplan-pagina bewerkt: de hele tabel valt onder Training (bevestigd
--- besluit van de eigenaar).
+-- besluit van de eigenaar, beslissing 7).
+--
+-- WAAROM DE EXTRA with check (M6b): sinds M6 is een oefening leesbaar voor elk
+-- lid van een team in wiens trainingsplan hij gekoppeld staat. Zonder deze
+-- check kon iemand met Training-recht via een directe PostgREST-aanroep een
+-- willekeurige oefening-UUID in het plan van zijn eigen team hangen (de
+-- FK-check negeert RLS) en die oefening daarna lezen en kopiëren — bijvoorbeeld
+-- een oud-assistent met ids die hij nog kent. De app weigerde dat al
+-- (addOefeningToTraining zoekt de oefening op ctx.userId, AC 19/36); dit is de
+-- tweede laag (BR 45).
+--
+-- Koppelbaar is een oefening als:
+--   1. hij van de aanroeper is (oefeningen.team_id = auth.uid()) —
+--      addOefeningToTraining en createAndAddOefening; of
+--   2. hij al aan een trainingsplan van HETZELFDE team hangt —
+--      kopieerTrainingsplan (een vorige training kopiëren, ook met oefeningen
+--      van teamgenoten) én elke UPDATE van een bestaande koppeling: de rij
+--      zelf is dan die bestaande koppeling, dus spelerindeling, volgorde,
+--      parallelgroepen en stap_override blijven werken op andermans gekoppelde
+--      oefening. Alleen oefening_id omzetten naar een oefening die nog niet in
+--      het team hangt, faalt.
+--
+-- WAAROM EEN security definer-FUNCTIE EN GEEN INLINE exists(...): een policy op
+-- training_oefeningen die zelf training_oefeningen leest — rechtstreeks, of
+-- via de M6-policy op oefeningen die dat doet — geeft "infinite recursion
+-- detected in policy". Zelfde reden als is_team_member & co. in M1. Daarom ook
+-- set search_path = public en geen execute voor public/anon. De functie begint
+-- met is_team_member(p_team_id), zodat ze voor een niet-lid nooit iets
+-- verraadt over koppelingen in een vreemd team.
+--
+-- SELECT en DELETE blijven zoals ze waren. De using-kant van UPDATE ook:
+-- ontkoppelen en herordenen van andermans gekoppelde oefening valt onder het
+-- Training-recht (beslissing 3).
+create or replace function public.oefening_koppelbaar(p_oefening_id uuid, p_team_id uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select is_team_member(p_team_id) and (
+    exists (select 1 from oefeningen o
+             where o.id = p_oefening_id and o.team_id = auth.uid())
+    or exists (select 1 from training_oefeningen k
+                where k.oefening_id = p_oefening_id and k.team_id = p_team_id)
+  );
+$$;
+
+revoke execute on function public.oefening_koppelbaar(uuid, uuid) from public, anon;
+grant execute on function public.oefening_koppelbaar(uuid, uuid) to authenticated;
+
 drop policy if exists "training_oefeningen: own team only"        on training_oefeningen;
 drop policy if exists "training_oefeningen: team_id = auth.uid()" on training_oefeningen;
 drop policy if exists "training_oefeningen: lid mag lezen"        on training_oefeningen;
@@ -233,10 +290,13 @@ drop policy if exists "training_oefeningen: recht mag wijzigen"   on training_oe
 drop policy if exists "training_oefeningen: recht mag wissen"     on training_oefeningen;
 
 create policy "training_oefeningen: lid mag lezen"      on training_oefeningen for select using (is_team_member(team_id));
-create policy "training_oefeningen: recht mag maken"    on training_oefeningen for insert with check (can_edit(team_id,'training'));
+create policy "training_oefeningen: recht mag maken"    on training_oefeningen for insert
+  with check (can_edit(team_id,'training') and oefening_koppelbaar(oefening_id, team_id));
 create policy "training_oefeningen: recht mag wijzigen" on training_oefeningen for update
-  using (can_edit(team_id,'training')) with check (can_edit(team_id,'training'));
+  using (can_edit(team_id,'training'))
+  with check (can_edit(team_id,'training') and oefening_koppelbaar(oefening_id, team_id));
 create policy "training_oefeningen: recht mag wissen"   on training_oefeningen for delete using (can_edit(team_id,'training'));
+-- <<< einde training_oefeningen-blok
 
 -- ── settings → per SLEUTEL ───────────────────────────────────
 -- settings is een key/value-store met sleutels uit verschillende onderdelen.

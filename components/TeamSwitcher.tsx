@@ -19,6 +19,7 @@ import { setActiveTeam, createTeam } from '@/app/actions/team'
 import { useDict } from '@/lib/i18n-context'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
 import type { TeamLidmaatschap } from '@/lib/team-context'
+import Spinner from '@/components/icons/Spinner'
 
 // Exit sneller dan enter (asymmetrische timing, geheugen.md §"Animatie-review
 // & -fixes"). De unmount-setTimeout is exit-duur + 20ms, als module-constante
@@ -55,15 +56,6 @@ function CheckIcon() {
   return (
     <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-    </svg>
-  )
-}
-
-function Spinner() {
-  return (
-    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-      <path d="M21 12a9 9 0 00-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }

@@ -309,6 +309,7 @@ function renderPlan(props: Partial<Omit<Parameters<typeof TrainingPlanEditor>[0]
         suggestion={props.suggestion ?? null}
         players={props.players ?? players3}
         presentPlayerIds={props.presentPlayerIds ?? ['p1', 'p2', 'p3']} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
+        userId={props.userId ?? 'team1'}
       />
     </DictProvider>,
   )

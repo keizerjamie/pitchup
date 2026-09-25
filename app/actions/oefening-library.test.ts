@@ -11,7 +11,11 @@ import {
   updateOefening,
   deleteOefening,
   countOefeningKoppelingen,
+  kopieerOefeningNaarBibliotheek,
 } from '@/app/actions/oefening-library'
+import { revalidatePath } from 'next/cache'
+import { GEEN_RECHTEN, rechtenNaarKolommen } from '@/lib/team-rechten'
+import { OEFENING_INHOUD_KOLOMMEN } from '@/lib/oefening'
 
 type TableResult = { data?: unknown; error?: unknown; count?: number }
 
@@ -438,5 +442,345 @@ describe('countOefeningKoppelingen (telt trainingen, niet koppelingsrijen)', () 
   it('gooit "Niet ingelogd" zonder sessie', async () => {
     use(makeSupabase({ user: null }))
     await expect(countOefeningKoppelingen('o1')).rejects.toThrow('Niet ingelogd')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Fase 4 — oefeningen van teamgenoten: kopiëren (AC 20) en niet bewerken (AC 35)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Mock-smaak: de stub hierboven negeert .eq() en geeft voor select én insert
+// dezelfde vaste uitkomst — daarmee is niet te bewijzen dat een kopie een
+// NIEUWE rij is, of dat een update het origineel ongemoeid laat. Hieronder
+// daarom een kleine tabel-engine die filters echt toepast en rijen echt
+// schrijft.
+//
+// Hij bootst ook de LEESKANT van de RLS op `oefeningen` na, omdat het gedrag
+// van kopieerOefeningNaarBibliotheek daar volledig van afhangt ("RLS beslist
+// zichtbaarheid"): een rij is zichtbaar als hij van de gebruiker zelf is
+// (oefeningen: own team only) óf gekoppeld staat in een trainingsplan van een
+// team waar de gebruiker lid van is (oefeningen: zichtbaar via gekoppeld
+// trainingsplan, supabase/oefeningen-persoonlijk.sql). Of de ECHTE policy dat
+// doet, bewijst alleen blok 24 van supabase/team-rls-verificatie.sql — vitest
+// praat niet met een database.
+
+type Rij = Record<string, unknown>
+
+const TEAM = '11111111-1111-4111-8111-111111111111'
+const HOOFDTRAINER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const ASSISTENT = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+const VREEMDE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const OEF_HOOFD = '0e000000-0000-4000-8000-000000000001'
+const OEF_ASSISTENT = '0e000000-0000-4000-8000-000000000002'
+const OEF_VREEMD = '0e000000-0000-4000-8000-000000000003'
+
+function oefeningRij(id: string, eigenaar: string, naam: string): Rij {
+  return {
+    id,
+    team_id: eigenaar,
+    created_at: '2026-01-01T10:00:00Z',
+    naam,
+    beschrijving: `Beschrijving van ${naam}`,
+    categorie: 'partijen_klein',
+    duur_min: 15,
+    breedte_m: 20,
+    lengte_m: 25.5,
+    orientatie: 'lengte',
+    veldzone: null,
+    teams: [{ grootte: 4, formaties: [], keeperInGrootte: true }],
+    aantal_neutralen: 2,
+    aantal_neutralen_max: 3,
+    diagram: { markers: [{ x: 1, y: 2 }] },
+  }
+}
+
+function makeEngine(userId: string, opts: { leesFout?: boolean; schrijfFout?: boolean } = {}) {
+  const store: Record<string, Rij[]> = {
+    team_members: [
+      { team_id: TEAM, user_id: HOOFDTRAINER, rol: 'owner', ...rechtenNaarKolommen({ ...GEEN_RECHTEN }) },
+      // Assistent ZONDER enig recht: kopiëren vraagt geen recht (AC 20).
+      { team_id: TEAM, user_id: ASSISTENT, rol: 'assistent', ...rechtenNaarKolommen({ ...GEEN_RECHTEN }) },
+    ],
+    settings: [{ team_id: TEAM, key: 'team_name', value: 'JO13-1' }],
+    oefeningen: [
+      oefeningRij(OEF_HOOFD, HOOFDTRAINER, 'Rondo van de hoofdtrainer'),
+      oefeningRij(OEF_ASSISTENT, ASSISTENT, 'Positiespel van de assistent'),
+      oefeningRij(OEF_VREEMD, VREEMDE, 'Oefening van een buitenstaander'),
+    ],
+    training_oefeningen: [
+      { id: 'k1', team_id: TEAM, event_id: 'e1', oefening_id: OEF_HOOFD },
+      { id: 'k2', team_id: TEAM, event_id: 'e1', oefening_id: OEF_ASSISTENT },
+    ],
+  }
+  const calls = {
+    ops: [] as { table: string; op: string }[],
+    eqs: [] as { table: string; op: string; col: string; val: unknown }[],
+    inserts: [] as { table: string; payload: Rij }[],
+  }
+  let teller = 0
+
+  const zichtbaar = (r: Rij) => {
+    if (r.team_id === userId) return true
+    const mijnTeams = new Set(store.team_members.filter((m) => m.user_id === userId).map((m) => m.team_id))
+    return store.training_oefeningen.some((k) => k.oefening_id === r.id && mijnTeams.has(k.team_id))
+  }
+
+  function chain(table: string) {
+    const filters: ((r: Rij) => boolean)[] = []
+    let op = 'select'
+    let patch: Rij | null = null
+    let ingevoegd: Rij[] = []
+    const lees = () => {
+      const basis = table === 'oefeningen' ? store[table].filter(zichtbaar) : (store[table] ?? [])
+      return basis.filter((r) => filters.every((f) => f(r)))
+    }
+    const uitkomst = () => {
+      if (table === 'oefeningen' && op === 'select' && opts.leesFout) {
+        return { data: null, error: { code: '42501', message: 'permission denied for table oefeningen' } }
+      }
+      if (table === 'oefeningen' && op === 'insert' && opts.schrijfFout) {
+        return { data: null, error: { code: '23514', message: 'new row violates check constraint "oefeningen_categorie_check"' } }
+      }
+      if (op === 'insert') return { data: ingevoegd, error: null }
+      const geraakt = lees()
+      if (op === 'update') for (const r of geraakt) Object.assign(r, patch)
+      if (op === 'delete') for (const r of geraakt) store[table].splice(store[table].indexOf(r), 1)
+      return { data: geraakt, error: null }
+    }
+    const c: Record<string, unknown> = {}
+    c.select = () => { if (op === 'select') calls.ops.push({ table, op }); return c }
+    c.eq = (col: string, val: unknown) => {
+      calls.eqs.push({ table, op, col, val })
+      filters.push((r) => r[col] === val)
+      return c
+    }
+    c.in = (col: string, vals: unknown[]) => { filters.push((r) => vals.includes(r[col])); return c }
+    c.order = () => c
+    c.insert = (payload: Rij) => {
+      op = 'insert'
+      calls.ops.push({ table, op })
+      calls.inserts.push({ table, payload })
+      if (!opts.schrijfFout) {
+        // UUID-vormig, zoals gen_random_uuid(): de action doet een vormcheck.
+        const id = `ae000000-0000-4000-8000-${String(++teller).padStart(12, '0')}`
+        const rij = { id, created_at: '2026-09-24T12:00:00Z', ...payload }
+        store[table].push(rij)
+        ingevoegd = [rij]
+      }
+      return c
+    }
+    c.update = (p: Rij) => { op = 'update'; patch = p; calls.ops.push({ table, op }); return c }
+    c.delete = () => { op = 'delete'; calls.ops.push({ table, op }); return c }
+    c.single = () => {
+      const u = uitkomst()
+      return Promise.resolve({ data: Array.isArray(u.data) ? (u.data[0] ?? null) : u.data, error: u.error })
+    }
+    c.maybeSingle = c.single
+    ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(uitkomst())
+    return c
+  }
+
+  const supabase = {
+    from: (t: string) => chain(t),
+    auth: { getUser: async () => ({ data: { user: { id: userId } } }) },
+  }
+  return { supabase, store, calls }
+}
+
+function useEngine(m: ReturnType<typeof makeEngine>) {
+  vi.mocked(createClient).mockResolvedValue(m.supabase as unknown as Awaited<ReturnType<typeof createClient>>)
+}
+
+function oefening(m: ReturnType<typeof makeEngine>, id: string): Rij | undefined {
+  return m.store.oefeningen.find((r) => r.id === id)
+}
+
+describe('kopieerOefeningNaarBibliotheek — succes (AC 20, BR 56)', () => {
+  it('maakt een NIEUWE rij met alle inhoud letterlijk overgenomen, ook de naam', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+    const origineel = { ...oefening(m, OEF_HOOFD)! }
+
+    const { id } = await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+
+    expect(id).not.toBe(OEF_HOOFD)
+    const kopie = oefening(m, id)!
+    for (const kolom of OEFENING_INHOUD_KOLOMMEN) {
+      expect(kopie[kolom], kolom).toEqual(origineel[kolom])
+    }
+    // Beslissing 10: geen "(kopie)"-suffix.
+    expect(kopie.naam).toBe('Rondo van de hoofdtrainer')
+    expect(m.store.oefeningen).toHaveLength(4)
+  })
+
+  // Oefeningen zijn persoonlijk bezit: de kopie hoort bij de AANROEPER, nooit
+  // bij het actieve team (ctx.teamId) en nooit bij de oude eigenaar.
+  it('zet team_id = ctx.userId, niet het team en niet de oude eigenaar', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    const { id } = await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+
+    expect(oefening(m, id)!.team_id).toBe(ASSISTENT)
+    expect(oefening(m, id)!.team_id).not.toBe(TEAM)
+  })
+
+  it('stuurt geen id, created_at of herkomst mee — die krijgt de kopie zelf (beslissing 2)', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+
+    const payload = m.calls.inserts.find((i) => i.table === 'oefeningen')!.payload
+    expect(Object.keys(payload).sort()).toEqual([...OEFENING_INHOUD_KOLOMMEN, 'team_id'].sort())
+  })
+
+  it('vraagt GEEN teamrecht: een assistent met nul rechten mag kopiëren', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+    // Vastgelegd in de fixture: de assistent heeft alle zes rechten op false.
+    expect(m.store.team_members.find((r) => r.user_id === ASSISTENT)!.mag_training_bewerken).toBe(false)
+
+    await expect(kopieerOefeningNaarBibliotheek(OEF_HOOFD)).resolves.toEqual({ id: expect.any(String) })
+  })
+
+  // RLS beslist de zichtbaarheid; een team_id-filter op de lees zou de
+  // oefening van de teamgenoot juist wegfilteren.
+  it('filtert de lees alleen op het id, niet op een eigenaar of team', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+
+    const leesFilters = m.calls.eqs.filter((e) => e.table === 'oefeningen' && e.op === 'select')
+    expect(leesFilters).toEqual([{ table: 'oefeningen', op: 'select', col: 'id', val: OEF_HOOFD }])
+  })
+
+  it('revalideert de eigen bibliotheek', async () => {
+    useEngine(makeEngine(ASSISTENT))
+    await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+    expect(revalidatePath).toHaveBeenCalledWith('/oefeningen')
+  })
+
+  it('de kopie is onafhankelijk: wijzigen van de kopie raakt het origineel niet', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+    const { id } = await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+
+    await updateOefening(id, baseInput({ naam: 'Mijn eigen variant' }))
+
+    expect(oefening(m, id)!.naam).toBe('Mijn eigen variant')
+    expect(oefening(m, OEF_HOOFD)!.naam).toBe('Rondo van de hoofdtrainer')
+  })
+
+  it('een kopie van een kopie is net zo los (geen herkomstketen)', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+    const { id: eerste } = await kopieerOefeningNaarBibliotheek(OEF_HOOFD)
+    const { id: tweede } = await kopieerOefeningNaarBibliotheek(eerste)
+
+    expect(new Set([OEF_HOOFD, eerste, tweede]).size).toBe(3)
+    expect(oefening(m, tweede)!.team_id).toBe(ASSISTENT)
+  })
+})
+
+describe('kopieerOefeningNaarBibliotheek — faalpaden', () => {
+  it('een onzichtbare oefening (niet gekoppeld in een eigen team) geeft "Oefening niet gevonden" en schrijft niets', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    await expect(kopieerOefeningNaarBibliotheek(OEF_VREEMD)).rejects.toThrow('Oefening niet gevonden')
+    expect(m.calls.inserts).toHaveLength(0)
+  })
+
+  it('een onbekend id geeft dezelfde melding', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    await expect(kopieerOefeningNaarBibliotheek('0e000000-0000-4000-8000-0000000000ff')).rejects.toThrow('Oefening niet gevonden')
+    expect(m.calls.inserts).toHaveLength(0)
+  })
+
+  it('een id dat geen UUID is geeft dezelfde melding, zonder databasequery', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    for (const id of ['', 'geen-uuid', undefined, null]) {
+      await expect(kopieerOefeningNaarBibliotheek(id as unknown as string), String(id)).rejects.toThrow('Oefening niet gevonden')
+    }
+    expect(m.calls.ops.filter((o) => o.table === 'oefeningen')).toHaveLength(0)
+  })
+
+  it('een leesfout gaat generiek naar de client en zonder ruwe tekst naar de log', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    useEngine(makeEngine(ASSISTENT, { leesFout: true }))
+
+    await expect(kopieerOefeningNaarBibliotheek(OEF_HOOFD)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    const log = consoleError.mock.calls.map((a: unknown[]) => a.join(' ')).join('\n')
+    expect(log).toContain('oefeningLibrary.kopieerOefeningNaarBibliotheek.lezen')
+    expect(log).not.toContain('permission denied')
+    consoleError.mockRestore()
+  })
+
+  it('een schrijffout gaat generiek naar de client en zonder ruwe tekst naar de log', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    useEngine(makeEngine(ASSISTENT, { schrijfFout: true }))
+
+    await expect(kopieerOefeningNaarBibliotheek(OEF_HOOFD)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    const log = consoleError.mock.calls.map((a: unknown[]) => a.join(' ')).join('\n')
+    expect(log).toContain('oefeningLibrary.kopieerOefeningNaarBibliotheek')
+    expect(log).not.toContain('check constraint')
+    consoleError.mockRestore()
+  })
+})
+
+describe('AC 35 — een oefening van een ander is niet te bewerken of te verwijderen', () => {
+  // De scherpste variant uit de story: de aanroeper is HOOFDTRAINER van het
+  // team waarin de oefening gekoppeld staat. Hij ZIET de oefening (via het
+  // plan), maar bezit hem niet.
+  it('de hoofdtrainer kan de gekoppelde oefening van zijn assistent niet wijzigen', async () => {
+    const m = makeEngine(HOOFDTRAINER)
+    useEngine(m)
+
+    await expect(updateOefening(OEF_ASSISTENT, baseInput({ naam: 'Gekaapt' }))).rejects.toThrow('Oefening niet gevonden')
+    expect(oefening(m, OEF_ASSISTENT)!.naam).toBe('Positiespel van de assistent')
+    expect(m.calls.ops.filter((o) => o.op === 'update')).toHaveLength(0)
+  })
+
+  it('de hoofdtrainer kan de gekoppelde oefening van zijn assistent niet verwijderen', async () => {
+    const m = makeEngine(HOOFDTRAINER)
+    useEngine(m)
+
+    await expect(deleteOefening(OEF_ASSISTENT)).rejects.toThrow('Oefening niet gevonden')
+    expect(oefening(m, OEF_ASSISTENT)).toBeDefined()
+    expect(m.calls.ops.filter((o) => o.op === 'delete')).toHaveLength(0)
+  })
+
+  it('en andersom: de assistent kan de gekoppelde oefening van de hoofdtrainer niet wijzigen of verwijderen', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    await expect(updateOefening(OEF_HOOFD, baseInput())).rejects.toThrow('Oefening niet gevonden')
+    await expect(deleteOefening(OEF_HOOFD)).rejects.toThrow('Oefening niet gevonden')
+    expect(oefening(m, OEF_HOOFD)!.naam).toBe('Rondo van de hoofdtrainer')
+  })
+
+  it('de eigenaar kan zijn eigen gekoppelde oefening wél wijzigen, los van zijn teamrechten (BR 54)', async () => {
+    const m = makeEngine(ASSISTENT)
+    useEngine(m)
+
+    await updateOefening(OEF_ASSISTENT, baseInput({ naam: 'Aangepast' }))
+    expect(oefening(m, OEF_ASSISTENT)!.naam).toBe('Aangepast')
+  })
+
+  it('de eigenaarscheck gebruikt ctx.userId, niet het team', async () => {
+    const m = makeEngine(HOOFDTRAINER)
+    useEngine(m)
+
+    await expect(updateOefening(OEF_ASSISTENT, baseInput())).rejects.toThrow('Oefening niet gevonden')
+    expect(m.calls.eqs).toContainEqual({ table: 'oefeningen', op: 'select', col: 'team_id', val: HOOFDTRAINER })
+    expect(m.calls.eqs).not.toContainEqual({ table: 'oefeningen', op: 'select', col: 'team_id', val: TEAM })
   })
 })

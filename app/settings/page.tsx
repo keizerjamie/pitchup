@@ -13,6 +13,7 @@ import ClubColorsSection from '@/components/ClubColorsSection'
 import ImageIcon from '@/components/icons/ImageIcon'
 import GroupIcon from '@/components/icons/GroupIcon'
 import StafSection from '@/components/settings/StafSection'
+import TeamsSection from '@/components/settings/TeamsSection'
 
 // `icon` accepteert ofwel de naam van een glyph uit het zelf-gehoste,
 // gesubsette Material Symbols-icoonfont (`.ms`, app/globals.css:117-140) —
@@ -64,6 +65,13 @@ export default async function SettingsPage() {
   // Binnen de echte Next.js-RSC-pipeline maakt dit geen verschil: Next roept
   // een async server component sowieso gewoon als functie aan.
   const stafSection = isOwner ? await StafSection() : null
+
+  // Teams-sectie (fase 3, brief §4.3, AC 14/49): alle teams waarvan de
+  // gebruiker owner is, ongeacht welk team nu actief is. `isOwner` hierboven
+  // gaat over het ACTIEVE team — dezelfde gate als Staf — dus deze sectie
+  // verschijnt niet voor iemand die elders wel hoofdtrainer is maar nu met
+  // een assistent-team actief is (consistent met de rest van §4.3's tabel).
+  const eigenTeams = ctx?.teams.filter((team) => team.rol === 'owner') ?? []
 
   const defaultAttendance = (settings['default_attendance'] ?? 'present') as 'present' | 'unknown'
   const seasonStart = settings['season_start'] ?? ''
@@ -194,6 +202,15 @@ export default async function SettingsPage() {
             <SectionCard icon={<GroupIcon className="w-5 h-5" />} title={t.staf.section}>
               <p className="text-[13px] text-faint -mt-2">{t.staf.sectionHint}</p>
               {stafSection}
+            </SectionCard>
+          )}
+
+          {/* Teams — owner-only (brief §4.3, fase 3). Los van deleteAccount:
+              hier verwijdert de hoofdtrainer één team, niet zijn account. */}
+          {isOwner && (
+            <SectionCard icon="groups" title={t.teamsBeheer.section}>
+              <p className="text-[13px] text-faint -mt-2">{t.teamsBeheer.sectionHint}</p>
+              <TeamsSection teams={eigenTeams} />
             </SectionCard>
           )}
 

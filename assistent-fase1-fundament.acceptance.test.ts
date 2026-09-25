@@ -77,6 +77,7 @@ import { uploadTeamLogo } from '@/app/actions/team-logo'
 import { saveSettings } from '@/app/actions/settings'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import { GEEN_RECHTEN, ALLE_RECHTEN, rechtenNaarKolommen, type TeamRechten } from '@/lib/team-rechten'
+import { TEAM_TABELLEN } from '@/lib/team-opruimen'
 
 // ────────────────────────────────────────────────
 // Generieke, ECHT filterende Supabase-tabel-engine (kopie, zelfde precedent
@@ -1312,6 +1313,52 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
     expect(m.calls.filter((c) => c.op === 'delete' && c.table === 'teams')).toHaveLength(2)
     expect(deleteUser).toHaveBeenCalledWith(ANDERE_USER)
   })
+
+  // BR 47/48, AC 22 — fase 4. De oefeningen gaan op de EIGENAAR-USER weg
+  // (oefeningen.team_id = user.id), nooit op een team-id. Hier wijkt het
+  // team-id bewust af van de user-id (een team uit fase 2), zodat een filter
+  // op het verkeerde id zichtbaar misgaat.
+  it('verwijdert uitsluitend de eigen oefeningen, ook die gekoppeld staan in een team van een ander; die van anderen blijven', async () => {
+    const m = makeSupabase({
+      user: { id: ANDERE_USER },
+      members: [
+        memberRow(TEAM_A, ANDERE_USER, 'owner', ALLE_RECHTEN),
+        memberRow(VREEMD_TEAM, ANDERE_USER, 'assistent', ALLE_RECHTEN),
+      ],
+      settings: [teamNameRow(TEAM_A, 'JO13-1'), teamNameRow(VREEMD_TEAM, 'Team van iemand anders')],
+      tables: {
+        oefeningen: [
+          { id: 'oef-eigen-1', team_id: ANDERE_USER },
+          { id: 'oef-eigen-2', team_id: ANDERE_USER },
+          // Van de hoofdtrainer van het vreemde team; staat in hetzelfde
+          // trainingsplan als een eigen oefening.
+          { id: 'oef-ander', team_id: TEAM_B },
+        ],
+        training_oefeningen: [
+          { id: 'k1', team_id: VREEMD_TEAM, event_id: 'e-v', oefening_id: 'oef-eigen-1' },
+          { id: 'k2', team_id: VREEMD_TEAM, event_id: 'e-v', oefening_id: 'oef-ander' },
+        ],
+      },
+    })
+    useSupabase(m)
+    const { admin, deleteUser } = makeAdmin()
+    vi.mocked(createAdminClient).mockReturnValue(admin as unknown as ReturnType<typeof createAdminClient>)
+
+    await expect(deleteAccount()).rejects.toThrow('__redirect__:/login')
+
+    expect(m.store.oefeningen.map((r) => r.id)).toEqual(['oef-ander'])
+    // De koppelingen in het VREEMDE team worden niet door de app gewist — dat
+    // is teamdata van een ander (de assistent-lus raakt alleen team_members).
+    // LET OP — GRENS VAN DIT HARNAS: in de database verdwijnt k1 wél, via
+    // `training_oefeningen.oefening_id ... on delete cascade`
+    // (supabase/training-plan.sql). Deze engine bootst geen FK-cascade na;
+    // blok 24 (g) van supabase/team-rls-verificatie.sql bewijst die cascade
+    // tegen de echte database, ook onder de rol van iemand die de koppelingen
+    // in dat team zelf niet mag wissen.
+    expect(m.store.training_oefeningen.map((r) => r.id)).toEqual(['k1', 'k2'])
+    expect(m.calls.filter((c) => c.op === 'delete' && c.table === 'training_oefeningen')).toHaveLength(1)
+    expect(deleteUser).toHaveBeenCalledWith(ANDERE_USER)
+  })
 })
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1319,7 +1366,7 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
 // ════════════════════════════════════════════════════════════════════════
 
 describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
-  it('NIET GEDEKT DOOR VITEST — verificatie loopt via supabase/team-rls-verificatie.sql; dit is alleen een structuurcontrole dat dat bestand bestaat, een niet-schrijvende begin…rollback-transactie is, en de 13 blokken uit §5.1 + addendum §8.7 bevat', () => {
+  it('NIET GEDEKT DOOR VITEST — verificatie loopt via supabase/team-rls-verificatie.sql; dit is alleen een structuurcontrole dat dat bestand bestaat, een niet-schrijvende begin…rollback-transactie is, en de blokken uit §5.1, addendum §8.7 en fase 2 t/m 4 bevat', () => {
     // Vitest praat nooit met een echte database en kan dus niets over RLS-
     // policies bewijzen (brief §5.1). Deze test controleert UITSLUITEND dat
     // het handmatige verificatiescript bestaat en de verwachte structuur heeft
@@ -1337,14 +1384,16 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     expect(inhoud).toMatch(/^rollback;/m)
 
     const blokken = inhoud.match(/^do \$\$/gm) ?? []
-    expect(blokken.length).toBeGreaterThanOrEqual(21)
+    expect(blokken.length).toBeGreaterThanOrEqual(25)
 
-    for (let i = 1; i <= 21; i++) {
+    for (let i = 1; i <= 25; i++) {
       expect(inhoud).toContain(`Blok ${i}`)
     }
 
-    // De fase-2-blokken staan VÓÓR de rollback, anders schrijven ze echt weg.
-    expect(inhoud.indexOf('Blok 21')).toBeLessThan(inhoud.search(/^rollback;/m))
+    // De fase-2- t/m fase-4-blokken staan VÓÓR de rollback, anders schrijven
+    // ze echt weg (blok 22 maakt en verwijdert een team, blok 23 zegt een
+    // lidmaatschap op, blok 24 en 25 maken oefeningen en koppelingen aan).
+    expect(inhoud.indexOf('Blok 25')).toBeLessThan(inhoud.search(/^rollback;/m))
 
     // De vervaltermijn wordt UITSLUITEND in de database beoordeeld; blok 14
     // legt beide randen vast.
@@ -1356,5 +1405,84 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     // én moet hard alarmeren als iemand het ooit ongemerkt dichttimmert.
     expect(inhoud).toMatch(/aanvaarde restrisico/i)
     expect(inhoud).toContain('ONVERWACHT: het aanvaarde restrisico is dichtgetimmerd')
+  })
+  // Fase 3 — blok 22 voert de deletes van deleteTeam uit onder de rol van een
+  // hoofdtrainer. Die lijst staat als tekst in de SQL en als constante in
+  // lib/team-opruimen.ts; loopt hij uit elkaar, dan bewijst blok 22 iets over
+  // een andere opruiming dan de app doet (derde testsmaak: productiecode als
+  // tekst lezen).
+  it('blok 22 wist exact TEAM_TABELLEN, in dezelfde volgorde, en daarna de teams-rij', () => {
+    const inhoud = readFileSync(path.resolve(__dirname, 'supabase', 'team-rls-verificatie.sql'), 'utf8')
+    const blok22 = inhoud.slice(inhoud.indexOf('-- ── Blok 22'), inhoud.indexOf('-- ── Blok 23'))
+    const lijst = blok22.match(/-- TEAM_TABELLEN\s*\n\s*foreach v_tabel in array array\[([^\]]+)\]/)
+    expect(lijst, 'de TEAM_TABELLEN-lus in blok 22').not.toBeNull()
+    const tabellen = lijst![1].split(',').map((t) => t.trim().replace(/^'|'$/g, ''))
+    expect(tabellen).toEqual([...TEAM_TABELLEN])
+    expect(blok22).toContain('delete from teams where id = v_team;')
+    // oefeningen zijn persoonlijk bezit en worden bij deleteTeam nooit gewist.
+    expect(blok22).not.toMatch(/delete from oefeningen/)
+  })
+
+  // Fase 4 — M6. Alleen structuur; het gedrag toetst blok 24 in de SQL Editor.
+  it('M6 (supabase/oefeningen-persoonlijk.sql) verbreedt uitsluitend SELECT en documenteert de kolom', () => {
+    const inhoud = readFileSync(path.resolve(__dirname, 'supabase', 'oefeningen-persoonlijk.sql'), 'utf8')
+    // Alleen de uitvoerbare regels, zonder commentaar.
+    const sql = inhoud.split('\n').filter((r) => !r.trim().startsWith('--')).join('\n')
+
+    expect(sql).toMatch(/^begin;/m)
+    expect(sql).toMatch(/^commit;/m)
+    expect(sql).toMatch(/comment on column public\.oefeningen\.team_id is\s*'EIGENAAR-USER/)
+
+    const policies = sql.match(/create policy[\s\S]*?;/g) ?? []
+    expect(policies).toHaveLength(1)
+    expect(policies[0]).toContain('"oefeningen: zichtbaar via gekoppeld trainingsplan"')
+    expect(policies[0]).toMatch(/for select/)
+    expect(policies[0]).toContain('is_team_member(k.team_id)')
+    // Geen enkele wijziging aan schrijfrechten, kolommen of foreign keys.
+    expect(sql).not.toMatch(/for (insert|update|delete|all)\b/i)
+    expect(sql).not.toMatch(/alter table/i)
+    expect(sql).not.toMatch(/drop policy if exists "oefeningen: own team only"/)
+    // Sectie 3f: M6 weigert te draaien zolang M6b (de eigenaarscheck op het
+    // koppelen) er niet staat — anders opent deze SELECT-policy een leesgat.
+    expect(sql).toMatch(/tablename = 'training_oefeningen'[\s\S]*position\('oefening_koppelbaar' in with_check\)[\s\S]*M6 GESTOPT: M6b ontbreekt/)
+  })
+  // Fase 4 — M6b. Het training_oefeningen-blok staat woordelijk in M2 én M6b,
+  // zodat een herhaalde run van M2 de eigenaarscheck niet stil terugdraait
+  // (zelfde constructie als het attendance-blok in M2/M2b).
+  it('M6b en M2 schrijven letterlijk hetzelfde training_oefeningen-blok', () => {
+    const blok = (bestand: string) => {
+      const tekst = readFileSync(path.resolve(__dirname, 'supabase', bestand), 'utf8')
+      const begin = tekst.indexOf('-- >>> training_oefeningen-blok')
+      const eind = tekst.indexOf('-- <<< einde training_oefeningen-blok')
+      expect(begin, `${bestand}: begin-markering`).toBeGreaterThanOrEqual(0)
+      expect(eind, `${bestand}: eind-markering`).toBeGreaterThan(begin)
+      return tekst.slice(begin, eind)
+    }
+    expect(blok('oefeningen-koppeling-eigenaar.sql')).toBe(blok('team-rls.sql'))
+  })
+
+  it('M6b eist bij INSERT én UPDATE een eigen of al gekoppelde oefening, via een afgeschermde security definer-helper', () => {
+    const inhoud = readFileSync(path.resolve(__dirname, 'supabase', 'oefeningen-koppeling-eigenaar.sql'), 'utf8')
+    const sql = inhoud.split('\n').filter((r) => !r.trim().startsWith('--')).join('\n')
+
+    expect(sql).toMatch(/^begin;/m)
+    expect(sql).toMatch(/^commit;/m)
+    // Security definer met vast search_path; geen execute voor anon.
+    expect(sql).toMatch(/function public\.oefening_koppelbaar\(p_oefening_id uuid, p_team_id uuid\)[\s\S]*security definer set search_path = public/)
+    expect(sql).toMatch(/revoke execute on function public\.oefening_koppelbaar\(uuid, uuid\) from public, anon;/)
+    // Eerst lidmaatschap, dan eigenaar óf al gekoppeld in hetzelfde team.
+    expect(sql).toMatch(/is_team_member\(p_team_id\) and \(/)
+    expect(sql).toContain('o.team_id = auth.uid()')
+    expect(sql).toContain('k.team_id = p_team_id')
+
+    const policy = (naam: string) => sql.match(new RegExp(`create policy "${naam}"[\\s\\S]*?;`))?.[0] ?? ''
+    expect(policy('training_oefeningen: recht mag maken')).toMatch(/for insert\s+with check \(can_edit\(team_id,'training'\) and oefening_koppelbaar\(oefening_id, team_id\)\)/)
+    // UPDATE: de using-kant blijft ALLEEN het Training-recht (beslissing 3:
+    // andermans gekoppelde oefening ontkoppelen/herordenen mag), de with
+    // check krijgt de eigenaarscheck.
+    const wijzigen = policy('training_oefeningen: recht mag wijzigen')
+    expect(wijzigen).toMatch(/using \(can_edit\(team_id,'training'\)\)\s+with check \(can_edit\(team_id,'training'\) and oefening_koppelbaar\(oefening_id, team_id\)\)/)
+    expect(policy('training_oefeningen: recht mag wissen')).not.toContain('oefening_koppelbaar')
+    expect(policy('training_oefeningen: lid mag lezen')).not.toContain('oefening_koppelbaar')
   })
 })
