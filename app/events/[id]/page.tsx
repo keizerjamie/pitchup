@@ -216,7 +216,13 @@ export default async function EventDetailPage({ params }: Props) {
       )}
 
       {canEdit(ctx, 'agenda') && (
-        <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
+        <div className="grid grid-cols-2 gap-3">
+          <Link href={`/events/${id}/edit`}
+            className="w-full py-3 rounded-xl font-semibold text-sm text-center text-ink bg-surface border border-[var(--border-soft)] hover:bg-surface-sunken active:scale-[0.98] transition">
+            {t.event.editEvent}
+          </Link>
+          <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
+        </div>
       )}
     </div>
   )

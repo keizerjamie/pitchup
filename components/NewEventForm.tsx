@@ -11,6 +11,7 @@
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
 import BackButton from '@/components/BackButton'
+import EventFormFields from '@/components/EventFormFields'
 import { createEvent } from '@/app/actions/events'
 import { todayLocal } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
@@ -40,8 +41,6 @@ function NewEventFields() {
       setIsLoading(false)
     }
   }
-
-  const notesPlaceholder = type === 'training' ? t.event.notesTrainingPlaceholder : t.event.notesMatchPlaceholder
 
   const submitLabel = isLoading
     ? t.event.creating
@@ -95,63 +94,10 @@ function NewEventFields() {
               <input type="hidden" name="trainingstype" value={trainingstype} />
             </div>
           )}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.date}</label>
-              <input name="date" type="date" required defaultValue={todayLocal()}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.time}</label>
-              <input name="time" type="time"
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">
-              {t.event.location} <span className="text-faint font-normal">({t.event.optional})</span>
-            </label>
-            <input name="location" type="text" placeholder={t.event.locationPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder-faint" />
-          </div>
-
-          {type === 'match' && (
-            <>
-              <div>
-                <label className="block text-sm font-semibold text-muted mb-1.5">{t.event.opponent}</label>
-                <input name="opponent" type="text" required placeholder={t.event.opponentPlaceholder}
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-event-match focus:ring-2 focus:ring-event-match/30 text-ink placeholder-faint" />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-muted mb-2">{t.event.matchType}</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['friendly', 'league', 'cup'] as const).map((val) => (
-                    <label key={val} className="cursor-pointer">
-                      <input type="radio" name="match_type" value={val} className="sr-only peer" defaultChecked={val === 'league'} />
-                      <div className="peer-checked:bg-event-match peer-checked:text-white peer-checked:border-event-match border-2 border-[var(--border-soft)] rounded-xl p-2 text-center text-xs font-semibold text-muted hover:border-event-match/50 transition-colors">
-                        {t.event.matchTypes[val]}
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-muted mb-2">{t.event.homeAway}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['home', 'away'] as const).map((val) => (
-                    <label key={val} className="cursor-pointer">
-                      <input type="radio" name="home_away" value={val} className="sr-only peer" defaultChecked={val === 'home'} />
-                      <div className="peer-checked:bg-event-match peer-checked:text-white peer-checked:border-event-match border-2 border-[var(--border-soft)] rounded-xl p-3 text-center text-sm font-semibold text-muted hover:border-event-match/50 transition-colors">
-                        {val === 'home' ? t.event.home : t.event.away}
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
+          <EventFormFields
+            type={type}
+            defaults={{ date: todayLocal(), matchType: 'league', homeAway: 'home' }}
+            matchExtra={(
               <div>
                 <label className="block text-sm font-semibold text-muted mb-1.5">
                   {t.event.gatherTime} <span className="text-faint font-normal">({t.event.optional})</span>
@@ -159,17 +105,8 @@ function NewEventFields() {
                 <input name="gather_time" type="time"
                   className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-event-match focus:ring-2 focus:ring-event-match/30 text-ink" />
               </div>
-            </>
-          )}
-
-          <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">
-              {t.event.notes} <span className="text-faint font-normal">({t.event.optional})</span>
-            </label>
-            <textarea name="notes" rows={3}
-              placeholder={notesPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink placeholder-faint resize-none" />
-          </div>
+            )}
+          />
         </div>
 
         <button type="submit" disabled={isLoading}

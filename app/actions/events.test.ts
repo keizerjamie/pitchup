@@ -12,7 +12,7 @@ vi.mock('@/app/actions/settings', () => ({ getDefaultAttendance: vi.fn(async () 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
-import { createEvent, updateGatherTime, updateTrainingstype } from '@/app/actions/events'
+import { createEvent, updateEvent, updateGatherTime, updateTrainingstype } from '@/app/actions/events'
 
 // ────────────────────────────────────────────────
 // Mocks (opzet overgenomen uit app/actions/match-squad.test.ts)
@@ -38,6 +38,11 @@ function makeSupabase(opts: {
   // Laat uitsluitend de DELETE op deze tabel falen. Nodig voor de compensatie:
   // daar moet de events-INSERT slagen en juist de opruim-DELETE mislukken.
   deleteError?: { table: string; error: { code?: string; message: string } }
+  // Eigen uitkomst voor de UPDATE-keten op een tabel. Nodig voor updateEvent:
+  // die leest eerst één rij (`tables.events`, een object) en krijgt van de
+  // update daarna de geraakte rijen terug (een array) — twee vormen die deze
+  // stub, die filters negeert, niet uit één `tables`-waarde kan halen.
+  updateResults?: Record<string, TableResult>
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
@@ -66,8 +71,10 @@ function makeSupabase(opts: {
     c.lte = () => c
     c.order = () => c
     c.insert = (payload: unknown) => { calls.insert.push({ table, payload }); return c }
+    let updating = false
     c.update = (payload: Record<string, unknown>) => {
       calls.update.push({ table, payload, eqs })
+      updating = true
       return c
     }
     let deleting = false
@@ -76,6 +83,7 @@ function makeSupabase(opts: {
       if (deleting && opts.deleteError?.table === table) {
         return { data: null, error: opts.deleteError.error }
       }
+      if (updating && opts.updateResults?.[table]) return opts.updateResults[table]
       return result
     }
     c.maybeSingle = () => Promise.resolve(uitkomst())
@@ -958,5 +966,554 @@ describe('updateGatherTime — weigeringen', () => {
     await expect(updateGatherTime('e1', '13:45')).rejects.toThrow('Geen toegang')
     expect(m.calls.rpc).toHaveLength(0)
     expect(m.calls.update).toHaveLength(0)
+  })
+})
+
+// ────────────────────────────────────────────────
+// createEvent — gedeelde invoervalidatie (parseEventBaseInput, lib/event-input.ts)
+//
+// createEvent en updateEvent delen de controle op datum, tijd en de
+// wedstrijdvelden. De meldingen en de insert-payload van createEvent zijn
+// daarbij gelijk gebleven; alleen de datum is strenger geworden.
+// ────────────────────────────────────────────────
+
+describe('createEvent — gedeelde invoervalidatie', () => {
+  it('houdt de insert-payload van een wedstrijd sleutel-voor-sleutel gelijk', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...WEDSTRIJD, location: 'Veld 2', notes: 'Shirts' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsPayload(m)).toEqual({
+      type: 'match',
+      date: '2026-09-12',
+      time: '14:30',
+      location: 'Veld 2',
+      notes: 'Shirts',
+      team_id: 'team-1',
+      match_type: 'league',
+      opponent: 'DVC',
+      home_away: 'home',
+      gather_time: null,
+    })
+  })
+
+  it('houdt de insert-payload van een training sleutel-voor-sleutel gelijk', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsPayload(m)).toEqual({
+      type: 'training',
+      date: '2026-09-10',
+      time: '19:00',
+      location: null,
+      notes: null,
+      team_id: 'team-1',
+      trainingstype: 'vct',
+    })
+  })
+
+  it('weigert een datum die niet bestaat (strenger dan voorheen) en schrijft niets weg', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...TRAINING, date: '2026-02-30' }))).rejects.toThrow('Ongeldige datum')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it.each([
+    [{ date: '' }, 'Ongeldige datum'],
+    [{ time: '14:30:00' }, 'Ongeldig tijdstip'],
+    [{ match_type: 'onzin' }, 'Ongeldig wedstrijdtype'],
+    [{ home_away: 'onzin' }, 'Ongeldig thuis/uit'],
+  ])('gooit bij %o nog steeds de melding "%s"', async (over, melding) => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...WEDSTRIJD, ...over }))).rejects.toThrow(melding)
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('accepteert nog steeds een wedstrijd zonder tegenstander', async () => {
+    // Verplicht is de tegenstander alleen bij bewerken (updateEvent).
+    const m = eigenTeam()
+    use(m)
+
+    await expect(createEvent(form({ ...WEDSTRIJD, opponent: '' }))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsPayload(m).opponent).toBe('')
+  })
+})
+
+// ────────────────────────────────────────────────
+// updateEvent
+// ────────────────────────────────────────────────
+
+// Wat het bewerkformulier meestuurt: géén `type` — dat komt uit de database.
+const TRAINING_BEWERKT = { date: '2026-09-17', time: '20:15', location: 'Sportpark Zuid', notes: 'Hesjes mee' }
+
+const WEDSTRIJD_BEWERKT = {
+  date: '2026-09-19',
+  time: '15:00',
+  location: 'Veld 2',
+  notes: 'Shirts wassen',
+  opponent: 'VV Noord',
+  match_type: 'cup',
+  home_away: 'away',
+}
+
+// Standaard: eigen event e1 van het gevraagde type; de update raakt één rij.
+function teBewerken(
+  type: 'training' | 'match' | 'meting',
+  over: {
+    lookup?: TableResult
+    update?: TableResult
+    teamMembers?: TableResult
+  } = {},
+) {
+  return makeSupabase({
+    tables: {
+      events: over.lookup ?? { data: { id: 'e1', type }, error: null },
+      ...(over.teamMembers ? { team_members: over.teamMembers } : {}),
+    },
+    updateResults: { events: over.update ?? { data: [{ id: 'e1' }], error: null } },
+  })
+}
+
+function assistentMet(rechten: Record<string, boolean>): TableResult {
+  return {
+    data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', ...rechten }],
+    error: null,
+  }
+}
+
+function eventsUpdates(m: ReturnType<typeof makeSupabase>) {
+  return m.calls.update.filter((u) => u.table === 'events')
+}
+
+// De teamcontext leest vóór élke action team_members en settings; wat telt is
+// of de action zelf een inhoudelijke query deed.
+function inhoudelijkeSelects(m: ReturnType<typeof makeSupabase>) {
+  return m.calls.select.filter((s) => s.table !== 'team_members' && s.table !== 'settings')
+}
+
+function nietsGeschreven(m: ReturnType<typeof makeSupabase>) {
+  expect(m.calls.update).toHaveLength(0)
+  expect(m.calls.insert).toHaveLength(0)
+  expect(m.calls.delete).toHaveLength(0)
+  expect(m.calls.rpc).toHaveLength(0)
+  expect(revalidatePath).not.toHaveBeenCalled()
+}
+
+describe('updateEvent — succes', () => {
+  it('schrijft bij een training exact datum, tijd, locatie en notities', async () => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)).toHaveLength(1)
+    expect(eventsUpdates(m)[0].payload).toEqual({
+      date: '2026-09-17',
+      time: '20:15',
+      location: 'Sportpark Zuid',
+      notes: 'Hesjes mee',
+    })
+  })
+
+  it('schrijft bij een wedstrijd daarnaast tegenstander, wedstrijdtype en thuis/uit', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)).toHaveLength(1)
+    expect(eventsUpdates(m)[0].payload).toEqual({
+      date: '2026-09-19',
+      time: '15:00',
+      location: 'Veld 2',
+      notes: 'Shirts wassen',
+      opponent: 'VV Noord',
+      match_type: 'cup',
+      home_away: 'away',
+    })
+  })
+
+  it('begrenst de update op id, team en het type uit de database', async () => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)[0].eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+      { col: 'type', val: 'training' },
+    ])
+  })
+
+  it('haalt het event team-gescoped op vóór het bijwerken', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    // Eerste events-select = de lookup; de tweede hoort bij de update-keten.
+    expect(m.calls.select.filter((s) => s.table === 'events')[0].eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('zet een leeggemaakte tijd, locatie en notitie op null', async () => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form({ date: '2026-09-17', time: '', location: '', notes: '' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)[0].payload).toEqual({ date: '2026-09-17', time: null, location: null, notes: null })
+  })
+
+  it('slaat ook op als er niets gewijzigd is en als dezelfde aanroep twee keer komt', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    // Geen diff en geen conflictdetectie: twee keer dezelfde, volledige update.
+    expect(eventsUpdates(m)).toHaveLength(2)
+    expect(eventsUpdates(m)[1].payload).toEqual(eventsUpdates(m)[0].payload)
+  })
+
+  it('accepteert een datum in het verleden', async () => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...TRAINING_BEWERKT, date: '2019-03-04' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)[0].payload.date).toBe('2019-03-04')
+  })
+
+  it('raakt geen andere tabel: alleen één update op events, geen insert, delete of rpc', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(m.calls.update).toHaveLength(1)
+    expect(m.calls.update[0].table).toBe('events')
+    expect(m.calls.insert).toHaveLength(0)
+    expect(m.calls.delete).toHaveLength(0)
+    expect(m.calls.rpc).toHaveLength(0)
+  })
+
+  it('is toegestaan voor een assistent met alleen agenda-recht', async () => {
+    const m = teBewerken('training', { teamMembers: assistentMet({ mag_agenda_bewerken: true }) })
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)).toHaveLength(1)
+  })
+
+  const ALTIJD: [string, ...string[]][] = [
+    ['/events'],
+    ['/'],
+    ['/events/e1'],
+    ['/events/e1/edit'],
+    ['/periodisering'],
+    ['/inzichten'],
+    ['/players/[id]', 'page'],
+  ]
+
+  it('revalideert bij een training de gedeelde paden en alle trainingsplannen', async () => {
+    use(teBewerken('training'))
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(vi.mocked(revalidatePath).mock.calls).toEqual([
+      ...ALTIJD,
+      ['/events/[id]/training-plan', 'page'],
+    ])
+  })
+
+  it('revalideert bij een wedstrijd de gedeelde paden en selectie, opstelling en analyse', async () => {
+    use(teBewerken('match'))
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(vi.mocked(revalidatePath).mock.calls).toEqual([
+      ...ALTIJD,
+      ['/events/e1/squad'],
+      ['/events/e1/lineup'],
+      ['/events/e1/analysis'],
+    ])
+  })
+})
+
+describe('updateEvent — autorisatie (gooit)', () => {
+  it('weigert zonder ingelogde gebruiker', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow('Niet ingelogd')
+    nietsGeschreven(m)
+  })
+
+  it('weigert een gebruiker zonder team', async () => {
+    const m = teBewerken('training', { teamMembers: { data: [], error: null } })
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow('Geen team')
+    nietsGeschreven(m)
+  })
+
+  it.each([
+    ['alleen training-recht', { mag_training_bewerken: true }],
+    ['alleen wedstrijd-recht', { mag_wedstrijd_bewerken: true }],
+    ['elk recht behalve agenda', {
+      mag_spelers_bewerken: true,
+      mag_aanwezigheid_bewerken: true,
+      mag_wedstrijd_bewerken: true,
+      mag_training_bewerken: true,
+      mag_periodisering_bewerken: true,
+    }],
+  ])('weigert een assistent met %s — vóór enige inhoudelijke query', async (_naam, rechten) => {
+    const m = teBewerken('match', { teamMembers: assistentMet(rechten) })
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow('Geen toegang')
+
+    expect(inhoudelijkeSelects(m)).toHaveLength(0)
+    nietsGeschreven(m)
+  })
+})
+
+describe('updateEvent — niet gevonden', () => {
+  it('geeft not_found als het event niet bestaat of van een ander team is', async () => {
+    const m = teBewerken('training', { lookup: { data: null, error: null } })
+    use(m)
+
+    await expect(updateEvent('vreemd', form(TRAINING_BEWERKT))).resolves.toEqual({ error: 'not_found' })
+    nietsGeschreven(m)
+  })
+
+  it('geeft not_found voor een legacy meting-event', async () => {
+    const m = teBewerken('meting')
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).resolves.toEqual({ error: 'not_found' })
+    nietsGeschreven(m)
+  })
+
+  it('geeft not_found vóór de invoervalidatie: een onbekend event verraadt niets over de invoer', async () => {
+    const m = teBewerken('training', { lookup: { data: null, error: null } })
+    use(m)
+
+    await expect(updateEvent('vreemd', form({ date: 'onzin' }))).resolves.toEqual({ error: 'not_found' })
+  })
+
+  it('geeft not_found als de update nul rijen raakt, en maakt nooit een nieuwe rij', async () => {
+    const m = teBewerken('training', { update: { data: [], error: null } })
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).resolves.toEqual({ error: 'not_found' })
+
+    expect(eventsUpdates(m)).toHaveLength(1)
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('geeft not_found als de update geen rijen teruggeeft (data null)', async () => {
+    const m = teBewerken('match', { update: { data: null, error: null } })
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).resolves.toEqual({ error: 'not_found' })
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateEvent — ongeldige invoer', () => {
+  it.each([
+    ['lege datum', { date: '' }, 'invalid_date'],
+    ['niet-bestaande datum', { date: '2026-02-30' }, 'invalid_date'],
+    ['niet-bestaande maand', { date: '2026-13-01' }, 'invalid_date'],
+    ['uur buiten bereik', { time: '25:00' }, 'invalid_time'],
+    ['tijd met seconden, zoals Postgres die teruggeeft', { time: '14:30:00' }, 'invalid_time'],
+    ['tijd zonder leidende nullen', { time: '9:5' }, 'invalid_time'],
+    ['onbekend wedstrijdtype', { match_type: 'onzin' }, 'invalid_match_type'],
+    ['onbekende thuis/uit', { home_away: 'onzin' }, 'invalid_home_away'],
+    ['lege tegenstander', { opponent: '' }, 'opponent_required'],
+    ['tegenstander van alleen spaties', { opponent: '   ' }, 'opponent_required'],
+  ])('wedstrijd, %s → %s; er wordt niets geschreven', async (_naam, over, code) => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...WEDSTRIJD_BEWERKT, ...over }))).resolves.toEqual({ error: code })
+    nietsGeschreven(m)
+  })
+
+  it.each([
+    ['lege datum', { date: '' }, 'invalid_date'],
+    ['tijd met seconden', { time: '14:30:00' }, 'invalid_time'],
+    ['tekst als tijd', { time: 'abc' }, 'invalid_time'],
+  ])('training, %s → %s; er wordt niets geschreven', async (_naam, over, code) => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...TRAINING_BEWERKT, ...over }))).resolves.toEqual({ error: code })
+    nietsGeschreven(m)
+  })
+
+  it('geeft opponent_required ook als het veld helemaal ontbreekt', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form({ date: '2026-09-19', match_type: 'cup', home_away: 'home' })))
+      .resolves.toEqual({ error: 'opponent_required' })
+    nietsGeschreven(m)
+  })
+
+  it('meldt een ongeldig wedstrijdtype vóór de ontbrekende tegenstander', async () => {
+    use(teBewerken('match'))
+
+    await expect(updateEvent('e1', form({ ...WEDSTRIJD_BEWERKT, opponent: '', match_type: 'onzin' })))
+      .resolves.toEqual({ error: 'invalid_match_type' })
+  })
+})
+
+describe('updateEvent — databasefout (gooit)', () => {
+  it('geeft een generieke melding bij een fout op de lookup en lekt niets', async () => {
+    const m = teBewerken('training', {
+      lookup: { data: null, error: { code: '42501', message: 'permission denied for table events' } },
+    })
+    use(m)
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('events.updateEvent.lookup')
+    expect(logged()).toContain('42501')
+    expect(logged()).not.toContain('permission denied')
+    nietsGeschreven(m)
+  })
+
+  it('geeft een generieke melding bij een fout op de update en lekt niets', async () => {
+    const m = teBewerken('match', {
+      update: { data: null, error: { code: '23514', message: 'new row violates check constraint "events_match_type_check"' } },
+    })
+    use(m)
+
+    await expect(updateEvent('e1', form(WEDSTRIJD_BEWERKT))).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('[events.updateEvent]')
+    expect(logged()).toContain('23514')
+    expect(logged()).not.toContain('violates check constraint')
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('redirect niet na een databasefout', async () => {
+    use(teBewerken('training', {
+      update: { data: null, error: { code: '40001', message: 'deadlock detected on events' } },
+    }))
+
+    await expect(updateEvent('e1', form(TRAINING_BEWERKT))).rejects.not.toThrow('__redirect__')
+  })
+})
+
+describe('updateEvent — kolom-whitelist', () => {
+  const MEEGESTUURD = {
+    id: 'ander-event',
+    type: 'match',
+    team_id: 'ander-team',
+    gather_time: '13:45',
+    trainingstype: 'teamtactisch',
+    doelstelling: 'Omschakelen',
+    goals_for: '3',
+    goals_against: '1',
+    created_at: '2020-01-01T00:00:00Z',
+  }
+
+  it('neemt meegestuurde velden buiten de whitelist niet over bij een wedstrijd', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...WEDSTRIJD_BEWERKT, ...MEEGESTUURD, type: 'training' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(Object.keys(eventsUpdates(m)[0].payload).sort()).toEqual(
+      ['date', 'home_away', 'location', 'match_type', 'notes', 'opponent', 'time'],
+    )
+  })
+
+  it('neemt ze ook niet over bij een training, en laat de wedstrijdvelden weg', async () => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...WEDSTRIJD_BEWERKT, ...MEEGESTUURD })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(Object.keys(eventsUpdates(m)[0].payload).sort()).toEqual(['date', 'location', 'notes', 'time'])
+  })
+
+  it('gebruikt het type uit de database, niet het meegestuurde type', async () => {
+    // Een training blijft een training: het type-filter van de update én de
+    // gelezen velden volgen de rij, ook als de FormData 'match' zegt.
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...WEDSTRIJD_BEWERKT, type: 'match' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)[0].eqs).toContainEqual({ col: 'type', val: 'training' })
+    expect(eventsUpdates(m)[0].payload).not.toHaveProperty('type')
+    expect(eventsUpdates(m)[0].payload).not.toHaveProperty('opponent')
+  })
+
+  it('gebruikt het id uit het argument en het team uit de context, niet uit de FormData', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...WEDSTRIJD_BEWERKT, ...MEEGESTUURD, type: 'match' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)[0].eqs).toEqual([
+      { col: 'id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+      { col: 'type', val: 'match' },
+    ])
+  })
+
+  it('negeert ongeldige wedstrijdvelden bij een training in plaats van ze af te keuren', async () => {
+    const m = teBewerken('training')
+    use(m)
+
+    await expect(updateEvent('e1', form({ ...TRAINING_BEWERKT, opponent: '', match_type: 'onzin', home_away: 'onzin' })))
+      .rejects.toThrow('__redirect__:/events/e1')
+
+    expect(eventsUpdates(m)).toHaveLength(1)
+  })
+
+  it('kapt te lange tekst af op 200, 2000 en 100 tekens', async () => {
+    const m = teBewerken('match')
+    use(m)
+
+    await expect(updateEvent('e1', form({
+      ...WEDSTRIJD_BEWERKT,
+      location: 'a'.repeat(201),
+      notes: 'b'.repeat(2001),
+      opponent: 'c'.repeat(101),
+    }))).rejects.toThrow('__redirect__:/events/e1')
+
+    const payload = eventsUpdates(m)[0].payload
+    expect(payload.location).toBe('a'.repeat(200))
+    expect(payload.notes).toBe('b'.repeat(2000))
+    expect(payload.opponent).toBe('c'.repeat(100))
   })
 })

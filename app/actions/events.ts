@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { EventType, MatchType, HomeAway, VALID_TRAININGSTYPES, type TrainingsType } from '@/lib/types'
+import { EventType, VALID_TRAININGSTYPES, type TrainingsType } from '@/lib/types'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { assertOwnMatchEvent, assertOwnTrainingEvent } from '@/lib/authz'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
@@ -11,15 +11,17 @@ import { genericError, logError, rpcEventError } from '@/lib/errors'
 import { isTimeString } from '@/lib/utils'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
+import {
+  EVENT_INPUT_ERROR_MESSAGES,
+  parseEventBaseInput,
+  type EventUpdateErrorCode,
+} from '@/lib/event-input'
 
 // Er maakt geen enkele code nog 'meting'-events aan: de nulmeting van de
 // periodisering leeft sinds de per-onderdeel-migratie in de eigen tabel
 // categorie_metingen (app/actions/periodisering.ts). Bestaande meting-events
 // blijven staan en zijn nog leesbaar via het legacy meting-scherm.
 const VALID_EVENT_TYPES: EventType[] = ['training', 'match']
-const VALID_MATCH_TYPES: MatchType[] = ['friendly', 'league', 'cup']
-const VALID_HOME_AWAY: HomeAway[] = ['home', 'away']
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export async function createEvent(formData: FormData) {
   const supabase = await createClient()
@@ -29,41 +31,33 @@ export async function createEvent(formData: FormData) {
   const type = formData.get('type') as EventType
   if (!VALID_EVENT_TYPES.includes(type)) throw new Error('Ongeldig event type')
 
-  const date = formData.get('date') as string
-  if (!date || !DATE_RE.test(date)) throw new Error('Ongeldige datum')
+  // Datum, tijd, locatie, notities en de wedstrijdvelden: gedeeld met
+  // updateEvent via parseEventBaseInput (lib/event-input.ts).
+  const parsed = parseEventBaseInput(formData, type === 'match' ? 'match' : 'training')
+  if (!parsed.ok) throw new Error(EVENT_INPUT_ERROR_MESSAGES[parsed.code])
+  const { date, time, location, notes, match } = parsed.value
 
-  const timeRaw = (formData.get('time') as string) || null
-  if (timeRaw && !isTimeString(timeRaw)) throw new Error('Ongeldig tijdstip')
-
-  const location = ((formData.get('location') as string) || null)?.slice(0, 200) ?? null
-  const notes = ((formData.get('notes') as string) || null)?.slice(0, 2000) ?? null
-
-  const payload: Record<string, unknown> = { type, date, time: timeRaw, location, notes, team_id: ctx.teamId }
+  const payload: Record<string, unknown> = { type, date, time, location, notes, team_id: ctx.teamId }
 
   if (type === 'training') {
     const trainingstype = formData.get('trainingstype') as TrainingsType
     // Ontbrekend veld = VCT (de DB-default), een ONGELDIGE waarde wordt
     // geweigerd — nooit stil naar de default terugvallen, zelfde lijn als
-    // match_type hieronder.
+    // match_type in parseEventBaseInput.
     if (formData.has('trainingstype') && !VALID_TRAININGSTYPES.includes(trainingstype)) {
       throw new Error('Ongeldig trainingstype')
     }
     payload.trainingstype = formData.has('trainingstype') ? trainingstype : 'vct'
   }
 
-  if (type === 'match') {
-    const match_type = formData.get('match_type') as MatchType
-    if (!VALID_MATCH_TYPES.includes(match_type)) throw new Error('Ongeldig wedstrijdtype')
-    const home_away = formData.get('home_away') as HomeAway
-    if (!VALID_HOME_AWAY.includes(home_away)) throw new Error('Ongeldig thuis/uit')
-    const opponent = ((formData.get('opponent') as string) || '').slice(0, 100)
+  if (match) {
     // Verzameltijd hoort alleen bij een wedstrijd; een training krijgt de kolom
     // daarom nooit mee, ook niet als het veld toch wordt meegestuurd.
     const gatherTimeRaw = (formData.get('gather_time') as string) || null
     if (gatherTimeRaw && !isTimeString(gatherTimeRaw)) throw new Error('Ongeldig tijdstip')
-    payload.match_type = match_type
-    payload.opponent = opponent
-    payload.home_away = home_away
+    payload.match_type = match.match_type
+    payload.opponent = match.opponent
+    payload.home_away = match.home_away
     payload.gather_time = gatherTimeRaw
   }
 
@@ -223,6 +217,107 @@ export async function updateTrainingstype(eventId: string, trainingstype: Traini
   revalidatePath('/')
   revalidatePath('/periodisering')
   revalidatePath('/inzichten')
+}
+
+// Bewerkt de velden van één training of wedstrijd die ook bij het aanmaken
+// worden ingevuld: datum, tijd, locatie, notities en — bij een wedstrijd —
+// tegenstander, wedstrijdtype en thuis/uit. Het type zelf, de verzameltijd, het
+// trainingstype, de doelstelling en de uitslag blijven buiten bereik; die
+// laatste vier hebben een eigen action onder een eigen recht.
+//
+// Twee soorten uitkomst. Een VERWACHTE fout (ongeldige invoer, event weg) komt
+// terug als { error: code }, zodat het formulier de invoer kan laten staan en
+// een vertaalde melding toont. Autorisatie- en technische fouten worden
+// gegooid, net als in de andere actions hier. Bij succes keert de functie niet
+// terug: redirect() gooit.
+export async function updateEvent(
+  id: string,
+  formData: FormData,
+): Promise<{ error: EventUpdateErrorCode }> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  // Onderdeel AGENDA, vóór elke inhoudelijke query: dezelfde velden als
+  // createEvent, dus hetzelfde recht. Dit is ook wat de events-policy toetst.
+  assertCanEdit(ctx, 'agenda')
+
+  // Het type komt uit de database en nooit uit de FormData: zo kan een
+  // meegestuurd `type` een training niet in een wedstrijd veranderen, en
+  // bepaalt de rij zelf welke velden gelezen worden.
+  const { data: event, error: lookupError } = await supabase
+    .from('events')
+    .select('id, type')
+    .eq('id', id)
+    .eq('team_id', ctx.teamId)
+    .maybeSingle()
+
+  if (lookupError) throw genericError('events.updateEvent.lookup', lookupError)
+  // Eén uitkomst voor "bestaat niet", "ander team" en "legacy meting": de
+  // melding verraadt niet welke van de drie het was.
+  if (!event || (event.type !== 'training' && event.type !== 'match')) return { error: 'not_found' }
+  const type: 'training' | 'match' = event.type
+
+  const parsed = parseEventBaseInput(formData, type)
+  if (!parsed.ok) return { error: parsed.code }
+  const { date, time, location, notes, match } = parsed.value
+
+  // Alleen hier verplicht: createEvent accepteert een lege tegenstander en
+  // blijft op dat punt bewust ongewijzigd.
+  if (match && match.opponent.trim() === '') return { error: 'opponent_required' }
+
+  // Expliciete kolom-whitelist, geen spread van invoer: de events-policy
+  // begrenst wél de rij maar niet de kolommen, dus dit objectliteral is de
+  // enige plek die bepaalt wat er geschreven mag worden. team_id en type staan
+  // er bewust niet in.
+  const payload = match
+    ? {
+        date,
+        time,
+        location,
+        notes,
+        opponent: match.opponent,
+        match_type: match.match_type,
+        home_away: match.home_away,
+      }
+    : { date, time, location, notes }
+
+  // Het type-filter sluit de race uit waarin de rij tussen lookup en update
+  // van soort is veranderd. `.select('id')` maakt zichtbaar hoeveel rijen er
+  // geraakt zijn: een update op nul rijen is bij PostgREST geen fout.
+  const { data: updated, error } = await supabase
+    .from('events')
+    .update(payload)
+    .eq('id', id)
+    .eq('team_id', ctx.teamId)
+    .eq('type', type)
+    .select('id')
+
+  if (error) throw genericError('events.updateEvent', error)
+  // Tussentijds verwijderd of het recht kwijtgeraakt: niets geschreven, en
+  // nooit alsnog een insert.
+  if (!updated || updated.length === 0) return { error: 'not_found' }
+
+  // Datum en tijd sturen de agenda, het dashboard, de spelerspagina's en —
+  // via de datum — de cyclusweek en stap-telling van de periodisering.
+  revalidatePath('/events')
+  revalidatePath('/')
+  revalidatePath(`/events/${id}`)
+  revalidatePath(`/events/${id}/edit`)
+  revalidatePath('/periodisering')
+  revalidatePath('/inzichten')
+  // Dynamisch segment ⇒ route-patroon + type 'page', zelfde vorm als
+  // saveCyclusWeekCorrectie in app/actions/periodisering.ts.
+  revalidatePath('/players/[id]', 'page')
+  if (type === 'match') {
+    revalidatePath(`/events/${id}/squad`)
+    revalidatePath(`/events/${id}/lineup`)
+    revalidatePath(`/events/${id}/analysis`)
+  } else {
+    // Alle trainingsplannen, niet alleen dit ene: een verschoven datum
+    // verandert ook de stap van de trainingen erna.
+    revalidatePath('/events/[id]/training-plan', 'page')
+  }
+
+  redirect(`/events/${id}`)
 }
 
 export async function deleteEvent(id: string) {
