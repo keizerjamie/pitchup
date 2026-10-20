@@ -405,7 +405,7 @@ describe('AC2 — klik roept window.print() precies één keer aan', () => {
     }
   })
 
-  it('edge case: dubbelklik roept window.print() precies 1× aan (PrintButton heeft sinds het aanwezigheidsoverzicht een dubbelklik-guard)', () => {
+  it('edge case: dubbelklik roept window.print() precies 2× aan (bewust geen eigen guard)', () => {
     const printSpy = stubPrint()
     render(
       <DictProvider dict={nl}>
@@ -415,7 +415,7 @@ describe('AC2 — klik roept window.print() precies één keer aan', () => {
     const button = screen.getByRole('button', { name: nl.trainingPlan.print })
     fireEvent.click(button)
     fireEvent.click(button)
-    expect(printSpy).toHaveBeenCalledTimes(1)
+    expect(printSpy).toHaveBeenCalledTimes(2)
   })
 })
 

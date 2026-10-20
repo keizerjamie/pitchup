@@ -67,29 +67,4 @@ describe('PrintButton', () => {
     fireEvent.click(button)
     expect(printSpy).not.toHaveBeenCalled()
   })
-
-  describe('dubbelklik-guard', () => {
-    beforeEach(() => { vi.useFakeTimers() })
-    afterEach(() => { vi.useRealTimers() })
-
-    it('een dubbelklik roept window.print() één keer aan', () => {
-      renderButton()
-      const button = screen.getByRole('button', { name: nl.trainingPlan.print })
-      fireEvent.click(button)
-      fireEvent.click(button)
-      expect(printSpy).toHaveBeenCalledTimes(1)
-    })
-
-    it('blijft geblokkeerd tot de timeout (500 ms) verstrijkt; daarna kan er weer geprint worden', () => {
-      renderButton()
-      const button = screen.getByRole('button', { name: nl.trainingPlan.print })
-      fireEvent.click(button)
-      vi.advanceTimersByTime(499)
-      fireEvent.click(button)
-      expect(printSpy).toHaveBeenCalledTimes(1)
-      vi.advanceTimersByTime(1)
-      fireEvent.click(button)
-      expect(printSpy).toHaveBeenCalledTimes(2)
-    })
-  })
 })
