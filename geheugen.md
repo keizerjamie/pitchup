@@ -3723,7 +3723,9 @@ Feature-factory-keten; werkdocumenten 01–06 in `~/.claude/projects/-Users-jami
   noemer 0 → "—".
 - Print: `AanwezigheidsOverzichtPrint` (dual markup, `.overzicht-tabel` in ongelaagd print-blok,
   `thead` table-header-group, `tr` break-inside avoid). Alleen naam + cijfers (privacy). `PrintButton`
-  heeft nu app-breed een dubbelklik-guard (500 ms). `PeriodeFilter` kreeg optionele `hrefVoor`.
+  kreeg een dubbelklik-guard (500 ms) — **teruggedraaid in `6f5b537`**: daarna deden alle printknoppen
+  niets meer in de iOS-beginscherm-app (standalone). Niets meer aan `PrintButton` toevoegen; iOS-print is
+  niet in jsdom/Chromium te testen, alleen op de echte iPhone. `PeriodeFilter` kreeg optionele `hrefVoor`.
 
 ### Migraties en livegang
 - `blessure-status.sql` (A-1) + `aanwezigheidsoverzicht.sql` (B-1) gedraaid op 2026-10-20 vóór de push;
