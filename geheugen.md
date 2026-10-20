@@ -3686,3 +3686,48 @@ gekoppelde data via cascade. Werkdocumenten 01–05 in
 Typecheck en lint groen; 147 testbestanden, 3755 tests, alleen de al langer rode
 `cyclusweek-correctie` AC1/AC12 falen. Open: rooktest in productie (knop blijft "Opslaan..." tot
 de navigatie; oude wedstrijd met `match_type`/`home_away` NULL vraagt eerst een keuze).
+
+## Blessure als eigen status + aanwezigheidsoverzicht op /players (2026-10-20, commit `f5943ba`, live)
+Feature-factory-keten; werkdocumenten 01–06 in `~/.claude/projects/-Users-jamiekeizer--claude/ff-aanwezigheid/`
+(story met 15 bindende besluiten, brief, besluiten V1–V9, bouwer-samenvattingen).
+
+### Fase A — `'injured'` als aanwezigheidsstatus
+- `AttendanceStatus = 'present' | 'absent' | 'injured' | 'unknown'`; CHECK `attendance_status_check`.
+  De vlag `attendance.injury_set` is vervangen (en wordt in A-2 gedropt). `players.injured` blijft:
+  "is NU geblesseerd" (badges, dashboard, `buildAttendanceRow`).
+- **Waarom:** de oude `markRecovered` wiste `injury_set` ook op verleden-events → blessurehistorie
+  verdween. Nu raakt `markRecovered` alleen events vanaf vandaag: `'injured'` zonder periode → default
+  (of gastregel), `'injured'` mét `absence_period_id` → `'absent'`. Verleden blijft `'injured'`.
+- `markInjured` upsert `'injured'` op ALLE events vanaf vandaag, ook handmatig afwezige (V2, bewust).
+  Upsert zonder `absence_period_id` in de payload → herkomst blijft staan (blessure wint van periode).
+- `resolveAttendanceStatus` volgorde: `injuredOnDate` → gast → periode → default. `AttendanceRowInput`
+  heeft **verplichte** `eventDate`/`today`: een nieuw event in het verleden krijgt GEEN `'injured'`.
+  Bulk-wedstrijden krijgen de blessure nu wél mee (was een bewust open gat).
+- `markAllPresent` slaat `'injured'` over (`.neq('status','injured')`, + optimistische UI).
+- `markAbsentForPeriod` / `revokeAbsencePeriod` laten `'injured'` staan (alleen herkomst wijzigt).
+- **Besluit 5:** in ALLE bestaande cijfers telt `'injured'` als afwezig (drie inzichten-RPC's,
+  dashboard `statsFor`/opkomsttegel, `vastAfwezig` in `lib/aanwezigheid-telling.ts`), zodat percentages
+  identiek bleven. Eigen telling "Geblesseerd" op eventpagina, AttendanceSummary (scherm+print), profiel.
+- **Gotcha:** `Record<AttendanceStatus, …>` (Availability.tsx) is een runtime-crash, geen typefout,
+  zodra een nieuwe enumwaarde in de data staat. Enum-uitbreiding = backend en frontend in één push.
+- **Gotcha:** `supabase/inzichten-team-id.sql` NIET opnieuw draaien — zet de RPC's terug naar
+  "alleen absent". Moet het toch: daarna `blessure-status.sql` opnieuw (idempotent, ook na A-2).
+- Testengine-les: `.is()`/`.not(col,'is',null)` moeten een ontbrekende sleutel als NULL behandelen.
+
+### Fase B — overzicht
+- `/players?weergave=aanwezigheid` (+ `&periode=4w|8w`, ongeldig → seizoen). Lijstweergave doet géén
+  settings-call of RPC. RPC `aanwezigheidsoverzicht_per_speler(p_team_id, p_start, p_end)` →
+  aanwezig/afwezig/geblesseerd apart; venster `verledenSeizoensVenster(periodeVenster(...), todayLocal())`.
+- `lib/aanwezigheidsoverzicht.ts`: `bouwAanwezigheidsoverzicht` (actief + regular, alfabetisch,
+  speler zonder rij → 0/0/0), `pctIncl = P/(P+A+B)` (= /inzichten-percentage), `pctZonder = P/(P+A)`,
+  noemer 0 → "—".
+- Print: `AanwezigheidsOverzichtPrint` (dual markup, `.overzicht-tabel` in ongelaagd print-blok,
+  `thead` table-header-group, `tr` break-inside avoid). Alleen naam + cijfers (privacy). `PrintButton`
+  heeft nu app-breed een dubbelklik-guard (500 ms). `PeriodeFilter` kreeg optionele `hrefVoor`.
+
+### Migraties en livegang
+- `blessure-status.sql` (A-1) + `aanwezigheidsoverzicht.sql` (B-1) gedraaid op 2026-10-20 vóór de push;
+  controles klopten (p/a per team gelijk, 1318 rijen → injured, 2× present+injury_set bleven present,
+  M3b was al gedraaid). Vercel-deploy `f5943ba` geslaagd.
+- **Open:** rooktest in productie; daarna `blessure-status-opruimen.sql` (A-2, dropt `injury_set`;
+  eerst de detectiequery, verwacht 0 rijen). Printpreview (thead-herhaling, Safari/iOS) niet geverifieerd.
