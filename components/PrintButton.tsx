@@ -1,13 +1,28 @@
 'use client'
 
+import { useRef } from 'react'
 import { useDict } from '@/lib/i18n-context'
 
 export default function PrintButton({ className = '', disabled = false }: { className?: string; disabled?: boolean }) {
   const t = useDict()
+  // Guard tegen een dubbele printdialoog (dubbelklik of dubbele tik): na de
+  // eerste klik is onClick een no-op tot de timeout hem weer vrijgeeft.
+  // window.print() blokkeert in veel browsers, dus de vrijgave gebeurt pas
+  // nadat de dialoog is gesloten of 500 ms voorbij is.
+  const bezig = useRef(false)
+  function handleClick() {
+    if (bezig.current) return
+    bezig.current = true
+    try {
+      window.print()
+    } finally {
+      setTimeout(() => { bezig.current = false }, 500)
+    }
+  }
   return (
     <button
       type="button"
-      onClick={() => window.print()}
+      onClick={handleClick}
       disabled={disabled}
       className={`print:hidden inline-flex items-center gap-2 h-10 px-4 rounded-xl bg-surface text-muted hover:text-ink text-sm font-semibold transition-colors active:scale-95 flex-shrink-0 disabled:opacity-60 ${className}`}
       style={{ border: '1px solid var(--border-soft)' }}

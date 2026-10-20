@@ -1088,6 +1088,28 @@ body::after {
     color: var(--club-secondary, #009966); font-weight: 800;
   }
   .rapport-voet-merk img { width: 3.5mm; height: 3.5mm; object-fit: contain; }
+
+  /* Aanwezigheidsoverzicht (/players?weergave=aanwezigheid). Ongelaagde
+     klassen in dit ongelaagde print-blok, geen print:-utilities: die verliezen
+     van ongelaagde regels (zie geheugen.md). De kop herhaalt per pagina en een
+     rij wordt nooit doormidden gesneden. */
+  .overzicht-tabel { width: 100%; border-collapse: collapse; margin-top: 6mm; font-size: 8.5pt; }
+  .overzicht-tabel thead { display: table-header-group; }
+  .overzicht-tabel tr { break-inside: avoid; }
+  .overzicht-tabel th,
+  .overzicht-tabel td {
+    padding: 1.2mm 1.5mm;
+    border-bottom: 0.2mm solid #e5e7eb;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .overzicht-tabel th {
+    color: var(--club-primary, #004f3b);
+    font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.06em;
+    vertical-align: bottom;
+  }
+  .overzicht-tabel .overzicht-naam { text-align: left; }
+  .overzicht-uitleg { margin-top: 3mm; font-size: 7pt; color: #6b7280; }
 }
 
 

@@ -53,7 +53,7 @@ vi.mock('next/headers', () => ({
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { createClient } from '@/lib/supabase/server'
-import { markAbsentForPeriod, revokeAbsencePeriod, updateAttendance } from '@/app/actions/attendance'
+import { markAbsentForPeriod, markAllPresent, revokeAbsencePeriod, updateAttendance } from '@/app/actions/attendance'
 import { createEvent } from '@/app/actions/events'
 import { generateSeasonTrainings } from '@/app/actions/settings'
 import { markInjured, markRecovered } from '@/app/actions/players'
@@ -224,8 +224,19 @@ function makeDb(seed: Record<string, Row[]> = {}) {
         filters.push((r) => vals.includes(r[col]))
         return chain
       },
+      // Een ontbrekende sleutel is in Postgres de kolomdefault NULL (een
+      // upsert die een nieuwe rij aanmaakt zonder absence_period_id); `?? null`
+      // bootst dat na voor IS / IS NOT.
       is: (col: string, val: unknown) => {
-        filters.push((r) => r[col] === val)
+        filters.push((r) => (r[col] ?? null) === val)
+        return chain
+      },
+      // Alleen de vorm die de code gebruikt: `.not(col, 'is', null)`
+      // (markRecovered, rijen MET afmeldperiode). Een andere operator is een
+      // testfout en mag niet stil "alles matcht" opleveren.
+      not: (col: string, op: string, val: unknown) => {
+        if (op !== 'is') throw new Error(`mock: .not(${col}, '${op}') niet nagebootst`)
+        filters.push((r) => (r[col] ?? null) !== val)
         return chain
       },
       order: (col: string, opts: { ascending?: boolean; nullsFirst?: boolean } = {}) => {
@@ -337,7 +348,6 @@ function attendanceRow(overrides: Row = {}): Row {
     event_id: 'e1',
     player_id: 'p1',
     status: 'unknown',
-    injury_set: false,
     absence_period_id: null,
     created_at: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -991,9 +1001,9 @@ describe('AC22 — generateSeasonTrainings past afmeldperiodes toe op elk gegene
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC23 — markRecovered respecteert een lopende afmeldperiode: een rij met
-// absence_period_id blijft absent (alleen injury_set wordt opgeschoond); een
-// rij zonder absence_period_id gaat terug naar default (bestaand gedrag)
+// AC23 — markRecovered respecteert een lopende afmeldperiode: een toekomstige
+// 'injured'-rij met absence_period_id wordt 'absent'; een rij zonder
+// absence_period_id gaat terug naar default
 // ═══════════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════════
 // HER-VERIFICATIE (fix-ronde) — AC21-uitbreiding: een door de periode
@@ -1001,8 +1011,8 @@ describe('AC22 — generateSeasonTrainings past afmeldperiodes toe op elk gegene
 // 'present' of 'unknown' (via updateAttendance, vóórdat de periode wordt
 // ingetrokken) blijft bij intrekken op die handmatig gezette status staan —
 // alleen de herkomst (absence_period_id) wordt gewist. Dit is de nieuwe
-// uitzondering in revokeAbsencePeriod (attendance.ts:232):
-// `row.injury_set || row.status !== 'absent'`. Anders dan AC21 hierboven
+// uitzondering in revokeAbsencePeriod:
+// `row.status !== 'absent'` (dat dekt ook 'injured'). Anders dan AC21 hierboven
 // (waar de rij van meet af aan buiten de periode-actie om is gezaaid) wordt
 // deze rij hier ECHT door de periode-actie zelf op absent gezet, en pas
 // daarna door de coach overruled — dat maakt dit een écht van-buitenaf
@@ -1092,7 +1102,7 @@ describe('AC8-verscherping — een kalendarisch ongeldige datum (bv. 30 februari
 })
 
 describe('AC23 — markRecovered respecteert een lopende afmeldperiode', () => {
-  it('een toekomstige rij MET absence_period_id blijft absent; alleen injury_set wordt opgeschoond', async () => {
+  it('een toekomstige injured-rij MET absence_period_id wordt absent: de periode dekt de datum nog', async () => {
     const x = playerRow({ id: 'px', injured: true })
     const period = periodRow({ id: randomUUID(), team_id: TEAM, player_id: 'px', from_date: '2099-01-01', to_date: '2099-12-31' })
     const future = eventRow({ id: 'e-future', date: '2099-06-01' })
@@ -1104,8 +1114,7 @@ describe('AC23 — markRecovered respecteert een lopende afmeldperiode', () => {
         attendanceRow({
           event_id: 'e-future',
           player_id: 'px',
-          status: 'absent',
-          injury_set: true,
+          status: 'injured',
           absence_period_id: period.id as string,
         }),
       ],
@@ -1116,12 +1125,12 @@ describe('AC23 — markRecovered respecteert een lopende afmeldperiode', () => {
     await markRecovered('px')
 
     const row = attendanceFor(db, 'e-future', 'px')
-    expect(row?.status).toBe('absent') // blijft absent: de periode is leidend
-    expect(row?.injury_set).toBe(false) // wél opgeschoond
+    expect(row?.status).toBe('absent') // de periode is leidend
     expect(row?.absence_period_id).toBe(period.id) // herkomst blijft staan
+    expect(db.tables.players.find((p) => p.id === 'px')?.injured).toBe(false)
   })
 
-  it('een toekomstige rij ZONDER absence_period_id (pure blessure) gaat terug naar team-default (bestaand gedrag)', async () => {
+  it('een toekomstige injured-rij ZONDER absence_period_id (pure blessure) gaat terug naar team-default', async () => {
     const y = playerRow({ id: 'py', injured: true })
     const future = eventRow({ id: 'e-future2', date: '2099-06-01' })
     const db = makeDb({
@@ -1131,8 +1140,7 @@ describe('AC23 — markRecovered respecteert een lopende afmeldperiode', () => {
         attendanceRow({
           event_id: 'e-future2',
           player_id: 'py',
-          status: 'absent',
-          injury_set: true,
+          status: 'injured',
           absence_period_id: null,
         }),
       ],
@@ -1144,8 +1152,44 @@ describe('AC23 — markRecovered respecteert een lopende afmeldperiode', () => {
 
     const row = attendanceFor(db, 'e-future2', 'py')
     expect(row?.status).toBe('unknown')
-    expect(row?.injury_set).toBe(false)
     expect(row?.absence_period_id).toBeNull()
+  })
+
+  it('een injured-rij in het VERLEDEN blijft injured na herstel (AC16)', async () => {
+    const x = playerRow({ id: 'px', injured: true })
+    const db = makeDb({
+      players: [x],
+      events: [
+        eventRow({ id: 'e-oud', date: '2020-03-01' }),
+        eventRow({ id: 'e-nieuw', date: '2099-03-01' }),
+      ],
+      attendance: [
+        attendanceRow({ event_id: 'e-oud', player_id: 'px', status: 'injured' }),
+        attendanceRow({ event_id: 'e-nieuw', player_id: 'px', status: 'injured' }),
+      ],
+      settings: [settingsRow('default_attendance', 'present')],
+    })
+    useDb(db)
+
+    await markRecovered('px')
+
+    expect(attendanceFor(db, 'e-oud', 'px')?.status).toBe('injured')
+    expect(attendanceFor(db, 'e-nieuw', 'px')?.status).toBe('present')
+  })
+
+  it('raakt een handmatig absent gezette toekomstige rij (geen blessure) niet aan', async () => {
+    const x = playerRow({ id: 'px', injured: true })
+    const db = makeDb({
+      players: [x],
+      events: [eventRow({ id: 'e1', date: '2099-03-01' })],
+      attendance: [attendanceRow({ event_id: 'e1', player_id: 'px', status: 'absent' })],
+      settings: [settingsRow('default_attendance', 'present')],
+    })
+    useDb(db)
+
+    await markRecovered('px')
+
+    expect(attendanceFor(db, 'e1', 'px')?.status).toBe('absent')
   })
 })
 
@@ -1153,15 +1197,16 @@ describe('AC23 — markRecovered respecteert een lopende afmeldperiode', () => {
 // AC24 — BLESSURES bij NIEUWE events (zelfde bugklasse als de afmeldperiodes
 // hierboven: markInjured raakte alleen BESTAANDE events, waardoor een event dat
 // daarna werd aangemaakt de geblesseerde speler weer op de team-default zette).
+// Sinds de blessure-status krijgt zo'n event 'injured' — maar alleen vanaf
+// vandaag (AC18). Daarom liggen de datums hieronder in 2099: datum-onafhankelijk.
 //
 // Dit blok staat bewust in dít bestand en niet in een nieuw: blessures lopen
 // door exact dezelfde server actions (createEvent, generateSeasonTrainings) en
 // dezelfde in-memory mock/fixtures als de afmeldperiodes, inclusief de
-// samenloop van beide markeringen op één rij. Een apart bestand zou die mock,
-// de fabrieken en de callCreateEvent-helper moeten dupliceren.
+// samenloop van blessure en periode op één rij.
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC24 — nieuw event na een blessuremelding → speler automatisch absent met injury_set', () => {
-  it('(a) team-default is "present", maar de geblesseerde speler krijgt op een nieuwe training absent + injury_set; een fitte teamgenoot niet', async () => {
+describe('AC24 — nieuw event na een blessuremelding → speler automatisch injured', () => {
+  it('(a) team-default is "present", maar de geblesseerde speler krijgt op een nieuwe training injured; een fitte teamgenoot niet', async () => {
     const x = playerRow({ id: 'px', name: 'Speler X' })
     const y = playerRow({ id: 'py', name: 'Speler Y' })
     const db = makeDb({
@@ -1173,17 +1218,16 @@ describe('AC24 — nieuw event na een blessuremelding → speler automatisch abs
     await markInjured('px')
     expect(db.tables.players.find((p) => p.id === 'px')?.injured).toBe(true)
 
-    const eventId = await callCreateEvent(trainingForm({ date: '2026-08-15' }))
+    const eventId = await callCreateEvent(trainingForm({ date: '2099-08-15' }))
 
     const geblesseerd = attendanceFor(db, eventId, 'px')
-    expect(geblesseerd?.status).toBe('absent')
-    expect(geblesseerd?.injury_set).toBe(true)
+    expect(geblesseerd?.status).toBe('injured')
     expect(geblesseerd?.absence_period_id).toBeNull()
+    expect(geblesseerd).not.toHaveProperty('injury_set')
 
     // Geen kruisbesmetting: de fitte teamgenoot houdt de team-default.
     const fit = attendanceFor(db, eventId, 'py')
     expect(fit?.status).toBe('present')
-    expect(fit?.injury_set).toBe(false)
   })
 
   it('(a2) geldt ook voor een nieuwe wedstrijd', async () => {
@@ -1195,21 +1239,19 @@ describe('AC24 — nieuw event na een blessuremelding → speler automatisch abs
     useDb(db)
 
     await markInjured('px')
-    const eventId = await callCreateEvent(matchForm({ date: '2026-08-15' }))
+    const eventId = await callCreateEvent(matchForm({ date: '2099-08-15' }))
 
-    const row = attendanceFor(db, eventId, 'px')
-    expect(row?.status).toBe('absent')
-    expect(row?.injury_set).toBe(true)
+    expect(attendanceFor(db, eventId, 'px')?.status).toBe('injured')
   })
 
-  it('(b) geldt ook voor de seizoensgeneratie: élke gegenereerde training krijgt absent + injury_set, ook buiten elke periode', async () => {
+  it('(b) geldt ook voor de seizoensgeneratie: élke toekomstige gegenereerde training krijgt injured, ook buiten elke periode', async () => {
     const x = playerRow({ id: 'px' })
     const y = playerRow({ id: 'py' })
     const db = makeDb({
       players: [x, y],
       settings: [
-        settingsRow('season_start', '2026-08-01'),
-        settingsRow('season_end', '2026-08-31'),
+        settingsRow('season_start', '2099-08-01'),
+        settingsRow('season_end', '2099-08-31'),
         settingsRow('training_days', '1,4'),
         settingsRow('default_attendance', 'present'),
       ],
@@ -1225,15 +1267,14 @@ describe('AC24 — nieuw event na een blessuremelding → speler automatisch abs
     expect(generated.length).toBe(created)
     for (const e of generated) {
       const row = attendanceFor(db, e.id as string, 'px')
-      expect(row?.status, `training ${e.date as string}`).toBe('absent')
-      expect(row?.injury_set).toBe(true)
+      expect(row?.status, `training ${e.date as string}`).toBe('injured')
       expect(row?.absence_period_id).toBeNull()
 
       expect(attendanceFor(db, e.id as string, 'py')?.status).toBe('present')
     }
   })
 
-  it('(c) samenloop met een lopende periode: beide markeringen; ná het intrekken van de periode blijft de rij absent (alleen de herkomst wist)', async () => {
+  it('(c) samenloop met een lopende periode: injured met herkomst; ná het intrekken blijft de rij injured (alleen de herkomst wist)', async () => {
     const x = playerRow({ id: 'px' })
     const db = makeDb({
       players: [x],
@@ -1242,22 +1283,20 @@ describe('AC24 — nieuw event na een blessuremelding → speler automatisch abs
     useDb(db)
 
     await markInjured('px')
-    const { periodId } = await markAbsentForPeriod('px', '2026-08-01', '2026-08-31')
+    const { periodId } = await markAbsentForPeriod('px', '2099-08-01', '2099-08-31')
 
-    const eventId = await callCreateEvent(trainingForm({ date: '2026-08-15' }))
+    const eventId = await callCreateEvent(trainingForm({ date: '2099-08-15' }))
     const row = attendanceFor(db, eventId, 'px')
-    expect(row?.status).toBe('absent')
-    expect(row?.injury_set).toBe(true)
+    expect(row?.status).toBe('injured')
     expect(row?.absence_period_id).toBe(periodId)
 
-    // Regressie op bestaand gedrag (app/actions/attendance.ts:232): een rij met
-    // injury_set blijft bij intrekken absent, alleen de herkomst verdwijnt.
+    // revokeAbsencePeriod behandelt 'injured' als clearOnly: de status blijft,
+    // alleen de herkomst verdwijnt.
     const { restored } = await revokeAbsencePeriod(periodId)
     expect(restored).toBe(0)
 
     const na = attendanceFor(db, eventId, 'px')
-    expect(na?.status).toBe('absent')
-    expect(na?.injury_set).toBe(true)
+    expect(na?.status).toBe('injured')
     expect(na?.absence_period_id).toBeNull()
   })
 
@@ -1270,32 +1309,133 @@ describe('AC24 — nieuw event na een blessuremelding → speler automatisch abs
     useDb(db)
 
     await markInjured('px')
-    // Ver in de toekomst: markRecovered raakt bewust alleen events vanaf
-    // vandaag, dus deze datum maakt de test datum-onafhankelijk.
     const eventId = await callCreateEvent(trainingForm({ date: '2099-06-01' }))
-    expect(attendanceFor(db, eventId, 'px')?.status).toBe('absent')
-    expect(attendanceFor(db, eventId, 'px')?.injury_set).toBe(true)
+    expect(attendanceFor(db, eventId, 'px')?.status).toBe('injured')
 
     await markRecovered('px')
 
     const row = attendanceFor(db, eventId, 'px')
     expect(row?.status).toBe('present')
-    expect(row?.injury_set).toBe(false)
     expect(row?.absence_period_id).toBeNull()
+  })
+
+  it('(e) volledige cyclus met periode: blessure wint van de periode, na herstel is de speler afgemeld (absent)', async () => {
+    const x = playerRow({ id: 'px' })
+    const db = makeDb({
+      players: [x],
+      events: [eventRow({ id: 'e1', date: '2099-08-10' }), eventRow({ id: 'e2', date: '2099-09-10' })],
+      settings: [settingsRow('default_attendance', 'present')],
+    })
+    useDb(db)
+
+    const { periodId } = await markAbsentForPeriod('px', '2099-08-01', '2099-08-31')
+    expect(attendanceFor(db, 'e1', 'px')?.status).toBe('absent')
+
+    // Blessure overschrijft de afmelding, maar de herkomst blijft staan.
+    await markInjured('px')
+    expect(attendanceFor(db, 'e1', 'px')).toMatchObject({ status: 'injured', absence_period_id: periodId })
+    // e2 had nog geen rij: de upsert maakt hem aan zonder absence_period_id
+    // (in Postgres de kolomdefault NULL; de mock laat de sleutel weg).
+    expect(attendanceFor(db, 'e2', 'px')?.status).toBe('injured')
+    expect(attendanceFor(db, 'e2', 'px')?.absence_period_id ?? null).toBeNull()
+
+    await markRecovered('px')
+    expect(attendanceFor(db, 'e1', 'px')).toMatchObject({ status: 'absent', absence_period_id: periodId })
+    expect(attendanceFor(db, 'e2', 'px')?.status).toBe('present')
+  })
+
+  it('(f) een periode registreren over een al geblesseerd event laat injured staan en zet alleen de herkomst', async () => {
+    const x = playerRow({ id: 'px' })
+    const y = playerRow({ id: 'py' })
+    const db = makeDb({
+      players: [x, y],
+      events: [eventRow({ id: 'e1', date: '2099-08-10' })],
+      attendance: [attendanceRow({ event_id: 'e1', player_id: 'py', status: 'injured' })],
+      settings: [settingsRow('default_attendance', 'present')],
+    })
+    useDb(db)
+
+    await markInjured('px')
+    const { periodId, affected } = await markAbsentForPeriod('px', '2099-08-01', '2099-08-31')
+
+    expect(affected).toBe(1)
+    expect(attendanceFor(db, 'e1', 'px')).toMatchObject({ status: 'injured', absence_period_id: periodId })
+    // Tenant/speler-scope: de geblesseerde teamgenoot krijgt géén herkomst.
+    expect(attendanceFor(db, 'e1', 'py')).toMatchObject({ status: 'injured', absence_period_id: null })
+  })
+
+  it('(g) markInjured overschrijft ook een handmatig absent gezet toekomstig event (V2)', async () => {
+    const x = playerRow({ id: 'px' })
+    const db = makeDb({
+      players: [x],
+      events: [eventRow({ id: 'e1', date: '2099-08-10' })],
+      attendance: [attendanceRow({ event_id: 'e1', player_id: 'px', status: 'absent' })],
+      settings: [settingsRow('default_attendance', 'present')],
+    })
+    useDb(db)
+
+    await markInjured('px')
+    expect(attendanceFor(db, 'e1', 'px')?.status).toBe('injured')
+
+    // Zonder vlag is "was handmatig afwezig" niet te onthouden: na herstel de standaard.
+    await markRecovered('px')
+    expect(attendanceFor(db, 'e1', 'px')?.status).toBe('present')
+  })
+
+  it('(h) markInjured raakt alleen events vanaf vandaag: een verleden-rij blijft zoals hij was', async () => {
+    const x = playerRow({ id: 'px' })
+    const db = makeDb({
+      players: [x],
+      events: [eventRow({ id: 'e-oud', date: '2020-08-10' })],
+      attendance: [attendanceRow({ event_id: 'e-oud', player_id: 'px', status: 'present' })],
+    })
+    useDb(db)
+
+    await markInjured('px')
+
+    expect(attendanceFor(db, 'e-oud', 'px')?.status).toBe('present')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// V3 — "Iedereen aanwezig" (markAllPresent) slaat geblesseerde spelers over
+// ═══════════════════════════════════════════════════════════════════════
+describe('V3 — markAllPresent laat een injured-rij staan', () => {
+  it('na markAllPresent is een injured-rij nog injured; de overige rijen van dit event worden present', async () => {
+    const db = makeDb({
+      players: [playerRow({ id: 'pa' }), playerRow({ id: 'pb' }), playerRow({ id: 'pc' }), playerRow({ id: 'pd' })],
+      events: [eventRow({ id: 'e1', date: '2099-08-10' }), eventRow({ id: 'e2', date: '2099-08-11' })],
+      attendance: [
+        attendanceRow({ event_id: 'e1', player_id: 'pa', status: 'injured' }),
+        attendanceRow({ event_id: 'e1', player_id: 'pb', status: 'absent' }),
+        attendanceRow({ event_id: 'e1', player_id: 'pc', status: 'unknown' }),
+        attendanceRow({ event_id: 'e1', player_id: 'pd', status: 'present' }),
+        // Ander event: blijft ongemoeid.
+        attendanceRow({ event_id: 'e2', player_id: 'pb', status: 'absent' }),
+        // Ander team, zelfde event-id-literal: blijft ongemoeid.
+        attendanceRow({ team_id: OTHER_TEAM, event_id: 'e1', player_id: 'pz', status: 'absent' }),
+      ],
+    })
+    useDb(db)
+
+    await markAllPresent('e1')
+
+    expect(attendanceFor(db, 'e1', 'pa')?.status).toBe('injured')
+    expect(attendanceFor(db, 'e1', 'pb')?.status).toBe('present')
+    expect(attendanceFor(db, 'e1', 'pc')?.status).toBe('present')
+    expect(attendanceFor(db, 'e1', 'pd')?.status).toBe('present')
+    expect(attendanceFor(db, 'e2', 'pb')?.status).toBe('absent')
+    expect(attendanceFor(db, 'e1', 'pz')?.status).toBe('absent')
   })
 })
 
 // ═══════════════════════════════════════════════════════════════════════
 // AANVULLENDE VERIFICATIE — Story "blessure automatisch afwezig bij nieuwe
-// events", criteria 8, 9, 10 en 13. AC24 hierboven (bouwer) bewijst al de
-// criteria 1, 2, 3, 4, 7, 14 en 15; de backfill-criteria 5 en 6 staan al in
-// wedstrijdselectie.acceptance.test.tsx ("Blessures" na Story-AC (bevinding
-// 2)). Deze vier resterende criteria hadden nog geen expliciete, van-buitenaf
-// bewezen test — dit blok sluit dat gat, met dezelfde gedeelde filterende
-// mock-DB en dezelfde echte server actions als de rest van dit bestand.
+// events", criteria 8, 9, 10 en 13, met dezelfde gedeelde filterende mock-DB
+// en dezelfde echte server actions als de rest van dit bestand.
 // ═══════════════════════════════════════════════════════════════════════
 describe('Criterium 8 — alleen actieve spelers krijgen een rij, ook als het om een blessure gaat', () => {
-  it('een inactieve geblesseerde speler krijgt GEEN attendance-rij; een actieve geblesseerde speler wel (absent + injury_set)', async () => {
+  it('een inactieve geblesseerde speler krijgt GEEN attendance-rij; een actieve geblesseerde speler wel (injured)', async () => {
     const inactive = playerRow({ id: 'p-inactive', active: false, injured: true })
     const active = playerRow({ id: 'p-active', active: true, injured: true })
     const db = makeDb({
@@ -1304,12 +1444,10 @@ describe('Criterium 8 — alleen actieve spelers krijgen een rij, ook als het om
     })
     useDb(db)
 
-    const eventId = await callCreateEvent(trainingForm({ date: '2026-08-20' }))
+    const eventId = await callCreateEvent(trainingForm({ date: '2099-08-20' }))
 
     expect(attendanceFor(db, eventId, 'p-inactive')).toBeUndefined()
-    const row = attendanceFor(db, eventId, 'p-active')
-    expect(row?.status).toBe('absent')
-    expect(row?.injury_set).toBe(true)
+    expect(attendanceFor(db, eventId, 'p-active')?.status).toBe('injured')
   })
 })
 
@@ -1346,8 +1484,10 @@ describe('Criterium 9 — een nulmeting laat nooit een agenda- of aanwezigheidss
   })
 })
 
-describe('Criterium 10 — geen datumvergelijking: ook een event met een datum in het verleden krijgt de blessure mee', () => {
-  it('een training met een datum ver in het verleden krijgt de geblesseerde speler toch automatisch absent + injury_set', async () => {
+// Omgedraaid sinds de blessure-status (AC18, besluit 8): de blessure is de
+// toestand van NU en zegt niets over een datum die al voorbij is.
+describe('Criterium 10 — een event met een datum in het verleden krijgt de blessure NIET mee (AC18)', () => {
+  it('een training met een datum ver in het verleden geeft de geblesseerde speler de team-default', async () => {
     const x = playerRow({ id: 'px' })
     const db = makeDb({
       players: [x],
@@ -1356,13 +1496,12 @@ describe('Criterium 10 — geen datumvergelijking: ook een event met een datum i
     useDb(db)
 
     await markInjured('px')
-    // Duidelijk in het verleden (ruim vóór elke realistische "vandaag"):
-    // alleen de huidige players.injured-waarde mag tellen, niet de eventdatum.
+    // Duidelijk in het verleden (ruim vóór elke realistische "vandaag").
     const eventId = await callCreateEvent(trainingForm({ date: '2020-01-15' }))
 
     const row = attendanceFor(db, eventId, 'px')
-    expect(row?.status).toBe('absent')
-    expect(row?.injury_set).toBe(true)
+    expect(row?.status).toBe('present')
+    expect(row?.absence_period_id).toBeNull()
   })
 })
 

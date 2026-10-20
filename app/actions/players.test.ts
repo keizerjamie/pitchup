@@ -27,9 +27,15 @@ function teamMembersFixture(userId: string | undefined) {
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
+  // Uitkomst per UPDATE-aanroep op een tabel, in volgorde. Zo kan een test de
+  // tweede attendance-update laten falen terwijl de eerste slaagt. Ontbreekt
+  // een positie, dan geldt het gewone tabelresultaat.
+  updateResults?: Record<string, TableResult[]>
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
+  const updateResults = opts.updateResults ?? {}
+  const updateCount: Record<string, number> = {}
   type Filter = { op: string; col: string; val: unknown }
   const calls = {
     select: [] as { table: string; filters: Filter[] }[],
@@ -39,7 +45,7 @@ function makeSupabase(opts: {
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
+    let result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const filters: Filter[] = []
     const c: Record<string, unknown> = {}
     c.select = () => { calls.select.push({ table, filters }); return c }
@@ -49,8 +55,19 @@ function makeSupabase(opts: {
     for (const op of ['eq', 'neq', 'gte', 'lte', 'in', 'is']) {
       c[op] = (col: string, val: unknown) => { filters.push({ op, col, val }); return c }
     }
+    // `.not(col, 'is', null)` sinds markRecovered rijen MET afmeldperiode apart
+    // terugzet naar 'absent'. Vastgelegd als op 'not.is', zodat een test het
+    // verschil met `.is()` ziet.
+    c.not = (col: string, op: string, val: unknown) => { filters.push({ op: `not.${op}`, col, val }); return c }
     c.insert = (payload: unknown) => { calls.insert.push({ table, payload }); return c }
-    c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload, filters }); return c }
+    c.update = (payload: Record<string, unknown>) => {
+      calls.update.push({ table, payload, filters })
+      const n = updateCount[table] ?? 0
+      updateCount[table] = n + 1
+      const override = updateResults[table]?.[n]
+      if (override) result = override
+      return c
+    }
     c.upsert = (payload: unknown) => { calls.upsert.push({ table, payload }); return c }
     c.maybeSingle = () => Promise.resolve(result)
     c.single = () => Promise.resolve(result)
@@ -98,67 +115,74 @@ function logged() {
   return consoleError.mock.calls.map((args: unknown[]) => args.join(' ')).join('\n')
 }
 
-// De eerste attendance-update is het herstel naar de standaardstatus, de tweede
-// het opschonen van de blessurevlag (app/actions/players.ts:191-211).
+// De eerste attendance-update zet toekomstige 'injured'-rijen ZONDER periode
+// terug naar de standaard, de tweede die MET periode naar 'absent'
+// (markRecovered in app/actions/players.ts).
 function updates(m: ReturnType<typeof makeSupabase>) {
   return m.calls.update.filter((u) => u.table === 'attendance')
 }
 
 describe('markRecovered', () => {
-  it('zet alleen door-blessure-gezette rijen ZONDER afmeldperiode terug naar de standaardstatus', async () => {
+  it('zet toekomstige injured-rijen ZONDER afmeldperiode terug naar de standaardstatus', async () => {
     const m = eigenTeam()
     use(m)
 
     await markRecovered(PLAYER_A)
 
     const restore = updates(m)[0]
-    expect(restore.payload).toEqual({ status: 'present', injury_set: false })
-    expect(restore.filters).toContainEqual({ op: 'is', col: 'absence_period_id', val: null })
-  })
-
-  it('werkt team- en spelergescoped bij, alleen voor toekomstige events', async () => {
-    const m = eigenTeam()
-    use(m)
-
-    await markRecovered(PLAYER_A)
-
-    expect(updates(m)[0].filters).toEqual([
+    expect(restore.payload).toEqual({ status: 'present' })
+    expect(restore.filters).toEqual([
       { op: 'eq', col: 'team_id', val: 'team-1' },
       { op: 'eq', col: 'player_id', val: PLAYER_A },
-      { op: 'eq', col: 'injury_set', val: true },
-      { op: 'eq', col: 'status', val: 'absent' },
+      { op: 'eq', col: 'status', val: 'injured' },
       { op: 'is', col: 'absence_period_id', val: null },
       { op: 'in', col: 'event_id', val: ['e1'] },
     ])
   })
 
-  it('laat een rij MET afmeldperiode op absent staan: die krijgt alleen de blessurevlag uit', async () => {
-    // De rij valt buiten de herstel-update (die filtert op absence_period_id IS
-    // NULL) en wordt daarna alleen nog opgeschoond — zonder status-wijziging,
-    // want de afmeldperiode houdt de speler afwezig.
+  it('zet toekomstige injured-rijen MET afmeldperiode op absent: de periode dekt de datum nog', async () => {
     const m = eigenTeam()
     use(m)
 
     await markRecovered(PLAYER_A)
 
-    const clear = updates(m)[1]
-    expect(clear.payload).toEqual({ injury_set: false })
-    expect(clear.payload).not.toHaveProperty('status')
-    expect(clear.filters).toEqual([
+    const periode = updates(m)[1]
+    expect(periode.payload).toEqual({ status: 'absent' })
+    expect(periode.filters).toEqual([
       { op: 'eq', col: 'team_id', val: 'team-1' },
       { op: 'eq', col: 'player_id', val: PLAYER_A },
-      { op: 'eq', col: 'injury_set', val: true },
+      { op: 'eq', col: 'status', val: 'injured' },
+      { op: 'not.is', col: 'absence_period_id', val: null },
+      { op: 'in', col: 'event_id', val: ['e1'] },
     ])
   })
 
-  it('schoont de blessurevlag ook op zonder toekomstige events', async () => {
+  it('raakt alleen toekomstige events: verleden-injured blijft staan (AC16)', async () => {
+    const m = eigenTeam({ events: { data: [{ id: 'e1' }, { id: 'e2' }], error: null } })
+    use(m)
+
+    await markRecovered(PLAYER_A)
+
+    // De events-query is de "vanaf vandaag"-grens; elke attendance-update is
+    // daarop begrensd met .in('event_id', …). Er is geen update meer zonder
+    // die grens (de oude "stap b" die over alle rijen ging is weg).
+    const eventsSelect = m.calls.select.find((s) => s.table === 'events')!
+    expect(eventsSelect.filters).toContainEqual(expect.objectContaining({ op: 'gte', col: 'date' }))
+    expect(updates(m)).toHaveLength(2)
+    for (const u of updates(m)) {
+      expect(u.filters).toContainEqual({ op: 'in', col: 'event_id', val: ['e1', 'e2'] })
+      expect(u.payload).not.toHaveProperty('injury_set')
+    }
+  })
+
+  it('werkt zonder toekomstige events geen enkele attendance-rij bij', async () => {
     const m = eigenTeam({ events: { data: [], error: null } })
     use(m)
 
     await markRecovered(PLAYER_A)
 
-    expect(updates(m)).toHaveLength(1)
-    expect(updates(m)[0].payload).toEqual({ injury_set: false })
+    expect(updates(m)).toHaveLength(0)
+    expect(m.calls.update.find((u) => u.table === 'players')!.payload).toEqual({ injured: false })
   })
 
   it('zet de speler op hersteld en revalideert', async () => {
@@ -209,6 +233,30 @@ describe('markRecovered', () => {
     expect(logged()).not.toContain('permission denied')
     expect(revalidatePath).not.toHaveBeenCalled()
   })
+
+  it('faalt update b (rijen met periode), dan een veilige melding en players.injured blijft ongewijzigd', async () => {
+    const m = makeSupabase({
+      tables: {
+        players: { data: { id: PLAYER_A }, error: null },
+        events: { data: [{ id: 'e1' }], error: null },
+        attendance: { data: null, error: null },
+      },
+      updateResults: {
+        attendance: [
+          { data: null, error: null },
+          { data: null, error: { code: '42501', message: 'permission denied for table attendance' } },
+        ],
+      },
+    })
+    use(m)
+
+    await expect(markRecovered(PLAYER_A)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    expect(logged()).toContain('players.markRecovered.period')
+    expect(logged()).not.toContain('permission denied')
+    expect(m.calls.update.filter((u) => u.table === 'players')).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
 })
 
 // ────────────────────────────────────────────────
@@ -257,6 +305,67 @@ describe('markInjured', () => {
     await expect(markInjured(PLAYER_A)).rejects.toThrow('Speler niet gevonden')
     expect(revalidatePath).not.toHaveBeenCalled()
   })
+
+  it('upsert injured voor ALLE toekomstige events, ook rijen die al absent waren (AC15, V2)', async () => {
+    // De attendance-tabel levert hier een al-absent rij; vroeger werd die
+    // overgeslagen. Nu is er geen lookup meer en gaat elk event mee.
+    const m = eigenTeam({
+      events: { data: [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }], error: null },
+      attendance: { data: [{ event_id: 'e2', status: 'absent' }], error: null },
+    })
+    use(m)
+
+    await markInjured(PLAYER_A)
+
+    const upserts = m.calls.upsert.filter((u) => u.table === 'attendance')
+    expect(upserts).toHaveLength(1)
+    expect(upserts[0].payload).toEqual(
+      ['e1', 'e2', 'e3'].map((id) => ({
+        event_id: id,
+        player_id: PLAYER_A,
+        team_id: 'team-1',
+        status: 'injured',
+      })),
+    )
+    expect(m.calls.select.filter((s) => s.table === 'attendance')).toHaveLength(0)
+  })
+
+  it('stuurt geen absence_period_id en geen injury_set mee: een bestaande periode-herkomst blijft staan', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await markInjured(PLAYER_A)
+
+    const payload = m.calls.upsert.find((u) => u.table === 'attendance')!.payload as Record<string, unknown>[]
+    for (const row of payload) {
+      expect(row).not.toHaveProperty('absence_period_id')
+      expect(row).not.toHaveProperty('injury_set')
+    }
+  })
+
+  it('haalt alleen events vanaf vandaag op, zonder metingen, team-gescoped', async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await markInjured(PLAYER_A)
+
+    const eventsSelect = m.calls.select.find((s) => s.table === 'events')!
+    expect(eventsSelect.filters).toEqual([
+      { op: 'eq', col: 'team_id', val: 'team-1' },
+      { op: 'neq', col: 'type', val: 'meting' },
+      expect.objectContaining({ op: 'gte', col: 'date' }),
+    ])
+  })
+
+  it('upsert niets zonder toekomstige events, maar zet de speler wél op geblesseerd', async () => {
+    const m = eigenTeam({ events: { data: [], error: null } })
+    use(m)
+
+    await markInjured(PLAYER_A)
+
+    expect(m.calls.upsert).toHaveLength(0)
+    expect(m.calls.update.find((u) => u.table === 'players')!.payload).toEqual({ injured: true })
+  })
 })
 
 describe('markRecovered — gastspeler', () => {
@@ -266,7 +375,7 @@ describe('markRecovered — gastspeler', () => {
 
     await markRecovered(PLAYER_A)
 
-    expect(updates(m)[0].payload).toEqual({ status: 'absent', injury_set: false })
+    expect(updates(m)[0].payload).toEqual({ status: 'absent' })
   })
 
   it('zet de rijen van een REGULIERE speler wél terug naar de teamstandaard', async () => {
@@ -277,7 +386,7 @@ describe('markRecovered — gastspeler', () => {
 
     await markRecovered(PLAYER_A)
 
-    expect(updates(m)[0].payload).toEqual({ status: 'present', injury_set: false })
+    expect(updates(m)[0].payload).toEqual({ status: 'present' })
   })
 
   it('haalt het type team-gescoped op', async () => {
@@ -298,15 +407,13 @@ describe('markRecovered — gastspeler', () => {
     }
   })
 
-  it('laat de blessurevlag-opschoning ongemoeid voor een gast (status blijft absent)', async () => {
+  it('zet ook voor een gast rijen MET periode op absent (geen verschil met de gastregel)', async () => {
     const m = eigenTeam({ players: { data: { id: PLAYER_A, type: 'guest' }, error: null } })
     use(m)
 
     await markRecovered(PLAYER_A)
 
-    const clear = updates(m)[1]
-    expect(clear.payload).toEqual({ injury_set: false })
-    expect(clear.payload).not.toHaveProperty('status')
+    expect(updates(m)[1].payload).toEqual({ status: 'absent' })
   })
 })
 

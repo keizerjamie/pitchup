@@ -32,7 +32,8 @@ export async function updateAttendance(
   const ctx = await requireTeamContext()
   assertCanEdit(ctx, 'aanwezigheid')
 
-  const VALID_STATUSES: AttendanceStatus[] = ['present', 'absent', 'unknown']
+  // 'injured' handmatig per event wijzigt players.injured bewust NIET (V7).
+  const VALID_STATUSES: AttendanceStatus[] = ['present', 'absent', 'injured', 'unknown']
   if (!VALID_STATUSES.includes(status)) throw new Error('Ongeldige status')
 
   await Promise.all([
@@ -59,7 +60,9 @@ export async function updateAttendance(
 // worden aangemaakt automatisch op 'absent' komen (createEvent,
 // generateSeasonTrainings). De bestaande events krijgen hier meteen hun rij,
 // met de periode als herkomst (absence_period_id) zodat het intrekken later
-// precies deze rijen — en alleen deze — kan terugdraaien.
+// precies deze rijen — en alleen deze — kan terugdraaien. Een event waarop de
+// speler al 'injured' staat, houdt die status (blessure wint, besluit 11) en
+// krijgt alleen de herkomst: na herstel valt die rij zo terug op 'absent'.
 export async function markAbsentForPeriod(
   playerId: string,
   fromDate: string,
@@ -110,23 +113,66 @@ export async function markAbsentForPeriod(
   // wél vastgelegd: hij geldt voor alles wat er later nog bij komt. Daarom hier
   // géén early return meer die de revalidatie overslaat.
   if (affectedEvents.length > 0) {
-    const records = affectedEvents.map((e) => ({
-      event_id: e.id,
-      player_id: playerId,
-      status: 'absent' as AttendanceStatus,
-      team_id: ctx.teamId,
-      absence_period_id: periodId,
-    }))
+    // Welke van deze events staan voor de speler al op 'injured'? Gechunkt,
+    // want een periode kan een heel seizoen beslaan.
+    const injuredEventIds = new Set<string>()
+    for (const chunk of chunked(affectedEvents.map((e) => e.id))) {
+      const { data: existing, error: existingError } = await supabase
+        .from('attendance')
+        .select('event_id, status')
+        .eq('team_id', ctx.teamId)
+        .eq('player_id', playerId)
+        .in('event_id', chunk)
+      if (existingError) {
+        // Zonder deze lijst zou de upsert hieronder een blessure kunnen
+        // overschrijven met 'absent'. Dus hard falen én compenseren, zoals bij
+        // eventsError hierboven.
+        await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', ctx.teamId)
+        throw genericError('attendance.markAbsentForPeriod.existing', existingError)
+      }
+      for (const row of (existing ?? []) as { event_id: string; status: string }[]) {
+        if (row.status === 'injured') injuredEventIds.add(row.event_id)
+      }
+    }
 
-    const { error } = await supabase
-      .from('attendance')
-      .upsert(records, { onConflict: 'event_id,player_id' })
+    const records = affectedEvents
+      .filter((e) => !injuredEventIds.has(e.id))
+      .map((e) => ({
+        event_id: e.id,
+        player_id: playerId,
+        status: 'absent' as AttendanceStatus,
+        team_id: ctx.teamId,
+        absence_period_id: periodId,
+      }))
 
-    if (error) {
-      // Compenseren: zonder de attendance-rijen zou een blijvende periode een
-      // halve waarheid zijn (wel "afgemeld" in de lijst, niet in de events).
-      await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', ctx.teamId)
-      throw genericError('attendance.markAbsentForPeriod', error)
+    if (records.length > 0) {
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(records, { onConflict: 'event_id,player_id' })
+
+      if (error) {
+        // Compenseren: zonder de attendance-rijen zou een blijvende periode een
+        // halve waarheid zijn (wel "afgemeld" in de lijst, niet in de events).
+        await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', ctx.teamId)
+        throw genericError('attendance.markAbsentForPeriod', error)
+      }
+    }
+
+    // 'injured'-rijen: status blijft, alleen de herkomst gaat erop. Het
+    // status-filter houdt de update begrensd tot rijen die nog écht
+    // geblesseerd zijn, ook als er tussendoor iets verandert.
+    for (const chunk of chunked([...injuredEventIds])) {
+      const { error } = await supabase
+        .from('attendance')
+        .update({ absence_period_id: periodId })
+        .eq('team_id', ctx.teamId)
+        .eq('player_id', playerId)
+        .eq('status', 'injured')
+        .in('event_id', chunk)
+      if (error) {
+        await supabase.from('absence_periods').delete().eq('id', periodId).eq('team_id', ctx.teamId)
+        throw genericError('attendance.markAbsentForPeriod.injured', error)
+      }
     }
   }
 
@@ -175,12 +221,12 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
 
   const { data: rows, error: rowsError } = await supabase
     .from('attendance')
-    .select('event_id, status, injury_set')
+    .select('event_id, status')
     .eq('team_id', ctx.teamId)
     .eq('absence_period_id', periodId)
   if (rowsError) throw genericError('attendance.revokeAbsencePeriod.rows', rowsError)
 
-  const causedRows = (rows ?? []) as { event_id: string; status: string; injury_set: boolean }[]
+  const causedRows = (rows ?? []) as { event_id: string; status: string }[]
   const touchedEventIds = new Set<string>()
   const matchEventIds = new Set<string>()
   let restored = 0
@@ -248,12 +294,11 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
         const list = transferByPeriod.get(covering.id) ?? []
         list.push(row.event_id)
         transferByPeriod.set(covering.id, list)
-      } else if (row.injury_set || row.status !== 'absent') {
-        // Twee keer "iemand heeft dit al overruled, dus met rust laten": een
-        // blessure houdt de speler afwezig ook zonder periode, en een rij die
-        // ondanks de periode niet (meer) op 'absent' staat — 'present' of
-        // 'unknown' — is handmatig door de coach gezet (updateAttendance laat
-        // absence_period_id ongemoeid). In beide gevallen alleen de herkomst
+      } else if (row.status !== 'absent') {
+        // "Iemand heeft dit al overruled, dus met rust laten": 'injured' houdt
+        // de speler ook zonder periode afwezig (blessure wint), en 'present' of
+        // 'unknown' is handmatig door de coach gezet (updateAttendance laat
+        // absence_period_id ongemoeid). In alle gevallen alleen de herkomst
         // wissen; de status blijft zoals hij is. Alleen rijen die nog écht
         // 'absent' zijn, zijn nog het resultaat van deze periode.
         clearOnly.push(row.event_id)
@@ -326,11 +371,14 @@ export async function markAllPresent(eventId: string) {
   const ctx = await requireTeamContext()
   assertCanEdit(ctx, 'aanwezigheid')
 
+  // 'injured'-rijen blijven staan (V3): een geblesseerde speler is niet
+  // "aanwezig" omdat de coach iedereen in één tik aanwezig zet.
   const { error } = await supabase
     .from('attendance')
     .update({ status: 'present' })
     .eq('event_id', eventId)
     .eq('team_id', ctx.teamId)
+    .neq('status', 'injured')
 
   if (error) throw genericError('attendance.markAllPresent', error)
   revalidatePath(`/events/${eventId}`)

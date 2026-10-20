@@ -11,6 +11,10 @@
 // aanwezig gezette gast is wel zichtbaar bij de aanwezigen, maar verhoogt het
 // percentage niet.
 //
+// Blessure ('injured') is een eigen status: hij staat apart in `geblesseerd`,
+// maar telt in het opkomstpercentage als afwezig (`vastAfwezig`), zodat het
+// percentage gelijk blijft aan /inzichten en het dashboard.
+//
 // LET OP — dit is de WEERGAVE-regel. De OPSLAG-regel staat in
 // lib/attendance-rows.ts (resolveAttendanceStatus): daar staat een gast nog
 // steeds standaard `absent` in de database. Die twee regels zijn bewust
@@ -35,11 +39,12 @@ export function teltMee(type: PlayerType, aanwezig: boolean): boolean {
 export interface AanwezigheidsTelling {
   aanwezig: number                  // vast aanwezig + gast aanwezig
   afwezig: number                   // UITSLUITEND vaste spelers met 'absent'
+  geblesseerd: number               // UITSLUITEND vaste spelers met 'injured'
   onbekend: number                  // UITSLUITEND vaste spelers met 'unknown'
-  meetellend: number                // aanwezig + afwezig + onbekend
+  meetellend: number                // aanwezig + afwezig + geblesseerd + onbekend
   gastenAanwezig: number            // voor de subregel op de stat-card
   vastAanwezig: number              // teller van het opkomstpercentage
-  vastAfwezig: number               // rest van de noemer
+  vastAfwezig: number               // rest van de noemer: 'absent' + 'injured'
   opkomstPercentage: number | null  // null bij noemer 0
 }
 
@@ -52,6 +57,7 @@ export function telAanwezigheid<T extends TelbareSpeler>(
 ): AanwezigheidsTelling {
   let aanwezig = 0
   let afwezig = 0
+  let geblesseerd = 0
   let onbekend = 0
   let gastenAanwezig = 0
   let vastAanwezig = 0
@@ -73,6 +79,11 @@ export function telAanwezigheid<T extends TelbareSpeler>(
       // Onbereikbaar voor een gast: die is hierboven al weggefilterd.
       afwezig++
       vastAfwezig++
+    } else if (status === 'injured') {
+      // Apart getoond, maar in de noemer gewoon afwezig: een blessure is een
+      // reden van afwezigheid, geen "geen reactie".
+      geblesseerd++
+      vastAfwezig++
     } else {
       onbekend++
     }
@@ -81,8 +92,9 @@ export function telAanwezigheid<T extends TelbareSpeler>(
   return {
     aanwezig,
     afwezig,
+    geblesseerd,
     onbekend,
-    meetellend: aanwezig + afwezig + onbekend,
+    meetellend: aanwezig + afwezig + geblesseerd + onbekend,
     gastenAanwezig,
     vastAanwezig,
     vastAfwezig,
@@ -111,4 +123,27 @@ export function splitsAanwezigheid<T extends TelbareSpeler>(
     else afwezig.push(speler)
   }
   return { aanwezig, afwezig }
+}
+
+// Driewegsplitsing voor het trainingsplan: zelfde regel als splitsAanwezigheid,
+// maar geblesseerde spelers krijgen een eigen lijst. `afwezig` blijft "niet
+// aanwezig en niet geblesseerd", dus INCLUSIEF 'unknown' (bestaand gedrag). Een
+// niet-aanwezige gast valt overal weg, ook als hij geblesseerd is. Behoudt de
+// invoervolgorde en muteert de invoer niet.
+export function splitsAanwezigheidMetBlessure<T extends TelbareSpeler>(
+  spelers: T[],
+  statusVan: (speler: T) => AttendanceStatus,
+): { aanwezig: T[]; afwezig: T[]; geblesseerd: T[] } {
+  const aanwezig: T[] = []
+  const afwezig: T[] = []
+  const geblesseerd: T[] = []
+  for (const speler of spelers) {
+    const status = statusVan(speler)
+    const present = status === 'present'
+    if (!teltMee(speler.type, present)) continue
+    if (present) aanwezig.push(speler)
+    else if (status === 'injured') geblesseerd.push(speler)
+    else afwezig.push(speler)
+  }
+  return { aanwezig, afwezig, geblesseerd }
 }

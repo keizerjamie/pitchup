@@ -99,8 +99,8 @@ export async function getSpelerStatistieken(playerId: string): Promise<SpelerSta
 
   // Twee vensters, en dat verschil is niet cosmetisch:
   // - aanwezigheid gebruikt het op gisteren geklemde venster, want markInjured
-  //   schrijft 'absent' weg op TOEKOMSTIGE events (app/actions/players.ts,
-  //   markInjured). Zonder klemmen stort het percentage van elke geblesseerde
+  //   schrijft 'injured' weg op TOEKOMSTIGE events (app/actions/players.ts,
+  //   markInjured), en de RPC telt 'injured' als afwezig. Zonder klemmen stort het percentage van elke geblesseerde
   //   speler in door wedstrijden die nog niet gespeeld zijn.
   // - ratings en kaarten gebruiken het volle seizoen: die bestaan per definitie
   //   pas ná de wedstrijd. Zelfde redenering als app/inzichten/page.tsx.

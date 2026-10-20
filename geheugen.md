@@ -3550,3 +3550,139 @@ Volgorde fase 2 is daarmee: M4 → M5 → **M5c** → deploy → rooktest regist
 - Fase 3 (los team verwijderen, `TeamsSection`) en fase 4 (persoonlijke oefeningen, kopiëren)
   zijn nog te bouwen. Fase-2/3-aandachtspunt: het zelfherstel kan na het verliezen van het laatste
   lidmaatschap alleen nog een leeg team maken als élke wispoging van de vlag mislukte (cosmetisch).
+
+## Assistent-trainers fase 3 en 4: team verwijderen, persoonlijke oefeningen, kopiëren (2026-09-24 → 2026-09-25, commit `fd3c3d3`, live)
+Slotstuk van de feature. Werkdocumenten 18–22 in
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-assistent/`. Migraties: M6b
+`oefeningen-koppeling-eigenaar.sql` → M6 `oefeningen-persoonlijk.sql`, beide **vóór** de deploy
+(fase 3 heeft geen migratie). Vooraf de `pg_constraint`-controle uit de kop van M6 (les fase 2).
+
+### Fase 3 — los een team verwijderen
+- **`lib/team-opruimen.ts`** (plain lib): `TEAM_TABELLEN` (13 tabellen), `ruimTeamOp(supabase,
+  teamId, logLabel)` (logo → tabellen → `teams`-rij; cascade doet `team_members`/`team_invites` en
+  sinds M5c ook players/events/attendance/lineups/settings — dubbel met de expliciete deletes,
+  onschadelijk), `actiefTeamNaVerlies`. `deleteAccount` én `deleteTeam` gebruiken dezelfde helper
+  (BR 49); **oefeningen staan nooit in die lijst** (persoonlijk bezit).
+- `app/actions/team.ts`: `getTeamDeleteInfo` (telt alleen assistenten), `deleteTeam` (redirect
+  naar `/`, cookie op het eerstvolgende team of gewist, metadata-vlag gewist bij nul teams),
+  `leaveTeam` (geen UI, beslissing 8; weigert owner en niet-lid).
+- **Gotcha:** `assertIsOwner(ctx, teamId?)` valt bij `undefined` terug op het actieve team. Een
+  action die een id uit de client ontvangt moet daarom **eerst `isUuid`** doen, anders verwijdert
+  `deleteTeam(undefined)` het actieve team. Staat als waarschuwing bij `assertIsOwner`.
+- UI: `components/settings/TeamsSection.tsx` (owner-only, alleen eigen teams, typ-VERWIJDER,
+  fout blijft in het blok en wist de invoer, `aria-busy` tijdens laden, eigen melding
+  `teamsBeheer.infoFailed` als de info niet laadt).
+
+### Fase 4 — oefeningen persoonlijk
+- **M6**: `comment on column oefeningen.team_id` (eigenaar-user) + permissive SELECT-policy
+  `"oefeningen: zichtbaar via gekoppeld trainingsplan"` (exists in `training_oefeningen` met
+  `is_team_member`). UPDATE/DELETE blijven `team_id = auth.uid()`. Zelfcontrole in het script
+  (geen FK op `oefeningen.team_id`, cascade op `oefening_id`, precies twee policies, **M6b
+  aanwezig — anders stopt M6**). Bijvangst: dit repareert ook fase 2, waar een door een assistent
+  gekoppelde eigen oefening voor de hoofdtrainer `oefeningen: null` gaf.
+- **M6b**: de INSERT- en UPDATE-`with check` op `training_oefeningen` eisen naast
+  `can_edit(...,'training')` ook `oefening_koppelbaar(oefening_id, team_id)`: eigen oefening óf
+  al aan een plan van hetzelfde team gekoppeld (dekt `kopieerTrainingsplan` en elke UPDATE op een
+  bestaande koppeling; de `stable` helper ziet de oude rij in dezelfde snapshot). Dicht het gat
+  dat iemand met Training-recht via een directe PostgREST-aanroep een vreemde oefening-UUID kon
+  koppelen en zo lezen (FK-check negeert RLS). **Een `security definer`-helper, geen inline
+  `exists`**: een policy op `training_oefeningen` die zelf `training_oefeningen` leest geeft
+  "infinite recursion detected in policy". Het `training_oefeningen`-blok staat **woordelijk
+  gelijk** in `team-rls.sql` (M2) en M6b, met structuurtest — zelfde constructie als het
+  attendance-blok. Bewust gevolg: een oefening van een teamgenoot die nergens meer in het team
+  hangt is niet opnieuw te koppelen; kopiëren is dan de weg.
+- `kopieerOefeningNaarBibliotheek(id)` in `app/actions/oefening-library.ts`: **geen rechtencheck**
+  (AC 20), zichtbaarheid via RLS, `team_id = ctx.userId`, `OEFENING_INHOUD_KOLOMMEN` +
+  `oefeningKopieRij` in `lib/oefening.ts` (letterlijk dezelfde naam, geen herkomst, bewust niet
+  door `validateOefening` omdat die clampt). `updateOefening`/`deleteOefening` weigeren
+  andermans oefening ook voor de team-owner; koppelen alleen eigen oefening.
+- UI: `TrainingPlanEditor` krijgt **verplichte** `userId`-prop (zelfde les als `emptyState`);
+  eigenaar = `koppeling.oefeningen.team_id === userId`; badge `oefeningen.fromTeammate` +
+  `components/CopyOefeningButton.tsx`; potlood alleen bij eigen oefening; ontkoppelen/herordenen
+  onder Training-recht (beslissing 3). Gedeeld: `components/icons/Spinner.tsx`,
+  `components/copy-feedback.ts`.
+
+### Tests en verificatie
+- `oefening-kopieren.acceptance.test.tsx` (14, incl. de échte `TrainingPlanPage`) en
+  `team-verwijderen.acceptance.test.tsx` (19, incl. de échte `SettingsPage`); structuurtests op
+  M6 sectie 3f en de gelijkheid M2/M6b. Niet in vitest te dekken: "oefening bestaat maar is
+  onzichtbaar" (RLS) en cascades → verificatieblok 22–25 (blok 25 bewijst ook de
+  `is_team_member`-guard van de helper met een in TEAM_B gekoppelde oefening).
+- Suite-status bij afronden: 3540 groen, alleen `cyclusweek-correctie` AC1/AC12 rood.
+
+### Bewust geaccepteerd / open
+- Een account zonder enig team kan zijn bibliotheek niet beheren (lege staat); story eist het niet.
+- Opruimlijst: `err.message` in de UI bij `NewEventForm`, `TrainingScheduleForm`,
+  `OefeningPicker`, `OefeningLibrary`, `OefeningEditor`, `PlayerAbsenceList` (pre-existing).
+- Nog te draaien door de eigenaar: `team-rls-verificatie.sql` blok 1–25 met een echte
+  assistent (fase 2–4 zijn in productie nog niet met het script geverifieerd).
+- De hele feature (fase 1–4) is hiermee gebouwd. Werkwijze-lessen: per fase registratie,
+  accountverwijdering en lege staat nalopen tegen de policies ná die fase; `pg_constraint` als
+  bron van waarheid; een guard met optionele parameter nooit rechtstreeks een client-argument
+  geven; een leesverbreding via een relatie is zo sterk als de schrijf-policy op die relatie.
+
+## Activiteit bewerken: training of wedstrijd aanpassen (2026-10-02, commit `b7dd93a`, live)
+Tot nu toe moest je een activiteit verwijderen en opnieuw aanmaken om datum, tijd, locatie,
+notities, tegenstander, wedstrijdtype of thuis/uit te corrigeren — met verlies van alle
+gekoppelde data via cascade. Werkdocumenten 01–05 in
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-activiteit-bewerken/`. **Geen migratie.**
+
+### Wat er is
+- **`lib/event-input.ts`** (plain lib): `parseEventBaseInput(formData, type)` — gedeelde validatie
+  voor `createEvent` en `updateEvent`; `EventInputErrorCode`, `EventUpdateErrorCode`,
+  `EVENT_INPUT_ERROR_MESSAGES`, en de hierheen verhuisde `VALID_MATCH_TYPES`/`VALID_HOME_AWAY`.
+  Leest bewust geen `type`, `team_id`, `gather_time`, `trainingstype`, `doelstelling`, `goals_*`.
+- **`updateEvent(id, formData)`** in `app/actions/events.ts`. Guard-volgorde: `requireTeamContext`
+  → `assertCanEdit(ctx,'agenda')` → team-gescopete lookup van `id, type` → validatie met het
+  **type uit de database** → `opponent_required` (alleen wedstrijd) → payload als expliciete
+  objectliteral → `.update().eq('id').eq('team_id').eq('type').select('id')` → revalidate →
+  `redirect('/events/<id>')`. Verwachte fouten komen terug als `{ error: code }`; autorisatie- en
+  technische fouten worden gegooid. Niet-bestaand, ander team en `meting` geven alle drie
+  `not_found` (niets lekt). Nul geraakte rijen → `not_found`, nooit een insert.
+- **UI:** `components/EventFormFields.tsx` (gedeeld veldblok, `matchExtra`-slot voor het
+  verzameltijd-veld van `NewEventForm`), `components/EditEventForm.tsx`,
+  `app/events/[id]/edit/page.tsx`; link "Bewerken" naast `DeleteButton` in de
+  training/wedstrijd-tak van `app/events/[id]/page.tsx`. i18n: `event.editEvent`,
+  `editTitleTraining`, `editTitleMatch`, `saveChanges`, `saving`, `editErrorGeneric`,
+  `editErrors.<code>` — de sleutels onder `editErrors` zijn letterlijk `EventUpdateErrorCode`.
+
+### Beslissingen (Jamie)
+- Alleen velden die nergens anders te bewerken waren; verzameltijd, trainingstype, doelstelling
+  en uitslag blijven in hun eigen editor onder hun eigen recht.
+- Type training ↔ wedstrijd is vergrendeld. Legacy `meting` is niet bewerkbaar.
+- **Aanwezigheid blijft ongemoeid bij een datumwijziging**: afmeldperiodes worden niet opnieuw
+  toegepast en er is geen blessure-herberekening. Een verplaatste activiteit kan dus een afmelding
+  tonen die bij de oude datum hoorde.
+- Geen duplicaatwaarschuwing, datum in het verleden mag, laatste opslag wint.
+- **Kolombegrenzing alleen in de app-laag.** De `events`-update-policy toetst alleen
+  `can_edit(team_id,'agenda')`; een agenda-assistent kan buiten de app om ook uitslag, verzameltijd
+  of trainingstype van een eigen-team-event zetten. Dat was al zo. Dichten = eigen story
+  (kolom-begrensde RPC + de update-policy schrappen).
+
+### Gotcha's
+- **Postgres `TIME` komt terug als `HH:MM:SS`, `isTimeString` accepteert alleen `HH:MM`.** Gebruik
+  `formatTime()` voor elke `defaultValue` van een tijdveld, anders wordt ongewijzigd opslaan
+  afgewezen.
+- **`redirect()` in een server action rejecteert de client-`await`** met een fout waarvan de
+  `digest` begint met `NEXT_REDIRECT`; de navigatie loopt los daarvan door. `EditEventForm` slikt
+  die fout in en laat de knop in de bezig-state. Zes oudere plekken (`CreateTeamCta`,
+  `DeleteAccountSection`, `TeamsSection`, `TeamSwitcher` 2×, `InviteConfirm`) controleren
+  `err.message.includes('NEXT_REDIRECT')` — twee varianten van dezelfde check, kandidaat voor één
+  helper. `NewEventForm` toont bij redirect nog kort `err.message`.
+- **`createEvent` is strenger geworden:** `2026-02-30` geeft nu `'Ongeldige datum'` (was: een
+  algemene databasefout), en een `File` in een tekstveld telt als leeg. Het commentaar bij de
+  datumcontrole in `lib/bulk-matches.ts` en `lib/bulk-matches.test.ts` beweert nog het oude gedrag.
+- **"Tegenstander verplicht" wordt server-side alleen bij bewerken afgedwongen**; bij aanmaken is
+  het nog steeds alleen de `required` in de browser.
+- **Stub in `app/actions/events.test.ts`** geeft per tabel één uitkomst voor alle ketens; een
+  action die eerst leest en dan `.update().select()` doet, heeft `updateResults` nodig. De filters
+  zelf (`team_id`, `type`) worden alleen bewezen door de tabel-engine in
+  `activiteit-bewerken.acceptance.test.tsx` (hook `afterEventsLookup` wijzigt de rij tussen lookup
+  en update).
+- Een datumwijziging van een training verschuift cyclusweek en stap-telling van latere trainingen
+  (afgeleid uit `events.date`); daar is geen eigen code of test voor in deze feature.
+
+### Stand
+Typecheck en lint groen; 147 testbestanden, 3755 tests, alleen de al langer rode
+`cyclusweek-correctie` AC1/AC12 falen. Open: rooktest in productie (knop blijft "Opslaan..." tot
+de navigatie; oude wedstrijd met `match_type`/`home_away` NULL vraagt eerst een keuze).

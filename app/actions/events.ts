@@ -8,7 +8,7 @@ import { getDefaultAttendance } from '@/app/actions/settings'
 import { assertOwnMatchEvent, assertOwnTrainingEvent } from '@/lib/authz'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { genericError, logError, rpcEventError } from '@/lib/errors'
-import { isTimeString } from '@/lib/utils'
+import { isTimeString, todayLocal } from '@/lib/utils'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
 import {
@@ -73,7 +73,7 @@ export async function createEvent(formData: FormData) {
   if (type !== 'meting') {
     const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] = await Promise.all([
       // `injured` hoort erbij: een geblesseerde speler moet ook op een NIEUW
-      // event meteen op 'absent' komen, net als markInjured dat voor bestaande
+      // event vanaf vandaag meteen op 'injured' komen, net als markInjured dat voor bestaande
       // events doet (markInjured in app/actions/players.ts). `type` idem voor
       // gastspelers: die staan altijd afwezig. Het active-filter blijft staan —
       // een gast is gewoon actief en krijgt dus wél een rij.
@@ -102,15 +102,19 @@ export async function createEvent(formData: FormData) {
 
     if (players && players.length > 0) {
       const periodByPlayer = periodIdByPlayerForDate(periods ?? [], date)
+      // Eén keer bepaald: een event in het verleden krijgt geen 'injured'.
+      const today = todayLocal()
       const { error: attendanceError } = await supabase.from('attendance').insert(
         // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
-        // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
+        // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle vijf.
         players.map((p) => buildAttendanceRow({
           eventId: data.id,
           playerId: p.id,
           teamId: ctx.teamId,
           defaultStatus,
           injured: p.injured === true,
+          eventDate: date,
+          today,
           periodId: periodByPlayer.get(p.id) ?? null,
           isGuest: p.type === 'guest',
         }))

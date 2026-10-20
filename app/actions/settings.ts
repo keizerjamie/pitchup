@@ -8,6 +8,7 @@ import { MAX_SEASON_DAYS, isDateString, seasonTrainingDates } from '@/lib/season
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { AttendanceStatus } from '@/lib/types'
+import { todayLocal } from '@/lib/utils'
 
 export async function getDefaultAttendance(): Promise<'present' | 'unknown'> {
   const supabase = await createClient()
@@ -176,6 +177,9 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
     .order('id', { ascending: true })
   if (periodsError) throw genericError('settings.generateSeasonTrainings.periods', periodsError)
 
+  // Eén keer bepaald voor alle batches: alleen trainingen vanaf vandaag krijgen
+  // bij een geblesseerde speler 'injured'.
+  const today = todayLocal()
   let created = 0
   for (let i = 0; i < toCreate.length; i += 50) {
     const batch = toCreate.slice(i, i + 50)
@@ -189,7 +193,7 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
     if (error) throw genericError('settings.generateSeasonTrainings', error)
 
     // `injured` hoort erbij: een geblesseerde speler moet ook op een nieuw
-    // gegenereerde training meteen op 'absent' komen, net als markInjured dat
+    // gegenereerde training vanaf vandaag meteen op 'injured' komen, net als markInjured dat
     // voor bestaande events doet (markInjured in app/actions/players.ts). `type` idem
     // voor gastspelers: die staan altijd afwezig. Het active-filter blijft
     // staan — een gast is gewoon actief en krijgt dus wél een rij.
@@ -207,13 +211,15 @@ export async function generateSeasonTrainings(): Promise<{ created: number; skip
         const periodByPlayer = periodIdByPlayerForDate(periods ?? [], ev.date)
         // Alle rijen krijgen dezelfde sleutels — PostgREST weigert een
         // bulk-insert met afwijkende kolommen, dus buildAttendanceRow zet ze
-        // altijd alle zes.
+        // altijd alle vijf.
         return players.map((p) => buildAttendanceRow({
           eventId: ev.id,
           playerId: p.id,
           teamId: ctx.teamId,
           defaultStatus,
           injured: p.injured === true,
+          eventDate: ev.date,
+          today,
           periodId: periodByPlayer.get(p.id) ?? null,
           isGuest: p.type === 'guest',
         }))

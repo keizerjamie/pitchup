@@ -405,7 +405,7 @@ describe('AC2 — klik roept window.print() precies één keer aan', () => {
     }
   })
 
-  it('edge case: dubbelklik roept window.print() precies 2× aan (bewust geen eigen guard)', () => {
+  it('edge case: dubbelklik roept window.print() precies 1× aan (PrintButton heeft sinds het aanwezigheidsoverzicht een dubbelklik-guard)', () => {
     const printSpy = stubPrint()
     render(
       <DictProvider dict={nl}>
@@ -415,7 +415,7 @@ describe('AC2 — klik roept window.print() precies één keer aan', () => {
     const button = screen.getByRole('button', { name: nl.trainingPlan.print })
     fireEvent.click(button)
     fireEvent.click(button)
-    expect(printSpy).toHaveBeenCalledTimes(2)
+    expect(printSpy).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -568,6 +568,7 @@ describe('AC5 — aanwezigheidsoverzicht blijft, wijzig-link niet', () => {
       <AttendanceSummary
         present={[makePlayer({ id: 'p1', name: 'Piet Peters' })]}
         absent={[makePlayer({ id: 'p2', name: 'Jan Jansen' })]}
+        injured={[]}
         eventId="e1"
         t={nl}
       />,
@@ -597,6 +598,41 @@ describe('AC5 — aanwezigheidsoverzicht blijft, wijzig-link niet', () => {
     )
     expect(hasPrintHiddenAncestor(presentLine)).toBe(false)
     expect(hasPrintHiddenAncestor(absentLine)).toBe(false)
+  })
+
+  // Blessure-status (AC19): een geblesseerde speler krijgt in het print-only
+  // blok een eigen lijst "Geblesseerd (n)", niet onder Afwezig, en telt in de
+  // noemer van de kop (aanwezig/(aanwezig+afwezig+geblesseerd)).
+  it('print-only blok: geblesseerde speler staat onder een eigen kopje "Geblesseerd (1)", niet onder Afwezig; noemer telt hem mee', () => {
+    render(
+      <AttendanceSummary
+        present={[makePlayer({ id: 'p1', name: 'Piet Peters' })]}
+        absent={[makePlayer({ id: 'p2', name: 'Jan Jansen' })]}
+        injured={[makePlayer({ id: 'p3', name: 'Kees Kramp' })]}
+        eventId="e1"
+        t={nl}
+      />,
+    )
+    const kop = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === `${nl.event.attendance} (1/3)`)
+    expect(hasPrintHiddenAncestor(kop)).toBe(false)
+
+    const injuredHeading = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === `${nl.event.injuredStat} (1)`
+      && !hasPrintHiddenAncestor(el as HTMLElement))
+    const injuredList = injuredHeading.nextElementSibling as HTMLElement
+    expect(injuredList.tagName).toBe('UL')
+    const injuredLine = within(injuredList).getByText((_c, el) => el?.tagName === 'LI' && el.textContent === '9 Kees Kramp')
+    expect(hasPrintHiddenAncestor(injuredLine)).toBe(false)
+
+    const absentHeading = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === `${nl.event.absentStat} (1)`
+      && !hasPrintHiddenAncestor(el as HTMLElement))
+    const absentList = absentHeading.nextElementSibling as HTMLElement
+    expect(within(absentList).queryByText((_c, el) => el?.tagName === 'LI' && el.textContent === '9 Kees Kramp')).not.toBeInTheDocument()
+    expect(within(absentList).getByText((_c, el) => el?.tagName === 'LI' && el.textContent === '9 Jan Jansen')).toBeInTheDocument()
+  })
+
+  it('zonder geblesseerden verschijnt er geen kopje "Geblesseerd" in het print-only blok', () => {
+    renderSummary()
+    expect(screen.queryByText((_c, el) => el?.tagName === 'P' && (el.textContent ?? '').startsWith(nl.event.injuredStat))).not.toBeInTheDocument()
   })
 
   it('de "wijzig aanwezigheid"-link is print:hidden', () => {
@@ -1262,6 +1298,7 @@ describe('E1 — klassen die de compacte print-layout dragen', () => {
       <AttendanceSummary
         present={[makePlayer({ id: 'p1', name: 'Piet Peters' })]}
         absent={[]}
+        injured={[]}
         eventId="e1"
         t={nl}
       />,

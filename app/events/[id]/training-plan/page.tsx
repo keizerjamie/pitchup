@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
-import { Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
+import { AttendanceStatus, Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import { actueleMetingen, ankerDatum, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
 import { addDays, formatDateLong, todayLocal } from '@/lib/utils'
@@ -13,7 +13,7 @@ import AttendanceSummary from '@/components/AttendanceSummary'
 import PrintButton from '@/components/PrintButton'
 import TeamLogo from '@/components/TeamLogo'
 import { getDict } from '@/lib/i18n'
-import { splitsAanwezigheid } from '@/lib/aanwezigheid-telling'
+import { splitsAanwezigheidMetBlessure } from '@/lib/aanwezigheid-telling'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -45,12 +45,17 @@ export default async function TrainingPlanPage({ params }: Props) {
   ])
   const activePlayers: Player[] = playersData ?? []
   const presentIds = new Set((attendanceData ?? []).filter((a) => a.status === 'present').map((a) => a.player_id))
-  // Eén regel voor beide lijsten (scherm én printblok): een gast staat alleen
-  // tussen de aanwezigen en nooit in de afwezigenlijst. Zie splitsAanwezigheid
-  // in lib/aanwezigheid-telling.ts; `afwezig` blijft daar bewust "niet
-  // aanwezig", dus inclusief status unknown — dat gedrag verandert niet.
-  const { aanwezig: presentPlayers, afwezig: absentPlayers } =
-    splitsAanwezigheid(activePlayers, (p) => presentIds.has(p.id))
+  // Eén regel voor alle lijsten (scherm én printblok): een gast staat alleen
+  // tussen de aanwezigen en nooit in de afwezigen-/geblesseerdenlijst. Zie
+  // splitsAanwezigheidMetBlessure in lib/aanwezigheid-telling.ts; `afwezig`
+  // blijft daar bewust "niet aanwezig en niet geblesseerd", dus inclusief
+  // status unknown. Geblesseerden staan niet in presentIds (AC17), dus ook
+  // niet in de teamindeling.
+  const statusByPlayer = new Map<string, AttendanceStatus>(
+    (attendanceData ?? []).map((a) => [a.player_id, a.status as AttendanceStatus]),
+  )
+  const { aanwezig: presentPlayers, afwezig: absentPlayers, geblesseerd: injuredPlayers } =
+    splitsAanwezigheidMetBlessure(activePlayers, (p) => statusByPlayer.get(p.id) ?? 'unknown')
 
   // Clubkleuren serverzijdig geresolved (ingestelde waarde óf fallback), zodat
   // de printweergave altijd kant-en-klare hexstrings krijgt. Het doorgeven aan
@@ -236,6 +241,7 @@ export default async function TrainingPlanPage({ params }: Props) {
           <AttendanceSummary
             present={presentPlayers}
             absent={absentPlayers}
+            injured={injuredPlayers}
             eventId={id}
             t={t}
             className="lg:sticky lg:top-10 print-attendance-col"

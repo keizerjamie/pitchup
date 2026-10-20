@@ -5,12 +5,13 @@ import type { Dict } from '@/messages/nl'
 interface Props {
   present: Player[]
   absent: Player[]
+  injured: Player[]
   eventId: string
   t: Dict
   className?: string
 }
 
-function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) {
+function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' | 'injured' }) {
   // Aanwezig krijgt het groene statuspaneel-drietal (achtergrond/rand/tekst,
   // in beide thema's op minimaal 4.5:1 nagerekend — zie de --panel-*-tokens in
   // globals.css). Afwezig blijft bewust neutraal, maar krijgt nu wél een rand:
@@ -19,13 +20,16 @@ function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) 
   // nauwelijks verschil met een aanwezige speler.
   const chip = tone === 'present'
     ? 'bg-panel-green text-panel-green-ink border border-panel-green-edge'
-    : 'bg-surface-sunken text-muted border border-[var(--border-soft)]'
+    : tone === 'injured'
+      ? 'bg-panel-red text-panel-red-ink border border-panel-red-edge'
+      : 'bg-surface-sunken text-muted border border-[var(--border-soft)]'
   const badge = tone === 'present' ? 'bg-primary text-white' : 'bg-[var(--track)] text-muted'
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-lg pl-1 pr-2.5 py-1 text-sm font-medium ${chip}`}>
       <span className={`w-5 h-5 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${badge}`}>
         {player.jersey_number ?? '#'}
       </span>
+      {tone === 'injured' && <span className="ms text-[15px] -mr-0.5" aria-hidden="true">healing</span>}
       {player.name.split(' ')[0]}
     </span>
   )
@@ -39,7 +43,7 @@ function Chip({ player, tone }: { player: Player; tone: 'present' | 'absent' }) 
 // kolom, i.p.v. de gegroepeerde chips-weergave hieronder — zie het
 // `hidden print:block`-blok verderop. Dezelfde `present`/`absent`-props,
 // alleen anders opgemaakt.
-export default function AttendanceSummary({ present, absent, eventId, t, className = '' }: Props) {
+export default function AttendanceSummary({ present, absent, injured, eventId, t, className = '' }: Props) {
   return (
     // `.glass-card` is ongelaagde CSS en wint van elke Tailwind-utility in
     // `@layer utilities` — `print:bg-transparent`/`print:shadow-none`/
@@ -54,7 +58,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
         <div className="px-5 py-4 border-b border-[var(--border-soft)] flex items-center justify-between gap-2">
           <h2 className="font-semibold text-ink">{t.event.attendance}</h2>
           <span className="text-sm font-semibold text-primary-strong flex-shrink-0">
-            {present.length}/{present.length + absent.length}
+            {present.length}/{present.length + absent.length + injured.length}
           </span>
         </div>
 
@@ -85,6 +89,17 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {absent.map((p) => <Chip key={p.id} player={p} tone="absent" />)}
+              </div>
+            </div>
+          )}
+
+          {injured.length > 0 && (
+            <div className="pt-3 border-t border-[var(--border-soft)]">
+              <p className="text-xs font-semibold text-faint uppercase tracking-wide mb-1.5">
+                {t.event.injuredStat} ({injured.length})
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {injured.map((p) => <Chip key={p.id} player={p} tone="injured" />)}
               </div>
             </div>
           )}
@@ -123,7 +138,7 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
             rechtsuitgelijnd in een vast kadertje (.print-attendance-nr) zodat
             de namen één nette linkerlijn vormen — verstrakking 2026-08-24. */}
         <p className="print:font-extrabold print:uppercase print:tracking-[0.12em] print:text-[7px] print:mb-[1mm] print-accent-text">
-          {t.event.attendance} ({present.length}/{present.length + absent.length})
+          {t.event.attendance} ({present.length}/{present.length + absent.length + injured.length})
         </p>
         {present.length > 0 && (
           <ul>
@@ -139,6 +154,18 @@ export default function AttendanceSummary({ present, absent, eventId, t, classNa
             </p>
             <ul>
               {absent.map((p) => (
+                <li key={p.id}><span className="print-attendance-nr">{p.jersey_number ?? '#'}</span> {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {injured.length > 0 && (
+          <>
+            <p className="print:font-extrabold print:uppercase print:tracking-[0.12em] print:text-[7px] print:mt-[2mm] print:mb-[1mm] print-accent-text">
+              {t.event.injuredStat} ({injured.length})
+            </p>
+            <ul>
+              {injured.map((p) => (
                 <li key={p.id}><span className="print-attendance-nr">{p.jersey_number ?? '#'}</span> {p.name}{p.type === 'guest' && ` (${t.players.guestBadge})`}</li>
               ))}
             </ul>

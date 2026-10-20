@@ -358,16 +358,18 @@ begin
   set local role authenticated;
   set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
 
-  -- Het markInjured-pad: een afwezig-rij wegschrijven met de blessurevlag.
-  insert into attendance (team_id, event_id, player_id, status, injury_set)
-  values ('TEAM_A_UUID', 'TRAINING_A_UUID', 'PLAYER_A_UUID', 'absent', true)
+  -- Het markInjured-pad: een rij met status 'injured' wegschrijven
+  -- (supabase/blessure-status.sql; de vlag injury_set bestaat niet meer).
+  insert into attendance (team_id, event_id, player_id, status)
+  values ('TEAM_A_UUID', 'TRAINING_A_UUID', 'PLAYER_A_UUID', 'injured')
   on conflict (event_id, player_id) do update
-    set status = 'absent', injury_set = true;
+    set status = 'injured';
   raise notice 'OK blok 7: spelersrecht mag een attendance-rij schrijven (markInjured-pad)';
 
   -- Het markRecovered-pad: dezelfde rij terugzetten.
-  update attendance set injury_set = false
-   where team_id = 'TEAM_A_UUID' and player_id = 'PLAYER_A_UUID';
+  update attendance set status = 'unknown'
+   where team_id = 'TEAM_A_UUID' and player_id = 'PLAYER_A_UUID'
+     and status = 'injured';
   get diagnostics n = row_count;
   if n = 0 then raise exception 'FOUT: spelersrecht kan de attendance-rij niet bijwerken'; end if;
 

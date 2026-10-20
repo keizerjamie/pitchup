@@ -471,8 +471,8 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
     await generateSeasonTrainings()
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: 'ap-1' },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: 'ap-1' },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -490,8 +490,8 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
 
     const rows = attendanceRows(m)
     expect(rows.filter((r) => r.event_id === 'e1')).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: 'ap-1' },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: 'ap-1' },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
     for (const row of rows.filter((r) => r.event_id === 'e2')) {
       expect(row.status).toBe('present')
@@ -520,10 +520,10 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
       )
       expect(row.absence_period_id).toBeNull()
-      expect(row.injury_set).toBe(false)
+      expect(row).not.toHaveProperty('injury_set')
     }
   })
 
@@ -562,9 +562,21 @@ describe('generateSeasonTrainings — afmeldperiode', () => {
 // generateSeasonTrainings — blessure
 // ────────────────────────────────────────────────
 // Anders dan een afmeldperiode kent een blessure geen datumbereik: zolang
-// players.injured true is, geldt hij voor élke gegenereerde training.
+// players.injured true is, geldt hij voor élke gegenereerde training vanaf
+// vandaag. Trainingen in het verleden krijgen de standaardstatus (AC18).
+
+// Vaste klok op de seizoensstart (januari 2026), zodat de gegenereerde
+// trainingen in de toekomst liggen. Alleen Date wordt nagebootst; lokale
+// middag, zodat todayLocal() in elke tijdzone dezelfde dag geeft.
+function vasteKlok(dag = 1) {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 0, dag, 12, 0, 0))
+}
 
 describe('generateSeasonTrainings — blessure', () => {
+  beforeEach(() => vasteKlok())
+  afterEach(() => { vi.useRealTimers() })
+
   function metBlessure(
     events: { id: string; date: string }[],
     players: { id: string; injured?: boolean }[],
@@ -582,7 +594,7 @@ describe('generateSeasonTrainings — blessure', () => {
     return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
   }
 
-  it('zet een geblesseerde speler op elke gegenereerde training op absent, ook zonder enige periode', async () => {
+  it('zet een geblesseerde speler op elke toekomstige gegenereerde training op injured, ook zonder enige periode', async () => {
     const m = metBlessure(
       [{ id: 'e1', date: '2026-01-12' }, { id: 'e2', date: '2026-01-26' }],
       [{ id: 'p1', injured: true }, { id: 'p2', injured: false }],
@@ -595,8 +607,7 @@ describe('generateSeasonTrainings — blessure', () => {
     const geblesseerd = rows.filter((r) => r.player_id === 'p1')
     expect(geblesseerd).toHaveLength(2)
     for (const row of geblesseerd) {
-      expect(row.status).toBe('absent')
-      expect(row.injury_set).toBe(true)
+      expect(row.status).toBe('injured')
       expect(row.absence_period_id).toBeNull()
     }
 
@@ -604,11 +615,27 @@ describe('generateSeasonTrainings — blessure', () => {
     expect(fit).toHaveLength(2)
     for (const row of fit) {
       expect(row.status).toBe('present')
-      expect(row.injury_set).toBe(false)
+      expect(row).not.toHaveProperty('injury_set')
     }
   })
 
-  it('combineert blessure en een dekkende periode: absent met beide markeringen', async () => {
+  it('beoordeelt elke training op zijn eigen datum: verleden → standaard, vanaf vandaag → injured', async () => {
+    // "Vandaag" = 2026-01-19: e1 (12 jan) ligt ervoor, e2 (26 jan) erna.
+    vasteKlok(19)
+    const m = metBlessure(
+      [{ id: 'e1', date: '2026-01-12' }, { id: 'e2', date: '2026-01-26' }],
+      [{ id: 'p1', injured: true }],
+    )
+    gebruikSupabase(m)
+
+    await generateSeasonTrainings()
+
+    const rows = attendanceRows(m)
+    expect(rows.find((r) => r.event_id === 'e1')).toMatchObject({ player_id: 'p1', status: 'present' })
+    expect(rows.find((r) => r.event_id === 'e2')).toMatchObject({ player_id: 'p1', status: 'injured' })
+  })
+
+  it('combineert blessure en een dekkende periode: injured, met de periode als herkomst', async () => {
     const m = metBlessure(
       [{ id: 'e1', date: '2026-01-12' }],
       [{ id: 'p1', injured: true }],
@@ -619,8 +646,8 @@ describe('generateSeasonTrainings — blessure', () => {
     await generateSeasonTrainings()
 
     expect(attendanceRows(m)[0]).toEqual({
-      event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1',
-      injury_set: true, absence_period_id: 'ap-1',
+      event_id: 'e1', player_id: 'p1', status: 'injured', team_id: 'team-1',
+      absence_period_id: 'ap-1',
     })
   })
 
@@ -644,6 +671,9 @@ describe('generateSeasonTrainings — blessure', () => {
 // teaminstelling default_attendance (in deze suite 'present').
 
 describe('generateSeasonTrainings — gastspeler', () => {
+  beforeEach(() => vasteKlok())
+  afterEach(() => { vi.useRealTimers() })
+
   function metGast(
     events: { id: string; date: string }[],
     players: { id: string; injured?: boolean; type?: string }[],
@@ -677,7 +707,6 @@ describe('generateSeasonTrainings — gastspeler', () => {
     expect(gast).toHaveLength(2)
     for (const row of gast) {
       expect(row.status).toBe('absent')
-      expect(row.injury_set).toBe(false)
       expect(row.absence_period_id).toBeNull()
     }
 
@@ -686,7 +715,7 @@ describe('generateSeasonTrainings — gastspeler', () => {
     for (const row of regulier) expect(row.status).toBe('present')
   })
 
-  it('blijft absent in combinatie met blessure en een dekkende periode (AC9)', async () => {
+  it('een geblesseerde gast krijgt injured, ook met een dekkende periode (V1)', async () => {
     const m = metGast(
       [{ id: 'e1', date: '2026-01-12' }],
       [{ id: 'p1', injured: true, type: 'guest' }],
@@ -697,8 +726,8 @@ describe('generateSeasonTrainings — gastspeler', () => {
     await generateSeasonTrainings()
 
     expect(attendanceRows(m)[0]).toEqual({
-      event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1',
-      injury_set: true, absence_period_id: 'ap-1',
+      event_id: 'e1', player_id: 'p1', status: 'injured', team_id: 'team-1',
+      absence_period_id: 'ap-1',
     })
   })
 
@@ -729,7 +758,7 @@ describe('generateSeasonTrainings — gastspeler', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
       )
     }
   })

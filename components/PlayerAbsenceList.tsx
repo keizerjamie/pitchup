@@ -84,7 +84,11 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     // buiten deze lokaal geladen (toekomstige) lijst mee.
     setEvents((prev) =>
       prev.map((e) =>
-        e.date >= fromDate && e.date <= toDate ? { ...e, status: 'absent' as AttendanceStatus } : e
+        // Een geblesseerde rij blijft 'injured' (de server zet daar alleen de
+        // herkomst van de periode, de status blijft staan).
+        e.date >= fromDate && e.date <= toDate && e.status !== 'injured'
+          ? { ...e, status: 'absent' as AttendanceStatus }
+          : e
       )
     )
     startPeriodTransition(async () => {
@@ -110,6 +114,8 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     setEvents((prev) =>
       prev.map((e) => {
         if (e.date < revoked.from_date || e.date > revoked.to_date) return e
+        // Een 'injured'-rij blijft bij intrekken ongemoeid (de server wist alleen de herkomst).
+        if (e.status === 'injured') return e
         const stillCovered = findCoveringPeriod(remaining, e.date)
         return { ...e, status: stillCovered ? ('absent' as AttendanceStatus) : (defaultStatus as AttendanceStatus) }
       })
@@ -117,7 +123,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     startRevokeTransition(async () => {
       try {
         await revokeAbsencePeriod(periodId)
-        // De server houdt handmatige en blessure-rijen bewust op 'absent';
+        // De server houdt handmatige rijen bewust op 'absent' en laat 'injured' staan;
         // de optimistische update hierboven kent dat onderscheid niet. Een
         // refresh haalt de definitieve serverstaat op.
         router.refresh()
@@ -253,11 +259,12 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
             {week.events.map((event) => {
               const isMatch = event.type === 'match'
               const isAbsent = event.status === 'absent'
+              const isInjured = event.status === 'injured'
               const isPresent = event.status === 'present'
 
               return (
                 <div key={event.id}
-                  className={`bg-surface rounded-xl border-2 p-4 flex items-center gap-4 transition ${isAbsent ? 'border-panel-red-edge bg-panel-red' : 'border-[var(--border-soft)]'}`}>
+                  className={`bg-surface rounded-xl border-2 p-4 flex items-center gap-4 transition ${isAbsent || isInjured ? 'border-panel-red-edge bg-panel-red' : 'border-[var(--border-soft)]'}`}>
                   <div className={`flex-shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center ${isMatch ? 'bg-panel-blue' : 'bg-brand-light'}`}>
                     <span className={`text-xs font-medium leading-none ${isMatch ? 'text-panel-blue-ink' : 'text-brand'}`}>
                       {new Date(event.date + 'T00:00:00').toLocaleDateString(t.browserLocale, { month: 'short' })}
@@ -302,6 +309,17 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                           }`}>
                           {t.players.absent}
                         </button>
+                        <button
+                          onClick={() => !isInjured && setStatus(event.id, 'injured')}
+                          disabled={isPeriodPending || isRevokePending}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition disabled:opacity-40 inline-flex items-center gap-1 ${
+                            isInjured
+                              ? 'bg-danger text-white'
+                              : 'bg-surface-sunken text-faint hover:bg-panel-red hover:text-panel-red-ink'
+                          }`}>
+                          <span className="ms text-[14px]" aria-hidden="true">healing</span>
+                          {t.players.injuredStatus}
+                        </button>
                       </>
                     ) : (
                       // Read-only: de waarde blijft zichtbaar als badge, geen
@@ -310,12 +328,12 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
                           isPresent
                             ? 'bg-primary text-white'
-                            : isAbsent
+                            : isAbsent || isInjured
                               ? 'bg-danger text-white'
                               : 'bg-surface-sunken text-faint'
                         }`}
                       >
-                        {isPresent ? t.players.present : isAbsent ? t.players.absent : t.players.unknownStatus}
+                        {isPresent ? t.players.present : isAbsent ? t.players.absent : isInjured ? t.players.injuredStatus : t.players.unknownStatus}
                       </span>
                     )}
                   </div>

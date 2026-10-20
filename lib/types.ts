@@ -80,7 +80,11 @@ export type TrainingsType = 'vct' | 'teamtactisch'
 export const VALID_TRAININGSTYPES: TrainingsType[] = ['vct', 'teamtactisch']
 export type MatchType = 'friendly' | 'league' | 'cup'
 export type HomeAway = 'home' | 'away'
-export type AttendanceStatus = 'present' | 'absent' | 'unknown'
+// 'injured' = afwezig door blessure op dit event. Telt in elk percentage en
+// elke hero-telling als afwezig; op de eventpagina en in het overzicht op
+// /players staat hij apart. Spiegelt de CHECK attendance_status_check
+// (supabase/blessure-status.sql).
+export type AttendanceStatus = 'present' | 'absent' | 'injured' | 'unknown'
 // Uitkomst van één wedstrijd vanuit het eigen team gezien; 'unknown' = geen
 // (volledige) uitslag ingevuld. Afgeleid door matchResult() in
 // lib/match-analysis.mjs — één bron van waarheid voor de W/G/V-vorm.
@@ -398,10 +402,10 @@ export interface Attendance {
   event_id: string
   player_id: string
   status: AttendanceStatus
-  injury_set: boolean
   // Herkomst van een 'absent'-status: wélke afmeldperiode zette deze rij? null =
   // handmatig, door blessure of gewoon de standaardstatus — die rijen blijven bij
-  // het intrekken van een periode ongemoeid.
+  // het intrekken van een periode ongemoeid. Kan ook op een 'injured'-rij staan:
+  // de periode dekt die datum, dus na herstel valt de rij terug op 'absent'.
   absence_period_id: string | null
   created_at: string
 }

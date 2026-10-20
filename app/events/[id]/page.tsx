@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, AttendanceStatus } from '@/lib/types'
-import { formatDateLong, formatTime } from '@/lib/utils'
+import { formatDateLong, formatTime, todayLocal } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
 import MetingEditor from '@/components/MetingEditor'
 import BackButton from '@/components/BackButton'
@@ -130,14 +130,18 @@ export default async function EventDetailPage({ params }: Props) {
     // Eén keer opgebouwd en daarna hergebruikt voor de attendanceMap hieronder:
     // de pagina moet exact tonen wat er is weggeschreven. Een geblesseerde
     // speler (players.injured, al opgehaald met de select('*') hierboven) komt
-    // net als bij een lopende periode op 'absent' — anders herintroduceert deze
-    // backfill precies het bugsymptoom dat markInjured moest oplossen.
+    // op een event vanaf vandaag op 'injured' — anders herintroduceert deze
+    // backfill precies het bugsymptoom dat markInjured moest oplossen. Een
+    // verleden-event krijgt geen 'injured' (de blessure is de toestand van nu).
+    const today = todayLocal()
     const backfillRows = missingPlayers.map((p) => buildAttendanceRow({
       eventId: id,
       playerId: p.id,
       teamId: ctx.teamId,
       defaultStatus: 'unknown',
       injured: p.injured === true,
+      eventDate: event.date,
+      today,
       periodId: periodByPlayer.get(p.id) ?? null,
       // Een gastspeler staat altijd afwezig; de backfill moet exact dezelfde
       // regel toepassen als de drie aanmaakplekken, anders geeft déze pagina
@@ -146,7 +150,7 @@ export default async function EventDetailPage({ params }: Props) {
     }))
 
     // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
-    // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
+    // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle vijf.
     const { error: backfillError } = await supabase.from('attendance').insert(backfillRows)
     // Zonder deze check zou de lus hieronder de attendanceMap vullen alsof de
     // insert lukte: de coach ziet dan statussen die nooit zijn opgeslagen.

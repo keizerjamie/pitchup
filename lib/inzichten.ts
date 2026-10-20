@@ -694,8 +694,9 @@ export interface MatchEventTelling {
 export interface SpelerStatistieken {
   // Geklemd venster (t/m gisteren) — alleen voor de aanwezigheid. Zie
   // verledenSeizoensVenster: toekomstige, nog niet gespeelde events mogen het
-  // percentage niet omlaag trekken (markInjured zet daar al 'absent' neer).
+  // percentage niet omlaag trekken (markInjured zet daar al 'injured' neer).
   aanwezig: number
+  // 'absent' + 'injured': de RPC telt een blessure als afwezig.
   afwezig: number
   // null = geen enkele present/absent-registratie; NOOIT 0% — zelfde regel als
   // berekenAanwezigheidPercentage hierboven.

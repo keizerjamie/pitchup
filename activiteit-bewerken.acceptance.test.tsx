@@ -320,13 +320,13 @@ function baseTables(): Record<string, Row[]> {
       { id: 'ap2', team_id: TEAM_ID, player_id: 'p1', from_date: '2026-12-05', to_date: '2026-12-10', created_at: '2026-10-01T00:00:00Z' },
     ],
     attendance: [
-      { id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM_ID, status: 'present', injury_set: false, absence_period_id: null },
-      { id: 'a2', event_id: 'e1', player_id: 'p2', team_id: TEAM_ID, status: 'absent', injury_set: false, absence_period_id: 'ap1' },
-      { id: 'a3', event_id: 'm1', player_id: 'p1', team_id: TEAM_ID, status: 'absent', injury_set: true, absence_period_id: null },
-      { id: 'a4', event_id: 'm1', player_id: 'p2', team_id: TEAM_ID, status: 'absent', injury_set: false, absence_period_id: 'ap1' },
-      { id: 'a5', event_id: 'e2', player_id: 'p1', team_id: TEAM_ID, status: 'present', injury_set: false, absence_period_id: null },
-      { id: 'a6', event_id: 'e2', player_id: 'p2', team_id: TEAM_ID, status: 'present', injury_set: false, absence_period_id: null },
-      { id: 'a7', event_id: 'eB', player_id: 'p3', team_id: ANDER_TEAM, status: 'present', injury_set: false, absence_period_id: null },
+      { id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM_ID, status: 'present', absence_period_id: null },
+      { id: 'a2', event_id: 'e1', player_id: 'p2', team_id: TEAM_ID, status: 'absent', absence_period_id: 'ap1' },
+      { id: 'a3', event_id: 'm1', player_id: 'p1', team_id: TEAM_ID, status: 'injured', absence_period_id: null },
+      { id: 'a4', event_id: 'm1', player_id: 'p2', team_id: TEAM_ID, status: 'absent', absence_period_id: 'ap1' },
+      { id: 'a5', event_id: 'e2', player_id: 'p1', team_id: TEAM_ID, status: 'present', absence_period_id: null },
+      { id: 'a6', event_id: 'e2', player_id: 'p2', team_id: TEAM_ID, status: 'present', absence_period_id: null },
+      { id: 'a7', event_id: 'eB', player_id: 'p3', team_id: ANDER_TEAM, status: 'present', absence_period_id: null },
     ],
     lineups: [{ id: 'l1', event_id: 'm1', team_id: TEAM_ID, formation: '4-3-3', positions: { p1: 'GK' } }],
     match_squad: [{ id: 's1', event_id: 'm1', team_id: TEAM_ID, player_id: 'p1' }],
@@ -440,10 +440,10 @@ async function submitForm(container: HTMLElement) {
   await act(async () => { fireEvent.submit(container.querySelector('form')!) })
 }
 
-// Rij-status op de detailpagina (TrainingAttendance: twee knoppen per speler).
+// Rij-status op de detailpagina (TrainingAttendance: drie knoppen per speler).
 function statusOf(name: string): 'present' | 'absent' | 'unknown' {
   const row = screen.getByText(name).parentElement?.parentElement
-  if (!row || within(row).queryAllByRole('button').length !== 2) throw new Error(`Aanwezigheidsrij ${name} niet gevonden`)
+  if (!row || within(row).queryAllByRole('button').length !== 3) throw new Error(`Aanwezigheidsrij ${name} niet gevonden`)
   const pressed = within(row).queryByRole('button', { pressed: true })
   if (!pressed) return 'unknown'
   return pressed.textContent?.includes(nl.event.absentStat) ? 'absent' : 'present'
@@ -855,7 +855,7 @@ describe('AC12 — datum en tijd zijn lokale wandklokwaarden zonder UTC-omrekeni
 // AC13 — aanwezigheid bij datumwijziging (B3)
 // ════════════════════════════════════════════════════════════════════════
 describe('AC13 — bij een datumwijziging blijven alle aanwezigheidsrijen exact zoals ze waren', () => {
-  it('AC13 — status, injury_set en absence_period_id van elke rij zijn diep-gelijk; geen rij erbij, weg of herberekend', async () => {
+  it('AC13 — status en absence_period_id van elke rij zijn diep-gelijk; geen rij erbij, weg of herberekend', async () => {
     const db = asOwner()
     const voor = structuredClone(db.tables.attendance)
     await runUpdate('e1', { ...TRAINING_FIELDS, date: '2026-12-01' })

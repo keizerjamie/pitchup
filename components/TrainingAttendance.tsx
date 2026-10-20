@@ -39,8 +39,10 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
   }
 
   function handleMarkAll() {
+    // Zelfde regel als markAllPresent op de server: een 'injured'-rij blijft
+    // staan, de rest wordt 'present'.
     const all: Record<string, AttendanceStatus> = {}
-    players.forEach((p) => { all[p.id] = 'present' })
+    players.forEach((p) => { all[p.id] = (statuses[p.id] ?? 'unknown') === 'injured' ? 'injured' : 'present' })
     setStatuses(all)
     startTransition(() => markAllPresent(eventId))
   }
@@ -55,7 +57,7 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
     )
   }
 
-  const { aanwezig, afwezig, onbekend, opkomstPercentage, gastenAanwezig, vastAanwezig, vastAfwezig } =
+  const { aanwezig, afwezig, geblesseerd, onbekend, opkomstPercentage, gastenAanwezig, vastAanwezig, vastAfwezig } =
     telAanwezigheid(players, (p) => statuses[p.id] ?? 'unknown')
 
   // Geen subregel zonder vaste selectie (bv. een event met uitsluitend
@@ -72,8 +74,8 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
   return (
     <div className="flex flex-col gap-4">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(120deg,#0d3d38,#14655c)' }}>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="col-span-2 lg:col-span-1 rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(120deg,#0d3d38,#14655c)' }}>
           <div className="text-[12.5px] font-bold" style={{ color: '#9fd8cd' }}>{t.event.turnout}</div>
           <div className="font-display text-[30px] font-bold mt-1">
             {opkomstPercentage !== null ? `${opkomstPercentage}%` : '—'}
@@ -93,6 +95,7 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
         </div>
         <StatMini dot="#22c55e" label={t.event.presentStat} value={aanwezig} sub={guestSub} />
         <StatMini dot="#ef4444" label={t.event.absentStat} value={afwezig} />
+        <StatMini icon="healing" label={t.event.injuredStat} value={geblesseerd} />
         <StatMini dot="#f59e0b" label={t.event.unknownStat} value={onbekend} />
       </div>
 
@@ -139,15 +142,18 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
                     <StatusButton
                       active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={isPending}
                       icon="close" label={t.event.absentStat} activeBg="#dc2626" />
+                    <StatusButton
+                      active={s === 'injured'} onClick={() => setStatus(player.id, 'injured')} disabled={isPending}
+                      icon="healing" label={t.event.injuredStat} activeBg="var(--danger)" />
                   </>
                 ) : (
                   // Read-only: alleen de huidige status als badge, geen
                   // klikbare knoppen zonder Aanwezigheid-recht.
                   <span
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                    style={{ background: s === 'present' ? 'var(--primary)' : s === 'absent' ? '#dc2626' : 'var(--faint)' }}
+                    style={{ background: s === 'present' ? 'var(--primary)' : s === 'absent' ? '#dc2626' : s === 'injured' ? 'var(--danger)' : 'var(--faint)' }}
                   >
-                    {s === 'present' ? t.event.presentStat : s === 'absent' ? t.event.absentStat : t.event.unknownStat}
+                    {s === 'present' ? t.event.presentStat : s === 'absent' ? t.event.absentStat : s === 'injured' ? t.event.injuredStat : t.event.unknownStat}
                   </span>
                 )}
               </div>
@@ -159,11 +165,16 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
   )
 }
 
-function StatMini({ dot, label, value, sub }: { dot: string; label: string; value: number; sub?: string }) {
+function StatMini({ dot, icon, label, value, sub }: { dot?: string; icon?: string; label: string; value: number; sub?: string }) {
   return (
     <div className="surface-card p-4">
       <div className="flex items-center gap-2 text-[12.5px] font-bold text-muted">
-        <span className="w-[9px] h-[9px] rounded-full" style={{ background: dot }} />{label}
+        {icon ? (
+          <span className="ms text-[14px]" style={{ color: 'var(--chip-red-fg)' }} aria-hidden="true">{icon}</span>
+        ) : (
+          <span className="w-[9px] h-[9px] rounded-full" style={{ background: dot }} />
+        )}
+        {label}
       </div>
       <div className="font-display text-[30px] font-bold text-ink mt-1">{value}</div>
       {/* Vaste min-hoogte: reserveert de ruimte zodat een verschijnende/verdwijnende
@@ -188,12 +199,13 @@ function StatusButton({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
-      className="h-9 rounded-[10px] px-3 flex items-center gap-1.5 text-[12.5px] font-bold transition-colors disabled:opacity-60"
+      aria-label={label}
+      className="h-9 rounded-[10px] px-3 flex items-center gap-1.5 text-[12.5px] font-bold transition-[color,background-color,transform] duration-[160ms] ease-out active:scale-[0.97] disabled:opacity-60"
       style={active
         ? { background: activeBg, color: '#fff' }
         : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
     >
-      <span className="ms text-[17px]">{icon}</span>
+      <span className="ms text-[17px]" aria-hidden="true">{icon}</span>
       <span className="hidden sm:inline">{label}</span>
     </button>
   )

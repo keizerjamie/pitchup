@@ -126,37 +126,22 @@ export async function markInjured(playerId: string): Promise<void> {
   if (eventsError) throw genericError('players.markInjured.events', eventsError)
 
   if (events && events.length > 0) {
-    const eventIds = events.map((e) => e.id)
+    // ALLE toekomstige events op 'injured', ook rijen die al 'absent' waren
+    // (handmatig of door een afmeldperiode): blessure wint (besluit 11, V2).
+    // Bewust géén absence_period_id in de payload: een upsert werkt alleen de
+    // meegegeven kolommen bij, dus een bestaande periode-herkomst blijft staan
+    // en markRecovered kan de rij daarna terugzetten op 'absent'.
+    const records = events.map((e) => ({
+      event_id: e.id,
+      player_id: playerId,
+      team_id: ctx.teamId,
+      status: 'injured' as AttendanceStatus,
+    }))
 
-    // Bestaande attendance-status per toekomstig event voor deze speler.
-    const { data: existing, error: existingError } = await supabase
+    const { error } = await supabase
       .from('attendance')
-      .select('event_id, status')
-      .eq('team_id', ctx.teamId)
-      .eq('player_id', playerId)
-      .in('event_id', eventIds)
-    if (existingError) throw genericError('players.markInjured.attendance', existingError)
-
-    const statusByEvent = new Map<string, AttendanceStatus>()
-    for (const row of existing ?? []) statusByEvent.set(row.event_id, row.status as AttendanceStatus)
-
-    // Alleen events waar de huidige status NIET 'absent' is (geen rij, present of unknown).
-    const records = eventIds
-      .filter((id) => statusByEvent.get(id) !== 'absent')
-      .map((id) => ({
-        event_id: id,
-        player_id: playerId,
-        team_id: ctx.teamId,
-        status: 'absent' as AttendanceStatus,
-        injury_set: true,
-      }))
-
-    if (records.length > 0) {
-      const { error } = await supabase
-        .from('attendance')
-        .upsert(records, { onConflict: 'event_id,player_id' })
-      if (error) throw genericError('players.markInjured.upsert', error)
-    }
+      .upsert(records, { onConflict: 'event_id,player_id' })
+    if (error) throw genericError('players.markInjured.upsert', error)
   }
 
   const { error: playerError } = await supabase
@@ -213,34 +198,33 @@ export async function markRecovered(playerId: string): Promise<void> {
       isGuest: player?.type === 'guest',
     })
 
-    // a. Nog-afwezige, door-blessure-gezette TOEKOMSTIGE rijen terug naar default.
-    //    Bewust future-only + status='absent': verleden-historie en handmatige
-    //    afwezigheden blijven ongemoeid. Ook rijen die aan een lopende
-    //    afmeldperiode hangen blijven staan (.is('absence_period_id', null)):
-    //    hersteld van een blessure zijn is geen reden om een afmelding op te
-    //    heffen — die wordt via revokeAbsencePeriod ingetrokken.
+    // a. TOEKOMSTIGE 'injured'-rijen zonder afmeldperiode terug naar de
+    //    standaard (of 'absent' voor een gast). Bewust future-only:
+    //    verleden-'injured' blijft staan als historie (AC16).
     const { error: restoreError } = await supabase
       .from('attendance')
-      .update({ status: restoreStatus, injury_set: false })
+      .update({ status: restoreStatus })
       .eq('team_id', ctx.teamId)
       .eq('player_id', playerId)
-      .eq('injury_set', true)
-      .eq('status', 'absent')
+      .eq('status', 'injured')
       .is('absence_period_id', null)
       .in('event_id', futureEventIds)
     if (restoreError) throw genericError('players.markRecovered.restore', restoreError)
-  }
 
-  // b. ALLE resterende injury_set-markeringen van de speler opschonen zonder de
-  //    status te wijzigen — ook op inmiddels-verleden events die anders verweesd
-  //    achterblijven. Status blijft ongemoeid, dus 'absent'-historie blijft staan.
-  const { error: clearError } = await supabase
-    .from('attendance')
-    .update({ injury_set: false })
-    .eq('team_id', ctx.teamId)
-    .eq('player_id', playerId)
-    .eq('injury_set', true)
-  if (clearError) throw genericError('players.markRecovered.clear', clearError)
+    // b. TOEKOMSTIGE 'injured'-rijen MET afmeldperiode naar 'absent': die
+    //    periode dekt de datum nog, dus de speler is na herstel gewoon
+    //    afgemeld. Hersteld zijn is geen reden om een afmelding op te heffen —
+    //    die wordt via revokeAbsencePeriod ingetrokken.
+    const { error: periodRestoreError } = await supabase
+      .from('attendance')
+      .update({ status: 'absent' })
+      .eq('team_id', ctx.teamId)
+      .eq('player_id', playerId)
+      .eq('status', 'injured')
+      .not('absence_period_id', 'is', null)
+      .in('event_id', futureEventIds)
+    if (periodRestoreError) throw genericError('players.markRecovered.period', periodRestoreError)
+  }
 
   const { error: playerError } = await supabase
     .from('players')

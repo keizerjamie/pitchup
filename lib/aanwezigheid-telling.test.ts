@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { teltMee, telAanwezigheid, splitsAanwezigheid } from '@/lib/aanwezigheid-telling'
+import {
+  teltMee,
+  telAanwezigheid,
+  splitsAanwezigheid,
+  splitsAanwezigheidMetBlessure,
+} from '@/lib/aanwezigheid-telling'
 import type { TelbareSpeler } from '@/lib/aanwezigheid-telling'
 import type { AttendanceStatus, PlayerType } from '@/lib/types'
 
@@ -23,6 +28,7 @@ const isAanwezig = (p: Speler) => p.status === 'present'
 const NUL = {
   aanwezig: 0,
   afwezig: 0,
+  geblesseerd: 0,
   onbekend: 0,
   meetellend: 0,
   gastenAanwezig: 0,
@@ -73,6 +79,16 @@ describe('telAanwezigheid — matrix spelertype × status', () => {
     })
   })
 
+  it('(c2) regular + injured → geblesseerd, en als afwezig in de opkomst-noemer', () => {
+    expect(telAanwezigheid([speler('p1', 'regular', 'injured')], statusVan)).toEqual({
+      ...NUL,
+      geblesseerd: 1,
+      meetellend: 1,
+      vastAfwezig: 1,
+      opkomstPercentage: 0,
+    })
+  })
+
   it('(d) guest + present → wél aanwezig, maar NIET in de opkomst-noemer', () => {
     expect(telAanwezigheid([speler('g1', 'guest', 'present')], statusVan)).toEqual({
       ...NUL,
@@ -90,6 +106,37 @@ describe('telAanwezigheid — matrix spelertype × status', () => {
   it('(f) guest + unknown → nergens: niet afwezig, niet onbekend, geen noemer', () => {
     expect(telAanwezigheid([speler('g1', 'guest', 'unknown')], statusVan)).toEqual(NUL)
   })
+
+  it('(g) guest + injured → nergens: niet geblesseerd, niet afwezig, geen noemer', () => {
+    expect(telAanwezigheid([speler('g1', 'guest', 'injured')], statusVan)).toEqual(NUL)
+  })
+})
+
+describe('telAanwezigheid — blessure telt als afwezig in het percentage (besluit 5)', () => {
+  it('P=8, A=2, B=2 → 67%, gelijk aan 8 aanwezig en 4 afwezig', () => {
+    const metBlessure: Speler[] = [
+      ...Array.from({ length: 8 }, (_, i) => speler(`p-${i}`, 'regular', 'present')),
+      ...Array.from({ length: 2 }, (_, i) => speler(`a-${i}`, 'regular', 'absent')),
+      ...Array.from({ length: 2 }, (_, i) => speler(`b-${i}`, 'regular', 'injured')),
+      speler('u-0', 'regular', 'unknown'),
+    ]
+    const telling = telAanwezigheid(metBlessure, statusVan)
+    expect(telling).toEqual({
+      aanwezig: 8,
+      afwezig: 2,
+      geblesseerd: 2,
+      onbekend: 1,
+      meetellend: 13,
+      gastenAanwezig: 0,
+      vastAanwezig: 8,
+      vastAfwezig: 4,
+      opkomstPercentage: 67,
+    })
+    const alsAfwezig = metBlessure.map((p) =>
+      p.status === 'injured' ? { ...p, status: 'absent' as AttendanceStatus } : p,
+    )
+    expect(telAanwezigheid(alsAfwezig, statusVan).opkomstPercentage).toBe(telling.opkomstPercentage)
+  })
 })
 
 describe('telAanwezigheid — het voorbeeld van de eigenaar', () => {
@@ -105,6 +152,7 @@ describe('telAanwezigheid — het voorbeeld van de eigenaar', () => {
     expect(telAanwezigheid(spelers, statusVan)).toEqual({
       aanwezig: 21,
       afwezig: 5,
+      geblesseerd: 0,
       onbekend: 0,
       meetellend: 26,
       gastenAanwezig: 6,
@@ -121,6 +169,7 @@ describe('telAanwezigheid — het voorbeeld van de eigenaar', () => {
     expect(telAanwezigheid(metAfwezigeGasten, statusVan)).toEqual({
       aanwezig: 15,
       afwezig: 5,
+      geblesseerd: 0,
       onbekend: 0,
       meetellend: 20,
       gastenAanwezig: 0,
@@ -202,5 +251,54 @@ describe('splitsAanwezigheid', () => {
 
   it('lege invoer → twee lege lijsten', () => {
     expect(splitsAanwezigheid([], isAanwezig)).toEqual({ aanwezig: [], afwezig: [] })
+  })
+})
+
+describe('splitsAanwezigheidMetBlessure', () => {
+  it('splitst in aanwezig, afwezig (incl. unknown) en geblesseerd; gasten alleen als aanwezig', () => {
+    const spelers = [
+      speler('v1', 'regular', 'present'),
+      speler('v2', 'regular', 'absent'),
+      speler('v3', 'regular', 'injured'),
+      speler('v4', 'regular', 'unknown'),
+      speler('g1', 'guest', 'present'),
+      speler('g2', 'guest', 'absent'),
+      speler('g3', 'guest', 'injured'),
+      speler('g4', 'guest', 'unknown'),
+    ]
+    const { aanwezig, afwezig, geblesseerd } = splitsAanwezigheidMetBlessure(spelers, statusVan)
+    expect(aanwezig.map((p) => p.id)).toEqual(['v1', 'g1'])
+    expect(afwezig.map((p) => p.id)).toEqual(['v2', 'v4'])
+    expect(geblesseerd.map((p) => p.id)).toEqual(['v3'])
+  })
+
+  it('valt zonder injured-rijen samen met splitsAanwezigheid', () => {
+    const spelers = [
+      speler('v1', 'regular', 'present'),
+      speler('v2', 'regular', 'absent'),
+      speler('v3', 'regular', 'unknown'),
+      speler('g1', 'guest', 'present'),
+    ]
+    const drie = splitsAanwezigheidMetBlessure(spelers, statusVan)
+    const twee = splitsAanwezigheid(spelers, isAanwezig)
+    expect(drie.aanwezig).toEqual(twee.aanwezig)
+    expect(drie.afwezig).toEqual(twee.afwezig)
+    expect(drie.geblesseerd).toEqual([])
+  })
+
+  it('behoudt de invoervolgorde en muteert de invoer niet', () => {
+    const spelers = [
+      speler('v3', 'regular', 'injured'),
+      speler('v1', 'regular', 'present'),
+      speler('v2', 'regular', 'injured'),
+    ]
+    const kopie = spelers.map((p) => ({ ...p }))
+    const { geblesseerd } = splitsAanwezigheidMetBlessure(spelers, statusVan)
+    expect(geblesseerd.map((p) => p.id)).toEqual(['v3', 'v2'])
+    expect(spelers).toEqual(kopie)
+  })
+
+  it('lege invoer → drie lege lijsten', () => {
+    expect(splitsAanwezigheidMetBlessure([], statusVan)).toEqual({ aanwezig: [], afwezig: [], geblesseerd: [] })
   })
 })

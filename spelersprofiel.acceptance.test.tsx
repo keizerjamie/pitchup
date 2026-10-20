@@ -47,7 +47,7 @@
 //          gast/inactief, onbekende/dubbele ?tab)
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within, fireEvent } from '@testing-library/react'
+import { render, screen, within, fireEvent, cleanup } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { Player } from '@/lib/types'
@@ -335,7 +335,7 @@ function rpcAanwezigheidPerSpeler(tables: Record<string, Row[]>, args: Row, acti
     if (p_player && a.player_id !== p_player) continue
     const cur = byPlayer.get(a.player_id as string) ?? { aanwezig: 0, afwezig: 0 }
     if (a.status === 'present') cur.aanwezig++
-    else if (a.status === 'absent') cur.afwezig++
+    else if (a.status === 'absent' || a.status === 'injured') cur.afwezig++ // besluit 5
     byPlayer.set(a.player_id as string, cur)
   }
   return Array.from(byPlayer.entries()).map(([playerId, v]) => ({
@@ -451,7 +451,6 @@ function attendanceRow(overrides: Row = {}): Row {
     event_id: 'e',
     player_id: PLAYER,
     status: 'unknown',
-    injury_set: false,
     absence_period_id: null,
     created_at: '2025-01-01T00:00:00Z',
     ...overrides,
@@ -797,6 +796,43 @@ describe('AC14/AC15/AC16 — Statistieken-tab toont de juiste cijfers uit de fix
 
     expect(statTegelValue(nl.players.statsGoals)).toBe('1')
     expect(statTegelValue(nl.players.statsAssists)).toBe('0')
+  })
+})
+
+// Blessure-status (story AC19, besluit 5): op het spelersprofiel telt 'injured'
+// als afwezig, zodat het percentage gelijk blijft aan dezelfde data met status
+// 'absent'. De RPC-engine bootst supabase/blessure-status.sql na; mutatiecheck:
+// zonder `|| a.status === 'injured'` in rpcAanwezigheidPerSpeler wordt dit rood.
+describe('Blessure-status — injured telt als afwezig op het profiel (AC19, besluit 5)', () => {
+  const maak = (blessureStatus: 'injured' | 'absent') => makeDb({
+    players: [playerRow()],
+    settings: seasonSettings('2025-07-01', '2026-06-30'),
+    events: [
+      eventRow({ id: 'train-1', type: 'training', date: '2025-08-01' }),
+      eventRow({ id: 'train-2', type: 'training', date: '2025-08-08' }),
+      eventRow({ id: 'train-3', type: 'training', date: '2025-08-15' }),
+      eventRow({ id: 'train-4', type: 'training', date: '2025-08-22' }),
+    ],
+    attendance: [
+      attendanceRow({ event_id: 'train-1', status: 'present' }),
+      attendanceRow({ event_id: 'train-2', status: 'present' }),
+      attendanceRow({ event_id: 'train-3', status: 'present' }),
+      attendanceRow({ event_id: 'train-4', status: blessureStatus }),
+    ],
+  })
+
+  it('3 aanwezig + 1 geblesseerd = 75% (3 van 4), gelijk aan 1 afwezig', async () => {
+    useDb(maak('injured'))
+    const { container } = await renderProfile(PLAYER, { tab: 'statistieken' })
+    expect(screen.getByText('75%')).toBeInTheDocument()
+    expect(
+      screen.getByText(nl.players.statsAttendanceDetail.replace('{aanwezig}', '3').replace('{totaal}', '4')),
+    ).toBeInTheDocument()
+    const metBlessure = container.innerHTML
+    cleanup()
+    useDb(maak('absent'))
+    const { container: c2 } = await renderProfile(PLAYER, { tab: 'statistieken' })
+    expect(c2.innerHTML).toBe(metBlessure)
   })
 })
 

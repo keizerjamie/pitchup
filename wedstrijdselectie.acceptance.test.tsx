@@ -1691,8 +1691,10 @@ describe('Story-AC (bevinding 2) — backfill van een ontbrekende attendance-rij
 
   // ── Blessures (zelfde bugklasse als de periode hierboven) ──
   // Een geblesseerde speler (players.injured) moet ook in het backfill-pad
-  // 'absent' krijgen: markInjured raakt alleen bestaande rijen, dus zonder deze
-  // regel zou de pagina hier permanent 'unknown' wegschrijven. De rijen worden
+  // 'injured' krijgen op een event vanaf vandaag: markInjured raakt alleen
+  // bestaande rijen, dus zonder deze regel zou de pagina hier permanent
+  // 'unknown' wegschrijven. Een event in het verleden krijgt de blessure niet
+  // mee (AC18). Daarom 2099-datums: datum-onafhankelijk. De rijen worden
   // op de ECHTE insert-payload bewezen, niet alleen op het gerenderde beeld —
   // het is een insert, dus wat er in de database belandt is wat telt.
   async function renderEventPageMetInserts(
@@ -1707,9 +1709,9 @@ describe('Story-AC (bevinding 2) — backfill van een ontbrekende attendance-rij
     return { ...result, inserts }
   }
 
-  it('vult de ontbrekende rij met status "absent" wanneer de speler geblesseerd is, zonder lopende periode', async () => {
+  it('vult de ontbrekende rij met status "injured" wanneer de speler geblesseerd is, zonder lopende periode', async () => {
     const player = playerRow({ id: 'p1', name: 'Geblesseerd Terug', active: true, injured: true })
-    const event = matchEventRow({ id: 'e1', type: 'training', date: '2026-08-15', match_type: null, opponent: null, home_away: null })
+    const event = matchEventRow({ id: 'e1', type: 'training', date: '2099-08-15', match_type: null, opponent: null, home_away: null })
     const { inserts } = await renderEventPageMetInserts({
       events: [event],
       players: [player],
@@ -1720,20 +1722,45 @@ describe('Story-AC (bevinding 2) — backfill van een ontbrekende attendance-rij
     expect(inserts).toEqual([[{
       event_id: 'e1',
       player_id: 'p1',
-      status: 'absent',
+      status: 'injured',
       team_id: TEAM,
-      injury_set: true,
       absence_period_id: null,
     }]])
 
-    // En de pagina toont hetzelfde als wat is weggeschreven (geen 'unknown').
+    // En de pagina telt hem niet als 'unknown' (en ook niet als 'absent':
+    // een blessure staat apart): de Geblesseerd-knop staat ingedrukt en de
+    // eigen stat-kaart "Geblesseerd" telt 1 (AC14/AC19).
+    const unknownStatValue = screen.getByText(nl.event.unknownStat).closest('div')!.nextElementSibling as HTMLElement
+    expect(unknownStatValue).toHaveTextContent('0')
+    expect(absentStatValue()).toHaveTextContent('0')
     const row = screen.getByText('Geblesseerd Terug').closest('div')!.parentElement as HTMLElement
-    expect(within(row).getByRole('button', { name: new RegExp(nl.event.absentStat) })).toHaveAttribute('aria-pressed', 'true')
-    expect(absentStatValue()).toHaveTextContent('1')
+    expect(within(row).getByRole('button', { name: nl.event.injuredStat })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(row).getByRole('button', { name: nl.event.absentStat })).toHaveAttribute('aria-pressed', 'false')
+    const injuredLabel = screen.getAllByText(nl.event.injuredStat).find((el) => el.tagName === 'DIV')!
+    expect(injuredLabel.nextElementSibling).toHaveTextContent('1')
   })
 
-  it('geeft bij meerdere ontbrekende spelers elk zijn eigen status: geblesseerd absent, periode absent, de rest unknown', async () => {
-    const event = matchEventRow({ id: 'e1', type: 'training', date: '2026-08-15', match_type: null, opponent: null, home_away: null })
+  it('vult de ontbrekende rij met "unknown" voor een geblesseerde speler op een event in het VERLEDEN (AC18)', async () => {
+    const player = playerRow({ id: 'p1', name: 'Geblesseerd Verleden', active: true, injured: true })
+    const event = matchEventRow({ id: 'e1', type: 'training', date: '2020-08-15', match_type: null, opponent: null, home_away: null })
+    const { inserts } = await renderEventPageMetInserts({
+      events: [event],
+      players: [player],
+      attendance: [],
+      absencePeriods: [],
+    })
+
+    expect(inserts).toEqual([[{
+      event_id: 'e1',
+      player_id: 'p1',
+      status: 'unknown',
+      team_id: TEAM,
+      absence_period_id: null,
+    }]])
+  })
+
+  it('geeft bij meerdere ontbrekende spelers elk zijn eigen status: geblesseerd injured, periode absent, de rest unknown', async () => {
+    const event = matchEventRow({ id: 'e1', type: 'training', date: '2099-08-15', match_type: null, opponent: null, home_away: null })
     const { inserts } = await renderEventPageMetInserts({
       events: [event],
       players: [
@@ -1742,23 +1769,24 @@ describe('Story-AC (bevinding 2) — backfill van een ontbrekende attendance-rij
         playerRow({ id: 'p3', name: 'Cor Periode', jersey_number: 3, active: true, injured: false }),
       ],
       attendance: [],
-      absencePeriods: [absencePeriodRow({ id: 'period-1', player_id: 'p3', from_date: '2026-08-01', to_date: '2026-08-31' })],
+      absencePeriods: [absencePeriodRow({ id: 'period-1', player_id: 'p3', from_date: '2099-08-01', to_date: '2099-08-31' })],
     })
 
     expect(inserts).toHaveLength(1)
     const byPlayer = new Map(inserts[0].map((r) => [r.player_id, r]))
     expect(byPlayer.get('p1')).toEqual({
-      event_id: 'e1', player_id: 'p1', status: 'unknown', team_id: TEAM, injury_set: false, absence_period_id: null,
+      event_id: 'e1', player_id: 'p1', status: 'unknown', team_id: TEAM, absence_period_id: null,
     })
     expect(byPlayer.get('p2')).toEqual({
-      event_id: 'e1', player_id: 'p2', status: 'absent', team_id: TEAM, injury_set: true, absence_period_id: null,
+      event_id: 'e1', player_id: 'p2', status: 'injured', team_id: TEAM, absence_period_id: null,
     })
     expect(byPlayer.get('p3')).toEqual({
-      event_id: 'e1', player_id: 'p3', status: 'absent', team_id: TEAM, injury_set: false, absence_period_id: 'period-1',
+      event_id: 'e1', player_id: 'p3', status: 'absent', team_id: TEAM, absence_period_id: 'period-1',
     })
 
-    // Het gerenderde beeld loopt niet uit de pas met de insert: 2 afwezig, 1 onbekend.
-    expect(absentStatValue()).toHaveTextContent('2')
+    // Het gerenderde beeld loopt niet uit de pas met de insert: 1 afwezig
+    // (alleen 'absent'), 1 onbekend; de blessure staat apart.
+    expect(absentStatValue()).toHaveTextContent('1')
     const unknownStatValue = screen.getByText(nl.event.unknownStat).closest('div')!.nextElementSibling as HTMLElement
     expect(unknownStatValue).toHaveTextContent('1')
   })
@@ -1874,7 +1902,6 @@ describe('Fix — backfill schrijft niets weg als de periodequery of de insert f
       player_id: 'p1',
       status: 'absent',
       team_id: TEAM,
-      injury_set: false,
       absence_period_id: 'period-1',
     }]])
   })

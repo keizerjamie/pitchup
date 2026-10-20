@@ -357,14 +357,14 @@ async function renderEventPage(opts: {
 }
 
 // TrainingAttendance (components/TrainingAttendance.tsx) toont per speler
-// precies twee statusknoppen (Aanwezig/Afwezig, aria-pressed); geen enkele
+// precies drie statusknoppen (Aanwezig/Afwezig/Geblesseerd, aria-pressed); geen enkele
 // knop pressed = 'unknown'. We lezen de rij via de naam en klimmen naar de
 // rij-container — gooit een duidelijke fout als de structuur ooit wijzigt,
 // i.p.v. stil een verkeerd element te matchen.
 function attendanceRowFor(name: string): HTMLElement {
   const nameEl = screen.getByText(name)
   const row = nameEl.parentElement?.parentElement
-  if (!row || within(row).queryAllByRole('button').length !== 2) {
+  if (!row || within(row).queryAllByRole('button').length !== 3) {
     throw new Error(`Aanwezigheidsrij voor "${name}" niet gevonden in TrainingAttendance`)
   }
   return row
@@ -1269,5 +1269,65 @@ describe('Validator-punt 3 — hero-degradatiepad bij gefaalde gast-query telt e
     expect(heroLegendText(nl.home.absent)).toBe(`1 ${nl.home.absent}`)
 
     errorSpy.mockRestore()
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Blessure-status (story AC19, besluit 5) — op het dashboard telt een
+// 'injured'-rij als afwezig: opkomsttegel en hero-ring blijven gelijk aan de
+// situatie waarin dezelfde rij 'absent' was. Een geblesseerde gast telt, net als
+// een afwezige gast, nergens mee.
+// ═══════════════════════════════════════════════════════════════════════
+describe('Blessure-status — dashboard telt injured als afwezig (AC19, besluit 5)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-19T10:00:00'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const regulars = [
+    makePlayer({ id: 'b1', team_id: TEAM, name: 'Blessure Reg 1', type: 'regular' }),
+    makePlayer({ id: 'b2', team_id: TEAM, name: 'Blessure Reg 2', type: 'regular' }),
+    makePlayer({ id: 'b3', team_id: TEAM, name: 'Blessure Reg 3', type: 'regular' }),
+  ]
+  const attendanceMet = (status: string): Row[] => [
+    { event_id: 'ev1', team_id: TEAM, player_id: 'b1', status: 'present' },
+    { event_id: 'ev1', team_id: TEAM, player_id: 'b2', status },
+    { event_id: 'ev1', team_id: TEAM, player_id: 'b3', status: 'absent' },
+  ]
+
+  it('opkomsttegel: 1 aanwezig + 1 geblesseerd + 1 afwezig = 33%, gelijk aan de situatie met twee afwezigen', async () => {
+    const { unmount } = await renderDashboard({ players: regulars, attendance: attendanceMet('absent') })
+    const metAbsent = attendancePercentage()
+    unmount()
+    await renderDashboard({ players: regulars, attendance: attendanceMet('injured') })
+    expect(attendancePercentage()).toBe(metAbsent)
+    expect(metAbsent).toBe('33%')
+  })
+
+  it('hero-ring: geblesseerd telt bij "afwezig" (2) en niet bij "geen reactie" (0)', async () => {
+    await renderDashboard({ players: regulars, attendance: attendanceMet('injured') })
+    expect(heroLegendText(nl.home.present)).toBe(`1 ${nl.home.present}`)
+    expect(heroLegendText(nl.home.absent)).toBe(`2 ${nl.home.absent}`)
+    expect(heroLegendText(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
+  })
+
+  it('een geblesseerde GAST verandert opkomst en hero niet (telt nergens mee)', async () => {
+    const gast = makePlayer({ id: 'bg', team_id: TEAM, name: 'Blessure Gast', type: 'guest' })
+    await renderDashboard({
+      players: [...regulars, gast],
+      attendance: [...attendanceMet('injured'), { event_id: 'ev1', team_id: TEAM, player_id: 'bg', status: 'injured' }],
+    })
+    expect(attendancePercentage()).toBe('33%')
+    expect(heroLegendText(nl.home.absent)).toBe(`2 ${nl.home.absent}`)
+  })
+
+  it('Beschikbaarheid-tegel rendert een geblesseerde speler met het label "Geblesseerd" (geen crash)', async () => {
+    await renderDashboard({ players: regulars, attendance: attendanceMet('injured') })
+    const card = availabilityCard()
+    expect(within(card).getByText('Blessure Reg 2')).toBeInTheDocument()
+    expect(within(card).getByText(nl.home.injuredStatus)).toBeInTheDocument()
   })
 })

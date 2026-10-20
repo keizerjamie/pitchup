@@ -74,7 +74,7 @@
 //          bestaande AC's + de bestaande bouwer-uitbreidingen blijven groen.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, within, fireEvent, waitFor, configure } from '@testing-library/react'
+import { render, screen, within, fireEvent, waitFor, configure, cleanup } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 
@@ -317,7 +317,7 @@ function rpcAanwezigheid(db: Db, args: Row) {
     const p = players.get(a.player_id as string)
     if (!p || p.team_id !== TEAM || p.type !== 'regular') continue
     if (a.status === 'present') aanwezig++
-    else if (a.status === 'absent') afwezig++
+    else if (a.status === 'absent' || a.status === 'injured') afwezig++ // besluit 5: injured = afwezig (blessure-status.sql) // besluit 5: injured = afwezig (blessure-status.sql)
   }
   return [{ aanwezig, afwezig }]
 }
@@ -337,7 +337,7 @@ function rpcMaandOpkomst(db: Db, args: Row) {
     const maand = (e.date as string).slice(0, 7)
     const cur = byMaand.get(maand) ?? { aanwezig: 0, afwezig: 0 }
     if (a.status === 'present') cur.aanwezig++
-    else if (a.status === 'absent') cur.afwezig++
+    else if (a.status === 'absent' || a.status === 'injured') cur.afwezig++ // besluit 5 // besluit 5
     byMaand.set(maand, cur)
   }
   return Array.from(byMaand.entries())
@@ -448,7 +448,7 @@ function rpcAanwezigheidPerSpeler(db: Db, args: Row) {
     if (!p || p.team_id !== TEAM || !p.active || p.type !== 'regular') continue
     const cur = byPlayer.get(p.id as string) ?? { aanwezig: 0, afwezig: 0 }
     if (a.status === 'present') cur.aanwezig++
-    else if (a.status === 'absent') cur.afwezig++
+    else if (a.status === 'absent' || a.status === 'injured') cur.afwezig++ // besluit 5 // besluit 5
     byPlayer.set(p.id as string, cur)
   }
   return Array.from(byPlayer.entries())
@@ -2017,6 +2017,82 @@ describe('FC4 — Top 5 / worst 5 aanwezigheid per speler', () => {
     expect(within(card).getByText(nl.insights.topWorstOverlapHint)).toBeInTheDocument()
     expect(topWorstNames(card, nl.insights.bestLabel).sort()).toEqual(['Afwezige Speler', 'Goede Speler'])
     expect(topWorstNames(card, nl.insights.worstLabel).sort()).toEqual(['Afwezige Speler', 'Goede Speler'])
+  })
+})
+
+// Aanwezigheidsoverzicht AC13 (omgekeerd): /inzichten bevat niets van het
+// afdrukbare aanwezigheidsoverzicht van /players, en de periodelinks bewijzen
+// dat de nieuwe optionele hrefVoor-prop /inzichten niet heeft veranderd.
+describe('AC13 (omgekeerd) — /inzichten bevat niets van het aanwezigheidsoverzicht', () => {
+  it('geen .overzicht-tabel en geen overzicht-printtitel; periodelinks wijzen nog naar /inzichten', async () => {
+    const { container } = await renderInzichten({
+      settings: seasonSettings('2026-07-01', '2026-12-31'),
+      events: [eventRow({ id: 't1', type: 'training', date: '2026-09-10' })],
+      attendance: [attendanceRow({ event_id: 't1', status: 'present' })],
+    })
+    expect(container.querySelector('.overzicht-tabel')).toBeNull()
+    expect(screen.queryByText(nl.players.overzichtPrintTitel)).not.toBeInTheDocument()
+    const groep = screen.getByRole('group', { name: nl.insights.periodeLabel })
+    const hrefs = within(groep).getAllByRole('link').map((a) => a.getAttribute('href'))
+    expect(hrefs).toEqual(expect.arrayContaining(['/inzichten?periode=4w', '/inzichten?periode=8w']))
+    for (const h of hrefs) expect(h).not.toContain('/players')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// Blessure-status (story AC19, besluit 5) — in /inzichten telt 'injured' als
+// afwezig, zodat de uitkomsten gelijk blijven aan de situatie waarin een
+// blessure nog als 'absent' werd opgeslagen. De RPC-engine hierboven
+// bootst supabase/blessure-status.sql na (afwezig = absent + injured); de echte
+// SQL draait hier niet. Mutatiecheck: haal `|| a.status === 'injured'` uit de
+// drie handlers en deze drie tests worden rood.
+// ═══════════════════════════════════════════════════════════════════════
+describe('Blessure-status — injured telt als afwezig in /inzichten (AC19, besluit 5)', () => {
+  const P_B = 'dddddddd-0000-0000-0000-0000000000b1'
+  const maakData = (blessureStatus: 'injured' | 'absent') => ({
+    settings: seasonSettings('2026-07-01', '2026-12-31'),
+    events: [
+      eventRow({ id: 't1', type: 'training', date: '2026-09-10' }),
+      eventRow({ id: 't2', type: 'training', date: '2026-09-17' }),
+      eventRow({ id: 't3', type: 'training', date: '2026-10-08' }),
+    ],
+    players: [playerRow({ id: P_B, name: 'Blessure Speler', active: true })],
+    attendance: [
+      attendanceRow({ event_id: 't1', player_id: P_B, status: 'present' }),
+      attendanceRow({ event_id: 't2', player_id: P_B, status: blessureStatus }),
+      attendanceRow({ event_id: 't3', player_id: P_B, status: blessureStatus }),
+    ],
+  })
+
+  it('team-Aanwezigheid: 1 aanwezig + 2 geblesseerd = 33%, identiek aan dezelfde data met status absent', async () => {
+    await renderInzichten(maakData('injured'))
+    const metBlessure = aanwezigheidPercentage()
+    cleanup()
+    await renderInzichten(maakData('absent'))
+    expect(aanwezigheidPercentage()).toBe(metBlessure)
+    expect(metBlessure).toBe('33%')
+  })
+
+  it('top/worst 5 aanwezigheid: geblesseerd telt in de noemer (1 van 3 = 33%)', async () => {
+    await renderInzichten(maakData('injured'))
+    const card = topWorstCard(nl.insights.topWorstAanwezigheidTitle)
+    expect(topWorstValueFor(card, nl.insights.bestLabel, 'Blessure Speler')).toBe(
+      nl.insights.topWorstAanwezigheidWaarde.replace('{percentage}', '33').replace('{aanwezig}', '1').replace('{totaal}', '3'),
+    )
+  })
+
+  it('opkomst per maand (trainingen): geblesseerd telt als afwezig, dezelfde tabel als bij absent', async () => {
+    const opkomstTabel = () => {
+      const tb = Array.from(document.querySelectorAll('table')).find((t) => t.querySelector('caption')?.textContent?.includes('maanden'))!
+      return Array.from(tb.querySelectorAll('tbody tr')).map((tr) => tr.textContent)
+    }
+    await renderInzichten(maakData('injured'))
+    const metBlessure = opkomstTabel()
+    cleanup()
+    await renderInzichten(maakData('absent'))
+    expect(opkomstTabel()).toEqual(metBlessure)
+    // sep: 1 aanwezig + 1 geblesseerd = 50%; okt: 1 geblesseerd = 0%
+    expect(metBlessure).toEqual(['Sep 202650%', 'Okt 20260%'])
   })
 })
 

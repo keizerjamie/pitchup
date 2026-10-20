@@ -15,6 +15,7 @@
 //   Regressie (AC5, spelerrij + markAllPresent)     → describe('Regressie...')
 
 import { describe, it, expect, vi } from 'vitest'
+import { act } from 'react'
 import { render, screen, within, fireEvent } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
@@ -173,20 +174,20 @@ describe('AC2 — trainingsdetailpagina stat-cards tellen gasten volgens de weer
 function attendanceRowFor(name: string): HTMLElement {
   const nameEl = screen.getByText(name)
   const row = nameEl.parentElement?.parentElement
-  if (!row || within(row).queryAllByRole('button').length !== 2) {
+  if (!row) {
     throw new Error(`Aanwezigheidsrij voor "${name}" niet gevonden`)
   }
   return row
 }
 
 describe('Regressie — de spelerslijst en markAllPresent blijven ongewijzigd (AC5)', () => {
-  it('de spelerrij van een afwezige gast staat er nog steeds, met beide statusknoppen', () => {
+  it('de spelerrij van een afwezige gast staat er nog steeds, met alle drie de statusknoppen', () => {
     const players = [makePlayer('g1', 'guest', { name: 'Afwezige Gast' })]
     renderAttendance(players, { g1: 'absent' })
 
     const row = attendanceRowFor('Afwezige Gast')
     const buttons = within(row).getAllByRole('button')
-    expect(buttons).toHaveLength(2)
+    expect(buttons).toHaveLength(3)
     expect(within(row).getByRole('button', { pressed: true }).textContent).toContain(nl.event.absentStat)
   })
 
@@ -207,5 +208,57 @@ describe('Regressie — de spelerslijst en markAllPresent blijven ongewijzigd (A
     expect(statValue(nl.event.unknownStat)).toBe('0')
     // Alle 4 spelers (incl. beide gasten) staan nu aanwezig.
     expect(statValue(nl.event.presentStat)).toBe('4')
+  })
+})
+
+describe('Blessure als eigen status (injured)', () => {
+  it('toont per spelerrij drie knoppen met aria-label; Geblesseerd is aria-pressed bij status "injured"', () => {
+    renderAttendance([makePlayer('r1', 'regular', { name: 'Gewonde Gert' })], { r1: 'injured' })
+    const row = attendanceRowFor('Gewonde Gert')
+    expect(within(row).getAllByRole('button')).toHaveLength(3)
+    // Toegankelijke naam komt uit aria-label (label is onder sm verborgen).
+    expect(within(row).getByRole('button', { name: nl.event.presentStat })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(row).getByRole('button', { name: nl.event.absentStat })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(row).getByRole('button', { name: nl.event.injuredStat })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('klikken op Geblesseerd zet de status; nogmaals klikken zet terug op onbekend', async () => {
+    renderAttendance([makePlayer('r1', 'regular', { name: 'Gewonde Gert' })], { r1: 'unknown' })
+    const row = attendanceRowFor('Gewonde Gert')
+    // await act: laat de transitie (server action) eerst afronden, anders staan de knoppen nog disabled.
+    await act(async () => { fireEvent.click(within(row).getByRole('button', { name: nl.event.injuredStat })) })
+    expect(within(row).getByRole('button', { name: nl.event.injuredStat })).toHaveAttribute('aria-pressed', 'true')
+    expect(statValue(nl.event.injuredStat)).toBe('1')
+    await act(async () => { fireEvent.click(within(row).getByRole('button', { name: nl.event.injuredStat })) })
+    expect(within(row).getByRole('button', { name: nl.event.injuredStat })).toHaveAttribute('aria-pressed', 'false')
+    expect(statValue(nl.event.injuredStat)).toBe('0')
+    expect(statValue(nl.event.unknownStat)).toBe('1')
+  })
+
+  it('stat-kaart Geblesseerd telt alleen vaste spelers; Afwezig blijft apart; Opkomst telt blessure als afwezig (8 aanwezig, 2 afwezig, 2 geblesseerd -> 67%)', () => {
+    const players = Array.from({ length: 12 }, (_, i) => makePlayer(`r${i}`, 'regular'))
+    const statuses: Record<string, AttendanceStatus> = {}
+    players.forEach((p, i) => { statuses[p.id] = i < 8 ? 'present' : i < 10 ? 'absent' : 'injured' })
+    renderAttendance([...players, makePlayer('g1', 'guest')], { ...statuses, g1: 'injured' })
+    expect(statValue(nl.event.injuredStat)).toBe('2')
+    expect(statValue(nl.event.absentStat)).toBe('2')
+    expect(turnoutValue()).toBe('67%')
+  })
+
+  it('"Iedereen aanwezig" laat een "injured"-rij staan en zet de rest op present (volgt markAllPresent op de server)', () => {
+    const players = [makePlayer('r1', 'regular'), makePlayer('r2', 'regular'), makePlayer('r3', 'regular')]
+    renderAttendance(players, { r1: 'injured', r2: 'absent', r3: 'unknown' })
+    fireEvent.click(screen.getByRole('button', { name: nl.event.markAllPresent }))
+    expect(statValue(nl.event.injuredStat)).toBe('1')
+    expect(statValue(nl.event.presentStat)).toBe('2')
+    expect(statValue(nl.event.absentStat)).toBe('0')
+    expect(statValue(nl.event.unknownStat)).toBe('0')
+  })
+
+  it('read-only: de badge toont "Geblesseerd" en er zijn geen knoppen', () => {
+    renderAttendance([makePlayer('r1', 'regular', { name: 'Gewonde Gert' })], { r1: 'injured' }, false)
+    const row = attendanceRowFor('Gewonde Gert')
+    expect(within(row).queryAllByRole('button')).toHaveLength(0)
+    expect(within(row).getByText(nl.event.injuredStat)).toBeInTheDocument()
   })
 })

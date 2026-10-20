@@ -138,8 +138,11 @@ export default async function DashboardPage() {
     // Een afwezige gast hoort niet in het afwezig-segment van de hero-ring — en
     // via heroSquadSize ook niet in "geen reactie". `present` blijft bewust
     // ongefilterd: een gast die op aanwezig staat telt juist wél mee. Dezelfde
-    // regel als teltMee in lib/aanwezigheid-telling.ts.
-    const absent = records.filter((a) => a.status === 'absent' && !gastIds.has(a.player_id)).length
+    // regel als teltMee in lib/aanwezigheid-telling.ts. 'injured' telt als
+    // afwezig (besluit 5), zodat de ring gelijk blijft aan vóór de blessure-status.
+    const absent = records.filter(
+      (a) => (a.status === 'absent' || a.status === 'injured') && !gastIds.has(a.player_id),
+    ).length
     return { present, absent, total: records.length }
   }
 
@@ -163,7 +166,8 @@ export default async function DashboardPage() {
     // inzichten_aanwezigheid, anders wijken de twee getallen van elkaar af.
     if (gastIds.has(a.player_id)) continue
     if (a.status === 'present') totalPresent++
-    else if (a.status === 'absent') totalAbsent++
+    // 'injured' telt als afwezig, net als in inzichten_aanwezigheid (besluit 5).
+    else if (a.status === 'absent' || a.status === 'injured') totalAbsent++
   }
   const attendancePct = guestPlayerError || totalPresent + totalAbsent === 0
     ? null

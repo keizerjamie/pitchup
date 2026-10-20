@@ -46,6 +46,7 @@ function makeSupabase(opts: {
   const calls = {
     select: [] as {
       table: string
+      cols?: string
       eqs: Eq[]
       ins: { col: string; vals: unknown[] }[]
       gtes: Eq[]
@@ -61,7 +62,7 @@ function makeSupabase(opts: {
     const gtes: Eq[] = []
     const ltes: Eq[] = []
     const c: Record<string, unknown> = {}
-    c.select = () => { calls.select.push({ table, eqs, ins, gtes, ltes }); return c }
+    c.select = (cols?: string) => { calls.select.push({ table, cols, eqs, ins, gtes, ltes }); return c }
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
     c.in = (col: string, vals: unknown[]) => { ins.push({ col, vals }); return c }
     // Datumbereik en sortering van de afmeldperiode-query: wel vastleggen, want
@@ -226,10 +227,10 @@ describe('createBulkMatches — opslaan', () => {
     const attendance = insertsOn(m, 'attendance')
     expect(attendance).toHaveLength(1)
     expect(attendance[0].payload).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -428,10 +429,10 @@ describe('createBulkMatches — afmeldperiode', () => {
     await createBulkMatches(TWEE_RIJEN)
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
-      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -448,10 +449,10 @@ describe('createBulkMatches — afmeldperiode', () => {
     await createBulkMatches(TWEE_RIJEN)
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p2', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_2 },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_2 },
     ])
   })
 
@@ -471,10 +472,8 @@ describe('createBulkMatches — afmeldperiode', () => {
 
   it('geeft elke rij dezelfde sleutels, ook zonder enige periode', async () => {
     // PostgREST weigert een bulk-insert waarin de objecten verschillende
-    // kolommen hebben; absence_period_id moet dus altijd mee. Sinds deze plek
-    // buildAttendanceRow gebruikt (i.p.v. een inline kopie) gaat injury_set
-    // altijd expliciet mee als false — gelijk aan de DB-default, dus geen
-    // gedragswijziging.
+    // kolommen hebben; absence_period_id moet dus altijd mee. De vroegere
+    // kolom injury_set bestaat niet meer en mag dus ook niet meegaan.
     const m = metPeriodes([])
     use(m)
 
@@ -482,7 +481,7 @@ describe('createBulkMatches — afmeldperiode', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
       )
       expect(row.status).toBe('present')
       expect(row.absence_period_id).toBeNull()
@@ -510,6 +509,102 @@ describe('createBulkMatches — afmeldperiode', () => {
 })
 
 // ────────────────────────────────────────────────
+// createBulkMatches — blessure (AC18)
+// ────────────────────────────────────────────────
+// Bulk-wedstrijden krijgen nu ook de blessure mee: voorheen gaf deze plek
+// bewust `injured: false` door. Alleen wedstrijden vanaf vandaag krijgen
+// 'injured'; een wedstrijd in het verleden de standaardstatus.
+
+describe('createBulkMatches — blessure', () => {
+  // Alleen Date nabootsen; lokale middag, zodat todayLocal() in elke tijdzone
+  // dezelfde dag geeft.
+  function vandaag(dag: number) {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 8, dag, 12, 0, 0))
+  }
+  afterEach(() => { vi.useRealTimers() })
+
+  function metBlessure(extra: Record<string, TableResult> = {}) {
+    return eigenTeam({
+      players: {
+        data: [
+          { id: 'p1', injured: true, type: 'regular' },
+          { id: 'p2', injured: false, type: 'regular' },
+        ],
+        error: null,
+      },
+      ...extra,
+    })
+  }
+
+  function attendanceRows(m: ReturnType<typeof makeSupabase>): Record<string, unknown>[] {
+    return insertsOn(m, 'attendance')[0].payload as Record<string, unknown>[]
+  }
+
+  it('haalt `injured` op, team-gescoped en met het active-filter', async () => {
+    vandaag(1)
+    const m = metBlessure()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    const sel = m.calls.select.find((s) => s.table === 'players')!
+    expect(sel.cols).toBe('id, injured, type')
+    expect(sel.eqs).toEqual([
+      { col: 'active', val: true },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('zet een geblesseerde speler op elke toekomstige wedstrijd op injured', async () => {
+    vandaag(1)
+    const m = metBlessure()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: 'p1', status: 'injured', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'injured', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+    ])
+  })
+
+  it('beoordeelt elke wedstrijd op zijn eigen datum: verleden → standaard, vandaag → injured', async () => {
+    // "Vandaag" = 19 sept: e1 (12 sept) ligt ervoor, e2 (19 sept) is vandaag.
+    vandaag(19)
+    const m = metBlessure()
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    const p1 = attendanceRows(m).filter((r) => r.player_id === 'p1')
+    expect(p1).toEqual([
+      { event_id: 'e1', player_id: 'p1', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'injured', team_id: 'team-1', absence_period_id: null },
+    ])
+  })
+
+  it('combineert blessure en een dekkende periode: injured met de periode als herkomst', async () => {
+    vandaag(1)
+    const m = metBlessure({
+      absence_periods: {
+        data: [{ id: 'ap-1', player_id: 'p1', from_date: '2026-09-01', to_date: '2026-09-30' }],
+        error: null,
+      },
+    })
+    use(m)
+
+    await createBulkMatches(TWEE_RIJEN)
+
+    expect(attendanceRows(m)[0]).toEqual({
+      event_id: 'e1', player_id: 'p1', status: 'injured', team_id: 'team-1', absence_period_id: 'ap-1',
+    })
+  })
+})
+
+// ────────────────────────────────────────────────
 // createBulkMatches — gastspelers (AC7)
 // ────────────────────────────────────────────────
 
@@ -533,10 +628,10 @@ describe('createBulkMatches — gastspelers', () => {
     await createBulkMatches(TWEE_RIJEN)
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p1', status: 'absent', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e2', player_id: 'p2', status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -562,7 +657,7 @@ describe('createBulkMatches — gastspelers', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
       )
     }
   })

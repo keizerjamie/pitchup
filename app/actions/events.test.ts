@@ -328,8 +328,8 @@ describe('createEvent — afmeldperiode', () => {
     await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -342,14 +342,14 @@ describe('createEvent — afmeldperiode', () => {
     await expect(createEvent(form(WEDSTRIJD))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: PERIOD_1 },
-      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
   it('geeft elke rij dezelfde sleutels, ook zonder enige periode', async () => {
     // PostgREST weigert een bulk-insert waarin de objecten verschillende
-    // kolommen hebben; absence_period_id en injury_set moeten dus altijd mee.
+    // kolommen hebben; absence_period_id moet dus altijd mee.
     const m = metPeriode([])
     use(m)
 
@@ -357,11 +357,11 @@ describe('createEvent — afmeldperiode', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
       )
       expect(row.status).toBe('present')
       expect(row.absence_period_id).toBeNull()
-      expect(row.injury_set).toBe(false)
+      expect(row).not.toHaveProperty('injury_set')
     }
   })
 
@@ -411,14 +411,26 @@ describe('createEvent — afmeldperiode', () => {
 // createEvent — blessure
 // ────────────────────────────────────────────────
 // Gespiegeld aan het afmeldperiode-blok hierboven: een speler met
-// players.injured = true moet op een NIEUW event meteen absent + injury_set
-// krijgen, precies zoals markInjured dat voor bestaande events doet
-// (app/actions/players.ts:124-132).
+// players.injured = true moet op een NIEUW event vanaf vandaag meteen
+// 'injured' krijgen, precies zoals markInjured dat voor bestaande events doet.
+// Een event in het verleden krijgt de standaardstatus (AC18).
+
+// Vaste klok vóór TRAINING (2026-09-10) en WEDSTRIJD (2026-09-12): beide
+// liggen dan in de toekomst. Alleen Date wordt nagebootst, zodat promises
+// gewoon doorlopen. Lokale middag, zodat todayLocal() in elke tijdzone
+// 2026-09-05 geeft.
+function vasteKlok() {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 8, 5, 12, 0, 0))
+}
 
 describe('createEvent — blessure', () => {
   const PLAYER_A = 'p1'
   const PLAYER_B = 'p2'
   const PERIOD_1 = 'ap-1'
+
+  beforeEach(vasteKlok)
+  afterEach(() => { vi.useRealTimers() })
 
   // Speler A is geblesseerd, speler B niet.
   function metBlessure(
@@ -441,15 +453,15 @@ describe('createEvent — blessure', () => {
     return m.calls.insert.find((i) => i.table === 'attendance')!.payload as Record<string, unknown>[]
   }
 
-  it('zet een geblesseerde speler op absent met injury_set en laat de teamgenoot op de standaardstatus', async () => {
+  it('zet een geblesseerde speler op injured en laat de teamgenoot op de standaardstatus', async () => {
     const m = metBlessure([{ id: PLAYER_A, injured: true }, { id: PLAYER_B, injured: false }])
     use(m)
 
     await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: true, absence_period_id: null },
-      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_A, status: 'injured', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -460,12 +472,12 @@ describe('createEvent — blessure', () => {
     await expect(createEvent(form(WEDSTRIJD))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', injury_set: true, absence_period_id: null },
-      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_A, status: 'injured', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
-  it('combineert blessure en een dekkende periode: absent met beide markeringen', async () => {
+  it('combineert blessure en een dekkende periode: injured, met de periode als herkomst', async () => {
     const m = metBlessure(
       [{ id: PLAYER_A, injured: true }, { id: PLAYER_B, injured: false }],
       [{ id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-09-01', to_date: '2026-09-30' }],
@@ -475,9 +487,33 @@ describe('createEvent — blessure', () => {
     await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)[0]).toEqual({
-      event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1',
-      injury_set: true, absence_period_id: PERIOD_1,
+      event_id: 'e1', player_id: PLAYER_A, status: 'injured', team_id: 'team-1',
+      absence_period_id: PERIOD_1,
     })
+  })
+
+  it('geeft een geblesseerde speler op een event VANDAAG injured', async () => {
+    vi.setSystemTime(new Date(2026, 8, 10, 12, 0, 0))
+    const m = metBlessure([{ id: PLAYER_A, injured: true }])
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)[0]).toMatchObject({ player_id: PLAYER_A, status: 'injured' })
+  })
+
+  it('geeft een geblesseerde speler op een event in het VERLEDEN de standaardstatus (AC18)', async () => {
+    vi.setSystemTime(new Date(2026, 8, 11, 12, 0, 0))
+    const m = metBlessure([{ id: PLAYER_A, injured: true }, { id: PLAYER_B, injured: false }])
+    use(m)
+
+    // TRAINING is op 2026-09-10, één dag vóór "vandaag".
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'present', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: PLAYER_B, status: 'present', team_id: 'team-1', absence_period_id: null },
+    ])
   })
 
   it('geeft een generieke melding bij een databasefout op de spelersquery', async () => {
@@ -506,6 +542,9 @@ describe('createEvent — gastspeler', () => {
   const GAST = 'p1'
   const REGULIER = 'p2'
   const PERIOD_1 = 'ap-1'
+
+  beforeEach(vasteKlok)
+  afterEach(() => { vi.useRealTimers() })
 
   function metGast(
     players: { id: string; injured?: boolean; type?: string }[],
@@ -539,8 +578,8 @@ describe('createEvent — gastspeler', () => {
     await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)).toEqual([
-      { event_id: 'e1', player_id: GAST, status: 'absent', team_id: 'team-1', injury_set: false, absence_period_id: null },
-      { event_id: 'e1', player_id: REGULIER, status: 'present', team_id: 'team-1', injury_set: false, absence_period_id: null },
+      { event_id: 'e1', player_id: GAST, status: 'absent', team_id: 'team-1', absence_period_id: null },
+      { event_id: 'e1', player_id: REGULIER, status: 'present', team_id: 'team-1', absence_period_id: null },
     ])
   })
 
@@ -554,7 +593,7 @@ describe('createEvent — gastspeler', () => {
     expect(attendanceRows(m)[1]).toMatchObject({ player_id: REGULIER, status: 'present' })
   })
 
-  it('blijft absent in combinatie met blessure en een dekkende periode (AC9)', async () => {
+  it('een geblesseerde gast krijgt injured, ook met een dekkende periode (V1)', async () => {
     const m = metGast(
       [{ id: GAST, injured: true, type: 'guest' }],
       [{ id: PERIOD_1, player_id: GAST, from_date: '2026-09-01', to_date: '2026-09-30' }],
@@ -564,9 +603,19 @@ describe('createEvent — gastspeler', () => {
     await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
 
     expect(attendanceRows(m)[0]).toEqual({
-      event_id: 'e1', player_id: GAST, status: 'absent', team_id: 'team-1',
-      injury_set: true, absence_period_id: PERIOD_1,
+      event_id: 'e1', player_id: GAST, status: 'injured', team_id: 'team-1',
+      absence_period_id: PERIOD_1,
     })
+  })
+
+  it('een geblesseerde gast op een event in het verleden blijft absent (gastregel)', async () => {
+    vi.setSystemTime(new Date(2026, 8, 20, 12, 0, 0))
+    const m = metGast([{ id: GAST, injured: true, type: 'guest' }])
+    use(m)
+
+    await expect(createEvent(form(TRAINING))).rejects.toThrow('__redirect__:/events/e1')
+
+    expect(attendanceRows(m)[0]).toMatchObject({ player_id: GAST, status: 'absent' })
   })
 
   it('houdt het active-filter en de tenant-scope op de spelersquery', async () => {
@@ -591,7 +640,7 @@ describe('createEvent — gastspeler', () => {
 
     for (const row of attendanceRows(m)) {
       expect(Object.keys(row).sort()).toEqual(
-        ['absence_period_id', 'event_id', 'injury_set', 'player_id', 'status', 'team_id'],
+        ['absence_period_id', 'event_id', 'player_id', 'status', 'team_id'],
       )
     }
   })

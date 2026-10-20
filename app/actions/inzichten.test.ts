@@ -405,7 +405,8 @@ describe('getSpelerStatistieken — succes', () => {
 
   it('vraagt de aanwezigheid op t/m GISTEREN — nooit toekomstige, nog niet gespeelde events', async () => {
     // Zonder dit klemmen keldert het percentage van elke geblesseerde speler:
-    // markInjured zet 'absent' op toekomstige events (app/actions/players.ts).
+    // markInjured zet 'injured' op toekomstige events (app/actions/players.ts);
+    // 'injured' telt in de RPC's als afwezig (besluit 5).
     const m = statsTeam()
     use(m)
 

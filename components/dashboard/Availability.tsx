@@ -18,6 +18,8 @@ export interface AvailabilityItem {
 const STATUS_STYLE: Record<AttendanceStatus, { dot: string; bg: string; fg: string }> = {
   present: { dot: '#16a34a', bg: 'rgba(22,163,74,0.14)',  fg: 'var(--chip-green-fg)' },
   absent:  { dot: '#ef4444', bg: 'rgba(239,68,68,0.14)',  fg: 'var(--chip-red-fg)' },
+  // Blessure telt als afwezig en krijgt dezelfde rode tint; het label ("Geblesseerd") maakt het verschil.
+  injured: { dot: '#ef4444', bg: 'rgba(239,68,68,0.14)',  fg: 'var(--chip-red-fg)' },
   unknown: { dot: '#f59e0b', bg: 'rgba(245,158,11,0.16)', fg: 'var(--chip-amber-fg)' },
 }
 
@@ -27,6 +29,7 @@ export default function Availability({ items, t }: { items: AvailabilityItem[]; 
   const statusLabel: Record<AttendanceStatus, string> = {
     present: t.home.present,
     absent: t.home.absent,
+    injured: t.home.injuredStatus,
     unknown: t.home.noResponse,
   }
 

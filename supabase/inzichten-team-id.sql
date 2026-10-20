@@ -1,6 +1,15 @@
 -- ============================================================
 -- Pitchup — M3a: inzichten-RPC's met een expliciete p_team_id
 --
+-- !! NIET OPNIEUW DRAAIEN !! De drie aanwezigheids-RPC's hieronder
+-- (inzichten_aanwezigheid, inzichten_training_opkomst_per_maand,
+-- inzichten_aanwezigheid_per_speler) zijn vervangen door
+-- supabase/blessure-status.sql, waar status 'injured' als afwezig telt.
+-- Opnieuw draaien zet ze stil terug naar "alleen 'absent' is afwezig" en haalt
+-- elk geblesseerd event uit /inzichten, het spelersprofiel en het
+-- seizoensrapport. Moet dit bestand toch ooit opnieuw: draai daarna
+-- blessure-status.sql nogmaals.
+--
 -- WANNEER DRAAIEN: VÓÓR deploy 1a (de deploy waarin app/inzichten/page.tsx en
 -- app/actions/inzichten.ts de nieuwe signatuur aanroepen). Run dit eenmalig in
 -- de Supabase SQL Editor.

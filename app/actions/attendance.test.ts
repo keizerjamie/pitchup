@@ -45,10 +45,10 @@ function makeSupabase(opts: {
   type Eq = { col: string; val: unknown }
   type In = { col: string; val: unknown }
   const calls = {
-    select: [] as { table: string; eqs: Eq[] }[],
+    select: [] as { table: string; eqs: Eq[]; ins?: In[] }[],
     insert: [] as { table: string; payload: unknown }[],
     upsert: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
-    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; ins: In[] }[],
+    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; ins: In[]; neqs: Eq[] }[],
     delete: [] as { table: string; eqs: Eq[] }[],
     // Volgorde van schrijfacties, om te kunnen aantonen dat het herstellen vóór
     // het verwijderen van de periode gebeurt.
@@ -66,15 +66,18 @@ function makeSupabase(opts: {
   function chain(table: string) {
     const eqs: Eq[] = []
     const ins: In[] = []
+    // `.neq()` apart vastgelegd (niet in eqs, dat de tenant-check blijft):
+    // markAllPresent slaat er de 'injured'-rijen mee over.
+    const neqs: Eq[] = []
     const c: Record<string, unknown> = {}
-    c.select = () => { calls.select.push({ table, eqs }); return c }
+    c.select = () => { calls.select.push({ table, eqs, ins }); return c }
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
     // Periodefilters van markAbsentForPeriod en de sortering van de
     // periodequery: alleen doorgeven, niet vastleggen — de eq-lijst blijft zo
     // de tenant-check.
     c.gte = () => c
     c.lte = () => c
-    c.neq = () => c
+    c.neq = (col: string, val: unknown) => { neqs.push({ col, val }); return c }
     c.order = () => c
     c.in = (col: string, val: unknown) => { ins.push({ col, val }); return c }
     c.insert = (payload: unknown) => {
@@ -88,7 +91,7 @@ function makeSupabase(opts: {
       return c
     }
     c.update = (payload: Record<string, unknown>) => {
-      calls.update.push({ table, payload, eqs, ins })
+      calls.update.push({ table, payload, eqs, ins, neqs })
       calls.sequence.push(`${table}.update`)
       return c
     }
@@ -165,6 +168,31 @@ describe('updateAttendance', () => {
       status: 'present',
       team_id: 'team-1',
     })
+  })
+
+  it("accepteert 'injured' als status en schrijft hem ongewijzigd weg", async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await updateAttendance('e1', PLAYER_A, 'injured')
+
+    const upsert = m.calls.upsert.find((u) => u.table === 'attendance')!
+    expect(upsert.payload).toEqual({
+      event_id: 'e1',
+      player_id: PLAYER_A,
+      status: 'injured',
+      team_id: 'team-1',
+    })
+    // V7: een blessure op één event wijzigt de spelerstatus niet.
+    expect(m.calls.update.filter((u) => u.table === 'players')).toHaveLength(0)
+  })
+
+  it("weigert 'bogus' met 'Ongeldige status'", async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await expect(updateAttendance('e1', PLAYER_A, 'bogus' as never)).rejects.toThrow('Ongeldige status')
+    expect(m.calls.upsert).toHaveLength(0)
   })
 
   it('revalideert de eventpagina én de selectiepagina', async () => {
@@ -387,8 +415,20 @@ describe('markAbsentForPeriod', () => {
   })
 
   it('revalideert niet bij een databasefout en draait de periode terug', async () => {
-    const m = periode([{ id: 'e1', type: 'match' }], {
-      attendance: { data: null, error: { code: '42501', message: 'permission denied for table attendance' } },
+    // Eerste attendance-antwoord: de lookup van bestaande rijen slaagt (leeg).
+    // Tweede: de upsert faalt.
+    const m = makeSupabase({
+      tables: {
+        events: { data: [{ id: 'e1', type: 'match' }], error: null },
+        players: { data: [{ id: PLAYER_A }], error: null },
+        absence_periods: { data: { id: PERIOD_1 }, error: null },
+      },
+      queues: {
+        attendance: [
+          { data: [], error: null },
+          { data: null, error: { code: '42501', message: 'permission denied for table attendance' } },
+        ],
+      },
     })
     use(m)
 
@@ -402,6 +442,144 @@ describe('markAbsentForPeriod', () => {
     ])
     expect(revalidatePath).not.toHaveBeenCalled()
     expect(logged()).toContain('attendance.markAbsentForPeriod')
+    expect(logged()).not.toContain('permission denied')
+  })
+
+  it('draait de periode terug als de lookup van bestaande rijen faalt, met een veilige melding', async () => {
+    const m = periode([{ id: 'e1', type: 'match' }], {
+      attendance: { data: null, error: { code: '42501', message: 'permission denied for table attendance' } },
+    })
+    use(m)
+
+    await expect(markAbsentForPeriod(PLAYER_A, '2026-08-01', '2026-08-31')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    const del = m.calls.delete.find((d) => d.table === 'absence_periods')!
+    expect(del.eqs).toEqual([
+      { col: 'id', val: PERIOD_1 },
+      { col: 'team_id', val: 'team-1' },
+    ])
+    // Zonder lookup géén upsert: anders zou een blessure op 'absent' belanden.
+    expect(m.calls.upsert).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+    expect(logged()).toContain('attendance.markAbsentForPeriod.existing')
+    expect(logged()).not.toContain('permission denied')
+  })
+
+  it("laat een 'injured'-rij op injured staan en zet er alleen absence_period_id op (besluit 11)", async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: [{ id: 'e1', type: 'match' }, { id: 'e2', type: 'training' }], error: null },
+        players: { data: [{ id: PLAYER_A }], error: null },
+        absence_periods: { data: { id: PERIOD_1 }, error: null },
+      },
+      queues: {
+        attendance: [
+          { data: [{ event_id: 'e2', status: 'injured' }, { event_id: 'e1', status: 'present' }], error: null },
+          { data: null, error: null },
+        ],
+      },
+    })
+    use(m)
+
+    const res = await markAbsentForPeriod(PLAYER_A, '2026-08-01', '2026-08-31')
+
+    // affected blijft het aantal events in de periode.
+    expect(res).toEqual({ periodId: PERIOD_1, affected: 2 })
+
+    // De lookup is team- en spelergescoped en begrensd op de events.
+    const lookup = m.calls.select.find((s) => s.table === 'attendance')!
+    expect(lookup.eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'player_id', val: PLAYER_A },
+    ])
+    expect(lookup.ins).toEqual([{ col: 'event_id', val: ['e1', 'e2'] }])
+
+    // Alleen e1 krijgt de upsert naar absent.
+    const upsert = m.calls.upsert.find((u) => u.table === 'attendance')!
+    expect(upsert.payload).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+    ])
+
+    // e2 houdt 'injured' en krijgt alleen de herkomst.
+    const update = m.calls.update.find((u) => u.table === 'attendance')!
+    expect(update.payload).toEqual({ absence_period_id: PERIOD_1 })
+    expect(update.payload).not.toHaveProperty('status')
+    expect(update.eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'player_id', val: PLAYER_A },
+      { col: 'status', val: 'injured' },
+    ])
+    expect(update.ins).toEqual([{ col: 'event_id', val: ['e2'] }])
+  })
+
+  it('schrijft geen upsert als elk event al injured is, alleen de herkomst', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: [{ id: 'e1', type: 'training' }], error: null },
+        players: { data: [{ id: PLAYER_A }], error: null },
+        absence_periods: { data: { id: PERIOD_1 }, error: null },
+      },
+      queues: {
+        attendance: [
+          { data: [{ event_id: 'e1', status: 'injured' }], error: null },
+          { data: null, error: null },
+        ],
+      },
+    })
+    use(m)
+
+    await markAbsentForPeriod(PLAYER_A, '2026-08-01', '2026-08-31')
+
+    expect(m.calls.upsert).toHaveLength(0)
+    expect(m.calls.update.filter((u) => u.table === 'attendance')).toHaveLength(1)
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+  })
+
+  it('na herstel (rij niet meer injured) wordt een nieuwe periode gewoon absent', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: [{ id: 'e1', type: 'training' }], error: null },
+        players: { data: [{ id: PLAYER_A }], error: null },
+        absence_periods: { data: { id: PERIOD_1 }, error: null },
+      },
+      queues: {
+        attendance: [
+          { data: [{ event_id: 'e1', status: 'present' }], error: null },
+          { data: null, error: null },
+        ],
+      },
+    })
+    use(m)
+
+    await markAbsentForPeriod(PLAYER_A, '2026-08-01', '2026-08-31')
+
+    const upsert = m.calls.upsert.find((u) => u.table === 'attendance')!
+    expect(upsert.payload).toEqual([
+      { event_id: 'e1', player_id: PLAYER_A, status: 'absent', team_id: 'team-1', absence_period_id: PERIOD_1 },
+    ])
+    expect(m.calls.update.filter((u) => u.table === 'attendance')).toHaveLength(0)
+  })
+
+  it('draait de periode terug als het zetten van de herkomst op een injured-rij faalt', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: [{ id: 'e1', type: 'training' }], error: null },
+        players: { data: [{ id: PLAYER_A }], error: null },
+        absence_periods: { data: { id: PERIOD_1 }, error: null },
+      },
+      queues: {
+        attendance: [
+          { data: [{ event_id: 'e1', status: 'injured' }], error: null },
+          { data: null, error: { code: '42501', message: 'permission denied for table attendance' } },
+        ],
+      },
+    })
+    use(m)
+
+    await expect(markAbsentForPeriod(PLAYER_A, '2026-08-01', '2026-08-31')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(m.calls.delete.filter((d) => d.table === 'absence_periods')).toHaveLength(1)
+    expect(revalidatePath).not.toHaveBeenCalled()
+    expect(logged()).toContain('attendance.markAbsentForPeriod.injured')
     expect(logged()).not.toContain('permission denied')
   })
 
@@ -437,7 +615,7 @@ describe('revokeAbsencePeriod', () => {
   // absence_periods wordt drie keer aangesproken: de periode zelf, de overige
   // periodes van dezelfde speler, en tot slot de delete.
   function intrekken(opts: {
-    rows?: { event_id: string; status: string; injury_set: boolean }[]
+    rows?: { event_id: string; status: string }[]
     events?: { id: string; date: string; type: string }[]
     others?: unknown[]
     periode?: unknown
@@ -468,8 +646,8 @@ describe('revokeAbsencePeriod', () => {
   it('zet de door deze periode gezette rijen terug naar de standaardstatus', async () => {
     const m = intrekken({
       rows: [
-        { event_id: 'e1', status: 'absent', injury_set: false },
-        { event_id: 'e2', status: 'absent', injury_set: false },
+        { event_id: 'e1', status: 'absent' },
+        { event_id: 'e2', status: 'absent' },
       ],
       events: [
         { id: 'e1', date: '2026-08-05', type: 'match' },
@@ -492,7 +670,7 @@ describe('revokeAbsencePeriod', () => {
   it('gebruikt de ingestelde standaardstatus van het team', async () => {
     vi.mocked(getDefaultAttendance).mockResolvedValueOnce('unknown')
     const m = intrekken({
-      rows: [{ event_id: 'e1', status: 'absent', injury_set: false }],
+      rows: [{ event_id: 'e1', status: 'absent' }],
       events: [{ id: 'e1', date: '2026-08-05', type: 'training' }],
     })
     use(m)
@@ -520,7 +698,7 @@ describe('revokeAbsencePeriod', () => {
 
   it('verwijdert de periode team-gescoped, pas ná het herstellen', async () => {
     const m = intrekken({
-      rows: [{ event_id: 'e1', status: 'absent', injury_set: false }],
+      rows: [{ event_id: 'e1', status: 'absent' }],
       events: [{ id: 'e1', date: '2026-08-05', type: 'training' }],
     })
     use(m)
@@ -539,8 +717,8 @@ describe('revokeAbsencePeriod', () => {
   it('draagt rijen die nog door een andere periode gedekt zijn over in plaats van terug te zetten', async () => {
     const m = intrekken({
       rows: [
-        { event_id: 'e1', status: 'absent', injury_set: false },
-        { event_id: 'e2', status: 'absent', injury_set: false },
+        { event_id: 'e1', status: 'absent' },
+        { event_id: 'e2', status: 'absent' },
       ],
       events: [
         { id: 'e1', date: '2026-08-05', type: 'training' }, // valt óók in P2
@@ -562,7 +740,7 @@ describe('revokeAbsencePeriod', () => {
 
   it('zoekt de overige periodes van dezelfde speler team-gescoped op', async () => {
     const m = intrekken({
-      rows: [{ event_id: 'e1', status: 'absent', injury_set: false }],
+      rows: [{ event_id: 'e1', status: 'absent' }],
       events: [{ id: 'e1', date: '2026-08-05', type: 'training' }],
     })
     use(m)
@@ -576,9 +754,9 @@ describe('revokeAbsencePeriod', () => {
     ])
   })
 
-  it('laat een blessure-rij op absent staan en wist alleen de herkomst', async () => {
+  it('laat een injured-rij op injured staan en wist alleen de herkomst', async () => {
     const m = intrekken({
-      rows: [{ event_id: 'e1', status: 'absent', injury_set: true }],
+      rows: [{ event_id: 'e1', status: 'injured' }],
       events: [{ id: 'e1', date: '2026-08-05', type: 'training' }],
     })
     use(m)
@@ -595,7 +773,7 @@ describe('revokeAbsencePeriod', () => {
     // aan de periode terwijl de coach hem bewust heeft overruled. Terugzetten
     // naar de standaardstatus zou die keuze ongedaan maken.
     const m = intrekken({
-      rows: [{ event_id: 'e1', status: 'present', injury_set: false }],
+      rows: [{ event_id: 'e1', status: 'present' }],
       events: [{ id: 'e1', date: '2026-08-05', type: 'training' }],
     })
     use(m)
@@ -611,7 +789,7 @@ describe('revokeAbsencePeriod', () => {
     // De standaardstatus is hier 'present'; zonder deze uitzondering zou een
     // bewust op 'unknown' gezette rij bij het intrekken naar 'present' springen.
     const m = intrekken({
-      rows: [{ event_id: 'e1', status: 'unknown', injury_set: false }],
+      rows: [{ event_id: 'e1', status: 'unknown' }],
       events: [{ id: 'e1', date: '2026-08-05', type: 'training' }],
     })
     use(m)
@@ -626,9 +804,9 @@ describe('revokeAbsencePeriod', () => {
   it('zet alleen de rijen terug die nog echt absent zijn', async () => {
     const m = intrekken({
       rows: [
-        { event_id: 'e1', status: 'absent', injury_set: false },
-        { event_id: 'e2', status: 'present', injury_set: false },
-        { event_id: 'e3', status: 'unknown', injury_set: false },
+        { event_id: 'e1', status: 'absent' },
+        { event_id: 'e2', status: 'present' },
+        { event_id: 'e3', status: 'unknown' },
       ],
       events: [
         { id: 'e1', date: '2026-08-05', type: 'training' },
@@ -653,7 +831,7 @@ describe('revokeAbsencePeriod', () => {
     // Bewust anders dan markRecovered(), dat alleen toekomstige events aanraakt:
     // een periode intrekken betekent "dit is nooit gebeurd".
     const m = intrekken({
-      rows: [{ event_id: 'oud', status: 'absent', injury_set: false }],
+      rows: [{ event_id: 'oud', status: 'absent' }],
       events: [{ id: 'oud', date: '2020-01-01', type: 'training' }],
     })
     use(m)
@@ -666,8 +844,8 @@ describe('revokeAbsencePeriod', () => {
   it('revalideert de afwezigheidspagina, de eventpagina van elk geraakt event en de selectiepagina van elk match-event', async () => {
     use(intrekken({
       rows: [
-        { event_id: 'e1', status: 'absent', injury_set: false },
-        { event_id: 'e2', status: 'absent', injury_set: false },
+        { event_id: 'e1', status: 'absent' },
+        { event_id: 'e2', status: 'absent' },
       ],
       events: [
         { id: 'e1', date: '2026-08-05', type: 'match' },
@@ -774,8 +952,8 @@ describe('revokeAbsencePeriod — gastspeler', () => {
       tables: {
         attendance: {
           data: [
-            { event_id: 'e1', status: 'absent', injury_set: false },
-            { event_id: 'e2', status: 'absent', injury_set: false },
+            { event_id: 'e1', status: 'absent' },
+            { event_id: 'e2', status: 'absent' },
           ],
           error: null,
         },
@@ -856,6 +1034,16 @@ describe('markAllPresent', () => {
       { col: 'event_id', val: 'e1' },
       { col: 'team_id', val: 'team-1' },
     ])
+  })
+
+  it("slaat 'injured'-rijen over (V3): alleen niet-geblesseerde rijen worden present", async () => {
+    const m = eigenTeam()
+    use(m)
+
+    await markAllPresent('e1')
+
+    const update = m.calls.update.find((u) => u.table === 'attendance')!
+    expect(update.neqs).toEqual([{ col: 'status', val: 'injured' }])
   })
 
   it('revalideert de eventpagina én de selectiepagina', async () => {

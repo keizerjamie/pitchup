@@ -13,7 +13,26 @@ import { PERIODES, type Periode } from '@/lib/inzichten'
 // server-ronde. De knopstijl is wel letterlijk van dat filter overgenomen,
 // zodat de twee filters op één pagina niet als twee verschillende dingen
 // ogen.
-export default function PeriodeFilter({ actief, t }: { actief: Periode; t: Dict }) {
+//
+// `hrefVoor` is optioneel zodat /inzichten ongewijzigd blijft; andere pagina's
+// (bv. /players?weergave=aanwezigheid) geven hun eigen URL-opbouw mee. Dit is
+// een server component, dus de functie-prop gaat niet door een client boundary.
+function inzichtenHref(p: Periode): string {
+  // De standaardperiode laat de parameter helemaal weg, zodat
+  // /inzichten en /inzichten?periode=seizoen niet als twee
+  // verschillende URL's naast elkaar bestaan.
+  return p === 'seizoen' ? '/inzichten' : `/inzichten?periode=${p}`
+}
+
+export default function PeriodeFilter({
+  actief,
+  t,
+  hrefVoor = inzichtenHref,
+}: {
+  actief: Periode
+  t: Dict
+  hrefVoor?: (p: Periode) => string
+}) {
   const label: Record<Periode, string> = {
     '4w': t.insights.periode4w,
     '8w': t.insights.periode8w,
@@ -27,10 +46,7 @@ export default function PeriodeFilter({ actief, t }: { actief: Periode; t: Dict 
         return (
           <Link
             key={p}
-            // De standaardperiode laat de parameter helemaal weg, zodat
-            // /inzichten en /inzichten?periode=seizoen niet als twee
-            // verschillende URL's naast elkaar bestaan.
-            href={p === 'seizoen' ? '/inzichten' : `/inzichten?periode=${p}`}
+            href={hrefVoor(p)}
             aria-current={isActief ? 'page' : undefined}
             className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${isActief ? 'text-white' : 'text-muted'}`}
             style={

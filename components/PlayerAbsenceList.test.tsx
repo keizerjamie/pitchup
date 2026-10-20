@@ -29,7 +29,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: mockRefresh }),
 }))
 
-import { markAbsentForPeriod, revokeAbsencePeriod } from '@/app/actions/attendance'
+import { updateAttendance, markAbsentForPeriod, revokeAbsencePeriod } from '@/app/actions/attendance'
 const mockMarkAbsentForPeriod = markAbsentForPeriod as unknown as ReturnType<typeof vi.fn>
 const mockRevokeAbsencePeriod = revokeAbsencePeriod as unknown as ReturnType<typeof vi.fn>
 
@@ -232,7 +232,7 @@ describe('router.refresh() na intrekken (bevinding 3)', () => {
   // (initialEvents)) draait dan niet opnieuw, dus zonder een expliciete sync
   // zou de lokale (optimistisch teruggezette) state blijven hangen op
   // defaultStatus, ook nadat de server met de echte waarheid (bijv.
-  // injury_set of een handmatig gezette status) terugkomt. Deze test
+  // een blessure ('injured') of een handmatig gezette status) terugkomt. Deze test
   // simuleert die refresh door met bijgewerkte props te rerenderen.
   it('valt terug op de echte serverstatus (niet defaultStatus) zodra router.refresh() verse props oplevert', async () => {
     const events = [
@@ -251,8 +251,8 @@ describe('router.refresh() na intrekken (bevinding 3)', () => {
     expect(screen.queryByText(`${nl.players.absentFor} 2 ${nl.players.events}`)).not.toBeInTheDocument()
 
     // Simuleer wat router.refresh() feitelijk doet: de server-component
-    // rendert opnieuw met de echte serverstaat als props. e-injury heeft
-    // injury_set en e-manual is handmatig door de coach op 'absent' gezet —
+    // rendert opnieuw met de echte serverstaat als props. e-injury is
+    // een blessure-rij en e-manual is handmatig door de coach op 'absent' gezet —
     // de server houdt beide bewust op 'absent', ondanks de ingetrokken periode.
     rerender(
       listElement({
@@ -399,5 +399,86 @@ describe('foutafhandeling rond markAbsentForPeriod/revokeAbsencePeriod (bevindin
     expect(screen.getByText(`${nl.players.absentFor} 1 ${nl.players.event}`)).toBeInTheDocument()
     // Geen refresh bij een mislukte call.
     expect(mockRefresh).not.toHaveBeenCalled()
+  })
+})
+
+// ── Blessure als eigen status (injured) ──
+describe('blessure als eigen aanwezigheidsstatus', () => {
+  const mockUpdateAttendance = updateAttendance as unknown as ReturnType<typeof vi.fn>
+
+  function fillPeriodDates(from: string, to: string) {
+    const fromInput = screen.getByText(nl.players.periodFrom).parentElement?.querySelector('input') as HTMLInputElement
+    const toInput = screen.getByText(nl.players.periodTo).parentElement?.querySelector('input') as HTMLInputElement
+    fireEvent.change(fromInput, { target: { value: from } })
+    fireEvent.change(toInput, { target: { value: to } })
+  }
+
+  it('toont per event een knop Geblesseerd naast Aanwezig en Afwezig; klikken roept updateAttendance(…, "injured") aan', async () => {
+    renderList({ events: [makeEvent({ id: 'e1', status: 'unknown' })] })
+    expect(screen.getByRole('button', { name: nl.players.present })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: nl.players.absent })).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(nl.players.injuredStatus) }))
+    })
+    expect(mockUpdateAttendance).toHaveBeenCalledWith('e1', 'p1', 'injured')
+  })
+
+  it('een actieve Geblesseerd-knop is rood (bg-danger) en de kaart krijgt de rode rand; opnieuw klikken doet niets', async () => {
+    const { container } = renderList({ events: [makeEvent({ id: 'e1', status: 'injured' })] })
+    const knop = screen.getByRole('button', { name: new RegExp(nl.players.injuredStatus) })
+    expect(knop.className).toContain('bg-danger')
+    expect(container.querySelector('.border-panel-red-edge')).not.toBeNull()
+    await act(async () => { fireEvent.click(knop) })
+    expect(mockUpdateAttendance).not.toHaveBeenCalled()
+  })
+
+  it('blessure telt niet mee in de "afgemeld"-teller (een blessure is geen afmelding)', () => {
+    renderList({ events: [makeEvent({ id: 'e1', status: 'injured' })] })
+    expect(screen.queryByText(new RegExp(nl.players.absentFor))).not.toBeInTheDocument()
+  })
+
+  it('optimistische periode-update overschrijft een "injured"-rij niet, een andere rij in de range wordt wel absent', async () => {
+    const events = [
+      makeEvent({ id: 'e-inj', date: '2026-09-02', status: 'injured' }),
+      makeEvent({ id: 'e-unk', date: '2026-09-03', status: 'unknown' }),
+    ]
+    // Houd de server-aanroep open zodat de optimistische staat zichtbaar blijft.
+    let resolve!: (v: { periodId: string; affected: number }) => void
+    mockMarkAbsentForPeriod.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    renderList({ events, periods: [] })
+    fillPeriodDates('2026-09-01', '2026-09-10')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: nl.players.periodButton }))
+    })
+    // Alleen e-unk is nu 'absent' (1 event), e-inj bleef 'injured'.
+    expect(screen.getByText(`${nl.players.absentFor} 1 ${nl.players.event}`)).toBeInTheDocument()
+    const injuredKnoppen = screen.getAllByRole('button', { name: new RegExp(nl.players.injuredStatus) })
+    expect(injuredKnoppen.filter((b) => b.className.includes('bg-danger'))).toHaveLength(1)
+    await act(async () => { resolve({ periodId: 'period-n', affected: 2 }) })
+  })
+
+  it('optimistisch intrekken van een periode laat een "injured"-rij staan', async () => {
+    const events = [
+      makeEvent({ id: 'e-inj', date: '2026-08-12', status: 'injured' }),
+      makeEvent({ id: 'e-abs', date: '2026-08-14', status: 'absent' }),
+    ]
+    renderList({
+      defaultStatus: 'unknown',
+      events,
+      periods: [{ id: 'period-1', player_id: 'p1', from_date: '2026-08-10', to_date: '2026-08-20' }],
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: revokeAriaName('2026-08-10', '2026-08-20') }))
+    })
+    const injuredKnoppen = screen.getAllByRole('button', { name: new RegExp(nl.players.injuredStatus) })
+    expect(injuredKnoppen.filter((b) => b.className.includes('bg-danger'))).toHaveLength(1)
+    // e-abs viel terug naar default -> geen "afgemeld"-melding meer
+    expect(screen.queryByText(new RegExp(nl.players.absentFor))).not.toBeInTheDocument()
+  })
+
+  it('read-only (geen recht): de badge toont "Geblesseerd" en er zijn geen statusknoppen', () => {
+    renderList({ canEdit: false, events: [makeEvent({ id: 'e1', status: 'injured' })] })
+    expect(screen.getByText(nl.players.injuredStatus)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: new RegExp(nl.players.injuredStatus) })).not.toBeInTheDocument()
   })
 })

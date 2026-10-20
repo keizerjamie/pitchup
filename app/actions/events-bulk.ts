@@ -18,6 +18,7 @@ import {
 } from '@/lib/bulk-matches'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
+import { todayLocal } from '@/lib/utils'
 import { parseMatchesFromCsv } from '@/lib/bulk-matches-csv'
 import { parseMatchesFromXlsx } from '@/lib/bulk-matches-xlsx'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
@@ -269,10 +270,11 @@ async function createAttendanceFor(
     // app/actions/settings.ts).
     const [{ data: players, error: playersError }, defaultStatus, { data: periods, error: periodsError }] =
       await Promise.all([
-        // `type` hoort erbij: een gastspeler staat altijd afwezig. Het
-        // active-filter blijft staan — een gast is gewoon actief en krijgt dus
-        // wél een rij.
-        supabase.from('players').select('id, type').eq('active', true).eq('team_id', teamId),
+        // `type` hoort erbij: een gastspeler staat altijd afwezig. `injured`
+        // idem: een geblesseerde speler krijgt op een wedstrijd vanaf vandaag
+        // 'injured', net als bij createEvent. Het active-filter blijft staan —
+        // een gast is gewoon actief en krijgt dus wél een rij.
+        supabase.from('players').select('id, injured, type').eq('active', true).eq('team_id', teamId),
         getDefaultAttendance().catch(() => 'present' as const),
         // Tenant-grens expliciet, naast de RLS-policy. Vaste sortering zodat de
         // herkomst bij overlappende periodes deterministisch is, net als daar.
@@ -301,19 +303,21 @@ async function createAttendanceFor(
     }
     if (!players || players.length === 0) return false
 
+    // Eén keer bepaald voor de hele batch: alleen wedstrijden vanaf vandaag
+    // krijgen bij een geblesseerde speler 'injured'.
+    const today = todayLocal()
     const records = events.flatMap((event) => {
       const periodByPlayer = periodIdByPlayerForDate(periods ?? [], event.date)
       // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
-      // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle zes.
-      // `injured: false` houdt het gedrag exact gelijk aan de inline variant die
-      // hier stond: die kende geen blessure-tak. Gevolg is alleen dat
-      // injury_set nu expliciet op false gaat (= de DB-default).
-      return players.map((player: { id: string; type: string }) => buildAttendanceRow({
+      // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle vijf.
+      return players.map((player: { id: string; injured: boolean | null; type: string }) => buildAttendanceRow({
         eventId: event.id,
         playerId: player.id,
         teamId,
         defaultStatus,
-        injured: false,
+        injured: player.injured === true,
+        eventDate: event.date,
+        today,
         periodId: periodByPlayer.get(player.id) ?? null,
         isGuest: player.type === 'guest',
       }))

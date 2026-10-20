@@ -99,12 +99,16 @@ CREATE TABLE IF NOT EXISTS attendance (
   team_id UUID NOT NULL,
   event_id UUID REFERENCES events(id) ON DELETE CASCADE NOT NULL,
   player_id UUID REFERENCES players(id) ON DELETE CASCADE NOT NULL,
-  status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('present', 'absent', 'unknown')),
-  injury_set BOOLEAN NOT NULL DEFAULT false,
+  -- 'injured' = afwezig door blessure op dit event (supabase/blessure-status.sql).
+  -- De vroegere vlag injury_set is vervallen (supabase/blessure-status-opruimen.sql);
+  -- players.injured blijft de huidige toestand van de speler.
+  status TEXT NOT NULL DEFAULT 'unknown'
+    CONSTRAINT attendance_status_check CHECK (status IN ('present', 'absent', 'injured', 'unknown')),
   -- Herkomst van een absent-status: welke afmeldperiode zette deze rij? NULL =
   -- handmatig/blessure/default en blijft bij het intrekken van een periode
   -- ongemoeid. FK i.p.v. boolean omdat bij overlappende periodes per rij moet
-  -- vastliggen WELKE periode hem zette.
+  -- vastliggen WELKE periode hem zette. Mag ook op een 'injured'-rij staan: de
+  -- periode dekt die datum, dus na herstel valt de rij terug naar 'absent'.
   absence_period_id UUID REFERENCES absence_periods(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(event_id, player_id)
