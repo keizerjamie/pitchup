@@ -3888,7 +3888,7 @@ Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-corre
 - Nieuwe tests: `Designronde 3 — Instellingen gegroepeerd` in assistent-rechten.acceptance.test.tsx.
 - Checks: typecheck/lint groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
 
-## Designronde 3 — iPhone-ronde: geen animaties, skeletscherm, inzoom-fix (2026-10-22, nog niet gecommit)
+## Designronde 3 — iPhone-ronde: geen animaties, skeletscherm, inzoom-fix (2026-10-22, commit `0d28188`, live)
 Aanleiding: op de iPhone "knoppen soms door elkaar, pagina's niet mooi, overgangen niet vloeiend".
 Jamie koos: **echt álle animaties weg** en bij een tik **direct een skeletscherm**.
 - **Oorzaak "door elkaar"**: iOS Safari zoomt in bij focus op een veld met tekst < 16px en zoomt
