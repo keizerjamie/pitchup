@@ -3734,7 +3734,7 @@ Feature-factory-keten; werkdocumenten 01–06 in `~/.claude/projects/-Users-jami
 - **Open:** rooktest in productie; daarna `blessure-status-opruimen.sql` (A-2, dropt `injury_set`;
   eerst de detectiequery, verwacht 0 rijen). Printpreview (thead-herhaling, Safari/iOS) niet geverifieerd.
 
-## Designronde 3 — fase 0: fundament (2026-10-22, nog niet gecommit)
+## Designronde 3 — fase 0: fundament (2026-10-22, commit `6a3b3b4`, live)
 Restyle-traject (audit + fasering in de kluis: `Pitchup - Designronde 3 (restyle)`). Jamie koos:
 merkbare restyle, vaste plek primaire actie, opslaan/annuleren consistent, destructief apart; FAB
 alleen op hoofdschermen en contextueel, verwijderen in het ⋯-menu, instellingen opsplitsen.
@@ -3772,7 +3772,7 @@ globals.css serveren; `touch` hielp niet, alleen `rm -rf .next` + herstart. Voor
 Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-correctie` AC1/AC12
 (falen ook zonder deze wijzigingen). 15 nieuwe tests in `components/ui/ui.test.tsx`.
 
-## Designronde 3 — fase 1: navigatie en dashboard (2026-10-22, nog niet gecommit)
+## Designronde 3 — fase 1: navigatie en dashboard (2026-10-22, commit `6a3b3b4`, live)
 - **Contextuele FAB** (`components/GlobalFab.tsx`): krijgt `pathname` van AppShell; `fabModeFor()`
   bepaalt de modus: `/` volledig menu · `/events` alleen de drie event-items · `/players` directe
   link naar `/players/new` · `/oefeningen` knop die `NIEUWE_OEFENING_EVENT` (`lib/fab-events.ts`)
@@ -3794,7 +3794,7 @@ Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-corre
   `nulmeting-per-onderdeel` AC20 onder volle belasting (los 3× groen, rendert /periodisering —
   niet aangeraakt). Nieuw: `components/GlobalFab.test.tsx` (8), 1 test in OefeningLibrary.test.tsx.
 
-## Designronde 3 — fase 2: kalender en events (2026-10-22, nog niet gecommit)
+## Designronde 3 — fase 2: kalender en events (2026-10-22, commit `6a3b3b4`, live)
 - **Eventdetail** (`app/events/[id]/page.tsx`): `PageHeader` met "Bewerken" zichtbaar rechts
   (`LinkButton` secondary, op <sm alleen icoon met `max-sm:sr-only`-label — accessible name blijft
   `t.event.editEvent`) en "Event verwijderen" in het ⋯-menu (`OverflowMenuItem` met `action:
@@ -3823,7 +3823,7 @@ Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-corre
   `sm:col-span-4 xl:col-span-1` ("Geblesseerd" werd afgekapt in de smallere rechterkolom).
 - Checks: typecheck/lint groen; alleen de 2 bekende `cyclusweek-correctie`-tests rood.
 
-## Designronde 3 — fase 3: spelers (2026-10-22, nog niet gecommit)
+## Designronde 3 — fase 3: spelers (2026-10-22, commit `6a3b3b4`, live)
 - **Lijst** (`PlayerList`): `PageHeader` (titel + telling, "Speler toevoegen" rechts vanaf md) →
   weergaveschakelaar → zoekveld (volle breedte, pilvorm). De schakelaar komt binnen als nieuwe
   optionele prop `schakelaar` (ReactNode) op `PlayerList` en `AanwezigheidsOverzicht` (en diens
@@ -3842,7 +3842,7 @@ Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-corre
   10px/0.02em tracking, namen `hyphens-auto` — namen braken midden in het woord.
 - Checks: typecheck/lint groen; alleen de 2 bekende `cyclusweek-correctie`-tests rood.
 
-## Designronde 3 — fase 4: oefeningen, periodisering, inzichten (2026-10-22, nog niet gecommit)
+## Designronde 3 — fase 4: oefeningen, periodisering, inzichten (2026-10-22, commit `6a3b3b4`, live)
 - **Oefeningenbibliotheek**: `PageHeader` met "Nieuwe oefening" (`Button` primary, `max-md:hidden`;
   label zonder de "+ " uit `t.oefeningen.addNew`), daaronder zoekveld (`flex-1`, pilvorm) + Filters.
   De kaart (`surface-card relative`) opent de editor via een **stretched button** op de naam
@@ -3866,7 +3866,7 @@ Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-corre
 - Checks: typecheck/lint groen; rood alleen `cyclusweek-correctie` (2, bekend) en eenmaal de
   flaky `nulmeting` AC20 onder volle belasting (los 3× groen).
 
-## Designronde 3 — fase 5: instellingen en inlogpagina's (2026-10-22, nog niet gecommit)
+## Designronde 3 — fase 5: instellingen en inlogpagina's (2026-10-22, commit `6a3b3b4`, live)
 - **Instellingen** (`app/settings/page.tsx`): vier groepen `<section id>` via lokale
   `SettingsGroup` — `weergave` (label "App": "Weergave" botste met de kaarttitel en maakte
   `queryByText(displaySection)` meervoudig), `team` (owner: logo → kleuren → aanwezigheid → staf →
