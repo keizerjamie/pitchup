@@ -117,8 +117,8 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
 
   return (
     <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto flex flex-col">
+      <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="anim-sheet relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto flex flex-col">
         <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl z-10">
           <h3 className="font-bold text-ink text-lg">{t.oefeningen.pickerTitle}</h3>
           <button type="button" onClick={onClose} className="w-8 h-8 rounded-full bg-surface-sunken flex items-center justify-center text-muted hover:bg-surface-sunken">

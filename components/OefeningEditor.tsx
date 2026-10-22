@@ -308,8 +308,8 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
 
   return (
     <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
+      <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
+      <div className="anim-sheet relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
         <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl z-10">
           <h3 className="font-bold text-ink text-lg">
             {isEdit ? t.oefeningen.editTitle : t.oefeningen.newTitle}

@@ -95,7 +95,7 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
         <div className="flex gap-2">
           {DAYS.map((day) => (
             <button key={day.value} type="button" onClick={() => toggleDay(day.value)}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition ${selectedDays.includes(day.value) ? 'bg-brand text-white border-brand' : 'bg-surface text-faint border-[var(--border-soft)] hover:border-brand-accent'}`}>
+              className={`flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition ${selectedDays.includes(day.value) ? 'bg-primary text-white border-primary' : 'bg-surface text-faint border-[var(--border-soft)] hover:border-brand-accent'}`}>
               {day.label}
             </button>
           ))}
@@ -121,10 +121,10 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
       </div>
 
       {trainingCount > 0 && (
-        <div className="bg-brand-light rounded-xl px-4 py-3 text-sm text-brand font-medium">
+        <div className="bg-panel-green border border-panel-green-edge rounded-xl px-4 py-3 text-sm text-panel-green-ink font-medium">
           {trainingCount} {t.schedule.trainingsInSeason}
           {selectedDays.length > 0 && (
-            <span className="text-brand/70 font-normal">
+            <span className="text-panel-green-ink/80 font-normal">
               {' '}· {DAYS.filter((d) => selectedDays.includes(d.value)).map((d) => d.label).join(' + ')}
             </span>
           )}
@@ -132,14 +132,14 @@ export default function TrainingScheduleForm({ initialSeasonStart, initialSeason
       )}
 
       <button type="submit" disabled={isSaving}
-        className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-[0.98] transition disabled:opacity-60">
+        className="w-full bg-primary text-white h-12 rounded-full font-semibold hover:bg-primary/90 active:scale-[0.98] transition disabled:opacity-60">
         {saved ? t.schedule.saved : isSaving ? t.schedule.saving : t.schedule.saveSchedule}
       </button>
 
       {trainingCount > 0 && (
         <div className="space-y-2">
           <button type="button" onClick={handleGenerate} disabled={isGenerating}
-            className="w-full py-3 rounded-xl font-semibold border-2 border-brand text-brand hover:bg-brand-light active:scale-[0.98] transition disabled:opacity-60">
+            className="w-full h-12 rounded-full font-semibold border-2 border-brand-accent text-brand-accent hover:bg-surface-sunken active:scale-[0.98] transition disabled:opacity-60">
             {isGenerating ? t.schedule.busy : `${t.schedule.generate} ${trainingCount} ${t.schedule.trainingsWord}`}
           </button>
           <button type="button" onClick={handleRegenerate} disabled={isGenerating}

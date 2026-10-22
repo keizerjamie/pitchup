@@ -538,28 +538,31 @@ a, button, input, select, textarea, label, [role="button"] {
 }
 
 /* ─────────────────────────────────────────────────
-   Geen animaties (besluit eigenaar, 2026-10-22, designronde 3)
+   Beweging: standaard uit, alleen bewust aangezet (designronde 3)
 
-   Hier stonden de view-transition-schuifovergangen tussen pagina's
-   (React <ViewTransition> in het verwijderde PageTransition.tsx), de
-   fadeUp/scaleIn/stagger-entree-animaties en een reduced-motion-vangnet.
-   Op de iPhone voelde dat stroperig: na een tik gebeurde er niets tot de
-   server klaar was en dán schoof de hele pagina. De app moet "gewoon
-   vloeiend" voelen; dat komt nu van directe skeletschermen
-   (app/loading.tsx), niet van beweging.
+   Eerst gingen op verzoek van de eigenaar álle animaties eruit (de oude
+   view-transition-schuifovergangen en entree-animaties voelden op de iPhone
+   stroperig). Daarna vroeg hij om vloeiende iOS-achtige overgangen en korte
+   menu-/onderbladanimaties. Model sindsdien:
 
-   Daarom zet deze regel ÁLLE animaties en transitions uit, ook die uit
-   inline styles (GlobalFab, LineupBuilder-inslag, InviteLinkCard) en uit
-   Tailwind-utilities (transition-colors, active:scale-… blijft wel als
-   directe, niet-geanimeerde indrukfeedback). Bewust `none` en niet de
-   0.01ms-truc: niets in de app wacht op animationend/transitionend
-   (gecontroleerd), en zonder animatie gelden gewoon de eindstijlen.
+   - Alles staat UIT via de regel hieronder (ook Tailwind transition-*,
+     hover-overgangen en inline animaties).
+   - Wat wél mag bewegen draagt `motion-ok` (of een van de anim-*-klassen
+     hieronder, die dat zelf meenemen) en houdt dan zijn eigen
+     transition/animation. Alleen transform en opacity.
+   - Paginaovergangen lopen via de Web Animations API in
+     components/RouteTransition.tsx; die worden door deze CSS-regel niet
+     geraakt.
+   - Niets wacht op animationend/transitionend (gecontroleerd), dus `none`
+     is veilig: zonder animatie gelden gewoon de eindstijlen.
+   - .animate-spin blijft altijd draaien: een stilstaande spinner leest als
+     "vastgelopen".
 
-   Enige uitzondering: .animate-spin (components/icons/Spinner.tsx). Een
-   stilstaande spinner leest als "vastgelopen"; het is een bezig-signaal,
-   geen decoratie.
+   Curves (zie de apple-design-richtlijnen): geen doorschieten bij menu's en
+   bladen; iOS-sheetcurve cubic-bezier(0.32, 0.72, 0, 1) voor schuiven,
+   ease-out voor vervagen.
 ───────────────────────────────────────────────── */
-*,
+*:not(.motion-ok):not(.anim-scrim):not(.anim-sheet):not(.anim-menu),
 *::before,
 *::after {
   animation: none !important;
@@ -567,6 +570,24 @@ a, button, input, select, textarea, label, [role="button"] {
 }
 .animate-spin {
   animation: spin 1s linear infinite !important;
+}
+
+@keyframes anim-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes anim-sheet-up { from { opacity: 0.6; transform: translateY(40px); } to { opacity: 1; transform: none; } }
+@keyframes anim-pop-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+
+/* Dimlaag achter een onderblad/modal. */
+.anim-scrim { animation: anim-fade-in 200ms ease-out both; }
+/* Onderblad: op de telefoon van onderen omhoog, vanaf sm een korte pop. */
+.anim-sheet { animation: anim-sheet-up 320ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+@media (min-width: 640px) {
+  .anim-sheet { animation: anim-pop-in 180ms ease-out both; }
+}
+/* Popover-menu (⋯): groeit vanuit de knop (transform-origin op het element). */
+.anim-menu { animation: anim-pop-in 150ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-sheet, .anim-menu { animation-name: anim-fade-in; animation-duration: 150ms; }
 }
 
 

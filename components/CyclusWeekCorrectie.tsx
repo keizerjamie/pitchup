@@ -90,8 +90,8 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
 
       {open && (
         <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeSheet} />
-          <div className="relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
+          <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeSheet} />
+          <div className="anim-sheet relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
             <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl">
               <h3 className="font-bold text-ink text-lg">{t.periodization.adjustWeekTitle}</h3>
               <button
@@ -129,7 +129,7 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
                         onClick={() => setGekozenWeek(n)}
                         className={`rounded-xl py-2.5 text-[13px] font-bold transition-colors active:scale-[0.97] ${
                           gekozen
-                            ? 'bg-brand text-white'
+                            ? 'bg-primary text-white'
                             : 'bg-surface-sunken text-muted border border-[var(--border-soft)]'
                         }`}
                       >
@@ -145,7 +145,7 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
                   type="button"
                   onClick={handleBackToAutomatic}
                   disabled={isPending}
-                  className="text-xs font-semibold text-brand px-3 py-1.5 rounded-lg border border-[var(--border-soft)] hover:border-brand/40 transition active:scale-[0.97] disabled:opacity-60"
+                  className="text-xs font-semibold text-brand-accent px-3 py-1.5 rounded-full border border-[var(--border-soft)] hover:border-brand-accent/50 transition active:scale-[0.97] disabled:opacity-60"
                 >
                   {t.periodization.backToAutomatic}
                 </button>
@@ -156,7 +156,7 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
               <button
                 type="button"
                 onClick={closeSheet}
-                className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition active:scale-[0.97]"
+                className="flex-1 h-12 rounded-full border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition active:scale-[0.97]"
               >
                 {t.trainingPlan.cancel}
               </button>
@@ -164,7 +164,7 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
                 type="button"
                 onClick={handleSave}
                 disabled={isPending}
-                className="flex-1 py-3 rounded-xl bg-brand hover:bg-brand-dark text-white font-semibold transition active:scale-[0.97] disabled:opacity-50"
+                className="flex-1 h-12 rounded-full bg-primary hover:bg-primary/90 text-white font-semibold transition active:scale-[0.97] disabled:opacity-50"
               >
                 {isPending ? t.periodization.saving : t.periodization.saveWeek}
               </button>

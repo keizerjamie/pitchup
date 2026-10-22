@@ -180,6 +180,7 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
       {/* Full-screen backdrop — rendered in document.body, outside all stacking contexts */}
       <div
         onClick={closeMenu}
+        className="motion-ok"
         style={{
           position: 'fixed', inset: 0, zIndex: 'var(--z-scrim)',
           background: 'rgba(0,0,0,0.30)',
@@ -194,6 +195,7 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
 
       {/* Menu card — opens upward from the FAB in the thumb zone */}
       <div
+        className="motion-ok"
         style={{
           position: 'fixed',
           bottom: 'calc(env(safe-area-inset-bottom, 0px) + 156px)',
@@ -210,7 +212,7 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
           transform: reduceMotion ? 'none' : visible ? 'scale(1) translateY(0)' : 'scale(0.92) translateY(12px)',
           opacity: visible ? 1 : 0,
           transition: visible
-            ? 'transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.22s ease-out'
+            ? 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease-out'
             : `transform ${CLOSE_MS}ms cubic-bezier(0.23, 1, 0.32, 1), opacity ${CLOSE_MS}ms ease-out`,
           overflow: 'hidden',
         }}
@@ -234,6 +236,7 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
             key={item.href}
             href={item.href}
             onClick={closeMenu}
+            className="motion-ok"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -248,7 +251,7 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
               // Stagger only on entrance; exit animates all items together, fast, so the
               // menu never gets unmounted mid-transition on a later item.
               transition: visible
-                ? `opacity 0.28s ease-out ${80 + i * 55}ms, transform 0.34s cubic-bezier(0.34,1.56,0.64,1) ${80 + i * 55}ms`
+                ? `opacity 0.22s ease-out ${60 + i * 35}ms, transform 0.32s cubic-bezier(0.32,0.72,0,1) ${60 + i * 35}ms`
                 : `opacity ${CLOSE_MS}ms ease-out, transform ${CLOSE_MS}ms ease-out`,
             }}
           >
@@ -284,9 +287,9 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
         className={fabClass}
         style={fabStyle}
       >
-        <span style={{
+        <span className="motion-ok" style={{
           display: 'block', lineHeight: 0,
-          transition: 'transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          transition: 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
           transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
         }}>
           <PlusIcon />

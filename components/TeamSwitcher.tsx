@@ -41,6 +41,7 @@ function ChevronIcon({ open, reduceMotion }: { open: boolean; reduceMotion: bool
       stroke="currentColor"
       strokeWidth={2}
       viewBox="0 0 24 24"
+      className="motion-ok"
       style={{
         transition: reduceMotion ? 'none' : `transform ${DESKTOP_ENTER_MS + 20}ms cubic-bezier(0.23, 1, 0.32, 1)`,
         transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
@@ -286,7 +287,7 @@ export default function TeamSwitcher({ teams, activeTeamId, variant }: Props) {
         {open && (
           <div
             role="presentation"
-            className="absolute left-0 top-full mt-2 z-[var(--z-sheet)] w-72 rounded-2xl bg-surface shadow-2xl overflow-hidden"
+            className="motion-ok absolute left-0 top-full mt-2 z-[var(--z-sheet)] w-72 rounded-2xl bg-surface shadow-2xl overflow-hidden"
             style={{
               border: '1px solid var(--border-soft)',
               transformOrigin: 'top left',
@@ -312,6 +313,7 @@ export default function TeamSwitcher({ teams, activeTeamId, variant }: Props) {
     <>
       <div
         onClick={() => closeMenu()}
+        className="motion-ok"
         style={{
           position: 'fixed', inset: 0, zIndex: 'var(--z-scrim)',
           background: 'rgba(0,0,0,0.30)',
@@ -320,7 +322,7 @@ export default function TeamSwitcher({ teams, activeTeamId, variant }: Props) {
         }}
       />
       <div
-        className="rounded-t-3xl bg-surface shadow-2xl overflow-hidden"
+        className="motion-ok rounded-t-3xl bg-surface shadow-2xl overflow-hidden"
         style={{
           position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 'var(--z-sheet)',
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',

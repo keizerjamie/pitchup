@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useDict } from '@/lib/i18n-context'
+import { markeerInAppTerug } from '@/components/RouteTransition'
 
 interface Props {
   fallback: string
@@ -15,6 +16,7 @@ export default function BackButton({ fallback, className, children }: Props) {
 
   function handleBack() {
     if (window.history.length > 1) {
+      markeerInAppTerug()
       router.back()
     } else {
       router.push(fallback)

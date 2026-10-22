@@ -61,8 +61,8 @@ export default function KopieerVorigeTraining({
 
       {open && (
         <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center print:hidden">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="relative w-full max-w-md bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
+          <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
+          <div className="anim-sheet relative w-full max-w-md bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
             <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-soft)' }}>
               <h3 className="font-bold text-ink text-lg">{t.trainingPlan.copyPreviousTitle}</h3>
               <p className="text-xs text-faint mt-1">{t.trainingPlan.copyPreviousHint}</p>

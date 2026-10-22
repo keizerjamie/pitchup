@@ -3915,3 +3915,34 @@ Jamie koos: **echt álle animaties weg** en bij een tik **direct een skeletscher
 - **KpiStrip-sparkline** pas vanaf 3 punten (2 punten oogde als los lijntje in de kaarthoek).
 - Checks: typecheck/lint/build groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
 - **Niet te verifiëren hier**: echt iOS Safari / beginscherm-app. Jamie test na de push.
+
+## Designronde 3 — vloeiende overgangen (2026-10-22, nog niet gecommit)
+Jamie koos na de "alles uit"-ronde: **iOS-stijl schuiven** voor detailpagina's, crossfade tussen
+tabbladen, en **korte, zachte animaties voor menu's en onderbladen**.
+- **Bewegingsmodel** (globals.css "Beweging: standaard uit, alleen bewust aangezet"): de globale
+  `none !important`-regel geldt nu voor `*:not(.motion-ok):not(.anim-scrim):not(.anim-sheet):not(.anim-menu)`.
+  Wat mag bewegen draagt `motion-ok` of een `anim-*`-klasse. Alleen transform/opacity.
+- **`components/RouteTransition.tsx`** (in AppShell om de pagina-inhoud; kop/zijbalk/onderbalk
+  bewegen niet): `richtingVoor(vorige, volgende)` — beide tabblad → `vervaag` (180ms), dieper →
+  `vooruit` (28px van rechts + fade, 300ms, `cubic-bezier(0.32,0.72,0,1)`), ondieper → `terug`
+  (van links). Web Animations API (`el.animate`, geen `fill`, zodat er na afloop geen transform
+  blijft die `fixed` onderbladen zou vangen), lopende animatie wordt geannuleerd (interruptible).
+  Reduced motion → alleen fade 150ms. **Popstate in Safari-in-de-browser op touch** wordt
+  overgeslagen (het veeggebaar animeert zelf), behalve als `BackButton` vóór `router.back()`
+  `markeerInAppTerug()` aanroept. Start bij routewissel = meteen na de tik (skelet uit
+  app/loading.tsx schuift in).
+- **Onderbladen** (NulmetingManager, OefeningEditor, CyclusWeekCorrectie, OefeningPicker,
+  KopieerVorigeTraining): `anim-scrim` (fade 200ms) + `anim-sheet` (mobiel 40px omhoog 320ms
+  iOS-curve, ≥sm pop 180ms). **⋯-menu**: `anim-menu origin-top-right` (pop 150ms).
+  GlobalFab, AppLauncher en TeamSwitcher hadden al eigen inline-overgangen: `motion-ok` erop en de
+  overshoot-curve `cubic-bezier(0.34,1.56,0.64,1)` vervangen door de iOS-curve (geen doorschieten
+  bij menu's), stagger korter (60 + i·35ms).
+- **Dark-mode-bug gevonden en opgelost**: `bg-brand`/`text-brand` (#0d3d38) is gelijk aan de dark
+  `--surface` → knoppen/tekst onzichtbaar (o.a. "Week opslaan", gekozen week, "Terug naar
+  automatisch", schema-dagen). Vervangen door `bg-primary`/`text-brand-accent`/`panel-green`
+  (6 bestanden). Vaste lichte combinatie `bg-brand-light + text-brand` in schema-samenvatting en
+  afwezigheidslijst → `panel-green`. AttendanceSummary-uitzondering (gedocumenteerd) gelaten.
+- **Gotcha (vierde keer)**: na `npm run build` naast een draaiende dev-server serveerde dev oude
+  CSS; alleen `rm -rf .next` + herstart hielp. Build liever niet parallel aan dev draaien.
+- Checks: typecheck/lint/build groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
+  Nieuw: components/RouteTransition.test.tsx (10).

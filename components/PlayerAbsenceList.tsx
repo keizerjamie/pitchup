@@ -168,7 +168,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                   type="date"
                   value={fromDate}
                   onChange={(e) => { setFromDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
+                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand-accent/30 focus:border-brand-accent/50"
                 />
               </div>
               <div className="flex-1">
@@ -178,7 +178,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
                   value={toDate}
                   min={fromDate}
                   onChange={(e) => { setToDate(e.target.value); setPeriodResult(null); setPeriodError(null) }}
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand/20 focus:border-brand/40"
+                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--border-soft)] text-sm text-ink focus:outline-none focus:ring-2 focus:ring-brand-accent/30 focus:border-brand-accent/50"
                 />
               </div>
             </div>
@@ -265,11 +265,11 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
               return (
                 <div key={event.id}
                   className={`bg-surface rounded-xl border-2 p-4 flex items-center gap-4 transition ${isAbsent || isInjured ? 'border-panel-red-edge bg-panel-red' : 'border-[var(--border-soft)]'}`}>
-                  <div className={`flex-shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center ${isMatch ? 'bg-panel-blue' : 'bg-brand-light'}`}>
-                    <span className={`text-xs font-medium leading-none ${isMatch ? 'text-panel-blue-ink' : 'text-brand'}`}>
+                  <div className={`flex-shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center ${isMatch ? 'bg-panel-blue' : 'bg-panel-green'}`}>
+                    <span className={`text-xs font-medium leading-none ${isMatch ? 'text-panel-blue-ink' : 'text-panel-green-ink'}`}>
                       {new Date(event.date + 'T00:00:00').toLocaleDateString(t.browserLocale, { month: 'short' })}
                     </span>
-                    <span className={`text-base font-bold leading-tight ${isMatch ? 'text-panel-blue-ink' : 'text-brand'}`}>
+                    <span className={`text-base font-bold leading-tight ${isMatch ? 'text-panel-blue-ink' : 'text-panel-green-ink'}`}>
                       {new Date(event.date + 'T00:00:00').getDate()}
                     </span>
                   </div>

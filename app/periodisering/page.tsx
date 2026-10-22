@@ -343,7 +343,7 @@ export default async function PeriodizationPage() {
               <CyclusWeekCorrectie
                 huidigeWeek={cycleWeek}
                 heeftCorrectie={correctie !== null}
-                triggerClassName="text-xs font-bold text-white px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-dark transition active:scale-[0.97]"
+                triggerClassName="text-xs font-bold text-white px-3.5 py-2 rounded-full bg-primary hover:bg-primary/90 transition active:scale-[0.97]"
                 canEdit={magBewerken}
               />
             )}

@@ -52,7 +52,7 @@ export default function AppLauncher({ open, onClose }: { open: boolean; onClose:
     // z-ladder in app/globals.css merkt --z-modal expliciet aan als de laag
     // die álles dekt, de FAB incluis.
     <div
-      className="fixed inset-0 z-[var(--z-modal)] md:hidden"
+      className="motion-ok fixed inset-0 z-[var(--z-modal)] md:hidden"
       style={{
         visibility: open ? 'visible' : 'hidden',
         transition: open ? 'visibility 0s' : `visibility 0s linear ${CLOSE_MS}ms`,
@@ -61,7 +61,7 @@ export default function AppLauncher({ open, onClose }: { open: boolean; onClose:
       <div
         onClick={onClose}
         aria-hidden="true"
-        className="absolute inset-0"
+        className="motion-ok absolute inset-0"
         style={{
           background: 'rgba(0,0,0,0.28)',
           backdropFilter: open ? 'blur(6px)' : 'blur(0px)',
@@ -77,14 +77,14 @@ export default function AppLauncher({ open, onClose }: { open: boolean; onClose:
         role="dialog"
         aria-modal="true"
         aria-label={t.nav.moreTitle}
-        className="absolute left-0 right-0 px-3"
+        className="motion-ok absolute left-0 right-0 px-3"
         style={{
           bottom: 'calc(max(env(safe-area-inset-bottom), 10px) + 82px)',
           transform: reduceMotion ? 'none' : open ? 'translateY(0) scale(1)' : 'translateY(12px) scale(0.97)',
           transformOrigin: 'bottom center',
           opacity: open ? 1 : 0,
           transition: open
-            ? 'transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.22s ease-out'
+            ? 'transform 0.32s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease-out'
             : `transform ${CLOSE_MS}ms cubic-bezier(0.23, 1, 0.32, 1), opacity ${CLOSE_MS}ms ease-out`,
         }}
       >
