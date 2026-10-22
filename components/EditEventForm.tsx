@@ -6,7 +6,9 @@
 // verzameltijd, trainingstype en uitslag zijn hier bewust niet bewerkbaar.
 
 import { useState } from 'react'
-import BackButton from '@/components/BackButton'
+import PageHeader from '@/components/ui/PageHeader'
+import ActionBar from '@/components/ui/ActionBar'
+import Button, { LinkButton } from '@/components/ui/Button'
 import EventFormFields from '@/components/EventFormFields'
 import { updateEvent } from '@/app/actions/events'
 import { useDict } from '@/lib/i18n-context'
@@ -67,12 +69,7 @@ export default function EditEventForm({ event }: Props) {
 
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
-      <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback={`/events/${event.id}`} className="text-faint hover:text-ink">
-          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
-        </BackButton>
-        <h1 className="text-2xl font-bold text-ink">{title}</h1>
-      </div>
+      <PageHeader backFallback={`/events/${event.id}`} title={title} className="mb-6" />
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
@@ -96,12 +93,14 @@ export default function EditEventForm({ event }: Props) {
           />
         </div>
 
-        <button type="submit" disabled={isLoading} aria-busy={isLoading}
-          className={`w-full py-3 rounded-xl font-semibold text-white transition active:scale-95 ${
-            event.type === 'match' ? 'bg-event-match hover:bg-event-match/90' : 'bg-event-training hover:bg-event-training/90'
-          } ${isLoading ? 'opacity-60' : ''}`}>
-          {isLoading ? t.event.saving : t.event.saveChanges}
-        </button>
+        <ActionBar
+          secondary={<LinkButton href={`/events/${event.id}`} variant="secondary">{t.common.cancel}</LinkButton>}
+          primary={
+            <Button type="submit" loading={isLoading} variant={event.type === 'match' ? 'match' : 'primary'}>
+              {isLoading ? t.event.saving : t.event.saveChanges}
+            </Button>
+          }
+        />
       </form>
     </div>
   )

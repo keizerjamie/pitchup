@@ -8,6 +8,7 @@ import { cn, formatTime, todayLocal } from '@/lib/utils'
 import { monthMatrix, sameMonth } from '@/lib/calendar.mjs'
 import { useDict } from '@/lib/i18n-context'
 import UploadIcon from '@/components/icons/UploadIcon'
+import { buttonClasses } from '@/components/ui/Button'
 
 interface Props {
   events: FootballEvent[]
@@ -15,9 +16,12 @@ interface Props {
   canEdit: boolean
 }
 
-// Type accent colours — chosen to read on both light and dark surfaces.
-const TRAINING = '#14b8a6' // teal
-const MATCH = '#16a34a'    // green
+// Type-accentkleuren als thema-tokens, zodat ze in licht én donker leesbaar
+// zijn (ze dienen ook als tekstkleur voor de tijd). Designronde 3: training
+// groen en wedstrijd blauw, gelijk aan de typekeuze in "Nieuw event" — eerder
+// waren het teal en groen en dus nauwelijks uit elkaar te houden.
+const TRAINING = 'var(--brand-accent)'  // groen: #107b38 licht / #4ade80 donker
+const MATCH = 'var(--panel-blue-fg)'    // blauw: #2563eb licht / #93b4fb donker
 const colorFor = (e: FootballEvent) => (e.type === 'match' ? MATCH : TRAINING)
 
 function eventTitle(event: FootballEvent, t: Dict): string {
@@ -76,38 +80,41 @@ export default function CalendarView({ events, attendanceMap, canEdit }: Props) 
       {/* Calendar column */}
       <div className="flex-1 min-w-0 flex flex-col gap-4">
         {/* Month navigation */}
-        <div className="flex items-center justify-between gap-3 flex-shrink-0">
+        {/* flex-wrap: op desktop deelt deze kolom de breedte met "Aankomend";
+            zonder omloop schoof "Nieuw event" daar onder (designronde 3). */}
+        <div className="flex items-center justify-between gap-x-3 gap-y-2 flex-wrap flex-shrink-0">
           <div className="flex items-center gap-3">
-            <h1 className="font-display text-[22px] lg:text-[28px] font-bold tracking-tight text-ink capitalize">{monthLabel}</h1>
+            <h1 className="font-display text-[22px] lg:text-[28px] font-bold tracking-tight text-ink capitalize whitespace-nowrap">{monthLabel}</h1>
             <div className="flex gap-1.5">
               <button type="button" onClick={() => shiftMonth(-1)} aria-label={t.calendar.prevMonth}
-                className="w-9 h-9 rounded-xl bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
+                className="w-9 h-9 rounded-full bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
                 <span className="ms text-[20px]">chevron_left</span>
               </button>
               <button type="button" onClick={() => shiftMonth(1)} aria-label={t.calendar.nextMonth}
-                className="w-9 h-9 rounded-xl bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
+                className="w-9 h-9 rounded-full bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
                 <span className="ms text-[20px]">chevron_right</span>
               </button>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={goToday}
-              className="h-9 px-3 rounded-xl text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors">
+              className="h-9 px-3 rounded-full text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors">
               {t.calendar.today}
             </button>
             {canEdit && (
               <>
                 <Link href="/events/bulk"
-                  className="hidden md:flex h-10 rounded-xl px-3 items-center gap-1.5 text-[13.5px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors flex-shrink-0">
+                  className="hidden md:flex h-10 rounded-full px-3 items-center gap-1.5 text-[13.5px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors flex-shrink-0">
                   {/* Inline SVG: "upload_file" zit niet in de gesubsette icoonfont
                       en rendert daar als letterlijke tekst (zie UploadIcon.tsx). */}
                   <UploadIcon className="w-[19px] h-[19px]" />
                   <span>{t.event.bulk.fabLabel}</span>
                 </Link>
+                {/* Mobiel neemt de contextuele FAB deze actie over (designronde 3). */}
                 <Link href="/events/new" aria-label={t.home.newEvent}
-                  className="h-10 rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0" style={{ background: 'var(--primary)' }}>
+                  className={buttonClasses({ className: 'max-md:hidden flex-shrink-0' })}>
                   <span className="ms text-[19px]" aria-hidden="true">add</span>
-                  <span className="hidden sm:inline">{t.home.newEvent}</span>
+                  <span>{t.home.newEvent}</span>
                 </Link>
               </>
             )}

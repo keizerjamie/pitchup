@@ -27,6 +27,7 @@ import ParallelGroepEditor from '@/components/ParallelGroepEditor'
 import BezettingStepper from '@/components/BezettingStepper'
 import TrainingstypeSchakelaar from '@/components/TrainingstypeSchakelaar'
 import { useDict } from '@/lib/i18n-context'
+import Button from '@/components/ui/Button'
 
 interface Props {
   eventId: string
@@ -590,13 +591,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               geen informatie toe en kost alleen ruimte (FOUT4, print-review). */}
           <h2 className="text-sm font-semibold text-muted uppercase tracking-wide print:hidden">{t.trainingPlan.exercisesHeading}</h2>
           {canEdit && (
-            <button
-              type="button"
-              onClick={openPicker}
-              className="print:hidden text-sm font-semibold text-warning-text hover:text-panel-orange-ink active:scale-95 transition"
-            >
+            // Designronde 3: één toevoegknop, rechts in de sectiekop (stond er
+            // ook nog als gestippelde knop onder de lijst).
+            <Button size="sm" variant="secondary" onClick={openPicker} className="print:hidden">
               {t.trainingPlan.addExercise}
-            </button>
+            </Button>
           )}
         </div>
 
@@ -1242,15 +1241,6 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           </div>
         )}
 
-        {canEdit && (
-          <button
-            type="button"
-            onClick={openPicker}
-            className="print:hidden mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
-          >
-            {t.trainingPlan.addExercise}
-          </button>
-        )}
       </div>
 
       {canEdit && showPicker && (

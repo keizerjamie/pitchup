@@ -47,6 +47,7 @@ import PeriodeFilter from '@/components/inzichten/PeriodeFilter'
 import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
 import TrainingsinhoudChart from '@/components/inzichten/TrainingsinhoudChart'
 import PrintButton from '@/components/PrintButton'
+import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
 
 // Pagina-brede lege staat. Twee gevallen delen deze schil: "geen seizoen
@@ -119,10 +120,7 @@ export default async function InzichtenPage({
   if (!venster) {
     return (
       <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-        <div>
-          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
-          <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
-        </div>
+        <PageHeader title={t.insights.pageTitle} subtitle={t.insights.pageSubtitle} />
         <LegeStaat
           icoon="calendar_month"
           titel={t.insights.noSeason}
@@ -311,10 +309,7 @@ export default async function InzichtenPage({
     const smallerDanSeizoen = periode !== PERIODE_STANDAARD
     return (
       <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-        <div>
-          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
-          <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
-        </div>
+        <PageHeader title={t.insights.pageTitle} subtitle={t.insights.pageSubtitle} />
         {smallerDanSeizoen ? (
           <>
             <PeriodeFilter actief={periode} t={t} />
@@ -347,13 +342,7 @@ export default async function InzichtenPage({
           en een schermindeling op A4 leveren nooit een presentabel document
           op. Zelfde patroon als de wedstrijdselectie (MatchSquadEditor). */}
       <div className="print:hidden max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.insights.pageTitle}</h1>
-          <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.insights.pageSubtitle}</p>
-        </div>
-        <PrintButton />
-      </div>
+      <PageHeader title={t.insights.pageTitle} subtitle={t.insights.pageSubtitle} actions={<PrintButton />} />
 
       <PeriodeFilter actief={periode} t={t} />
 

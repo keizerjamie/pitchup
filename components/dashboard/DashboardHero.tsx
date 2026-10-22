@@ -55,7 +55,7 @@ export default function DashboardHero({
 
   return (
     <div
-      className="rounded-[20px] lg:rounded-[22px] overflow-hidden relative p-[18px] lg:px-7 lg:py-6 text-white transition-transform active:scale-[0.99] lg:active:scale-100"
+      className="rounded-[22px] overflow-hidden relative p-[18px] lg:px-7 lg:py-6 text-white transition-transform active:scale-[0.99] lg:active:scale-100"
       style={{ background: 'linear-gradient(125deg,#0a2e2a 0%,#0d3d38 45%,#14655c 100%)' }}
     >
       <div
@@ -92,7 +92,7 @@ export default function DashboardHero({
         href={secondaryHref}
         aria-label={secondaryLabel}
         data-testid="hero-tile-link"
-        className="lg:hidden absolute inset-0 z-[1] rounded-[20px]"
+        className="lg:hidden absolute inset-0 z-[1] rounded-[22px]"
       />
 
       {/* ── Mobile (compact) ── */}
@@ -137,7 +137,7 @@ export default function DashboardHero({
           </div>
           <Link
             href={primaryHref}
-            className="relative z-[2] h-9 rounded-[11px] px-3.5 flex items-center gap-1.5 text-[12.5px] font-bold text-white"
+            className="relative z-[2] h-9 rounded-full px-4 flex items-center gap-1.5 text-[12.5px] font-bold text-white"
             style={{ background: 'var(--primary)' }}
           >
             <span className="ms text-[17px]">{primaryIcon}</span>
@@ -185,7 +185,7 @@ export default function DashboardHero({
           <div className="flex gap-2.5 mt-1 flex-wrap">
             <Link
               href={primaryHref}
-              className="h-11 rounded-[13px] px-5 flex items-center gap-2 text-[14px] font-bold text-white"
+              className="h-11 rounded-full px-5 flex items-center gap-2 text-[14px] font-bold text-white"
               style={{ background: 'var(--primary)' }}
             >
               <span className="ms text-[20px]">{primaryIcon}</span>
@@ -193,7 +193,7 @@ export default function DashboardHero({
             </Link>
             <Link
               href={secondaryHref}
-              className="h-11 rounded-[13px] px-[18px] flex items-center gap-2 text-[14px] font-bold text-white"
+              className="h-11 rounded-full px-5 flex items-center gap-2 text-[14px] font-bold text-white"
               style={{ background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.22)' }}
             >
               <span className="ms text-[20px]">groups</span>

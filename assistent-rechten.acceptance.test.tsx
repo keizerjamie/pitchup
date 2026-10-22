@@ -38,7 +38,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { TeamContextClientProvider } from '@/lib/team-context-client'
 import { nl } from '@/messages/nl'
@@ -385,6 +385,33 @@ describe('Owner ziet alle secties op Instellingen', () => {
     expect(q(nl.settings.scheduleSection)).not.toBeNull()
     expect(q(nl.staf.section)).not.toBeNull()
     expect(q(nl.settings.periodizationSection)).not.toBeNull()
+  })
+})
+
+// Designronde 3 (2026-10-22): Instellingen in vier groepen met ankernavigatie;
+// de gevarenzone staat als allerlaatste blok.
+describe('Designronde 3 — Instellingen gegroepeerd', () => {
+  it('owner: navigatie naar App/Team/Planning/Account in die volgorde, elke sectie in zijn groep, gevarenzone als laatste', async () => {
+    const { container } = await renderSettings('owner')
+    const nav = screen.getByRole('navigation', { name: nl.settings.groupsNav })
+    expect(within(nav).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual(['#weergave', '#team', '#planning', '#account'])
+
+    const groep = (id: string) => container.querySelector(`section#${id}`) as HTMLElement
+    expect(within(groep('weergave')).getByText(nl.settings.displaySection)).toBeInTheDocument()
+    expect(within(groep('team')).getByText(nl.settings.logoSection)).toBeInTheDocument()
+    expect(within(groep('team')).getByText(nl.staf.section)).toBeInTheDocument()
+    expect(within(groep('planning')).getByText(nl.settings.scheduleSection)).toBeInTheDocument()
+    expect(within(groep('account')).getByRole('button', { name: new RegExp(nl.settings.logout) })).toBeInTheDocument()
+
+    const gevarenzone = within(groep('account')).getByText(nl.settings.dangerZone)
+    const alleSecties = Array.from(container.querySelectorAll('section'))
+    expect(alleSecties[alleSecties.length - 1]).toContainElement(gevarenzone)
+  })
+
+  it('assistent zonder rechten: alleen de groepen App en Account', async () => {
+    await renderSettings('assistent', GEEN_RECHTEN)
+    const nav = screen.getByRole('navigation', { name: nl.settings.groupsNav })
+    expect(within(nav).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual(['#weergave', '#account'])
   })
 })
 

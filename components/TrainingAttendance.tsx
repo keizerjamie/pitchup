@@ -74,8 +74,8 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
   return (
     <div className="flex flex-col gap-4">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <div className="col-span-2 lg:col-span-1 rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(120deg,#0d3d38,#14655c)' }}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-5 gap-3">
+        <div className="col-span-2 sm:col-span-4 xl:col-span-1 rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(120deg,#0d3d38,#14655c)' }}>
           <div className="text-[12.5px] font-bold" style={{ color: '#9fd8cd' }}>{t.event.turnout}</div>
           <div className="font-display text-[30px] font-bold mt-1">
             {opkomstPercentage !== null ? `${opkomstPercentage}%` : '—'}

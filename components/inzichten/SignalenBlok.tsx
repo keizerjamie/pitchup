@@ -26,8 +26,10 @@ export default function SignalenBlok({ signalen, t }: { signalen: Signaal[]; t: 
   return (
     <div className="surface-card overflow-hidden">
       <div className="px-5 py-3.5 flex items-baseline justify-between gap-3" style={{ borderBottom: '1px solid var(--border-soft)' }}>
-        <h2 className="font-display text-[16px] font-bold text-ink">{t.insights.signalenTitle}</h2>
-        <p className="text-[11px] font-semibold text-faint">{t.insights.signalenSubtitle}</p>
+        {/* whitespace-nowrap: "Wat valt op" brak op mobiel over twee regels
+            naast de ondertitel (designronde 3). */}
+        <h2 className="font-display text-[16px] font-bold text-ink whitespace-nowrap">{t.insights.signalenTitle}</h2>
+        <p className="text-[11px] font-semibold text-faint text-right">{t.insights.signalenSubtitle}</p>
       </div>
       <ul className="flex flex-col">
         {signalen.map((signaal, i) => {

@@ -6,8 +6,10 @@ import { Player, AttendanceStatus } from '@/lib/types'
 import { formatDateLong, formatTime, todayLocal } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
 import MetingEditor from '@/components/MetingEditor'
-import BackButton from '@/components/BackButton'
-import DeleteButton from '@/components/DeleteButton'
+import PageHeader from '@/components/ui/PageHeader'
+import { LinkButton } from '@/components/ui/Button'
+import type { OverflowMenuItem } from '@/components/ui/OverflowMenu'
+import TrashIcon from '@/components/icons/TrashIcon'
 import { deleteEvent } from '@/app/actions/events'
 import { getDict } from '@/lib/i18n'
 import { analyseBestaat as computeAnalyseBestaat } from '@/lib/match-analysis.mjs'
@@ -55,11 +57,15 @@ export default async function EventDetailPage({ params }: Props) {
     redirect('/events')
   }
 
-  const backIcon = (
-    <span className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
-      <span className="ms text-[22px]">arrow_back</span>
-    </span>
-  )
+  // Designronde 3: verwijderen staat in het ⋯-menu van de paginakop (rood,
+  // met bevestiging), niet meer onderaan de pagina naast "Bewerken".
+  const deleteItem: OverflowMenuItem = {
+    label: t.event.deleteEvent,
+    icon: <TrashIcon />,
+    danger: true,
+    confirm: `${t.event.deleteEvent}?`,
+    action: handleDelete,
+  }
 
   const metaLine = [
     event.time ? formatTime(event.time) : null,
@@ -71,21 +77,15 @@ export default async function EventDetailPage({ params }: Props) {
   if (isMeting) {
     return (
       <div className="max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-        <div className="flex items-center gap-3">
-          <BackButton fallback="/events">{backIcon}</BackButton>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-display text-[22px] font-bold text-ink flex items-center gap-2">
-              <span className="ms text-[22px] text-panel-purple-ink" aria-hidden="true">straighten</span>{t.event.meting}
-            </h1>
-            <p className="text-[13px] font-semibold text-faint capitalize">{formatDateLong(event.date, t.browserLocale)}</p>
-          </div>
-        </div>
+        <PageHeader
+          backFallback="/events"
+          title={<span className="flex items-center gap-2"><span className="ms text-[24px] text-panel-purple-ink" aria-hidden="true">straighten</span>{t.event.meting}</span>}
+          subtitle={<span className="capitalize">{formatDateLong(event.date, t.browserLocale)}</span>}
+          menu={canEdit(ctx, 'agenda') ? [deleteItem] : undefined}
+        />
         {metaLine && <div className="surface-card px-4 py-3 text-[13.5px] font-semibold text-muted">{metaLine}</div>}
         {event.notes && <div className="surface-card px-4 py-3 text-[13.5px] text-muted">{event.notes}</div>}
         <MetingEditor eventId={id} initialMeting={meting} canEdit={canEdit(ctx, 'periodisering')} />
-        {canEdit(ctx, 'agenda') && (
-          <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
-        )}
       </div>
     )
   }
@@ -167,67 +167,67 @@ export default async function EventDetailPage({ params }: Props) {
   const title = isMatch && event.opponent ? `vs ${event.opponent}` : t.event.training
 
   return (
-    <div className="max-w-2xl lg:max-w-4xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <BackButton fallback="/events">{backIcon}</BackButton>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-display text-[22px] lg:text-[26px] font-bold text-ink truncate">{title}</h1>
-          <p className="text-[13px] font-semibold text-faint capitalize">
-            {formatDateLong(event.date, t.browserLocale)}{metaLine && ` · ${metaLine}`}
-          </p>
-        </div>
-        {isMatch && event.match_type && (
-          <span className="flex-shrink-0 text-[11px] font-extrabold px-3 py-1.5 rounded-full text-brand-accent"
+    <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
+      {/* Header — Bewerken zichtbaar rechts (op mobiel als icoon), verwijderen
+          in het ⋯-menu (designronde 3; vervangt de knoppenrij onderaan). */}
+      <PageHeader
+        backFallback="/events"
+        title={title}
+        subtitle={<span className="capitalize">{formatDateLong(event.date, t.browserLocale)}{metaLine && ` · ${metaLine}`}</span>}
+        badge={isMatch && event.match_type ? (
+          <span className="max-sm:hidden text-[11px] font-extrabold px-3 py-1.5 rounded-full text-brand-accent"
             style={{ background: 'color-mix(in srgb, var(--primary) 12%, transparent)' }}>
             {t.event.matchTypes[event.match_type as keyof typeof t.event.matchTypes]}
           </span>
-        )}
+        ) : undefined}
+        actions={canEdit(ctx, 'agenda') ? (
+          <LinkButton href={`/events/${id}/edit`} variant="secondary" icon="edit" className="max-sm:w-11 max-sm:px-0">
+            <span className="max-sm:sr-only">{t.event.editEvent}</span>
+          </LinkButton>
+        ) : undefined}
+        menu={canEdit(ctx, 'agenda') ? [deleteItem] : undefined}
+      />
+
+      {/* Desktop: acties + notities links, aanwezigheid rechts (designronde 3;
+          stond als één smalle kolom met veel lege ruimte). Mobiel: zelfde volgorde
+          als voorheen. */}
+      <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:items-start">
+        <div className="flex flex-col gap-4 min-w-0">
+          {/* Squad / lineup / training-plan action */}
+          {isMatch && (
+            <ActionCard href={`/events/${id}/squad`} done={(squadCheck?.length ?? 0) > 0} icon="groups"
+              title={t.event.squad} hint={t.event.squadHint}
+              viewLabel={t.event.squadView} viewHint={t.event.squadViewHint} cta={t.event.squadCta} />
+          )}
+          {isMatch && (
+            <ActionCard href={`/events/${id}/lineup`} done={!!lineup} icon="dashboard"
+              title={t.event.lineup} hint={t.event.lineupHint}
+              viewLabel={t.event.lineupView} viewHint={t.event.lineupViewHint} cta={t.event.lineupCta} />
+          )}
+          {isMatch && (
+            <ActionCard href={`/events/${id}/analysis`} done={analyseBestaat} icon="scoreboard"
+              title={t.event.analysis} hint={t.event.analysisHint}
+              viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta}
+              accent="var(--warning)" />
+          )}
+          {isTraining && (
+            <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
+              title={t.event.trainingPlan} hint={t.event.trainingPlanHint}
+              viewLabel={t.event.trainingPlanView} viewHint={t.event.trainingPlanViewHint} cta={t.event.trainingPlanCta} />
+          )}
+          {/* Notes */}
+          {event.notes && (
+            <div className="surface-card p-4">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-faint mb-1">{t.event.notes}</div>
+              <div className="text-[14px] text-muted">{event.notes}</div>
+            </div>
+          )}
+        </div>
+        <div className="min-w-0">
+          {/* Attendance (stat cards + list) */}
+          <TrainingAttendance eventId={id} players={allPlayers} initialStatuses={initialStatuses} canEdit={canEdit(ctx, 'aanwezigheid')} />
+        </div>
       </div>
-
-      {/* Squad / lineup / training-plan action */}
-      {isMatch && (
-        <ActionCard href={`/events/${id}/squad`} done={(squadCheck?.length ?? 0) > 0} icon="groups"
-          title={t.event.squad} hint={t.event.squadHint}
-          viewLabel={t.event.squadView} viewHint={t.event.squadViewHint} cta={t.event.squadCta} />
-      )}
-      {isMatch && (
-        <ActionCard href={`/events/${id}/lineup`} done={!!lineup} icon="dashboard"
-          title={t.event.lineup} hint={t.event.lineupHint}
-          viewLabel={t.event.lineupView} viewHint={t.event.lineupViewHint} cta={t.event.lineupCta} />
-      )}
-      {isMatch && (
-        <ActionCard href={`/events/${id}/analysis`} done={analyseBestaat} icon="scoreboard"
-          title={t.event.analysis} hint={t.event.analysisHint}
-          viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta}
-          accent="var(--warning)" />
-      )}
-      {isTraining && (
-        <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
-          title={t.event.trainingPlan} hint={t.event.trainingPlanHint}
-          viewLabel={t.event.trainingPlanView} viewHint={t.event.trainingPlanViewHint} cta={t.event.trainingPlanCta} />
-      )}
-
-      {/* Attendance (stat cards + list) */}
-      <TrainingAttendance eventId={id} players={allPlayers} initialStatuses={initialStatuses} canEdit={canEdit(ctx, 'aanwezigheid')} />
-
-      {/* Notes */}
-      {event.notes && (
-        <div className="surface-card p-4">
-          <div className="text-[11px] font-extrabold uppercase tracking-wider text-faint mb-1">{t.event.notes}</div>
-          <div className="text-[14px] text-muted">{event.notes}</div>
-        </div>
-      )}
-
-      {canEdit(ctx, 'agenda') && (
-        <div className="grid grid-cols-2 gap-3">
-          <Link href={`/events/${id}/edit`}
-            className="w-full py-3 rounded-xl font-semibold text-sm text-center text-ink bg-surface border border-[var(--border-soft)] hover:bg-surface-sunken active:scale-[0.98] transition">
-            {t.event.editEvent}
-          </Link>
-          <DeleteButton label={t.event.deleteEvent} confirmMessage={`${t.event.deleteEvent}?`} action={handleDelete} />
-        </div>
-      )}
     </div>
   )
 }

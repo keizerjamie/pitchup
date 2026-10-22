@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
-import BackButton from '@/components/BackButton'
+import PageHeader from '@/components/ui/PageHeader'
+import ActionBar from '@/components/ui/ActionBar'
+import Button, { LinkButton } from '@/components/ui/Button'
 import { createPlayer } from '@/app/actions/players'
 import PositionSelector from '@/components/PositionSelector'
 import RatingSelector from '@/components/RatingSelector'
@@ -21,14 +23,7 @@ export default async function NewPlayerPage() {
 
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
-      <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/players" className="text-faint hover:text-ink">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </BackButton>
-        <h1 className="text-2xl font-bold text-ink">{t.players.newTitle}</h1>
-      </div>
+      <PageHeader backFallback="/players" title={t.players.newTitle} className="mb-6" />
 
       <form action={handleSubmit} className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
         <div>
@@ -61,9 +56,10 @@ export default async function NewPlayerPage() {
 
         <RatingSelector />
 
-        <button type="submit" className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-[0.98] transition">
-          {t.players.add}
-        </button>
+        <ActionBar
+          secondary={<LinkButton href="/players" variant="secondary">{t.common.cancel}</LinkButton>}
+          primary={<Button type="submit">{t.players.add}</Button>}
+        />
       </form>
     </div>
   )

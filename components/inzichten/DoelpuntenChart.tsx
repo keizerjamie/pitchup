@@ -44,18 +44,18 @@ export default function DoelpuntenChart({ items, t }: { items: DoelpuntItem[]; t
     >
       {items.length > 0 && (
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label={t.insights.filterLabel}>
+          <div className="inline-flex self-start max-w-full gap-1 p-1 rounded-full bg-surface-sunken border border-[var(--border-soft)]" role="group" aria-label={t.insights.filterLabel}>
             {FILTERS.map((f) => (
               <button
                 key={f}
                 type="button"
                 aria-pressed={filter === f}
                 onClick={() => setFilter(f)}
-                className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${filter === f ? 'text-white' : 'text-muted'}`}
+                className={`h-8 px-3 inline-flex items-center whitespace-nowrap text-xs font-bold rounded-full transition-colors ${filter === f ? 'text-white shadow-sm' : 'text-muted hover:text-ink'}`}
                 style={
                   filter === f
                     ? { background: 'var(--primary)' }
-                    : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
+                    : undefined
                 }
               >
                 {filterLabel(f)}

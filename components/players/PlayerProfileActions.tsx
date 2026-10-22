@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Dict } from '@/messages/nl'
 import type { Player } from '@/lib/types'
 import { markInjured, markRecovered } from '@/app/actions/players'
+import Button from '@/components/ui/Button'
 
 interface Props {
   player: Player
@@ -41,43 +41,28 @@ export default function PlayerProfileActions({ player, t, onSignOff, canEditSpel
     })
   }
 
-  const buttonBase =
-    'h-11 rounded-xl px-4 text-sm font-bold transition-transform duration-[160ms] ease-out active:scale-[0.97] disabled:opacity-55 disabled:pointer-events-none'
-
   if (!canEditSpelers && !canEditAanwezigheid) return null
 
+  // Designronde 3: alleen de twee statusacties, naast elkaar en even breed.
+  // "Speler bewerken" staat nu rechtsboven in de kop (PlayerProfileHeader).
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-2 gap-2.5">
         {canEditSpelers && (
-          <>
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={handleInjuryToggle}
-              className={`${buttonBase} text-white`}
-              style={{ background: player.injured ? 'var(--primary)' : 'var(--danger)' }}
-            >
-              {player.injured ? t.players.reportRecovered : t.players.reportInjury}
-            </button>
-            <Link
-              href={`/players/${player.id}/edit`}
-              className={`${buttonBase} bg-surface text-ink flex items-center justify-center`}
-              style={{ border: '1px solid var(--border-soft)' }}
-            >
-              {t.players.editLabel}
-            </Link>
-          </>
+          <Button
+            disabled={isPending}
+            onClick={handleInjuryToggle}
+            variant={player.injured ? 'primary' : 'danger'}
+            icon={player.injured ? 'check_circle' : 'healing'}
+            className={canEditAanwezigheid ? '' : 'col-span-2'}
+          >
+            {player.injured ? t.players.reportRecovered : t.players.reportInjury}
+          </Button>
         )}
         {canEditAanwezigheid && (
-          <button
-            type="button"
-            onClick={onSignOff}
-            className={`${buttonBase} bg-surface text-ink`}
-            style={{ border: '1px solid var(--border-soft)' }}
-          >
+          <Button variant="secondary" onClick={onSignOff} icon="event_busy" className={canEditSpelers ? '' : 'col-span-2'}>
             {t.players.signOff}
-          </button>
+          </Button>
         )}
       </div>
       {error && (

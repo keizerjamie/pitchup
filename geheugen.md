@@ -3733,3 +3733,157 @@ Feature-factory-keten; werkdocumenten 01–06 in `~/.claude/projects/-Users-jami
   M3b was al gedraaid). Vercel-deploy `f5943ba` geslaagd.
 - **Open:** rooktest in productie; daarna `blessure-status-opruimen.sql` (A-2, dropt `injury_set`;
   eerst de detectiequery, verwacht 0 rijen). Printpreview (thead-herhaling, Safari/iOS) niet geverifieerd.
+
+## Designronde 3 — fase 0: fundament (2026-10-22, nog niet gecommit)
+Restyle-traject (audit + fasering in de kluis: `Pitchup - Designronde 3 (restyle)`). Jamie koos:
+merkbare restyle, vaste plek primaire actie, opslaan/annuleren consistent, destructief apart; FAB
+alleen op hoofdschermen en contextueel, verwijderen in het ⋯-menu, instellingen opsplitsen.
+
+### Nieuwe bouwstenen (`components/ui/`)
+- **`Button` / `LinkButton` / `IconButton` + `buttonClasses()`**: varianten primary/secondary/ghost/
+  danger/warning, maten sm (h-9) / md (h-11) / lg (h-12), altijd `rounded-full`. Achtergrond via
+  ongelaagde `.btn-*`-klassen in globals.css (hover-gated), tekstkleur als utility. Hover = 
+  `color-mix(var(--primary) 86%, #000)` — **niet** `--primary-strong`, die is in dark mode licht.
+- **`PageHeader`**: terugknop (BackButton, één stijl, inline-SVG-pijl) · titel (`.page-title`) ·
+  ondertitel · rechts `badge`, `actions` (hoofdactie) en `menu` (⋯). Server-compatibel.
+- **`OverflowMenu`**: ⋯-trigger (inline SVG — `more_horiz`/`more_vert` zitten niet in de font),
+  items met `href` | `action` (server action, zoals DeleteButton) | `onSelect`, optioneel `confirm`
+  (window.confirm) en `danger` (scheidingslijn vóór het eerste destructieve item). Sluit op Escape
+  en klik buiten; popover op `--z-sheet`.
+- **`ActionBar`**: secundair links, primair rechts; mobiel sticky boven de onderbalk
+  (`max(safe-area,10px) + 62px + 10px`), vanaf md 16px van onder. **De FAB overlapt hem nog** —
+  in fase 1 de FAB verbergen op pagina's met een ActionBar.
+- **`components/icons/TrashIcon.tsx`**: `delete` zit niet in de gesubsette icoonfont (GSUB-check
+  2026-10-22; `edit`, `person_add`, `add`, `logout` wél, `content_copy` niet).
+- i18n: `common.moreActions`, `common.cancel` in alle 5 talen.
+
+### Globale visuele wijzigingen
+- `.surface-card`: radius 18 → `--radius-card` (22px), schaduw via `--shadow-card` (eigen waarde in
+  dark). Achtergrondblobs (`body::before/after`) teruggeschroefd van 0.22/0.18 naar 0.10/0.08.
+- Nieuwe klassen `.page-title`, `.eyebrow`, `.menu-popover`, `.menu-item`, `.action-bar(-inner)`.
+- De globale `:focus-visible` zet `border-radius: 4px`; voor `.btn-*` overschreven naar 9999px.
+
+### Gotcha (weer): stale Turbopack-CSS na `git stash`/`stash pop`
+Een `git stash` om te checken of tests al rood waren liet de draaiende dev-server de oude
+globals.css serveren; `touch` hielp niet, alleen `rm -rf .next` + herstart. Voor zo'n check liever
+`git worktree` of de server eerst stoppen.
+
+### Checks
+Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-correctie` AC1/AC12
+(falen ook zonder deze wijzigingen). 15 nieuwe tests in `components/ui/ui.test.tsx`.
+
+## Designronde 3 — fase 1: navigatie en dashboard (2026-10-22, nog niet gecommit)
+- **Contextuele FAB** (`components/GlobalFab.tsx`): krijgt `pathname` van AppShell; `fabModeFor()`
+  bepaalt de modus: `/` volledig menu · `/events` alleen de drie event-items · `/players` directe
+  link naar `/players/new` · `/oefeningen` knop die `NIEUWE_OEFENING_EVENT` (`lib/fab-events.ts`)
+  dispatcht, waarop `OefeningLibrary` `setEditing('new')` doet · overal elders **geen FAB** (ook niet
+  op formulieren/subpagina's — hij overlapte daar ActionBar en lijstknoppen). Default-prop `'/'`
+  houdt de rechten-tests in assistent-rechten/wedstrijden-bulk (die de FAB los renderen) op het
+  volledige menu. Rechten blijven gelden: zonder `spelers`/`agenda` verdwijnt de FAB op die pagina.
+- **Dubbele aanmaakknoppen op mobiel weg** via `max-md:hidden` (niet `hidden md:inline-flex`: de
+  knopklassen bevatten zelf `inline-flex` en dan beslist de CSS-volgorde): dashboard "Nieuw event",
+  kalender "+", spelers "Speler toevoegen", oefeningen "+ Nieuwe oefening". Kalender- en
+  spelersknop gebruiken nu `buttonClasses()`; kalendertitel wrapt daardoor niet meer op 375px.
+- **Dashboard**: kop via `PageHeader` (datum als eyebrow, begroeting als h1). Periodisering
+  verhuisd van direct onder de hero naar de rechterkolom onder Beschikbaarheid (mobiel: na de
+  kengetallen) en als platte lijst met scheidingslijnen i.p.v. kaart-in-kaart. Hero-knoppen en
+  -kaart pilvormig/22px. Statuschips in Beschikbaarheid via `first-letter:uppercase` (de
+  `home.present/absent`-labels blijven lowercase omdat de hero ze midden in een zin gebruikt).
+- **Mobiele kop**: glas (`color-mix(var(--surface) 82%)` + blur) i.p.v. dicht vlak.
+- Checks: typecheck/lint groen; rood alleen `cyclusweek-correctie` AC1/AC12 (bekend) en
+  `nulmeting-per-onderdeel` AC20 onder volle belasting (los 3× groen, rendert /periodisering —
+  niet aangeraakt). Nieuw: `components/GlobalFab.test.tsx` (8), 1 test in OefeningLibrary.test.tsx.
+
+## Designronde 3 — fase 2: kalender en events (2026-10-22, nog niet gecommit)
+- **Eventdetail** (`app/events/[id]/page.tsx`): `PageHeader` met "Bewerken" zichtbaar rechts
+  (`LinkButton` secondary, op <sm alleen icoon met `max-sm:sr-only`-label — accessible name blijft
+  `t.event.editEvent`) en "Event verwijderen" in het ⋯-menu (`OverflowMenuItem` met `action:
+  handleDelete`, `confirm`, `danger`, `TrashIcon`). De knoppenrij onderaan is weg; `DeleteButton`
+  wordt hier niet meer gebruikt. Meting-tak idem (alleen ⋯-menu). Desktop: twee kolommen
+  (actiekaarten + notities links, aanwezigheid rechts), container `lg:max-w-6xl`.
+- **AC1/AC20 in `activiteit-bewerken.acceptance.test.tsx` bewust aangepast** (besluit Jamie): de
+  eis "Bewerken direct naast Verwijderen" is vervangen door "Bewerken in de paginakop, verwijderen
+  in het ⋯-menu van die kop" (helper `openMeerActies()`).
+- **Formulieren** (`NewEventForm`, `EditEventForm`): `PageHeader` + `ActionBar` met Annuleren
+  (`LinkButton` naar /events resp. het event) links en de submit rechts. Nieuwe knopvariant
+  **`match`** (`.btn-match`, `--event-match`) zodat de submit wedstrijdblauw/trainingsgroen blijft.
+- **Subpagina's** selectie, opstelling, analyse, bulk: `PageHeader`. Trainingsplanner houdt zijn
+  eigen kop (die is ook de printkop, door print-tests vastgepind) maar gebruikt
+  `HeaderBackButton` (nieuw export uit `components/ui/PageHeader.tsx`).
+- **Trainingsplanner**: één "+ Oefening toevoegen" (in de sectiekop, `Button` sm secondary); de
+  gestippelde knop onder de lijst is weg. De kopknop bleef omdat afdrukken-trainingsplan B4 hem
+  in de kopregel vastpint.
+- **PrintButton**: pilvorm + `btn-secondary`; op <sm alleen icoon (label `max-sm:sr-only`) — de
+  titel "Trainingsplanner" liep er anders onderdoor.
+- **Kalender**: training = `var(--brand-accent)` (groen), wedstrijd = `var(--panel-blue-fg)` (blauw),
+  i.p.v. teal/groen die nauwelijks te onderscheiden waren; beide thema-tokens dus ook leesbaar als
+  tijdtekst in dark. Maandkop `flex-wrap` — op desktop schoof "Nieuw event" anders onder de
+  Aankomend-kolom. Navigatieknoppen pilvormig.
+- **TrainingAttendance**-statsraster `grid-cols-2 sm:grid-cols-4 xl:grid-cols-5`, opkomstkaart
+  `sm:col-span-4 xl:col-span-1` ("Geblesseerd" werd afgekapt in de smallere rechterkolom).
+- Checks: typecheck/lint groen; alleen de 2 bekende `cyclusweek-correctie`-tests rood.
+
+## Designronde 3 — fase 3: spelers (2026-10-22, nog niet gecommit)
+- **Lijst** (`PlayerList`): `PageHeader` (titel + telling, "Speler toevoegen" rechts vanaf md) →
+  weergaveschakelaar → zoekveld (volle breedte, pilvorm). De schakelaar komt binnen als nieuwe
+  optionele prop `schakelaar` (ReactNode) op `PlayerList` en `AanwezigheidsOverzicht` (en diens
+  `Kop`, alle 4 de staten); `app/players/page.tsx` geeft hem mee i.p.v. hem bóven de component te
+  zetten. Labels Geblesseerd/Gast staan nu op de tweede regel naast de positie (kapten de naam af).
+- **WeergaveSchakelaar** als segmentknop (track `rounded-full bg-surface-sunken p-1`, actieve pil
+  `--primary`); `h-11` en de inline backgrounds blijven, want WeergaveSchakelaar.test pint ze.
+- **Profiel**: terug links en "Speler bewerken" (alleen met spelersrecht, `aria-label` =
+  `t.players.editLabel`) rechts als ronde glasknoppen in de donkere kop (`PlayerProfileHeader`
+  krijgt `canEditSpelers`). Onder de kop alleen nog Blessure melden/Hersteld melden (danger/primary)
+  en Afmelden (secondary), `grid-cols-2`, via `Button`. Profieltabs pilvormig.
+- **Nieuw/bewerken speler**: `PageHeader` + `ActionBar` (Annuleren → /players resp. het profiel).
+  Bewerken: "Speler verwijderen" in het ⋯-menu (confirm `${naam}?`), terug-fallback nu het profiel.
+  **AC3 in `spelersprofiel.acceptance.test.tsx` bewust aangepast**: verwijderen zoeken via het ⋯-menu.
+- **Aanwezigheidstabel** mobiel: getalkolommen smaller (38/50/58px, vanaf sm 44/56/68), kop
+  10px/0.02em tracking, namen `hyphens-auto` — namen braken midden in het woord.
+- Checks: typecheck/lint groen; alleen de 2 bekende `cyclusweek-correctie`-tests rood.
+
+## Designronde 3 — fase 4: oefeningen, periodisering, inzichten (2026-10-22, nog niet gecommit)
+- **Oefeningenbibliotheek**: `PageHeader` met "Nieuwe oefening" (`Button` primary, `max-md:hidden`;
+  label zonder de "+ " uit `t.oefeningen.addNew`), daaronder zoekveld (`flex-1`, pilvorm) + Filters.
+  De kaart (`surface-card relative`) opent de editor via een **stretched button** op de naam
+  (`kaart-open`, `after:absolute after:inset-0`, `aria-label` = `t.oefeningen.editAria` — de
+  regressietest in oefening-inline-bewerken zoekt daarop). Bewerken + Verwijderen zitten in een
+  `OverflowMenu` rechtsboven (`relative z-[1]` boven de overlay); de AC21-logica (N=0 direct, N≥1
+  waarschuwing) is ongewijzigd naar `onSelect` verhuisd. Het waarschuwingspaneel moet ook
+  `relative z-[1]` hebben, anders vangt de overlay de klikken. 4 delete-tests in
+  OefeningLibrary.test via helper `kiesVerwijderen()`. De 190px-thumbnailzone bleef bewust (eerdere
+  rasterbeslissing).
+- **Periodisering**: `PageHeader`; "Plan deze training" via `buttonClasses()`; cycluskaart 22px,
+  weektitel 26px, trigger pilvormig, rij `flex-wrap` zodat "Week aanpassen" onder de titel valt
+  i.p.v. "week 6 van / de cyclus". DOM-vorm van de linkerkolom (titel/week/subregel samen) intact
+  gelaten vanwege nulmeting-per-onderdeel AC14-16.
+- **Inzichten**: `PageHeader` (drie staten; met `PrintButton` als actie). `PeriodeFilter` en het
+  filter in `DoelpuntenChart` als segmentknop (track + actieve pil), net als WeergaveSchakelaar.
+  SignalenBlok-titel `whitespace-nowrap` ("Wat valt op" brak).
+- **Gotcha**: een server-component-wijziging kwam na `navigate` niet door in de preview; pas
+  `location.reload()` toonde hem. Bij twijfel eerst de klasse in de DOM checken vóór je
+  concludeert dat CSS niet werkt.
+- Checks: typecheck/lint groen; rood alleen `cyclusweek-correctie` (2, bekend) en eenmaal de
+  flaky `nulmeting` AC20 onder volle belasting (los 3× groen).
+
+## Designronde 3 — fase 5: instellingen en inlogpagina's (2026-10-22, nog niet gecommit)
+- **Instellingen** (`app/settings/page.tsx`): vier groepen `<section id>` via lokale
+  `SettingsGroup` — `weergave` (label "App": "Weergave" botste met de kaarttitel en maakte
+  `queryByText(displaySection)` meervoudig), `team` (owner: logo → kleuren → aanwezigheid → staf →
+  teams; die eerste drie in deze volgorde pint clubkleuren-test), `planning` (schema bij owner/
+  agenda, periodisering-link bij owner/periodisering), `account` (Over + Uitloggen, dan
+  `DeleteAccountSection` als allerlaatste blok). Sticky ankernavigatie (`.settings-nav`, onder de
+  mobiele kop; `.settings-group` heeft scroll-margin). Nieuwe keys `settings.groupsNav/
+  groupDisplay/groupTeam/groupPlanning/groupAccount` (5 talen).
+- **Bewuste afwijking van "één opslaanknop per groep"**: de blokken slaan los van elkaar op
+  (logo direct bij upload, kleuren/aanwezigheid/schema via eigen formulier/action). Samenvoegen
+  raakt de opslaglogica; gekozen voor exact één opslaanknop per blok, ín de kaart (aanwezigheid
+  stond eronder). Uitloggen is niet destructief → secundaire knop naast "Over Pitchup".
+- **Inlogpagina's** (login, register, forgot/reset-password, invite + InviteRegisterForm): velden
+  `h-12 rounded-2xl`, knoppen `h-12 rounded-full`, meldingen `rounded-2xl`. Alleen klassen; geen
+  structuur of gedrag gewijzigd.
+- **Verifiëren zonder uit te loggen**: ingelogde gebruikers worden van /login e.d. doorgestuurd;
+  screenshots via Playwright in een verse context (geen cookies) tegen localhost.
+- **Stale-Turbopack-i18n (derde keer)**: nieuwe keys renderden leeg tot `rm -rf .next` + herstart.
+- Nieuwe tests: `Designronde 3 — Instellingen gegroepeerd` in assistent-rechten.acceptance.test.tsx.
+- Checks: typecheck/lint groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).

@@ -116,10 +116,15 @@ export default function AppShell({
 
       {/* ── Mobile header ── */}
       <div
-        className="anchor-mobile-header md:hidden fixed top-0 left-0 right-0 z-[var(--z-chrome)] bg-surface"
+        className="anchor-mobile-header md:hidden fixed top-0 left-0 right-0 z-[var(--z-chrome)]"
         style={{
           paddingTop: 'env(safe-area-inset-top)',
           borderBottom: '1px solid var(--border-soft)',
+          // Designronde 3: glas i.p.v. dicht vlak, net als de onderbalk —
+          // de inhoud scrollt er zichtbaar onderdoor.
+          background: 'color-mix(in srgb, var(--surface) 82%, transparent)',
+          backdropFilter: 'blur(18px) saturate(170%)',
+          WebkitBackdropFilter: 'blur(18px) saturate(170%)',
         }}
       >
         <div className="flex items-center px-4 h-14 gap-3">
@@ -167,7 +172,7 @@ export default function AppShell({
       />
 
       {showChrome && <Navigation />}
-      {showChrome && <GlobalFab />}
+      {showChrome && <GlobalFab pathname={pathname} />}
     </TeamContextClientProvider>
   )
 }

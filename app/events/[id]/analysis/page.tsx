@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import BackButton from '@/components/BackButton'
+import PageHeader from '@/components/ui/PageHeader'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, MatchRating, MatchEvent } from '@/lib/types'
@@ -44,19 +44,7 @@ export default async function AnalysisPage({ params }: Props) {
 
   return (
     <div className="max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      <div className="flex items-center gap-3">
-        <BackButton fallback={`/events/${id}`}>
-          <span className="w-10 h-10 rounded-xl bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
-            <span className="ms text-[22px]">arrow_back</span>
-          </span>
-        </BackButton>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-display text-[22px] lg:text-[26px] font-bold text-ink truncate">{t.analysis.title}</h1>
-          <p className="text-[13px] font-semibold text-faint">
-            {t.lineup.vsLabel} {event.opponent}
-          </p>
-        </div>
-      </div>
+      <PageHeader backFallback={`/events/${id}`} title={t.analysis.title} subtitle={`${t.lineup.vsLabel} ${event.opponent}`} />
 
       <MatchAnalysisEditor
         eventId={id}

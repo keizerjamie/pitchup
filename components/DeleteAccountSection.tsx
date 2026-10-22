@@ -29,7 +29,7 @@ export default function DeleteAccountSection() {
   }
 
   return (
-    <div className="rounded-2xl border border-panel-red-edge bg-panel-red/50 overflow-hidden">
+    <div className="rounded-[var(--radius-card)] border border-panel-red-edge bg-panel-red/50 overflow-hidden">
       <div className="px-5 py-4 border-b border-panel-red-edge">
         <h2 className="font-semibold text-panel-red-ink">{t.settings.dangerZone}</h2>
       </div>
@@ -41,7 +41,7 @@ export default function DeleteAccountSection() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="mt-4 px-4 py-2.5 rounded-xl text-sm font-semibold text-panel-red-ink border border-panel-red-edge hover:bg-panel-red active:scale-95 transition"
+            className="mt-4 h-11 px-5 rounded-full text-sm font-semibold text-panel-red-ink border border-panel-red-edge hover:bg-panel-red active:scale-95 transition"
           >
             {t.settings.deleteAccountButton}
           </button>
@@ -66,7 +66,7 @@ export default function DeleteAccountSection() {
               <button
                 type="button"
                 onClick={() => { setOpen(false); setConfirm(''); setError(null) }}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-muted border border-[var(--border-soft)] hover:text-ink active:scale-95 transition"
+                className="flex-1 h-11 rounded-full text-sm font-semibold text-muted border border-[var(--border-soft)] hover:text-ink active:scale-95 transition"
               >
                 {t.trainingPlan.cancel}
               </button>
@@ -74,7 +74,7 @@ export default function DeleteAccountSection() {
                 type="button"
                 onClick={handleDelete}
                 disabled={!armed || isPending}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white bg-danger hover:bg-danger/90 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 h-11 rounded-full text-sm font-semibold text-white bg-danger hover:bg-danger/90 active:scale-95 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isPending ? t.settings.deleting : t.settings.deleteConfirmFinal}
               </button>

@@ -40,7 +40,10 @@ export default function PeriodeFilter({
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5" role="group" aria-label={t.insights.periodeLabel}>
+    // Designronde 3: segmentknop in dezelfde vorm als de weergaveschakelaar op
+    // /players (track + actieve pil), i.p.v. losse chips die over twee regels
+    // braken op mobiel.
+    <div className="inline-flex self-start max-w-full gap-1 p-1 rounded-full bg-surface-sunken border border-[var(--border-soft)]" role="group" aria-label={t.insights.periodeLabel}>
       {PERIODES.map((p) => {
         const isActief = p === actief
         return (
@@ -48,11 +51,11 @@ export default function PeriodeFilter({
             key={p}
             href={hrefVoor(p)}
             aria-current={isActief ? 'page' : undefined}
-            className={`text-xs font-bold px-3 py-1.5 rounded-full transition-colors ${isActief ? 'text-white' : 'text-muted'}`}
+            className={`h-9 px-3.5 sm:px-4 inline-flex items-center whitespace-nowrap text-[13px] font-bold rounded-full transition-colors ${isActief ? 'text-white shadow-sm' : 'text-muted hover:text-ink'}`}
             style={
               isActief
                 ? { background: 'var(--primary)' }
-                : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
+                : undefined
             }
           >
             {label[p]}

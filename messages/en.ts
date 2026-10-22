@@ -688,6 +688,11 @@ export const en: Dict = {
     },
   },
   settings: {
+    groupsNav: 'Sections',
+    groupDisplay: 'App',
+    groupTeam: 'Team',
+    groupPlanning: 'Planning',
+    groupAccount: 'Account',
     logoSection: 'Club logo',
     logoHint: 'Replaces the Pitchup logo in the sidebar and on the matchday squad PDF. PNG, JPG or WebP, max 2MB.',
     logoUpload: 'Upload logo',
@@ -899,6 +904,8 @@ export const en: Dict = {
   common: {
     retry: 'Try again',
     close: 'Close',
+    moreActions: 'More actions',
+    cancel: 'Cancel',
   },
   errors: {
     noPermission: 'You do not have permission for this area',

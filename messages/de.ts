@@ -540,6 +540,11 @@ export const de: Dict = {
     kinds: { goal: 'Tor', assist: 'Vorlage', yellow: 'Gelbe Karte', red: 'Rote Karte' },
   },
   settings: {
+    groupsNav: 'Bereiche',
+    groupDisplay: 'App',
+    groupTeam: 'Team',
+    groupPlanning: 'Planung',
+    groupAccount: 'Konto',
     logoSection: 'Vereinslogo',
     logoHint: 'Ersetzt das Pitchup-Logo in der Seitenleiste und auf der Kader-PDF. PNG, JPG oder WebP, max. 2 MB.',
     logoUpload: 'Logo hochladen',
@@ -724,6 +729,8 @@ export const de: Dict = {
   common: {
     retry: 'Erneut versuchen',
     close: 'Schließen',
+    moreActions: 'Weitere Aktionen',
+    cancel: 'Abbrechen',
   },
   errors: {
     noPermission: 'Du hast keine Rechte für diesen Bereich',

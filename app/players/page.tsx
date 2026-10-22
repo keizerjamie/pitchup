@@ -56,8 +56,7 @@ export default async function PlayersPage({
   if (weergave === 'lijst') {
     return (
       <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-        <WeergaveSchakelaar actief="lijst" t={t} />
-        <PlayerList active={active} inactive={inactive} canEdit={canEdit(ctx, 'spelers')} />
+        <PlayerList active={active} inactive={inactive} canEdit={canEdit(ctx, 'spelers')} schakelaar={<WeergaveSchakelaar actief="lijst" t={t} />} />
       </div>
     )
   }
@@ -72,8 +71,7 @@ export default async function PlayersPage({
   if (!seizoen) {
     return (
       <div className={container}>
-        <WeergaveSchakelaar actief="aanwezigheid" t={t} />
-        <AanwezigheidsOverzicht staat={{ soort: 'geenSeizoen' }} t={t} />
+        <AanwezigheidsOverzicht staat={{ soort: 'geenSeizoen' }} t={t} schakelaar={<WeergaveSchakelaar actief="aanwezigheid" t={t} />} />
       </div>
     )
   }
@@ -94,8 +92,7 @@ export default async function PlayersPage({
     logError('players.aanwezigheidsoverzicht', error)
     return (
       <div className={container}>
-        <WeergaveSchakelaar actief="aanwezigheid" t={t} />
-        <AanwezigheidsOverzicht staat={{ soort: 'fout', periode }} t={t} />
+        <AanwezigheidsOverzicht staat={{ soort: 'fout', periode }} t={t} schakelaar={<WeergaveSchakelaar actief="aanwezigheid" t={t} />} />
       </div>
     )
   }
@@ -106,8 +103,7 @@ export default async function PlayersPage({
     const staat: OverzichtStaat = { soort: 'leeg', periode }
     return (
       <div className={container}>
-        <WeergaveSchakelaar actief="aanwezigheid" t={t} />
-        <AanwezigheidsOverzicht staat={staat} t={t} />
+        <AanwezigheidsOverzicht staat={staat} t={t} schakelaar={<WeergaveSchakelaar actief="aanwezigheid" t={t} />} />
       </div>
     )
   }
@@ -120,8 +116,7 @@ export default async function PlayersPage({
     <>
       {/* Dual-markup: het scherm drukt niet mee, het printblok eronder wel. */}
       <div className={container}>
-        <WeergaveSchakelaar actief="aanwezigheid" t={t} />
-        <AanwezigheidsOverzicht staat={{ soort: 'data', periode, rijen }} t={t} />
+        <AanwezigheidsOverzicht staat={{ soort: 'data', periode, rijen }} t={t} schakelaar={<WeergaveSchakelaar actief="aanwezigheid" t={t} />} />
       </div>
       <AanwezigheidsOverzichtPrint
         t={t}

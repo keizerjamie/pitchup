@@ -138,6 +138,10 @@
   /* Paars als KNOP-achtergrond onder witte tekst (6.98:1). Constant over beide
      thema's, net als --primary en --warning. */
   --panel-purple-solid: #7e22ce;
+
+  /* Designronde 3: kaartvorm. */
+  --radius-card: 22px;
+  --shadow-card: 0 1px 2px rgba(10, 46, 42, 0.04), 0 12px 32px -18px rgba(10, 46, 42, 0.22);
 }
 
 /* Z-index-ladder voor alles wat op paginaniveau zweeft. Vóór 2026-08-23 stonden
@@ -203,6 +207,8 @@
   --panel-blue-fg: #93b4fb;
   --panel-purple-bg: rgba(196, 165, 245, 0.10); --panel-purple-border: rgba(196, 165, 245, 0.28);
   --panel-purple-fg: #c4a5f5;
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 14px 32px -20px rgba(0, 0, 0, 0.6);
 }
 
 /* Grafiekkleuren voor recharts (components/inzichten/*) — als CSS-klassen in
@@ -304,11 +310,15 @@ body {
 }
 
 /* Standard content card surface (white, soft border, gentle shadow). */
+/* Designronde 3: grotere radius en een zachtere, diepere schaduw in plaats van
+   de harde onderrand — leest moderner en laat kaarten minder "op elkaar
+   gestapeld" ogen. In dark mode is de schaduw nagenoeg onzichtbaar; daar
+   draagt de lichtrand (--border-soft) de afbakening. */
 .surface-card {
   background: var(--surface);
   border: 1px solid var(--border-soft);
-  border-radius: 18px;
-  box-shadow: 0 1px 2px rgba(10, 46, 42, 0.04), 0 10px 30px -24px rgba(10, 46, 42, 0.35);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
 
 /* Klikbare kaart (StatCard met href, NextMatch): hover-tint. Moet hier
@@ -338,7 +348,7 @@ body::before {
   right: -120px;
   width: 640px;
   height: 640px;
-  background: radial-gradient(circle at center, rgba(20,184,166,0.22) 0%, transparent 65%);
+  background: radial-gradient(circle at center, rgba(20,184,166,0.10) 0%, transparent 65%);
   pointer-events: none;
   z-index: 0;
 }
@@ -349,7 +359,7 @@ body::after {
   left: -100px;
   width: 560px;
   height: 560px;
-  background: radial-gradient(circle at center, rgba(13,61,56,0.18) 0%, transparent 65%);
+  background: radial-gradient(circle at center, rgba(13,61,56,0.08) 0%, transparent 65%);
   pointer-events: none;
   z-index: 0;
 }
@@ -384,6 +394,117 @@ body::after {
   background: #ffffff;
   border: 1px solid rgba(255, 255, 255, 1);
   box-shadow: 0 2px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04);
+}
+
+/* ─────────────────────────────────────────────────
+   Designronde 3 — knoppen, paginakop, menu, actiebalk
+   (components/ui/Button.tsx, PageHeader.tsx, OverflowMenu.tsx, ActionBar.tsx)
+
+   Bewust ongelaagde klassen voor achtergrond/rand/schaduw: een Tailwind
+   hover:bg-* zou in @layer utilities de cascade verliezen (zelfde valkuil als
+   a.surface-card:hover). Hover is gegate op hover-capable devices.
+   Tekstkleur zit NIET hier maar als utility op de component, zodat
+   hover:text-ink gewoon werkt.
+───────────────────────────────────────────────── */
+.btn-primary {
+  background: var(--primary);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 6px 16px -8px color-mix(in srgb, var(--primary) 70%, transparent);
+}
+.btn-danger {
+  background: var(--danger);
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--danger) 70%, transparent);
+}
+.btn-match {
+  background: var(--event-match);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 6px 16px -8px color-mix(in srgb, var(--event-match) 70%, transparent);
+}
+.btn-warning {
+  background: var(--warning);
+  box-shadow: 0 6px 16px -8px color-mix(in srgb, var(--warning) 70%, transparent);
+}
+.btn-secondary {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border-soft) inset;
+}
+.btn-ghost { background: transparent; }
+
+@media (hover: hover) and (pointer: fine) {
+  /* Donkerder i.p.v. --primary-strong: die is in dark mode juist licht
+     (#7fd8cd) en zou de witte tekst onleesbaar maken. */
+  .btn-primary:hover { background: color-mix(in srgb, var(--primary) 86%, #000); }
+  .btn-danger:hover { background: color-mix(in srgb, var(--danger) 86%, #000); }
+  .btn-warning:hover { background: color-mix(in srgb, var(--warning) 86%, #000); }
+  .btn-match:hover { background: color-mix(in srgb, var(--event-match) 86%, #000); }
+  .btn-secondary:hover,
+  .btn-ghost:hover,
+  .menu-item:hover { background: var(--surface-sunken); }
+}
+
+/* De globale :focus-visible hieronder zet border-radius: 4px — dat zou een
+   ronde knop bij toetsenbordfocus vierkant maken. */
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible,
+.btn-danger:focus-visible,
+.btn-warning:focus-visible,
+.btn-match:focus-visible,
+.btn-ghost:focus-visible { border-radius: 9999px; }
+
+/* Paginatitel en eyebrow-label (conventie uit designsprint 2, nu als klasse). */
+.page-title {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 1.625rem;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+@media (min-width: 1024px) {
+  .page-title { font-size: 2rem; }
+}
+.eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+}
+
+.menu-popover {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* Mobiel: plak boven de onderbalk (62px track + max(safe-area, 10px)
+   padding uit components/Navigation.tsx) plus 10px lucht. */
+.action-bar {
+  bottom: calc(max(env(safe-area-inset-bottom), 10px) + 62px + 10px);
+}
+.action-bar-inner {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid var(--border-soft);
+  border-radius: 9999px;
+  box-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.35);
+}
+@media (min-width: 768px) {
+  .action-bar { bottom: 16px; }
+}
+
+/* Instellingen (app/settings/page.tsx): ankernavigatie plakt onder de
+   mobiele kop (h-14 + safe-area), en de groepskoppen houden zoveel afstand
+   dat ze bij een ankersprong niet ónder kop + navigatie verdwijnen. */
+.settings-nav {
+  top: calc(env(safe-area-inset-top) + 3.5rem);
+  background: linear-gradient(to bottom, var(--bg) 70%, transparent);
+}
+.settings-group { scroll-margin-top: calc(env(safe-area-inset-top) + 3.5rem + 64px); }
+@media (min-width: 768px) {
+  .settings-nav { top: 0; }
+  .settings-group { scroll-margin-top: 72px; }
 }
 
 /* Visible keyboard focus on every interactive element */

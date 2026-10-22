@@ -4,6 +4,8 @@ import type { Periode } from '@/lib/inzichten'
 import { formatPercentage, type OverzichtRij } from '@/lib/aanwezigheidsoverzicht'
 import PeriodeFilter from '@/components/inzichten/PeriodeFilter'
 import PrintButton from '@/components/PrintButton'
+import type { ReactNode } from 'react'
+import PageHeader from '@/components/ui/PageHeader'
 
 // Schermdeel van het aanwezigheidsoverzicht op /players
 // (?weergave=aanwezigheid). Server component: de page haalt de RPC op en geeft
@@ -23,30 +25,29 @@ export function overzichtHref(p: Periode): string {
   return p === 'seizoen' ? '/players?weergave=aanwezigheid' : `/players?weergave=aanwezigheid&periode=${p}`
 }
 
-function Kop({ t, printKnop }: { t: Dict; printKnop: boolean }) {
+// Designronde 3: titel eerst, de weergaveschakelaar (lijst/aanwezigheid)
+// eronder — hij stond eerder als grote knoppenrij bóven de titel.
+function Kop({ t, printKnop, schakelaar }: { t: Dict; printKnop: boolean; schakelaar?: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.players.title}</h1>
-        <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.players.overzichtSubtitle}</p>
-      </div>
-      {printKnop && <PrintButton />}
+    <div className="flex flex-col gap-4">
+      <PageHeader title={t.players.title} subtitle={t.players.overzichtSubtitle} actions={printKnop ? <PrintButton /> : undefined} />
+      {schakelaar}
     </div>
   )
 }
 
-export default function AanwezigheidsOverzicht({ staat, t }: { staat: OverzichtStaat; t: Dict }) {
+export default function AanwezigheidsOverzicht({ staat, t, schakelaar }: { staat: OverzichtStaat; t: Dict; schakelaar?: ReactNode }) {
   if (staat.soort === 'geenSeizoen') {
     return (
       <div className="flex flex-col gap-5">
-        <Kop t={t} printKnop={false} />
+        <Kop t={t} printKnop={false} schakelaar={schakelaar} />
         <div className="max-w-lg surface-card p-10 text-center flex flex-col items-center gap-3">
           <span className="ms text-[40px] text-faint" aria-hidden="true">calendar_month</span>
           <p className="text-ink font-bold">{t.insights.noSeason}</p>
           <p className="text-faint text-sm">{t.insights.noSeasonHint}</p>
           <Link
             href="/settings"
-            className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white active:scale-[0.97] transition-[transform] duration-[160ms] ease-out"
+            className="mt-1 h-11 rounded-full px-5 flex items-center gap-2 text-sm font-bold text-white active:scale-[0.97] transition-[transform] duration-[160ms] ease-out"
             style={{ background: 'var(--brand-btn)' }}
           >
             {t.insights.goToSettings}
@@ -61,7 +62,7 @@ export default function AanwezigheidsOverzicht({ staat, t }: { staat: OverzichtS
     // blijft bruikbaar zodat een andere periode meteen opnieuw kan proberen.
     return (
       <div className="flex flex-col gap-5">
-        <Kop t={t} printKnop={false} />
+        <Kop t={t} printKnop={false} schakelaar={schakelaar} />
         <PeriodeFilter actief={staat.periode} t={t} hrefVoor={overzichtHref} />
         <div
           role="alert"
@@ -77,7 +78,7 @@ export default function AanwezigheidsOverzicht({ staat, t }: { staat: OverzichtS
     const kleinerDanSeizoen = staat.periode !== 'seizoen'
     return (
       <div className="flex flex-col gap-5">
-        <Kop t={t} printKnop={false} />
+        <Kop t={t} printKnop={false} schakelaar={schakelaar} />
         {/* Bij een kortere periode kan er elders wél data zijn: de kiezer
             moet blijven staan, anders zit de gebruiker vast. */}
         {kleinerDanSeizoen && <PeriodeFilter actief={staat.periode} t={t} hrefVoor={overzichtHref} />}
@@ -93,14 +94,14 @@ export default function AanwezigheidsOverzicht({ staat, t }: { staat: OverzichtS
   const { rijen, periode } = staat
   return (
     <div className="flex flex-col gap-5">
-      <Kop t={t} printKnop />
+      <Kop t={t} printKnop schakelaar={schakelaar} />
       <PeriodeFilter actief={periode} t={t} hrefVoor={overzichtHref} />
 
       <div className="surface-card overflow-hidden">
         <table className="w-full table-fixed">
           <caption className="sr-only">{t.players.overzichtSubtitle}</caption>
           <thead>
-            <tr className="text-[11px] font-extrabold uppercase tracking-[0.06em] text-faint">
+            <tr className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-[0.02em] sm:tracking-[0.06em] text-faint">
               <th scope="col" className="text-left font-extrabold pl-3 pr-1 py-3">{t.players.overzichtKolomNaam}</th>
               <Kolomkop kort={t.players.overzichtKolomAanwezig} lang={t.players.overzichtKolomAanwezigLang} />
               <Kolomkop kort={t.players.overzichtKolomAfwezig} lang={t.players.overzichtKolomAfwezigLang} />
@@ -114,7 +115,7 @@ export default function AanwezigheidsOverzicht({ staat, t }: { staat: OverzichtS
               <tr key={r.playerId} style={{ borderTop: '1px solid var(--border-soft)' }}>
                 {/* Naam breekt af op woordgrens maar wordt NIET afgekapt: scherm
                     en papier tonen dezelfde, volledige naam. */}
-                <th scope="row" className="text-left pl-3 pr-1 py-2.5 text-[14px] font-bold text-ink break-words">{r.naam}</th>
+                <th scope="row" className="text-left pl-3 pr-1 py-2.5 text-[14px] font-bold text-ink break-words hyphens-auto">{r.naam}</th>
                 <td className="text-right tabular-nums text-[13px] text-muted py-2.5">{r.aanwezig}</td>
                 <td className="text-right tabular-nums text-[13px] text-muted py-2.5">{r.afwezig}</td>
                 <td className="text-right tabular-nums text-[13px] text-muted py-2.5">{r.geblesseerd}</td>
@@ -136,7 +137,7 @@ export default function AanwezigheidsOverzicht({ staat, t }: { staat: OverzichtS
 // sr-only voor schermlezers (title wordt niet overal voorgelezen).
 function Kolomkop({ kort, lang, breed = false, laatste = false }: { kort: string; lang: string; breed?: boolean; laatste?: boolean }) {
   return (
-    <th scope="col" className={`text-right font-extrabold py-3 ${breed ? (laatste ? 'w-[68px] pr-3' : 'w-[56px]') : 'w-[44px]'}`}>
+    <th scope="col" className={`text-right font-extrabold py-3 pl-1 ${breed ? (laatste ? 'w-[58px] sm:w-[68px] pr-3' : 'w-[50px] sm:w-[56px]') : 'w-[38px] sm:w-[44px]'}`}>
       <abbr title={lang} className="no-underline" aria-hidden="true">{kort}</abbr>
       <span className="sr-only">{lang}</span>
     </th>

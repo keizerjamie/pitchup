@@ -14,6 +14,8 @@ import ImageIcon from '@/components/icons/ImageIcon'
 import GroupIcon from '@/components/icons/GroupIcon'
 import StafSection from '@/components/settings/StafSection'
 import TeamsSection from '@/components/settings/TeamsSection'
+import PageHeader from '@/components/ui/PageHeader'
+import Button from '@/components/ui/Button'
 
 // `icon` accepteert ofwel de naam van een glyph uit het zelf-gehoste,
 // gesubsette Material Symbols-icoonfont (`.ms`, app/globals.css:117-140) —
@@ -88,97 +90,118 @@ export default async function SettingsPage() {
 
   const radioLabel = 'flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-colors border-[var(--border-soft)] has-[:checked]:border-brand-accent has-[:checked]:bg-surface-sunken'
 
+  // Designronde 3: vier groepen (Weergave, Team, Planning, Account) met een
+  // ankernavigatie bovenaan — de pagina was één lange kolom van ±3800px. Elk
+  // blok houdt zijn eigen, enige opslaanknop: de blokken slaan los van elkaar
+  // op (logo direct bij uploaden, kleuren/aanwezigheid/schema via hun eigen
+  // formulier), dus één knop per groep zou die opslaglogica samenvoegen.
+  // Volgorde binnen Team blijft logo → kleuren → aanwezigheid (clubkleuren-
+  // acceptatietest pint die). Gevarenzone staat als allerlaatste blok.
+  const toonTeam = isOwner
+  const toonPlanning = isOwner || magAgenda || magPeriodisering
+  const groepen = [
+    { id: 'weergave', label: t.settings.groupDisplay, zichtbaar: true },
+    { id: 'team', label: t.settings.groupTeam, zichtbaar: toonTeam },
+    { id: 'planning', label: t.settings.groupPlanning, zichtbaar: toonPlanning },
+    { id: 'account', label: t.settings.groupAccount, zichtbaar: true },
+  ].filter((g) => g.zichtbaar)
+
   return (
-    <div className="max-w-lg lg:max-w-5xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      <div>
-        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.settings.title}</h1>
-        <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.settings.subtitle}</p>
-      </div>
+    <div className="max-w-2xl lg:max-w-3xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
+      <PageHeader title={t.settings.title} subtitle={t.settings.subtitle} />
 
-      <div className="lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start flex flex-col gap-5">
-        <div className="flex flex-col gap-5">
+      <nav
+        aria-label={t.settings.groupsNav}
+        className="settings-nav sticky z-[var(--z-chrome)] -mx-4 px-4 md:mx-0 md:px-0 py-2"
+      >
+        <div className="inline-flex max-w-full overflow-x-auto gap-1 p-1 rounded-full bg-surface-sunken border border-[var(--border-soft)]">
+          {groepen.map((g) => (
+            <a key={g.id} href={`#${g.id}`} className="h-9 px-4 inline-flex items-center whitespace-nowrap text-[13px] font-bold rounded-full text-muted hover:text-ink hover:bg-surface transition-colors">
+              {g.label}
+            </a>
+          ))}
+        </div>
+      </nav>
 
-          {/* Display: theme + language */}
-          <SectionCard icon="palette" title={t.settings.displaySection}>
-            <div>
-              <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.themeLabel}</div>
-              <ThemeSelect />
-            </div>
-            <div>
-              <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.languageSection}</div>
-              <LanguageSwitcher />
-            </div>
+      <SettingsGroup id="weergave" label={t.settings.groupDisplay}>
+        <SectionCard icon="palette" title={t.settings.displaySection}>
+          <div>
+            <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.themeLabel}</div>
+            <ThemeSelect />
+          </div>
+          <div>
+            <div className="text-[11px] font-bold text-faint uppercase tracking-wide mb-2">{t.settings.languageSection}</div>
+            <LanguageSwitcher />
+          </div>
+        </SectionCard>
+      </SettingsGroup>
+
+      {toonTeam && (
+        <SettingsGroup id="team" label={t.settings.groupTeam}>
+          {/* Club logo — owner-only (brief §4.3) */}
+          <SectionCard icon={<ImageIcon className="w-5 h-5" />} title={t.settings.logoSection}>
+            <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
           </SectionCard>
 
-          {/* Club logo — owner-only (brief §4.3) */}
-          {isOwner && (
-            <SectionCard icon={<ImageIcon className="w-5 h-5" />} title={t.settings.logoSection}>
-              <TeamLogoSection initialLogoUrl={settings['team_logo_url'] ?? null} />
-            </SectionCard>
-          )}
-
           {/* Club colours — owner-only */}
-          {isOwner && (
-            <SectionCard icon="palette" title={t.settings.clubColorsSection}>
-              <ClubColorsSection
-                initialPrimary={settings['team_color_primary'] ?? null}
-                initialSecondary={settings['team_color_secondary'] ?? null}
-              />
-            </SectionCard>
-          )}
+          <SectionCard icon="palette" title={t.settings.clubColorsSection}>
+            <ClubColorsSection
+              initialPrimary={settings['team_color_primary'] ?? null}
+              initialSecondary={settings['team_color_secondary'] ?? null}
+            />
+          </SectionCard>
 
-          {/* Attendance default — owner-only */}
-          {isOwner && (
-            <form action={handleSave} className="flex flex-col gap-4">
-              <SectionCard icon="how_to_reg" title={t.settings.attendanceSection}>
-                <p className="text-[13.5px] font-medium text-muted -mt-1">{t.settings.attendanceQuestion}</p>
-                <div className="flex flex-col gap-3">
-                  <label className={radioLabel}>
-                    <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-[var(--primary)]" />
-                    <div>
-                      <div className="font-bold text-ink flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center"><span className="ms text-[15px]" aria-hidden="true">check</span></span>
-                        {t.settings.everyonePresent}
-                      </div>
-                      <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
+          {/* Attendance default — owner-only. Opslaan staat nu ín de kaart. */}
+          <form action={handleSave}>
+            <SectionCard icon="how_to_reg" title={t.settings.attendanceSection}>
+              <p className="text-[13.5px] font-medium text-muted -mt-1">{t.settings.attendanceQuestion}</p>
+              <div className="flex flex-col gap-3">
+                <label className={radioLabel}>
+                  <input type="radio" name="default_attendance" value="present" defaultChecked={defaultAttendance === 'present'} className="w-4 h-4 accent-[var(--primary)]" />
+                  <div>
+                    <div className="font-bold text-ink flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center"><span className="ms text-[15px]" aria-hidden="true">check</span></span>
+                      {t.settings.everyonePresent}
                     </div>
-                  </label>
-                  <label className={radioLabel}>
-                    <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-[var(--faint)]" />
-                    <div>
-                      <div className="font-bold text-ink flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold" style={{ background: 'var(--faint)' }}>?</span>
-                        {t.settings.everyoneUnknown}
-                      </div>
-                      <div className="text-[13px] text-faint mt-0.5">{t.settings.everyoneUnknownHint}</div>
+                    <div className="text-[13px] text-faint mt-0.5">{t.settings.everyonePresentHint}</div>
+                  </div>
+                </label>
+                <label className={radioLabel}>
+                  <input type="radio" name="default_attendance" value="unknown" defaultChecked={defaultAttendance === 'unknown'} className="w-4 h-4 accent-[var(--faint)]" />
+                  <div>
+                    <div className="font-bold text-ink flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full text-white flex items-center justify-center text-xs font-bold" style={{ background: 'var(--faint)' }}>?</span>
+                      {t.settings.everyoneUnknown}
                     </div>
-                  </label>
-                </div>
-              </SectionCard>
-              <button type="submit" className="w-full py-3 rounded-xl font-bold text-white active:scale-[0.98] transition" style={{ background: 'var(--primary)' }}>
-                {t.settings.save}
-              </button>
-            </form>
-          )}
-
-          {/* Periodization — mobile entry point, owner of Periodisering-recht */}
-          {(isOwner || magPeriodisering) && (
-            <Link href="/periodisering" className="block lg:hidden">
-              <div className="surface-card px-5 py-4 flex items-center gap-3 hover:bg-surface-sunken transition-colors">
-                <span className="ms text-[22px] text-primary-strong flex-shrink-0">monitoring</span>
-                <div className="flex-1">
-                  <h2 className="font-bold text-ink text-[15px]">{t.settings.periodizationSection}</h2>
-                  <p className="text-[13px] text-faint">{t.settings.periodizationHint}</p>
-                </div>
-                <span className="ms text-[20px] text-faint">chevron_right</span>
+                    <div className="text-[13px] text-faint mt-0.5">{t.settings.everyoneUnknownHint}</div>
+                  </div>
+                </label>
               </div>
-            </Link>
-          )}
+              <div className="flex justify-end">
+                <Button type="submit">{t.settings.save}</Button>
+              </div>
+            </SectionCard>
+          </form>
 
-        </div>
+          {/* Staf — owner-only (brief §4.3). listTeamMembers() gooit zelf
+              'Geen toegang' voor een assistent, dus deze sectie NOOIT
+              renderen buiten isOwner om. */}
+          <SectionCard icon={<GroupIcon className="w-5 h-5" />} title={t.staf.section}>
+            <p className="text-[13px] text-faint -mt-2">{t.staf.sectionHint}</p>
+            {stafSection}
+          </SectionCard>
 
-        <div className="flex flex-col gap-5">
+          {/* Teams — owner-only (brief §4.3, fase 3). Los van deleteAccount:
+              hier verwijdert de hoofdtrainer één team, niet zijn account. */}
+          <SectionCard icon="groups" title={t.teamsBeheer.section}>
+            <p className="text-[13px] text-faint -mt-2">{t.teamsBeheer.sectionHint}</p>
+            <TeamsSection teams={eigenTeams} />
+          </SectionCard>
+        </SettingsGroup>
+      )}
 
+      {toonPlanning && (
+        <SettingsGroup id="planning" label={t.settings.groupPlanning}>
           {/* Training schedule — owner OF assistent met Agenda-recht.
               Dit is de ENIGE uitzondering op "een assistent ziet alleen
               Weergave/Uitloggen/accountverwijdering" (beslissing 4). */}
@@ -195,44 +218,47 @@ export default async function SettingsPage() {
             </SectionCard>
           )}
 
-          {/* Staf — owner-only (brief §4.3). listTeamMembers() gooit zelf
-              'Geen toegang' voor een assistent, dus deze sectie NOOIT
-              renderen buiten isOwner om. */}
-          {isOwner && (
-            <SectionCard icon={<GroupIcon className="w-5 h-5" />} title={t.staf.section}>
-              <p className="text-[13px] text-faint -mt-2">{t.staf.sectionHint}</p>
-              {stafSection}
-            </SectionCard>
+          {/* Periodization — mobile entry point, owner of Periodisering-recht */}
+          {(isOwner || magPeriodisering) && (
+            <Link href="/periodisering" className="block lg:hidden">
+              <div className="surface-card px-5 py-4 flex items-center gap-3 hover:bg-surface-sunken transition-colors">
+                <span className="ms text-[22px] text-primary-strong flex-shrink-0">monitoring</span>
+                <div className="flex-1">
+                  <h3 className="font-bold text-ink text-[15px]">{t.settings.periodizationSection}</h3>
+                  <p className="text-[13px] text-faint">{t.settings.periodizationHint}</p>
+                </div>
+                <span className="ms text-[20px] text-faint">chevron_right</span>
+              </div>
+            </Link>
           )}
+        </SettingsGroup>
+      )}
 
-          {/* Teams — owner-only (brief §4.3, fase 3). Los van deleteAccount:
-              hier verwijdert de hoofdtrainer één team, niet zijn account. */}
-          {isOwner && (
-            <SectionCard icon="groups" title={t.teamsBeheer.section}>
-              <p className="text-[13px] text-faint -mt-2">{t.teamsBeheer.sectionHint}</p>
-              <TeamsSection teams={eigenTeams} />
-            </SectionCard>
-          )}
-
-          {/* About */}
-          <div className="surface-card px-5 py-4">
-            <h2 className="font-display text-[15px] font-bold text-ink mb-0.5">{t.settings.aboutSection}</h2>
+      <SettingsGroup id="account" label={t.settings.groupAccount}>
+        {/* About */}
+        <div className="surface-card px-5 py-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="font-display text-[15px] font-bold text-ink mb-0.5">{t.settings.aboutSection}</h3>
             <p className="text-[13px] text-faint">{t.settings.version}</p>
           </div>
-
-          {/* Danger zone */}
-          <form action={signOut}>
-            <button type="submit" className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm active:scale-[0.98] transition"
-              style={{ color: '#ef4444', border: '1px solid color-mix(in srgb, #ef4444 30%, transparent)', background: 'color-mix(in srgb, #ef4444 6%, transparent)' }}>
-              <span className="ms text-[19px]">logout</span>
-              {t.settings.logout}
-            </button>
+          {/* Uitloggen is niet destructief: secundaire knop, niet meer rood. */}
+          <form action={signOut} className="flex-shrink-0">
+            <Button type="submit" variant="secondary" icon="logout">{t.settings.logout}</Button>
           </form>
-
-          <DeleteAccountSection />
-
         </div>
-      </div>
+
+        {/* Danger zone — altijd het allerlaatste blok */}
+        <DeleteAccountSection />
+      </SettingsGroup>
     </div>
+  )
+}
+
+function SettingsGroup({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+  return (
+    <section id={id} aria-labelledby={`${id}-kop`} className="settings-group flex flex-col gap-4">
+      <h2 id={`${id}-kop`} className="eyebrow px-1 pt-2">{label}</h2>
+      {children}
+    </section>
   )
 }

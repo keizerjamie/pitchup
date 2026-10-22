@@ -542,7 +542,10 @@ describe('AC3 — /players/[id]/edit blijft zelfstandig werken', () => {
 
     expect(screen.getByDisplayValue('Jan de Tester')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: nl.players.save })).toBeInTheDocument()
-    expect(screen.getByText(nl.players.deletePlayer)).toBeInTheDocument()
+    // Designronde 3 (besluit Jamie, 2026-10-22): verwijderen zit in het ⋯-menu
+    // van de paginakop i.p.v. als losse knop onder het formulier.
+    fireEvent.click(screen.getByRole('button', { name: nl.common.moreActions }))
+    expect(screen.getByRole('menuitem', { name: nl.players.deletePlayer })).toBeInTheDocument()
   })
 })
 

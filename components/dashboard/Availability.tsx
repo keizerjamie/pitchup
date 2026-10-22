@@ -77,7 +77,10 @@ export default function Availability({ items, t }: { items: AvailabilityItem[]; 
                   style={{ background: s.bg, color: s.fg }}
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.dot }} />
-                  {statusLabel[p.status]}
+                  {/* De home-labels zijn lowercase omdat ze ook midden in een zin
+                      staan ("10 aanwezig"); in de chip altijd met hoofdletter,
+                      gelijk aan "Geblesseerd" (designronde 3). */}
+                  <span className="inline-block first-letter:uppercase">{statusLabel[p.status]}</span>
                 </span>
               </div>
             )

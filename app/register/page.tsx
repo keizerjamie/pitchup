@@ -22,7 +22,7 @@ export default function RegisterPage() {
 
         <form action={action} className="space-y-4">
           {state?.error && (
-            <div className="bg-red-500/20 border border-red-400/30 text-red-200 text-sm px-4 py-3 rounded-xl">
+            <div className="bg-red-500/20 border border-red-400/30 text-red-200 text-sm px-4 py-3 rounded-2xl">
               {state.error}
             </div>
           )}
@@ -30,26 +30,26 @@ export default function RegisterPage() {
           <div>
             <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.teamName}</label>
             <input name="team_name" type="text" required
-              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="w-full h-12 px-4 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.teamNamePlaceholder} />
           </div>
 
           <div>
             <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.email}</label>
             <input name="email" type="email" required autoComplete="email"
-              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="w-full h-12 px-4 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.emailPlaceholder} />
           </div>
 
           <div>
             <label className="block text-white/75 text-sm font-medium mb-1.5">{t.auth.password}</label>
             <input name="password" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH}
-              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+              className="w-full h-12 px-4 rounded-2xl bg-white/10 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder={t.auth.passwordMinLength} />
           </div>
 
           <button type="submit" disabled={pending}
-            className="w-full py-3 rounded-xl bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition disabled:opacity-60 mt-2">
+            className="w-full h-12 rounded-full bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition disabled:opacity-60 mt-2">
             {pending ? t.auth.creating : t.auth.createTeam}
           </button>
         </form>

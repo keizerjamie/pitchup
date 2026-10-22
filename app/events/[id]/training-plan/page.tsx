@@ -6,7 +6,7 @@ import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/
 import { actueleMetingen, ankerDatum, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
 import { addDays, formatDateLong, todayLocal } from '@/lib/utils'
 import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
-import BackButton from '@/components/BackButton'
+import { HeaderBackButton } from '@/components/ui/PageHeader'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import type { KopieerOptie } from '@/components/KopieerVorigeTraining'
 import AttendanceSummary from '@/components/AttendanceSummary'
@@ -205,9 +205,7 @@ export default async function TrainingPlanPage({ params }: Props) {
       </div>
 
       <div className="flex items-center gap-3 print:border-b-2 print:pb-[1mm] print-club-border">
-        <BackButton fallback={`/events/${id}`} className="print:hidden text-faint hover:text-ink flex-shrink-0">
-          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
-        </BackButton>
+        <HeaderBackButton fallback={`/events/${id}`} />
         <div className="min-w-0 flex-1 print:flex print:items-baseline print:gap-2">
           {/* .print-accent-text / .print-poster-meta bestaan alleen in het
               @media print-blok en raken de schermweergave dus niet. */}

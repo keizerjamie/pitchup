@@ -21,7 +21,9 @@ export default function WeergaveSchakelaar({ actief, t }: { actief: Weergave; t:
 
   return (
     <div
-      className="grid grid-cols-2 sm:inline-grid gap-1.5 print:hidden"
+      // Designronde 3: één segmentknop (track + actieve pil) i.p.v. twee losse
+      // grote knoppen; leest als weergavekeuze, niet als actie.
+      className="grid grid-cols-2 sm:inline-grid sm:self-start gap-1 p-1 rounded-full bg-surface-sunken border border-[var(--border-soft)] print:hidden"
       role="group"
       aria-label={t.players.weergaveLabel}
     >
@@ -32,11 +34,11 @@ export default function WeergaveSchakelaar({ actief, t }: { actief: Weergave; t:
             key={weergave}
             href={href}
             aria-current={isActief ? 'page' : undefined}
-            className={`h-11 px-5 rounded-xl flex items-center justify-center text-sm font-bold transition-[transform] duration-[160ms] ease-out active:scale-[0.97] ${isActief ? 'text-white' : 'text-muted'}`}
+            className={`h-11 px-6 rounded-full flex items-center justify-center text-sm font-bold transition-[transform] duration-[160ms] ease-out active:scale-[0.97] ${isActief ? 'text-white shadow-sm' : 'text-muted hover:text-ink'}`}
             style={
               isActief
                 ? { background: 'var(--primary)' }
-                : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
+                : { background: 'var(--surface-sunken)' }
             }
           >
             {label[weergave]}

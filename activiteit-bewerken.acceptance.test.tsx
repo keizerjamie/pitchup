@@ -450,24 +450,35 @@ function statusOf(name: string): 'present' | 'absent' | 'unknown' {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// AC1 — knop "Bewerken" naast "Verwijderen" op de detailpagina
+// AC1 — knop "Bewerken" op de detailpagina
+// Designronde 3 (2026-10-22, besluit Jamie): "Bewerken" staat zichtbaar in de
+// paginakop en "Event verwijderen" in het ⋯-menu van diezelfde kop — niet
+// meer als knoppenpaar onderaan. Dit vervangt het oorspronkelijke "direct
+// naast elkaar" uit AC1.
 // ════════════════════════════════════════════════════════════════════════
+function openMeerActies() {
+  fireEvent.click(screen.getByRole('button', { name: nl.common.moreActions }))
+  return screen.getByRole('menuitem', { name: nl.event.deleteEvent })
+}
+
 describe('AC1 — knop "Bewerken" op de detailpagina', () => {
-  it('AC1 — training: link "Bewerken" naar /events/e1/edit, direct naast "Event verwijderen"', async () => {
+  it('AC1 — training: link "Bewerken" naar /events/e1/edit in de paginakop; verwijderen zit in het ⋯-menu van die kop', async () => {
     asOwner()
     await renderDetail('e1')
     const link = screen.getByRole('link', { name: nl.event.editEvent })
     expect(link).toHaveAttribute('href', '/events/e1/edit')
-    const verwijder = screen.getByRole('button', { name: nl.event.deleteEvent })
-    expect(link.parentElement).toContainElement(verwijder)
+    const kop = link.closest('header') as HTMLElement
+    expect(kop).toContainElement(screen.getByRole('heading', { level: 1 }))
+    expect(screen.queryByRole('button', { name: nl.event.deleteEvent })).toBeNull()
+    expect(kop).toContainElement(openMeerActies())
   })
 
-  it('AC1 — wedstrijd: link "Bewerken" naar /events/m1/edit, naast "Event verwijderen"', async () => {
+  it('AC1 — wedstrijd: link "Bewerken" naar /events/m1/edit in de paginakop; verwijderen in het ⋯-menu', async () => {
     asOwner()
     await renderDetail('m1')
     const link = screen.getByRole('link', { name: nl.event.editEvent })
     expect(link).toHaveAttribute('href', '/events/m1/edit')
-    expect(link.parentElement).toContainElement(screen.getByRole('button', { name: nl.event.deleteEvent }))
+    expect(link.closest('header')).toContainElement(openMeerActies())
   })
 })
 
@@ -1124,7 +1135,7 @@ describe('AC20 — legacy-activiteit van type meting is niet bewerkbaar', () => 
     asOwner()
     await renderDetail('meting1')
     expect(screen.queryByRole('link', { name: nl.event.editEvent })).toBeNull()
-    expect(screen.getByRole('button', { name: nl.event.deleteEvent })).toBeInTheDocument()
+    expect(openMeerActies()).toBeInTheDocument()
   })
 
   it('AC20 — de bewerkpagina stuurt een meting door naar de detailpagina', async () => {

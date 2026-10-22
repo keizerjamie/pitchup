@@ -40,7 +40,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
             <p className="text-white/85 text-sm">{t.invite.invalid}</p>
             <Link
               href="/login"
-              className="inline-block py-3 rounded-xl bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition"
+              className="inline-flex items-center justify-center h-12 px-6 rounded-full bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition"
             >
               {t.auth.backToLogin}
             </Link>
@@ -54,13 +54,13 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
             <div className="flex flex-col gap-3">
               <Link
                 href={`/invite/${token}/register`}
-                className="w-full py-3 rounded-xl bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition"
+                className="w-full h-12 rounded-full bg-accent-strong text-white font-semibold hover:bg-accent-strong/90 active:scale-[0.98] transition"
               >
                 {t.invite.createAccount}
               </Link>
               <Link
                 href={`/login?next=/invite/${token}`}
-                className="w-full py-3 rounded-xl bg-white/10 border border-white/20 text-white font-semibold hover:bg-white/15 active:scale-[0.98] transition"
+                className="w-full h-12 rounded-full bg-white/10 border border-white/20 text-white font-semibold hover:bg-white/15 active:scale-[0.98] transition"
               >
                 {t.invite.haveAccount}
               </Link>

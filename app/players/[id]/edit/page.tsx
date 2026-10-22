@@ -2,8 +2,10 @@ import { notFound, redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { updatePlayer, deletePlayer } from '@/app/actions/players'
-import BackButton from '@/components/BackButton'
-import DeleteButton from '@/components/DeleteButton'
+import PageHeader from '@/components/ui/PageHeader'
+import ActionBar from '@/components/ui/ActionBar'
+import Button, { LinkButton } from '@/components/ui/Button'
+import TrashIcon from '@/components/icons/TrashIcon'
 import PositionSelector from '@/components/PositionSelector'
 import RatingSelector from '@/components/RatingSelector'
 import { getDict } from '@/lib/i18n'
@@ -38,14 +40,20 @@ export default async function EditPlayerPage({ params }: Props) {
 
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
-      <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/players" className="text-faint hover:text-ink">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-          </svg>
-        </BackButton>
-        <h1 className="text-2xl font-bold text-ink">{player.name}</h1>
-      </div>
+      {/* Designronde 3: verwijderen in het ⋯-menu van de kop (rood, met
+          bevestiging) i.p.v. een losse knop onder het formulier. */}
+      <PageHeader
+        backFallback={`/players/${id}`}
+        title={player.name}
+        className="mb-6"
+        menu={[{
+          label: t.players.deletePlayer,
+          icon: <TrashIcon />,
+          danger: true,
+          confirm: `${player.name}?`,
+          action: handleDelete,
+        }]}
+      />
 
       <form action={handleUpdate} className="bg-surface rounded-2xl p-6 border border-[var(--border-soft)] space-y-5">
         <div>
@@ -86,18 +94,12 @@ export default async function EditPlayerPage({ params }: Props) {
           <label htmlFor="active" className="text-sm font-semibold text-muted">{t.players.activeInSquad}</label>
         </div>
 
-        <button type="submit" className="w-full bg-brand text-white py-3 rounded-xl font-semibold hover:bg-brand-dark active:scale-[0.98] transition">
-          {t.players.save}
-        </button>
+        <ActionBar
+          secondary={<LinkButton href={`/players/${id}`} variant="secondary">{t.common.cancel}</LinkButton>}
+          primary={<Button type="submit">{t.players.save}</Button>}
+        />
       </form>
 
-      <div className="mt-4">
-        <DeleteButton
-          label={t.players.deletePlayer}
-          confirmMessage={`${player.name}?`}
-          action={handleDelete}
-        />
-      </div>
     </div>
   )
 }

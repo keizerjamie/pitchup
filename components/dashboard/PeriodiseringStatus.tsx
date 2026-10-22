@@ -8,8 +8,8 @@ import type { OnderdeelStatus } from '@/lib/periodization'
 // geen "alles-of-niets"-staat meer — vanaf de eerste keer dat het dashboard
 // wordt geopend, staat hier per onderdeel "gemeten" of "nog te meten, week X".
 //
-// Kaartconventie van components/dashboard/TodoList.tsx:63-70 (surface-card
-// p-5 flex flex-col gap-3.5, eyebrow-kop, per-item rij met bg-surface-sunken).
+// Kaartconventie van TodoList (surface-card p-5 flex flex-col gap-3.5,
+// eyebrow-kop); rijen sinds designronde 3 als platte lijst met scheidingslijnen.
 //
 // Twee harde regels (brief §4.0): status nooit op kleur alleen (altijd woord
 // + icoon in de chip), en een gemeten rij is bewust GEEN link (niets te doen);
@@ -24,8 +24,10 @@ export default function PeriodiseringStatus({
   items: OnderdeelStatus[]
   steigerungsWeken: [number, number]
 }) {
-  const rowClass = 'flex items-center gap-3 p-3 rounded-[15px] bg-surface-sunken'
-  const rowStyle = { border: '1px solid var(--border-soft)' } as const
+  // Designronde 3: platte lijst met scheidingslijnen in plaats van een kaartje
+  // per rij — kaart-in-kaart oogde zwaar en rommelig.
+  const rowClass = 'flex items-center gap-3 py-3 px-1 -mx-1 rounded-xl'
+  const rowStyle = undefined
 
   return (
     <div className="surface-card p-5 flex flex-col gap-3.5">
@@ -38,7 +40,7 @@ export default function PeriodiseringStatus({
         </Link>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col divide-y divide-[var(--border-soft)]">
         {items.map((item) => {
           const label = t.periodization.categories[item.key] ?? item.key
 
@@ -64,7 +66,7 @@ export default function PeriodiseringStatus({
             <Link
               key={item.key}
               href="/periodisering"
-              className={`${rowClass} transition-colors hover:bg-surface active:scale-[0.98]`}
+              className={`${rowClass} transition-colors hover:bg-surface-sunken active:scale-[0.98]`}
               style={rowStyle}
             >
               <span className="text-[14px] font-bold text-ink flex-1 min-w-0 truncate">{label}</span>

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useDict } from '@/lib/i18n-context'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
 import { canEditClient, useTeamContextClient } from '@/lib/team-context-client'
+import { NIEUWE_OEFENING_EVENT } from '@/lib/fab-events'
 
 // Exit is snappier than the springy entrance — asymmetric timing.
 const CLOSE_MS = 200
@@ -42,7 +43,37 @@ const ChevronRight = () => (
 
 const emptySubscribe = () => () => {}
 
-export default function GlobalFab() {
+// Designronde 3: de FAB is contextueel en staat alleen op de hoofdschermen.
+// - '/'           → het volledige aanmaakmenu
+// - '/events'     → menu met alleen de event-items
+// - '/players'    → direct naar "Speler toevoegen" (geen menu)
+// - '/oefeningen' → opent direct de editor voor een nieuwe oefening
+// - elders        → geen FAB: op formulieren en subpagina's zat hij over de
+//                   opslaanknop (ActionBar) en over lijstknoppen heen.
+// `pathname` komt van AppShell; de default '/' houdt de bestaande
+// rechten-tests (die de FAB los renderen) op het volledige menu.
+type FabMode = 'menu' | 'events' | 'players' | 'oefeningen' | 'none'
+
+export function fabModeFor(pathname: string): FabMode {
+  if (pathname === '/') return 'menu'
+  if (pathname === '/events') return 'events'
+  if (pathname === '/players') return 'players'
+  if (pathname === '/oefeningen') return 'oefeningen'
+  return 'none'
+}
+
+const fabStyle = {
+  right: 16,
+  bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)',
+  zIndex: 'var(--z-fab)',
+  background: 'linear-gradient(160deg, #14655c 0%, #0d3d38 100%)',
+  boxShadow: '0 4px 16px rgba(13,61,56,0.35), 0 1px 0 rgba(255,255,255,0.18) inset',
+  color: 'white',
+  transition: 'box-shadow 0.2s ease',
+} as const
+const fabClass = 'md:hidden fixed w-14 h-14 rounded-full flex items-center justify-center active:scale-90'
+
+export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
   const t = useDict()
   const teamCtx = useTeamContextClient()
   const [open, setOpen] = useState(false)
@@ -107,7 +138,37 @@ export default function GlobalFab() {
       onderdeel: 'spelers' as const,
     },
   ]
-  const items = alleItems.filter((item) => canEditClient(teamCtx, item.onderdeel))
+  const mode = fabModeFor(pathname)
+  const items = alleItems
+    .filter((item) => canEditClient(teamCtx, item.onderdeel))
+    .filter((item) => mode !== 'events' || item.onderdeel === 'agenda')
+
+  if (mode === 'none') return null
+
+  // Eén directe actie: geen menu, de knop zelf doet het.
+  if (mode === 'players') {
+    if (!canEditClient(teamCtx, 'spelers')) return null
+    return (
+      <Link href="/players/new" transitionTypes={['nav-forward']} aria-label={t.players.add} className={fabClass} style={fabStyle}>
+        <PlusIcon />
+      </Link>
+    )
+  }
+  if (mode === 'oefeningen') {
+    // Oefeningen zijn persoonlijk bezit (geen teamrecht nodig), net als de
+    // "+ Nieuwe oefening"-knop in OefeningLibrary.
+    return (
+      <button
+        type="button"
+        aria-label={t.oefeningen.addNew.replace(/^\+\s*/, '')}
+        onClick={() => window.dispatchEvent(new Event(NIEUWE_OEFENING_EVENT))}
+        className={fabClass}
+        style={fabStyle}
+      >
+        <PlusIcon />
+      </button>
+    )
+  }
 
   // Blijft er niets over, dan render de FAB helemaal niet — geen knop die een
   // leeg menu opent (brief §4.5). Ná alle hooks hierboven, zodat de
@@ -221,16 +282,8 @@ export default function GlobalFab() {
         onClick={open ? closeMenu : openMenu}
         aria-label={t.fab.title}
         aria-expanded={open}
-        className="md:hidden fixed w-14 h-14 rounded-full flex items-center justify-center active:scale-90"
-        style={{
-          right: 16,
-          bottom: 'calc(env(safe-area-inset-bottom, 0px) + 88px)',
-          zIndex: 'var(--z-fab)',
-          background: 'linear-gradient(160deg, #14655c 0%, #0d3d38 100%)',
-          boxShadow: '0 4px 16px rgba(13,61,56,0.35), 0 1px 0 rgba(255,255,255,0.18) inset',
-          color: 'white',
-          transition: 'box-shadow 0.2s ease',
-        }}
+        className={fabClass}
+        style={fabStyle}
       >
         <span style={{
           display: 'block', lineHeight: 0,

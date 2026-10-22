@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { Oefening, OefeningCategorie, Veldzone, OEFENING_CATEGORIES, VALID_VELDZONES, PERIODIZATION_CATEGORIES } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
 import { matchesOefeningFilters, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
@@ -10,6 +10,11 @@ import { createOefening, updateOefening, deleteOefening } from '@/app/actions/oe
 import FormationField from '@/components/FormationField'
 import DiagramView from '@/components/DiagramView'
 import OefeningEditor from '@/components/OefeningEditor'
+import { NIEUWE_OEFENING_EVENT } from '@/lib/fab-events'
+import PageHeader from '@/components/ui/PageHeader'
+import Button from '@/components/ui/Button'
+import OverflowMenu from '@/components/ui/OverflowMenu'
+import TrashIcon from '@/components/icons/TrashIcon'
 import { useDict } from '@/lib/i18n-context'
 
 // Bibliotheek-oefening + het aantal trainingen waar hij aan gekoppeld is
@@ -46,6 +51,14 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
   // zitten: de klok kan daar niet doortellen. Dit maakt ze in één klik
   // vindbaar en aanpasbaar.
   const [alleenZonderDuur, setAlleenZonderDuur] = useState(false)
+
+  // De contextuele FAB op mobiel (components/GlobalFab.tsx) opent dezelfde
+  // editor als de "+ Nieuwe oefening"-knop, die daar verborgen is.
+  useEffect(() => {
+    const open = () => setEditing('new')
+    window.addEventListener(NIEUWE_OEFENING_EVENT, open)
+    return () => window.removeEventListener(NIEUWE_OEFENING_EVENT, open)
+  }, [])
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
@@ -96,37 +109,41 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.oefeningen.libraryTitle}</h1>
-        <div className="flex items-center gap-2">
+      {/* Designronde 3: vaste kop (hoofdactie rechts, vanaf md — op mobiel
+          neemt de contextuele FAB hem over), daaronder zoeken + filters op
+          volle breedte; het zoekveld was op mobiel afgekapt ("Zoek oefeni"). */}
+      <PageHeader
+        title={t.oefeningen.libraryTitle}
+        actions={
+          <Button icon="add" onClick={() => setEditing('new')} className="max-md:hidden">
+            {t.oefeningen.addNew.replace(/^\+\s*/, '')}
+          </Button>
+        }
+      />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 min-w-0 sm:max-w-sm">
+          <span className="ms text-[19px] text-faint absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true">search</span>
           <input
             value={filters.query}
             onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
             placeholder={t.oefeningen.searchPlaceholder}
-            className="px-3 py-2 rounded-xl border border-[var(--border-soft)] bg-surface focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink placeholder:text-faint w-[150px] sm:w-[220px] min-w-0"
+            className="h-11 w-full pl-10 pr-4 rounded-full border border-[var(--border-soft)] bg-surface focus:outline-none focus:ring-2 focus:ring-brand-accent/40 text-sm text-ink placeholder:text-faint"
           />
-          <button
-            type="button"
-            onClick={() => setFiltersOpen((open) => !open)}
-            aria-expanded={filtersOpen}
-            className={`text-sm font-semibold rounded-xl px-3.5 py-2 transition-colors flex-shrink-0 ${filtersOpen || actieveFilters > 0 ? 'text-white' : 'text-muted'}`}
-            style={
-              filtersOpen || actieveFilters > 0
-                ? { background: 'var(--brand-btn)' }
-                : { background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }
-            }
-          >
-            {t.oefeningen.filtersToggle}
-            {actieveFilters > 0 && ` · ${actieveFilters}`}
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditing('new')}
-            className="text-sm font-semibold text-white bg-warning hover:bg-warning/90 rounded-xl px-4 py-2 transition-colors active:scale-95 flex-shrink-0"
-          >
-            {t.oefeningen.addNew}
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          className={`h-11 text-sm font-semibold rounded-full px-4 transition-colors flex-shrink-0 ${filtersOpen || actieveFilters > 0 ? 'text-white' : 'text-muted'}`}
+          style={
+            filtersOpen || actieveFilters > 0
+              ? { background: 'var(--brand-btn)' }
+              : { background: 'var(--surface)', border: '1px solid var(--border-soft)' }
+          }
+        >
+          {t.oefeningen.filtersToggle}
+          {actieveFilters > 0 && ` · ${actieveFilters}`}
+        </button>
       </div>
 
       {/* Uitgebreide filters — zelfde velden en semantiek als de
@@ -289,10 +306,21 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {filtered.map((o) => (
-            <div key={o.id} className="bg-surface rounded-2xl border border-[var(--border-soft)] p-4 lg:p-5 min-w-0 overflow-hidden">
+            // Designronde 3: de hele kaart opent de editor (stretched button
+            // op de naam); verwijderen zit in het ⋯-menu rechtsboven i.p.v. een
+            // prullenbak direct naast het potlood.
+            <div key={o.id} className="surface-card relative p-4 lg:p-5 min-w-0 overflow-hidden transition-colors has-[.kaart-open:hover]:bg-surface-sunken">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-ink truncate">{o.naam}</div>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(o)}
+                    aria-label={t.oefeningen.editAria}
+                    title={o.naam}
+                    className="kaart-open block w-full text-left font-semibold text-ink truncate after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-brand-accent focus-visible:after:rounded-[inherit]"
+                  >
+                    {o.naam}
+                  </button>
                   <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${catColor(o.categorie)}`}>
                       {catLabel(o.categorie)}
@@ -326,37 +354,27 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
                     <p className="text-sm text-muted mt-1.5 line-clamp-2">{o.beschrijving}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setEditing(o)}
-                    aria-label={t.oefeningen.editAria}
-                    className="w-8 h-8 rounded-lg hover:bg-surface-sunken flex items-center justify-center text-faint hover:text-muted transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeleteError(null)
-                      // AC21: N=0 → direct verwijderen zonder bevestigingsdialoog;
-                      // N>=1 → eerst de waarschuwing met het exacte aantal tonen.
-                      if (o.koppelingCount === 0) {
-                        handleDelete(o.id)
-                      } else {
-                        setDeleteConfirm(o.id)
-                      }
-                    }}
-                    aria-label={t.oefeningen.deleteAria}
-                    disabled={isPending}
-                    className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors disabled:opacity-50"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
+                <div className="relative z-[1] -mt-1 -mr-1 flex-shrink-0">
+                  <OverflowMenu
+                    items={[
+                      { label: t.oefeningen.editAria, icon: 'edit', onSelect: () => setEditing(o) },
+                      {
+                        label: t.oefeningen.deleteAria,
+                        icon: <TrashIcon />,
+                        danger: true,
+                        onSelect: () => {
+                          setDeleteError(null)
+                          // AC21: N=0 → direct verwijderen zonder bevestigingsdialoog;
+                          // N>=1 → eerst de waarschuwing met het exacte aantal tonen.
+                          if (o.koppelingCount === 0) {
+                            handleDelete(o.id)
+                          } else {
+                            setDeleteConfirm(o.id)
+                          }
+                        },
+                      },
+                    ]}
+                  />
                 </div>
               </div>
 
@@ -387,7 +405,7 @@ export default function OefeningLibrary({ oefeningen: initialOefeningen }: Props
               {/* AC21: deleteConfirm wordt alleen gezet bij koppelingCount >= 1
                   (zie de delete-knop hierboven) — N=0 verwijdert direct. */}
               {deleteConfirm === o.id && (
-                <div className="mt-3 rounded-xl border border-panel-red-edge bg-panel-red p-3 space-y-2">
+                <div className="relative z-[1] mt-3 rounded-xl border border-panel-red-edge bg-panel-red p-3 space-y-2">
                   <p className="text-sm text-panel-red-ink">
                     {t.oefeningen.deleteConfirmUsage.replace('{n}', String(o.koppelingCount))}
                   </p>

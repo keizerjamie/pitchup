@@ -10,7 +10,9 @@
 
 import { useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
-import BackButton from '@/components/BackButton'
+import PageHeader from '@/components/ui/PageHeader'
+import ActionBar from '@/components/ui/ActionBar'
+import Button, { LinkButton } from '@/components/ui/Button'
 import EventFormFields from '@/components/EventFormFields'
 import { createEvent } from '@/app/actions/events'
 import { todayLocal } from '@/lib/utils'
@@ -49,12 +51,7 @@ function NewEventFields() {
 
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
-      <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/events" className="text-faint hover:text-ink">
-          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
-        </BackButton>
-        <h1 className="text-2xl font-bold text-ink">{t.event.newTitle}</h1>
-      </div>
+      <PageHeader backFallback="/events" title={t.event.newTitle} className="mb-6" />
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
@@ -109,12 +106,14 @@ function NewEventFields() {
           />
         </div>
 
-        <button type="submit" disabled={isLoading}
-          className={`w-full py-3 rounded-xl font-semibold text-white transition active:scale-95 ${
-            type === 'match' ? 'bg-event-match hover:bg-event-match/90' : 'bg-event-training hover:bg-event-training/90'
-          } ${isLoading ? 'opacity-60' : ''}`}>
-          {submitLabel}
-        </button>
+        <ActionBar
+          secondary={<LinkButton href="/events" variant="secondary">{t.common.cancel}</LinkButton>}
+          primary={
+            <Button type="submit" loading={isLoading} variant={type === 'match' ? 'match' : 'primary'}>
+              {submitLabel}
+            </Button>
+          }
+        />
       </form>
     </div>
   )

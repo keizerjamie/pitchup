@@ -1,18 +1,22 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
 import { Player, POSITION_GROUPS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 import { avatarBg, initialsOf } from '@/lib/avatar'
+import { LinkButton } from '@/components/ui/Button'
+import PageHeader from '@/components/ui/PageHeader'
 
 interface Props {
   active: Player[]
   inactive: Player[]
   canEdit: boolean
+  /** Weergaveschakelaar (lijst/aanwezigheid), onder de kop getoond. */
+  schakelaar?: ReactNode
 }
 
-export default function PlayerList({ active, inactive, canEdit }: Props) {
+export default function PlayerList({ active, inactive, canEdit, schakelaar }: Props) {
   const t = useDict()
   const [query, setQuery] = useState('')
 
@@ -42,8 +46,13 @@ export default function PlayerList({ active, inactive, canEdit }: Props) {
           {initialsOf(player.name)}
         </div>
         <div className="flex-1 min-w-0 flex flex-col leading-tight">
-          <span className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+          {/* Designronde 3: labels onder de naam, naast de positie — naast de
+              naam kapten ze op mobiel de naam af ("Dani…"). */}
+          <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+          <span className="flex items-center gap-1.5 min-w-0 mt-0.5">
+            <span className="text-[12px] font-semibold text-faint truncate">
+              {t.players.positions[player.position] ?? player.position}
+            </span>
             {player.injured && (
               <span
                 className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-full flex items-center gap-1 flex-shrink-0"
@@ -65,9 +74,6 @@ export default function PlayerList({ active, inactive, canEdit }: Props) {
               </span>
             )}
           </span>
-          <span className="text-[12px] font-semibold text-faint">
-            {t.players.positions[player.position] ?? player.position}
-          </span>
         </div>
         {player.rating != null && (
           <span className="text-[11.5px] font-extrabold text-brand-accent px-2 py-0.5 rounded-full flex-shrink-0"
@@ -87,38 +93,28 @@ export default function PlayerList({ active, inactive, canEdit }: Props) {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Header */}
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div className="flex flex-col leading-tight">
-          <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.players.title}</h1>
-          <p className="text-[13.5px] font-semibold text-faint mt-0.5">
-            {active.length} {t.players.activeCount}
-            {inactive.length > 0 && ` · ${inactive.length} ${t.players.inactiveCount}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2.5">
-          <div className="relative">
-            <span className="ms text-[19px] text-faint absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t.players.searchPlaceholder}
-              className="h-[42px] w-[180px] sm:w-[220px] rounded-xl bg-surface text-ink text-[13.5px] font-semibold pl-10 pr-3 placeholder:text-faint placeholder:font-semibold focus:outline-none focus:ring-2 focus:ring-brand-accent/40"
-              style={{ border: '1px solid var(--border-soft)' }}
-            />
-          </div>
-          {canEdit && (
-            <Link
-              href="/players/new"
-              aria-label={t.players.add}
-              className="h-[42px] rounded-xl px-4 flex items-center gap-2 text-[13.5px] font-bold text-white flex-shrink-0"
-              style={{ background: 'var(--primary)' }}
-            >
-              <span className="ms text-[19px]" aria-hidden="true">person_add</span>
-              <span className="hidden sm:inline">{t.players.add}</span>
-            </Link>
-          )}
-        </div>
+      {/* Header — titel, dan de weergaveschakelaar, dan zoeken + toevoegen
+          (designronde 3: de schakelaar stond eerder bóven de titel). */}
+      <PageHeader
+        title={t.players.title}
+        subtitle={<>{active.length} {t.players.activeCount}{inactive.length > 0 && ` · ${inactive.length} ${t.players.inactiveCount}`}</>}
+        actions={canEdit ? (
+          // Mobiel neemt de contextuele FAB deze actie over (designronde 3).
+          <LinkButton href="/players/new" icon="person_add" aria-label={t.players.add} className="max-md:hidden">
+            {t.players.add}
+          </LinkButton>
+        ) : undefined}
+      />
+      {schakelaar}
+      <div className="relative w-full sm:max-w-xs">
+        <span className="ms text-[19px] text-faint absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none">search</span>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t.players.searchPlaceholder}
+          className="h-11 w-full rounded-full bg-surface text-ink text-[13.5px] font-semibold pl-10 pr-4 placeholder:text-faint placeholder:font-semibold focus:outline-none focus:ring-2 focus:ring-brand-accent/40"
+          style={{ border: '1px solid var(--border-soft)' }}
+        />
       </div>
 
       {!hasAny ? (
@@ -127,9 +123,7 @@ export default function PlayerList({ active, inactive, canEdit }: Props) {
           <p className="text-ink font-bold">{t.players.noPlayers}</p>
           <p className="text-faint text-sm">{t.players.noPlayersHint}</p>
           {canEdit && (
-            <Link href="/players/new" className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white" style={{ background: 'var(--primary)' }}>
-              <span className="ms text-[19px]">person_add</span>{t.players.add}
-            </Link>
+            <LinkButton href="/players/new" icon="person_add" className="mt-1">{t.players.add}</LinkButton>
           )}
         </div>
       ) : (

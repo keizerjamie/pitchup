@@ -15,7 +15,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import BackButton from '@/components/BackButton'
+import PageHeader from '@/components/ui/PageHeader'
 import BulkMatchInput from '@/components/BulkMatchInput'
 import BulkMatchPreviewTable from '@/components/BulkMatchPreviewTable'
 import { createBulkMatches } from '@/app/actions/events-bulk'
@@ -69,12 +69,7 @@ export default function BulkMatchesForm() {
 
   return (
     <div className="max-w-lg lg:max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-10">
-      <div className="flex items-center gap-3 mb-6">
-        <BackButton fallback="/events" className="text-faint hover:text-ink">
-          <span className="ms text-[24px]" aria-hidden="true">arrow_back</span>
-        </BackButton>
-        <h1 className="text-2xl font-bold text-ink">{t.event.bulk.title}</h1>
-      </div>
+      <PageHeader backFallback="/events" title={t.event.bulk.title} className="mb-6" />
 
       {saveError && (
         <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl mb-5">

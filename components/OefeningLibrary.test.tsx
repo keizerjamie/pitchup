@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import OefeningLibrary, { OefeningWithUsage } from '@/components/OefeningLibrary'
+import { NIEUWE_OEFENING_EVENT } from '@/lib/fab-events'
+import { act } from '@testing-library/react'
 
 vi.mock('@/app/actions/oefening-library', () => ({
   createOefening: vi.fn(),
@@ -33,6 +35,13 @@ function makeOefening(overrides: Partial<OefeningWithUsage> = {}): OefeningWithU
   }
 }
 
+// Designronde 3: verwijderen zit in het ⋯-menu van de kaart (stond als
+// prullenbakicoon direct naast het potlood).
+function kiesVerwijderen() {
+  fireEvent.click(screen.getByRole('button', { name: nl.common.moreActions }))
+  fireEvent.click(screen.getByRole('menuitem', { name: nl.oefeningen.deleteAria }))
+}
+
 function renderLibrary(oefeningen: OefeningWithUsage[]) {
   render(
     <DictProvider dict={nl}>
@@ -53,7 +62,7 @@ describe('OefeningLibrary', () => {
 
   it('N=0: verwijdert direct zonder bevestigingsdialoog (AC21)', async () => {
     renderLibrary([makeOefening({ id: 'o1', koppelingCount: 0 })])
-    fireEvent.click(screen.getByLabelText(nl.oefeningen.deleteAria))
+    kiesVerwijderen()
 
     // Geen bevestigingsbox/waarschuwing zichtbaar op enig moment.
     expect(screen.queryByText(nl.oefeningen.deleteConfirm)).not.toBeInTheDocument()
@@ -65,7 +74,7 @@ describe('OefeningLibrary', () => {
 
   it('N>=1: toont de waarschuwing met het aantal trainingen vóór verwijderen', () => {
     renderLibrary([makeOefening({ koppelingCount: 3 })])
-    fireEvent.click(screen.getByLabelText(nl.oefeningen.deleteAria))
+    kiesVerwijderen()
     expect(screen.getByText(nl.oefeningen.deleteConfirmUsage.replace('{n}', '3'))).toBeInTheDocument()
     // deleteOefening pas na expliciete bevestiging, niet meteen bij het klikken op het prullenbak-icoon.
     expect(deleteOefening).not.toHaveBeenCalled()
@@ -73,7 +82,7 @@ describe('OefeningLibrary', () => {
 
   it('annuleren (N>=1) laat de oefening staan (geen deleteOefening aangeroepen)', () => {
     renderLibrary([makeOefening({ koppelingCount: 2 })])
-    fireEvent.click(screen.getByLabelText(nl.oefeningen.deleteAria))
+    kiesVerwijderen()
     fireEvent.click(screen.getByText(nl.trainingPlan.cancel))
     expect(screen.getByText('Rondo')).toBeInTheDocument()
     expect(deleteOefening).not.toHaveBeenCalled()
@@ -81,7 +90,7 @@ describe('OefeningLibrary', () => {
 
   it('bevestigen (N>=1) roept deleteOefening aan en verwijdert de kaart', async () => {
     renderLibrary([makeOefening({ id: 'o1', koppelingCount: 1 })])
-    fireEvent.click(screen.getByLabelText(nl.oefeningen.deleteAria))
+    kiesVerwijderen()
     fireEvent.click(screen.getByText(nl.oefeningen.deleteButton))
     await waitFor(() => expect(deleteOefening).toHaveBeenCalledWith('o1'))
     await waitFor(() => expect(screen.queryByText('Rondo')).not.toBeInTheDocument())
@@ -154,5 +163,12 @@ describe('OefeningLibrary', () => {
       fireEvent.click(screen.getByText(nl.oefeningen.withoutDurationShowAll))
       expect(screen.getByText('Rondo')).toBeInTheDocument()
     })
+  })
+
+  it('opent de editor voor een nieuwe oefening op het signaal van de mobiele FAB (designronde 3)', () => {
+    renderLibrary([makeOefening()])
+    expect(screen.queryByText(nl.oefeningen.newTitle)).not.toBeInTheDocument()
+    act(() => { window.dispatchEvent(new Event(NIEUWE_OEFENING_EVENT)) })
+    expect(screen.getByText(nl.oefeningen.newTitle)).toBeInTheDocument()
   })
 })

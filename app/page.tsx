@@ -1,4 +1,5 @@
-import Link from 'next/link'
+import PageHeader from '@/components/ui/PageHeader'
+import { LinkButton } from '@/components/ui/Button'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS, PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
@@ -351,25 +352,15 @@ export default async function DashboardPage() {
           JoinedBanner.tsx voor waarom en hoe de ?joined=1-param verdwijnt. */}
       <JoinedBanner teamName={teamName || t.team.activeTeam} />
 
-      {/* Topbar */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex flex-col leading-tight">
-          <span className="text-[13px] font-bold text-faint">{dateLine}</span>
-          <span className="font-display text-[24px] lg:text-[27px] font-bold tracking-tight text-ink">
-            {greeting} 👋
-          </span>
-        </div>
-        {canEdit(ctx, 'agenda') && (
-          <Link
-            href="/events/new"
-            className="h-[42px] rounded-xl px-[18px] flex items-center gap-2 text-[13.5px] font-bold text-white"
-            style={{ background: 'var(--brand-btn)' }}
-          >
-            <span className="ms text-[19px]">add</span>
-            {t.home.newEvent}
-          </Link>
-        )}
-      </div>
+      {/* Topbar — vaste PageHeader-opbouw (designronde 3). De aanmaakknop
+          staat alleen vanaf md: op mobiel neemt de contextuele FAB hem over. */}
+      <PageHeader
+        eyebrow={dateLine}
+        title={<>{greeting} 👋</>}
+        actions={canEdit(ctx, 'agenda') ? (
+          <LinkButton href="/events/new" icon="add" className="max-md:hidden">{t.home.newEvent}</LinkButton>
+        ) : undefined}
+      />
 
       {heroEvent ? (
         <DashboardHero
@@ -391,18 +382,9 @@ export default async function DashboardPage() {
           <span className="ms text-[40px] text-faint">calendar_month</span>
           <p className="text-ink font-bold">{t.home.empty}</p>
           <p className="text-faint text-sm">{t.home.emptyHint}</p>
-          <Link
-            href="/events/new"
-            className="mt-1 h-11 rounded-xl px-5 flex items-center gap-2 text-sm font-bold text-white"
-            style={{ background: 'var(--brand-btn)' }}
-          >
-            <span className="ms text-[19px]">add</span>
-            {t.home.newEvent}
-          </Link>
+          <LinkButton href="/events/new" icon="add" className="mt-1">{t.home.newEvent}</LinkButton>
         </div>
       )}
-
-      <PeriodiseringStatus t={t} items={periodiseringItems} steigerungsWeken={steigerungsWeken} />
 
       {/* Beslissing-eerst-volgorde (mobiel én desktop dezelfde DOM-volgorde):
           eerst de open taken, dan pas de kengetallen — het dashboard is een
@@ -481,8 +463,13 @@ export default async function DashboardPage() {
           </div>
         </div>
 
+        {/* Rechterkolom (desktop) / onder de kengetallen (mobiel): status-
+            informatie zonder directe actie. Periodisering stond eerder direct
+            onder de hero en duwde de To-do en kengetallen op mobiel ver naar
+            beneden (designronde 3). */}
         <div className="flex flex-col gap-4 min-w-0">
           <Availability items={availabilityItems} t={t} />
+          <PeriodiseringStatus t={t} items={periodiseringItems} steigerungsWeken={steigerungsWeken} />
         </div>
       </div>
     </div>

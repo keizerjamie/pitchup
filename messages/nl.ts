@@ -745,6 +745,11 @@ export const nl = {
     },
   },
   settings: {
+    groupsNav: 'Onderdelen',
+    groupDisplay: 'App',
+    groupTeam: 'Team',
+    groupPlanning: 'Planning',
+    groupAccount: 'Account',
     logoSection: 'Clublogo',
     logoHint: 'Vervangt het Pitchup-logo in de zijbalk en op de wedstrijdselectie-PDF. PNG, JPG of WebP, max. 2 MB.',
     logoUpload: 'Logo uploaden',
@@ -961,6 +966,8 @@ export const nl = {
   common: {
     retry: 'Opnieuw proberen',
     close: 'Sluiten',
+    moreActions: 'Meer acties',
+    cancel: 'Annuleren',
   },
   errors: {
     noPermission: 'Je hebt geen rechten voor dit onderdeel',

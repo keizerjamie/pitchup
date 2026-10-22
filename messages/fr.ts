@@ -541,6 +541,11 @@ export const fr: Dict = {
     kinds: { goal: 'But', assist: 'Passe décisive', yellow: 'Carton jaune', red: 'Carton rouge' },
   },
   settings: {
+    groupsNav: 'Rubriques',
+    groupDisplay: 'Application',
+    groupTeam: 'Équipe',
+    groupPlanning: 'Planification',
+    groupAccount: 'Compte',
     logoSection: 'Logo du club',
     logoHint: 'Remplace le logo Pitchup dans la barre latérale et sur le PDF de sélection. PNG, JPG ou WebP, 2 Mo max.',
     logoUpload: 'Téléverser le logo',
@@ -725,6 +730,8 @@ export const fr: Dict = {
   common: {
     retry: 'Réessayer',
     close: 'Fermer',
+    moreActions: 'Plus d\'actions',
+    cancel: 'Annuler',
   },
   errors: {
     noPermission: "Vous n'avez pas les droits pour cette rubrique",

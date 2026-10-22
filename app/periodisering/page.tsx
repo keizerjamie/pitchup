@@ -7,6 +7,8 @@ import { addDays, formatDate, formatDateLong, todayLocal } from '@/lib/utils'
 import { getDict } from '@/lib/i18n'
 import NulmetingManager from '@/components/NulmetingManager'
 import CyclusWeekCorrectie from '@/components/CyclusWeekCorrectie'
+import PageHeader from '@/components/ui/PageHeader'
+import { buttonClasses } from '@/components/ui/Button'
 
 // Solid bar colors matching each category's badge tint
 const BAR_COLORS: Record<string, string> = {
@@ -154,8 +156,7 @@ export default async function PeriodizationPage() {
 
                     <Link
                       href={`/events/${volgendeTraining.id}/training-plan`}
-                      className="mt-4 h-11 rounded-xl px-5 inline-flex items-center gap-2 text-sm font-bold text-white"
-                      style={{ background: 'var(--primary)' }}
+                      className={buttonClasses({ className: 'mt-4' })}
                     >
                       {t.periodization.nextTrainingPlan}
                     </Link>
@@ -185,11 +186,14 @@ export default async function PeriodizationPage() {
   // flex-rij zitten, dan valt de ankerdatum buiten dat `parentElement` en
   // breekt die test stil.
   const cyclusKaart = cycleWeek !== null ? (
-    <div className="rounded-2xl p-5 text-white" style={{ background: 'linear-gradient(135deg,#0a2e2a,#14655c)' }}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
+    <div className="rounded-[22px] p-5 text-white" style={{ background: 'linear-gradient(135deg,#0a2e2a,#14655c)' }}>
+      {/* flex-wrap: past "week 6 van de cyclus" niet naast "Week aanpassen",
+          dan schuift de knop eronder i.p.v. de titel over twee regels te
+          breken (designronde 3). De DOM-vorm van de linkerkolom blijft gelijk. */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <div className="text-[11px] font-extrabold tracking-[.1em] uppercase" style={{ color: '#4ade80' }}>{t.periodization.cycleTitle}</div>
-          <div className="font-display text-[30px] font-bold mt-1.5">{t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</div>
+          <div className="font-display text-[26px] leading-tight font-bold mt-1.5">{t.periodization.cycleWeek.replace('{n}', String(cycleWeek))}</div>
           {correctie !== null ? (
             <div className="text-[13.5px] font-semibold mt-1" style={{ color: '#9fd8cd' }}>
               {t.periodization.manualWeekSince.replace('{date}', formatDate(correctie.datum, t.browserLocale))}
@@ -205,7 +209,7 @@ export default async function PeriodizationPage() {
         <CyclusWeekCorrectie
           huidigeWeek={cycleWeek}
           heeftCorrectie={correctie !== null}
-          triggerClassName="text-xs font-bold text-white px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors active:scale-[0.97] flex-shrink-0"
+          triggerClassName="h-9 text-xs font-bold text-white px-3.5 rounded-full bg-white/15 hover:bg-white/25 transition-colors active:scale-[0.97] flex-shrink-0"
           canEdit={magBewerken}
         />
       </div>
@@ -217,10 +221,7 @@ export default async function PeriodizationPage() {
 
   return (
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      <div>
-        <h1 className="font-display text-[26px] lg:text-[28px] font-bold tracking-tight text-ink">{t.periodization.pageTitle}</h1>
-        <p className="text-[13.5px] font-semibold text-faint mt-0.5">{t.periodization.pageSubtitle}</p>
-      </div>
+      <PageHeader title={t.periodization.pageTitle} subtitle={t.periodization.pageSubtitle} />
 
       {anker !== null ? (
         <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:items-start flex flex-col gap-5">

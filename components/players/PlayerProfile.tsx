@@ -49,7 +49,7 @@ export default function PlayerProfile({ player, initialTab, events, periods, def
 
   return (
     <div className="flex flex-col">
-      <PlayerProfileHeader player={player} t={t} />
+      <PlayerProfileHeader player={player} t={t} canEditSpelers={canEditSpelers} />
 
       <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-5 lg:py-8 w-full flex flex-col gap-4">
         <PlayerProfileActions
@@ -63,7 +63,7 @@ export default function PlayerProfile({ player, initialTab, events, periods, def
         <div
           role="group"
           aria-label={t.players.profileTabsAria}
-          className="bg-surface-sunken rounded-xl p-1 border border-[var(--border-soft)] flex gap-1"
+          className="bg-surface-sunken rounded-full p-1 border border-[var(--border-soft)] flex gap-1"
         >
           {PROFIEL_TABS.map((key) => (
             <button
@@ -71,7 +71,7 @@ export default function PlayerProfile({ player, initialTab, events, periods, def
               type="button"
               aria-pressed={tab === key}
               onClick={() => setTab(key)}
-              className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-[background-color,color] duration-[160ms] ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-light ${
+              className={`flex-1 px-4 h-10 rounded-full text-sm font-semibold transition-[background-color,color] duration-[160ms] ease-out active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-light ${
                 tab === key ? 'text-white shadow-sm' : 'text-muted'
               }`}
               style={tab === key ? { background: 'var(--primary)' } : undefined}
