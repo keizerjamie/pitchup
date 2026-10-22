@@ -149,7 +149,7 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
   if (mode === 'players') {
     if (!canEditClient(teamCtx, 'spelers')) return null
     return (
-      <Link href="/players/new" transitionTypes={['nav-forward']} aria-label={t.players.add} className={fabClass} style={fabStyle}>
+      <Link href="/players/new" aria-label={t.players.add} className={fabClass} style={fabStyle}>
         <PlusIcon />
       </Link>
     )
@@ -233,7 +233,6 @@ export default function GlobalFab({ pathname = '/' }: { pathname?: string }) {
           <Link
             key={item.href}
             href={item.href}
-            transitionTypes={['nav-forward']}
             onClick={closeMenu}
             style={{
               display: 'flex',

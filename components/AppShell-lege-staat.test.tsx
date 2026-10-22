@@ -38,9 +38,6 @@ vi.mock('@/app/actions/team', () => ({
 // blijft ongemockt geen enkel verschil maken.
 vi.mock('@/components/Navigation', () => ({ default: () => <div data-testid="navigation" /> }))
 vi.mock('@/components/GlobalFab', () => ({ default: () => <div data-testid="global-fab" /> }))
-vi.mock('@/components/PageTransition', () => ({
-  default: ({ children }: { children: React.ReactNode }) => children,
-}))
 
 async function renderLegeStaat(pathname = '/') {
   mockPathname = () => pathname

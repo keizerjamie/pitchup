@@ -98,7 +98,7 @@ export default function OverflowMenu({ items, label }: { items: OverflowMenuItem
         <div
           id={menuId}
           role="menu"
-          className="menu-popover absolute right-0 top-full mt-2 min-w-[220px] p-1.5 z-[var(--z-sheet)] animate-scale-in origin-top-right"
+          className="menu-popover absolute right-0 top-full mt-2 min-w-[220px] p-1.5 z-[var(--z-sheet)]"
         >
           {items.map((item, i) => {
             const content = (

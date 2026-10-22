@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import SidebarNav from '@/components/SidebarNav'
-import PageTransition from '@/components/PageTransition'
 import GlobalFab from '@/components/GlobalFab'
 import ThemeToggle from '@/components/ThemeToggle'
 import TeamLogo from '@/components/TeamLogo'
@@ -154,7 +153,7 @@ export default function AppShell({
       {/* ── Main content ── */}
       <div className="app-main md:ml-64">
         <main className="min-h-screen pb-40 md:pb-8 pt-[calc(env(safe-area-inset-top)_+_3.5rem)] md:pt-0">
-          {showEmptyState ? emptyState : <PageTransition>{children}</PageTransition>}
+          {showEmptyState ? emptyState : children}
         </main>
       </div>
 

@@ -111,7 +111,6 @@ export default function AttendanceSummary({ present, absent, injured, eventId, t
             en --surface-sunken zijn de themabare tegenhangers. */}
         <Link
           href={`/events/${eventId}`}
-          transitionTypes={['nav-back']}
           className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-soft)] text-sm font-medium text-brand-accent hover:bg-surface-sunken transition-colors"
         >
           {t.event.editAttendance}

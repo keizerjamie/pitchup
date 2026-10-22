@@ -203,7 +203,7 @@ export default function MatchAnalysisEditor({
         onBlur={canEdit ? handleSaveResult : undefined}
         disabled={isPending}
         readOnly={!canEdit}
-        className="w-full text-center px-3 py-2.5 rounded-xl bg-surface-sunken text-ink font-display text-[22px] font-bold focus:outline-none disabled:opacity-60 read-only:opacity-70"
+        className="invoer-groot w-full text-center px-3 py-2.5 rounded-xl bg-surface-sunken text-ink font-display text-[22px] font-bold focus:outline-none disabled:opacity-60 read-only:opacity-70"
         style={{ border: '1px solid var(--border-soft)' }}
       />
     </label>
@@ -272,7 +272,7 @@ export default function MatchAnalysisEditor({
                         placeholder="–"
                         onChange={(e) => onRatingInput(player.id, e.target.value)}
                         aria-label={player.name}
-                        className="w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken focus:outline-none placeholder:text-faint"
+                        className="invoer-groot w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken focus:outline-none placeholder:text-faint"
                         style={{ border: '1px solid var(--border-soft)' }}
                       />
                       <button
@@ -297,7 +297,7 @@ export default function MatchAnalysisEditor({
                   ) : (
                     <span
                       aria-label={player.name}
-                      className="w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken flex items-center justify-center"
+                      className="invoer-groot w-12 h-9 text-center font-display text-[18px] font-bold text-ink tabular-nums rounded-lg bg-surface-sunken flex items-center justify-center"
                       style={{ border: '1px solid var(--border-soft)' }}
                     >
                       {rating ?? '–'}

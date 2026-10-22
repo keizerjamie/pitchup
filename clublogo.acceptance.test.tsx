@@ -20,15 +20,6 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/',
 }))
 
-// PageTransition gebruikt React's experimentele <ViewTransition>, dat in de
-// hier geïnstalleerde React-versie niet als bruikbaar component beschikbaar
-// is buiten de Next.js-runtime. Voor deze tests is de transition-laag
-// irrelevant (we toetsen het logo in de zijbalk/mobiele header, niet de
-// paginaovergang) — vervangen door een kale passthrough.
-vi.mock('@/components/PageTransition', () => ({
-  default: ({ children }: { children: React.ReactNode }) => children,
-}))
-
 // Navigation en GlobalFab zijn voor déze story irrelevant (bottom-nav resp.
 // zwevende actieknop, geen van beide toont het logo) en leunen op
 // browser-only API's die jsdom niet implementeert (ResizeObserver,

@@ -44,7 +44,6 @@ vi.mock('next/headers', () => ({
   headers: vi.fn().mockResolvedValue(new Headers()),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
-vi.mock('@/components/PageTransition', () => ({ default: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('@/components/Navigation', () => ({ default: () => <nav data-testid="nav" /> }))
 vi.mock('@/components/GlobalFab', () => ({ default: () => <div data-testid="fab" /> }))
 

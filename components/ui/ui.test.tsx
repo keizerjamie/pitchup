@@ -11,6 +11,7 @@ import Button, { LinkButton, IconButton, buttonClasses } from '@/components/ui/B
 import OverflowMenu from '@/components/ui/OverflowMenu'
 import PageHeader from '@/components/ui/PageHeader'
 import ActionBar from '@/components/ui/ActionBar'
+import PageSkeleton from '@/components/ui/Skeleton'
 
 function renderNl(ui: React.ReactElement) {
   return render(<DictProvider dict={nl}>{ui}</DictProvider>)
@@ -155,5 +156,13 @@ describe('ActionBar', () => {
     expect(first).toHaveAccessibleName('Annuleren')
     expect(second).toHaveAccessibleName('Opslaan')
     expect(second).toHaveAttribute('type', 'submit')
+  })
+})
+
+describe('PageSkeleton', () => {
+  it('meldt zich als status met een leesbaar label en heeft geen animatieklassen', () => {
+    const { container } = render(<PageSkeleton label="Laden..." />)
+    expect(screen.getByRole('status')).toHaveTextContent('Laden...')
+    expect(container.innerHTML).not.toMatch(/animate-/)
   })
 })

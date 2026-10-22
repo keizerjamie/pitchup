@@ -54,9 +54,11 @@ function deltaToon(delta: number | null): Toon {
 }
 
 function Sparkline({ waarden, kleur }: { waarden: number[]; kleur: string }) {
-  // Onder de twee punten is er geen lijn te trekken; dan tekent dit niets in
-  // plaats van een misleidend horizontaal streepje.
-  if (waarden.length < 2) return null
+  // Pas vanaf drie punten is het een trend. Met twee punten (bv. vroeg in het
+  // seizoen) was het één schuin streepje dat op de iPhone als los lijntje in
+  // de hoek van de kaart oogde (designronde 3); de deltaregel zegt dan al
+  // hetzelfde in tekst.
+  if (waarden.length < 3) return null
   const breedte = 52
   const hoogte = 20
   const min = Math.min(...waarden)

@@ -242,7 +242,9 @@
 }
 
 html {
-  scroll-behavior: smooth;
+  /* Geen smooth scroll: zie "Geen animaties" hieronder. */
+  scroll-behavior: auto;
+  -webkit-text-size-adjust: 100%;
 }
 
 /* Scale the whole UI up on large external monitors. Every size in the app is
@@ -507,6 +509,27 @@ body::after {
   .settings-group { scroll-margin-top: 72px; }
 }
 
+/* iPhone: Safari zoomt automatisch in zodra je een invoerveld aantikt met
+   tekst kleiner dan 16px, en zoomt daarna niet terug — de pagina staat dan
+   vergroot en knoppen lijken over elkaar te vallen (gemeld 2026-10-22; o.a.
+   spelers-zoekveld 13.5px, oefeningen 14px, instellingen 13–14px). Op
+   touchscreens daarom minimaal 16px. Ongelaagd zodat het van text-sm e.d.
+   (@layer utilities) wint; velden die bewust groter zijn (scorevelden in
+   MatchAnalysisEditor) dragen `invoer-groot` en vallen erbuiten. Geen
+   maximum-scale in de viewport: dat blokkeert op Android ook knijpzoomen. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(.invoer-groot),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Geen 300ms-tikvertraging / dubbeltik-zoom op knoppen en links. */
+a, button, input, select, textarea, label, [role="button"] {
+  touch-action: manipulation;
+}
+
 /* Visible keyboard focus on every interactive element */
 :focus-visible {
   outline: 2px solid #14b8a6;
@@ -515,148 +538,37 @@ body::after {
 }
 
 /* ─────────────────────────────────────────────────
-   View Transitions — slide keyframes
+   Geen animaties (besluit eigenaar, 2026-10-22, designronde 3)
+
+   Hier stonden de view-transition-schuifovergangen tussen pagina's
+   (React <ViewTransition> in het verwijderde PageTransition.tsx), de
+   fadeUp/scaleIn/stagger-entree-animaties en een reduced-motion-vangnet.
+   Op de iPhone voelde dat stroperig: na een tik gebeurde er niets tot de
+   server klaar was en dán schoof de hele pagina. De app moet "gewoon
+   vloeiend" voelen; dat komt nu van directe skeletschermen
+   (app/loading.tsx), niet van beweging.
+
+   Daarom zet deze regel ÁLLE animaties en transitions uit, ook die uit
+   inline styles (GlobalFab, LineupBuilder-inslag, InviteLinkCard) en uit
+   Tailwind-utilities (transition-colors, active:scale-… blijft wel als
+   directe, niet-geanimeerde indrukfeedback). Bewust `none` en niet de
+   0.01ms-truc: niets in de app wacht op animationend/transitionend
+   (gecontroleerd), en zonder animatie gelden gewoon de eindstijlen.
+
+   Enige uitzondering: .animate-spin (components/icons/Spinner.tsx). Een
+   stilstaande spinner leest als "vastgelopen"; het is een bezig-signaal,
+   geen decoratie.
 ───────────────────────────────────────────────── */
-
-@keyframes vt-slide-in-right {
-  from { translate: 60px; opacity: 0; }
-  to   { translate: 0;    opacity: 1; }
+*,
+*::before,
+*::after {
+  animation: none !important;
+  transition: none !important;
 }
-@keyframes vt-slide-out-left {
-  from { translate: 0;     opacity: 1; }
-  to   { translate: -50px; opacity: 0; }
-}
-@keyframes vt-slide-in-left {
-  from { translate: -60px; opacity: 0; }
-  to   { translate: 0;     opacity: 1; }
-}
-@keyframes vt-slide-out-right {
-  from { translate: 0;    opacity: 1; }
-  to   { translate: 50px; opacity: 0; }
+.animate-spin {
+  animation: spin 1s linear infinite !important;
 }
 
-/* Forward: old exits left, new enters from right */
-::view-transition-old(.nav-forward) {
-  animation: 200ms cubic-bezier(0.4, 0, 1, 1) both vt-slide-out-left;
-}
-::view-transition-new(.nav-forward) {
-  animation: 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both vt-slide-in-right;
-}
-
-/* Back: old exits right, new enters from left */
-::view-transition-old(.nav-back) {
-  animation: 200ms cubic-bezier(0.4, 0, 1, 1) both vt-slide-out-right;
-}
-::view-transition-new(.nav-back) {
-  animation: 280ms cubic-bezier(0, 0, 0.2, 1) 100ms both vt-slide-in-left;
-}
-
-/* Cross-fade — used as default for tab switches */
-::view-transition-old(.cross-fade) {
-  animation: 180ms ease-out both fade-out-vt;
-}
-::view-transition-new(.cross-fade) {
-  animation: 220ms ease-out 60ms both fade-in-vt;
-}
-
-/* Default crossfade — smoother than browser default */
-::view-transition-old(root) {
-  animation: 220ms ease-out both fade-out-vt;
-}
-::view-transition-new(root) {
-  animation: 260ms ease-out both fade-in-vt;
-}
-@keyframes fade-out-vt { from { opacity: 1 } to { opacity: 0 } }
-@keyframes fade-in-vt  { from { opacity: 0 } to { opacity: 1 } }
-
-/* ─────────────────────────────────────────────────
-   Anchor elements that should NOT animate
-───────────────────────────────────────────────── */
-
-.anchor-bottom-nav { view-transition-name: bottom-nav; }
-::view-transition-group(bottom-nav) { z-index: 200; }
-::view-transition-old(bottom-nav),
-::view-transition-new(bottom-nav) { animation: none; }
-
-.anchor-mobile-header { view-transition-name: mobile-header; }
-::view-transition-group(mobile-header) { z-index: 150; }
-::view-transition-old(mobile-header),
-::view-transition-new(mobile-header) { animation: none; }
-
-.anchor-sidebar { view-transition-name: sidebar; }
-::view-transition-group(sidebar) { z-index: 150; }
-::view-transition-old(sidebar),
-::view-transition-new(sidebar) { animation: none; }
-
-/* ─────────────────────────────────────────────────
-   Respect prefers-reduced-motion
-───────────────────────────────────────────────── */
-
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(*),
-  ::view-transition-new(*),
-  ::view-transition-group(*) {
-    animation-duration: 0s !important;
-    animation-delay: 0s !important;
-  }
-
-  /* Dekte eerder alleen view-transitions. De rest van de app — .animate-fade-up,
-     .stagger, elke Tailwind-transition en elke active:scale — liep gewoon door.
-
-     Bewust `0.01ms` en niet `none`: animaties met `both` fill-mode (zie
-     .animate-fade-up / .animate-scale-in hieronder) beginnen op opacity 0.
-     Met `animation: none` valt die fill weg en zou het element zichtbaar
-     blijven, maar met een 0.01ms-duur springt hij netjes naar de EINDstaat.
-     Dat is het verschil tussen "geen animatie" en "element blijft onzichtbaar". */
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-delay: 0s !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    transition-delay: 0s !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* ─────────────────────────────────────────────────
-   CSS-only animations (fallback / supplemental)
-───────────────────────────────────────────────── */
-
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-.animate-fade-up  { animation: fadeUp  0.30s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-scale-in { animation: scaleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both; }
-
-/* Kopieerknop-labelwissel (components/settings/InviteLinkCard.tsx): blur
-   maskeert het overlappen van de oude en nieuwe tekst tijdens de crossfade,
-   i.p.v. alleen opacity — anders is heel even zowel "Kopiëren" als
-   "Gekopieerd" leesbaar over elkaar heen. */
-@keyframes invite-copy-label-in {
-  from { opacity: 0; filter: blur(2px); }
-  to   { opacity: 1; filter: blur(0); }
-}
-
-/* Stagger helpers */
-.stagger > * { animation: fadeUp 0.30s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.stagger > *:nth-child(1)  { animation-delay:   0ms; }
-.stagger > *:nth-child(2)  { animation-delay:  50ms; }
-.stagger > *:nth-child(3)  { animation-delay: 100ms; }
-.stagger > *:nth-child(4)  { animation-delay: 150ms; }
-.stagger > *:nth-child(5)  { animation-delay: 200ms; }
-.stagger > *:nth-child(6)  { animation-delay: 250ms; }
-.stagger > *:nth-child(7)  { animation-delay: 300ms; }
-.stagger > *:nth-child(8)  { animation-delay: 350ms; }
-.stagger > *:nth-child(9)  { animation-delay: 400ms; }
-.stagger > *:nth-child(10) { animation-delay: 450ms; }
 
 /* ─────────────────────────────────────────────────
    Print — trainingsplan afdrukken

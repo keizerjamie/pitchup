@@ -698,7 +698,7 @@ describe('Consistentie tussen kop en knoptekst bij een uitsluitend toekomstige m
 
     // De sheet-titel (bij het openen van dezelfde knop) gebruikt dezelfde bron.
     fireEvent.click(within(blok).getByText(nl.periodization.measureCta).closest('button')!)
-    const sheet = sheetDateInput().closest('.animate-scale-in') as HTMLElement
+    const sheet = sheetDateInput().closest('[role="dialog"]') as HTMLElement
     expect(sheet).toHaveTextContent(nl.periodization.measureCta)
     expect(sheet).not.toHaveTextContent(nl.periodization.remeasureCta)
   })

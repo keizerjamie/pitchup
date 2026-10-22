@@ -3887,3 +3887,31 @@ Typecheck en lint groen; 3927 tests groen, 2 rood = de bekende `cyclusweek-corre
 - **Stale-Turbopack-i18n (derde keer)**: nieuwe keys renderden leeg tot `rm -rf .next` + herstart.
 - Nieuwe tests: `Designronde 3 — Instellingen gegroepeerd` in assistent-rechten.acceptance.test.tsx.
 - Checks: typecheck/lint groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
+
+## Designronde 3 — iPhone-ronde: geen animaties, skeletscherm, inzoom-fix (2026-10-22, nog niet gecommit)
+Aanleiding: op de iPhone "knoppen soms door elkaar, pagina's niet mooi, overgangen niet vloeiend".
+Jamie koos: **echt álle animaties weg** en bij een tik **direct een skeletscherm**.
+- **Oorzaak "door elkaar"**: iOS Safari zoomt in bij focus op een veld met tekst < 16px en zoomt
+  niet terug. Gemeten: spelers-zoek 13.5px, oefeningen-zoek 14px, instellingen 13–14px,
+  analyse 14px. Fix: ongelaagde regel in globals.css onder `@media (pointer: coarse)` → 16px voor
+  input/select/textarea (wint van `text-sm` in `@layer utilities`); bewust grotere velden dragen
+  `invoer-groot` (scorevelden MatchAnalysisEditor). Géén `maximum-scale` (blokkeert knijpzoom op
+  Android). Plus `-webkit-text-size-adjust: 100%` en `touch-action: manipulation`.
+- **Animaties**: `components/PageTransition.tsx` (React `<ViewTransition>`) verwijderd, AppShell
+  rendert `children` direct; `transitionTypes` weg (GlobalFab, AttendanceSummary); view-transition-
+  CSS, fadeUp/scaleIn/stagger en het reduced-motion-blok vervangen door één globale regel
+  `*, *::before, *::after { animation: none !important; transition: none !important }`. Die doodt
+  ook inline animaties (GlobalFab-menu, LineupBuilder-inslag, InviteLinkCard) — hun logica en tests
+  bleven staan. Enige uitzondering: `.animate-spin` (Spinner = bezig-signaal). `scroll-behavior:
+  auto`. Gecontroleerd: niets wacht op animationend/transitionend.
+- **Testselectors**: nulmeting-test vond het meetvenster via `.animate-scale-in` → venster heeft nu
+  `role="dialog" aria-modal`, test zoekt daarop. PageTransition-mocks uit drie tests verwijderd.
+- **Skeletscherm**: `app/loading.tsx` (root, geldt voor alle routes) met `PageSkeleton` uit
+  `components/ui/Skeleton.tsx` — statisch, geen pulse, `role="status"` met `t.event.loading`.
+  Gotcha bij meten: direct na `navigate` staat nog het skelet in beeld (0 knoppen gemeten); wacht
+  ~3s of op inhoud.
+- **Overlapdetector** (Chromium, 390px, 19 pagina's): geen overlappende/afgekapte knoppen, geen
+  horizontaal scrollen. Enige melding = bewuste tegel-overlay in DashboardHero.
+- **KpiStrip-sparkline** pas vanaf 3 punten (2 punten oogde als los lijntje in de kaarthoek).
+- Checks: typecheck/lint/build groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
+- **Niet te verifiëren hier**: echt iOS Safari / beginscherm-app. Jamie test na de push.
