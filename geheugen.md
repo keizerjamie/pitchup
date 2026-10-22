@@ -3916,7 +3916,7 @@ Jamie koos: **echt álle animaties weg** en bij een tik **direct een skeletscher
 - Checks: typecheck/lint/build groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
 - **Niet te verifiëren hier**: echt iOS Safari / beginscherm-app. Jamie test na de push.
 
-## Designronde 3 — vloeiende overgangen (2026-10-22, nog niet gecommit)
+## Designronde 3 — vloeiende overgangen (2026-10-22, commit `5002c7a`, live)
 Jamie koos na de "alles uit"-ronde: **iOS-stijl schuiven** voor detailpagina's, crossfade tussen
 tabbladen, en **korte, zachte animaties voor menu's en onderbladen**.
 - **Bewegingsmodel** (globals.css "Beweging: standaard uit, alleen bewust aangezet"): de globale
