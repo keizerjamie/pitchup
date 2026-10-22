@@ -22,7 +22,7 @@
 //
 // ── Aanvullende dekking na validator-bevindingen (zie onderaan dit bestand) ──
 //   A1.1 → describe('A1.1 — "Afgemeld"-markering ...')            — "Afgemeld" print wél mee
-//   A1.2 → describe('A1.2 — diagram- en formatieveld-breedte ...') — exact print:w-[32mm]!/[22mm]! (verstrakt 2026-08-24)
+//   A1.2 → describe('A1.2 — diagram- en formatieveld-breedte ...') — exact print:w-[28mm]!/[20mm]! (verstrakt 2026-08-24, verder verkleind 2026-10-22 voor grotere namen)
 //   A1.3 → describe('A1.3 — editor-waarschuwingen ...')            — teamsRemoved/sizeMismatch/saveError print:hidden
 //   A1.4 → AC5-blok, extra test 'de root van het aanwezigheidsblok draagt print:break-inside-avoid'
 //   A2   → gefixt in AC3-blok (eerste test): assertie richt zich nu op het juiste element
@@ -103,7 +103,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import { en } from '@/messages/en'
@@ -181,6 +181,19 @@ beforeEach(() => {
 })
 
 // ── Print-proxy helper (zie kopcomment) ──
+// Print-teamindeling sinds 2026-10-22 (verzoek eigenaar): per team een
+// kolommetje (kop "Team 1 (n)" + namen ONDER ELKAAR in <li>'s) i.p.v. één
+// komma-regel "Team 1 (n): Jan, Piet". Deze helpers vinden zo'n teamblok op
+// zijn kop en lezen de namen eruit.
+function printTeam(kop: string): HTMLElement {
+  const kopEl = Array.from(document.querySelectorAll('.print-indeling-kop')).find((el) => el.textContent === kop)
+  if (!kopEl) throw new Error(`Print-teamblok "${kop}" niet gevonden`)
+  return kopEl.closest('.print-indeling-team') as HTMLElement
+}
+function printNamen(team: HTMLElement): string[] {
+  return Array.from(team.querySelectorAll('li')).map((li) => li.textContent ?? '')
+}
+
 function hasPrintHiddenAncestor(el: HTMLElement | null): boolean {
   let node: HTMLElement | null = el
   while (node) {
@@ -528,17 +541,18 @@ describe('AC4 — teamindeling: bediening verborgen, namen zichtbaar', () => {
     const interactiveTeam0 = screen.getByTestId('teamindeling-team-0')
     expect(hasPrintHiddenAncestor(interactiveTeam0)).toBe(true)
 
-    // De print-only regel ("Team 1 (1): Piet Peters") leest dezelfde lokale
-    // indeling-state en print wél.
-    const printLine = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === 'Team 1 (1): Piet Peters')
-    expect(hasPrintHiddenAncestor(printLine)).toBe(false)
+    // Het print-only teamblok (kop "Team 1 (1)", namen onder elkaar) leest
+    // dezelfde lokale indeling-state en print wél.
+    const printBlok = printTeam('Team 1 (1)')
+    expect(printNamen(printBlok)).toEqual(['Piet Peters'])
+    expect(hasPrintHiddenAncestor(printBlok)).toBe(false)
   })
 
   it('toegewezen spelernaam blijft leesbaar op de afdruk, via dezelfde print-only teamregel', () => {
     renderWithTeams()
-    const printLine = screen.getByText((_c, el) => el?.tagName === 'P' && el.textContent === 'Team 2 (1): Jan Jansen')
-    expect(hasPrintHiddenAncestor(printLine)).toBe(false)
-    expect(printLine.textContent).toContain('Jan Jansen')
+    const printBlok = printTeam('Team 2 (1)')
+    expect(hasPrintHiddenAncestor(printBlok)).toBe(false)
+    expect(printNamen(printBlok)).toEqual(['Jan Jansen'])
   })
 
   it('edge case: oefening zonder teams (teams: []) — TeamIndelingEditor rendert niets, geen crash', () => {
@@ -927,10 +941,8 @@ describe('A1.1 — "Afgemeld"-markering per speler print wél mee, nu inline in 
     renderPlan({ initialOefeningen: [koppeling], presentPlayerIds: ['p2', 'p3'] })
 
     const teamLabel = nl.teamIndeling.teamLabel.replace('{n}', '1')
-    const expectedLine = `${teamLabel} (1): Piet Peters (${nl.teamIndeling.absentWarning})`
-    const line = screen.getByText(
-      (_content, el) => el?.tagName === 'P' && el.textContent === expectedLine,
-    )
+    const line = printTeam(`${teamLabel} (1)`)
+    expect(printNamen(line)).toEqual([`Piet Peters (${nl.teamIndeling.absentWarning})`])
     expect(hasPrintHiddenAncestor(line)).toBe(false)
 
     // Contrast: de interactieve "Afgemeld"-markering op de chip (voorheen op
@@ -946,22 +958,22 @@ describe('A1.1 — "Afgemeld"-markering per speler print wél mee, nu inline in 
 // "LAYOUTWIJZIGING": diagram/formatieveld staan nu naast de teamindeling
 // i.p.v. erboven, TrainingPlanEditor.tsx:362-379.)
 describe('A1.2 — diagram- en formatieveld-breedte op de afdruk (TrainingPlanEditor.tsx:364,373)', () => {
-  it('DiagramView krijgt exact de klasse print:w-[32mm]! mee', () => {
+  it('DiagramView krijgt exact de klasse print:w-[28mm]! mee (32→28mm op 2026-10-22, ruimte voor grotere namen)', () => {
     const koppeling = makeKoppeling({
       oefeningen: { ...makeKoppeling().oefeningen, diagram: { markers: [], materiaal: [], lijnen: [] } },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const diagram = screen.getByTestId('diagram-view')
-    expect(diagram.parentElement?.className).toContain('print:w-[32mm]!')
+    expect(diagram.parentElement?.className).toContain('print:w-[28mm]!')
   })
 
-  it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[22mm]! mee', () => {
+  it('FormationField (fallback zonder diagram) krijgt exact de klasse print:w-[20mm]! mee', () => {
     const koppeling = makeKoppeling({
       oefeningen: { ...makeKoppeling().oefeningen, diagram: null, teams: [{ grootte: 4, formaties: [] }] },
     })
     renderPlan({ initialOefeningen: [koppeling] })
     const field = screen.getByTestId('formation-field')
-    expect(field.parentElement?.className).toContain('print:w-[22mm]!')
+    expect(field.parentElement?.className).toContain('print:w-[20mm]!')
   })
 })
 
@@ -1285,11 +1297,11 @@ describe('E1 — klassen die de compacte print-layout dragen', () => {
     })
     renderPlan({ initialOefeningen: [koppeling] })
     // De float staat op de buitenste wrapper (TrainingPlanEditor.tsx:375), niet
-    // op de DiagramView-node zelf — die draagt alleen `print:w-[32mm]!` (A1.2).
+    // op de DiagramView-node zelf — die draagt alleen `print:w-[28mm]!` (A1.2).
     const floatWrapper = screen.getByTestId('diagram-view').closest('.print\\:float-left')
     expect(floatWrapper).not.toBeNull()
     expect(floatWrapper!.className).toContain('print:float-left')
-    expect(floatWrapper!.className).toContain('print:w-[32mm]')
+    expect(floatWrapper!.className).toContain('print:w-[28mm]')
     expect(floatWrapper!.className).toContain('print:mr-[3mm]')
   })
 
@@ -1359,9 +1371,35 @@ describe('D1 — print-teamindeling toont de actuele (lokale) indeling, niet de 
     // De print-only regel toont de nieuwe indeling meteen — dezelfde lokale
     // `indeling`-state als de interactieve editor, niet `initialIndeling`
     // (die is in deze test nooit veranderd).
-    const printLine = await screen.findByText(
-      (_c, el) => el?.tagName === 'P' && el.textContent === 'Team 1 (1): Piet Peters',
-    )
-    expect(hasPrintHiddenAncestor(printLine)).toBe(false)
+    await waitFor(() => expect(printNamen(printTeam('Team 1 (1)'))).toEqual(['Piet Peters']))
+    expect(hasPrintHiddenAncestor(printTeam('Team 1 (1)'))).toBe(false)
+  })
+})
+
+// ── Veldjes op de afdruk samengevoegd (2026-10-22) ──
+// Identieke veldjes (zelfde maat + formatie) printen maar één keer met het
+// aantal erbij; anders stapelden 2–4 dezelfde veldjes en bepaalden zij de
+// hoogte van de oefening. Op het scherm blijft elk team zijn eigen veldje.
+describe('Veldjes zonder tekening: identieke teams één keer op de afdruk', () => {
+  function velden() {
+    return screen.getAllByTestId('formation-field').map((f) => f.parentElement as HTMLElement)
+  }
+
+  it('2 gelijke teams: het tweede veldje is print:hidden, het eerste toont "2×" alleen op de afdruk', () => {
+    renderPlan({ initialOefeningen: [makeKoppeling()] })
+    const [eerste, tweede] = velden()
+    expect(hasPrintHiddenAncestor(eerste)).toBe(false)
+    expect(tweede.className).toContain('print:hidden')
+    const printLabel = within(eerste).getByText(/^2× /)
+    expect(printLabel.className).toContain('hidden print:block')
+  })
+
+  it('teams met een verschillende grootte houden elk hun eigen veldje, zonder aantal', () => {
+    const k = makeKoppeling({ oefeningen: { ...makeKoppeling().oefeningen, teams: [{ grootte: 3, formaties: [] }, { grootte: 2, formaties: [] }] } })
+    renderPlan({ initialOefeningen: [k] })
+    for (const veld of velden()) {
+      expect(veld.className).not.toContain('print:hidden')
+      expect(within(veld).queryByText(/× /)).toBeNull()
+    }
   })
 })

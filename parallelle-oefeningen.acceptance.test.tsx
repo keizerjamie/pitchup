@@ -835,7 +835,9 @@ describe('AC21 — een hard verwijderde, al ingedeelde speler valt uit de geldig
     const k2 = makeKoppeling({ id: 'k2', oefening_id: 'oB', parallel_groep_id: 'g1', oefeningen: makeOefening({ id: 'oB', naam: 'Oefening B' }) })
 
     expect(() => renderGroup([k1, k2])).not.toThrow()
-    expect(screen.getByText(nl.parallelGroep.unknownPlayer)).toBeInTheDocument()
+    // Op scherm én in het print-blok (namen sinds 2026-10-22 elk een eigen <li>).
+    expect(screen.getAllByText(nl.parallelGroep.unknownPlayer).length).toBeGreaterThanOrEqual(1)
+    expect(within(screen.getByTestId('parallelgroep-print')).getByText(nl.parallelGroep.unknownPlayer)).toBeInTheDocument()
   })
 })
 

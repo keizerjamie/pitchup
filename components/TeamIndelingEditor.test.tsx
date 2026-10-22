@@ -270,7 +270,9 @@ describe('TeamIndelingEditor — waarschuwingen', () => {
   it('toont een generieke "onbekende speler"-waarschuwing voor een id die niet in players voorkomt, en verwijdert hem niet automatisch', () => {
     renderEditor({ initialIndeling: [['ghost-id'], []] })
 
-    expect(screen.getByText(nl.teamIndeling.unknownPlayer)).toBeInTheDocument()
+    // Twee keer: in de editor én in het print-teamblok (namen staan daar sinds
+    // 2026-10-22 elk in een eigen <li>, dus als losse tekst).
+    expect(screen.getAllByText(nl.teamIndeling.unknownPlayer)).toHaveLength(2)
     expect(mockSave).not.toHaveBeenCalled()
   })
 

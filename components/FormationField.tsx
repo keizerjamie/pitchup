@@ -10,6 +10,9 @@ interface Props {
   /** Maximale breedte in px; de hoogte volgt de 100/140 veld-aspect-ratio. */
   sizePx?: number
   className?: string
+  /** Afwijkend label alleen op de afdruk (bv. "2× 4 · 1-2-1" als identieke
+   *  veldjes daar worden samengevoegd, zie TrainingPlanEditor). */
+  printLabel?: string
 }
 
 // Read-only mini voetbalveld — hergebruikt de veld-SVG-vormgeving uit
@@ -17,7 +20,7 @@ interface Props {
 // strafschopgebieden), maar zonder spelertoewijzing of popup. Volledig
 // responsive via aspect-ratio + max-w-full, zodat hij nooit horizontaal laat
 // scrollen op smalle viewports.
-export default function FormationField({ positions, label, sizePx = 96, className = '' }: Props) {
+export default function FormationField({ positions, label, sizePx = 96, className = '', printLabel }: Props) {
   return (
     <div className={`flex flex-col items-center max-w-full ${className}`} style={{ width: sizePx, maxWidth: '100%' }}>
       <div
@@ -63,7 +66,10 @@ export default function FormationField({ positions, label, sizePx = 96, classNam
         </div>
       </div>
       {label && (
-        <p className="mt-1 w-full text-center text-[11px] font-semibold text-muted truncate">{label}</p>
+        <p className={`mt-1 w-full text-center text-[11px] font-semibold text-muted truncate${printLabel ? ' print:hidden' : ''}`}>{label}</p>
+      )}
+      {printLabel && (
+        <p className="hidden print:block mt-1 w-full text-center text-[11px] font-semibold text-muted truncate">{printLabel}</p>
       )}
     </div>
   )

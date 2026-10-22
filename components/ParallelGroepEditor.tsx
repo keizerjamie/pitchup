@@ -471,29 +471,33 @@ export default function ParallelGroepEditor({ eventId, groepId, leden, players, 
       </div>
 
       {/* Print-only: alleen namen per oefening, GEEN tekort/overschot (V6). */}
-      <div data-testid="parallelgroep-print" className="hidden print:block print:text-[9px] print:leading-snug print:text-ink">
-        {leden.map((lid) => {
-          const ids = assignments[lid.id] ?? []
-          if (ids.length === 0) return null
-          const names = ids
-            .map((id) => {
-              const player = playerById.get(id)
-              if (!player) return t.parallelGroep.unknownPlayer
-              const absent = !presentSet.has(id)
-              return absent ? `${player.name} (${t.parallelGroep.absentWarning})` : player.name
-            })
-            .join(', ')
-          return (
-            <p key={lid.id}>
-              <span className="font-bold">{lid.oefeningen.naam}</span>: {names}
-            </p>
-          )
-        })}
+      {/* Print: zelfde kolomopmaak als de teamindeling (TeamIndelingEditor) —
+          per parallelle oefening een kolommetje met de namen onder elkaar. */}
+      <div data-testid="parallelgroep-print" className="hidden print:block print:text-ink">
+        <div className="print-indeling-grid">
+          {leden.map((lid) => {
+            const ids = assignments[lid.id] ?? []
+            if (ids.length === 0) return null
+            return (
+              <div key={lid.id} className="print-indeling-team">
+                <p className="print-indeling-kop print-accent-text">{lid.oefeningen.naam}</p>
+                <ul className="print-indeling-namen">
+                  {ids.map((id) => {
+                    const player = playerById.get(id)
+                    if (!player) return <li key={id}>{t.parallelGroep.unknownPlayer}</li>
+                    const absent = !presentSet.has(id)
+                    return <li key={id}>{absent ? `${player.name} (${t.parallelGroep.absentWarning})` : player.name}</li>
+                  })}
+                </ul>
+              </div>
+            )
+          })}
+        </div>
         {/* Zelfde regel als TeamIndelingEditor: alleen tonen zodra er íéts
             over de leden verdeeld is — een volledig lege verdeling levert
             anders een betekenisloze volledige namenlijst op de afdruk op. */}
         {pool.length > 0 && leden.some((lid) => (assignments[lid.id] ?? []).length > 0) && (
-          <p>
+          <p className="print-indeling-pool">
             <span className="font-bold">{t.parallelGroep.poolLabelPrint}</span>: {pool.map((p) => p.name).join(', ')}
           </p>
         )}

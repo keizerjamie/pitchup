@@ -3946,3 +3946,34 @@ tabbladen, en **korte, zachte animaties voor menu's en onderbladen**.
   CSS; alleen `rm -rf .next` + herstart hielp. Build liever niet parallel aan dev draaien.
 - Checks: typecheck/lint/build groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
   Nieuw: components/RouteTransition.test.tsx (10).
+
+## Trainingsplan-print: teamnamen groot en onder elkaar (2026-10-22)
+Vraag: "de namen een stuk groter naast de oefeningen". Jamie koos: **teamindeling per oefening**
+(niet de aanwezigheidskolom), **namen onder elkaar per team**, en **zo veel mogelijk op 1 A4**.
+- `TeamIndelingEditor` en `ParallelGroepEditor` (zelfde vorm voor consistentie): print-blok is nu
+  `.print-indeling-grid` → per team `.print-indeling-team` met `.print-indeling-kop`
+  (7,5pt kapitalen, `print-accent-text`) en `<ul class="print-indeling-namen">` met één `<li>` per
+  speler (10,5pt, was één komma-regel op 9px ≈ 6,5pt). Grid `auto-fill minmax(34mm, 1fr)`: 2 teams
+  naast elkaar, 3–4 teams lopen door naar een tweede rij. "Nog niet ingedeeld" blijft één regel
+  (`.print-indeling-pool`, 8pt). CSS in het printblok van globals.css (comment noemt de at-rule
+  bewust niet bij naam — C1-tests).
+- Om ruimte te maken: diagram 32→28mm, formatieveld 22→20mm (groepswaarden 26/18 ongewijzigd).
+- **Tests bewust aangepast**: afdrukken-trainingsplan AC4 (2), A1.1, D1 vonden de oude regel
+  "Team 1 (1): Piet Peters" — nu helpers `printTeam(kop)`/`printNamen(team)`; A1.2/E1.3 naar
+  28/20mm. "Onbekende speler" staat nu ook als losse `<li>` in het printblok → TeamIndelingEditor.test
+  `getAllByText(...)` = 2; parallelle-oefeningen AC21 scoped op `parallelgroep-print`.
+- **Meting** (tijdelijke ingelogde preview-route met nepdata, printregels geactiveerd op 703px):
+  namen 14px. Blokhoogte 82mm bij 2 teams, 151mm bij 4 teams — die hoogte komt van de
+  **gestapelde formatievelden** (fallback zonder eigen tekening, één veld per team onder elkaar),
+  niet van de namen. Bekend sinds de eerste printversie.
+- **Opgelost in dezelfde ronde (op verzoek)**: identieke veldjes (zelfde label = maat + formatie)
+  printen nog maar één keer, met "N× …" als print-label. `FormationField` kreeg een optionele
+  `printLabel` (scherm-label `print:hidden`, print-label `hidden print:block`); in
+  TrainingPlanEditor krijgen dubbelen `print:hidden`. Teams met een andere grootte houden een eigen
+  veldje. Scherm ongewijzigd. Gemeten met dezelfde zware testtraining (5 oefeningen, teams tot 9):
+  **542mm → 337mm ≈ 1,24 A4** (blokken 82/82/151/117/82 → 63/64/71/49/63mm). Een training met
+  veel 9-tallen past dus nog niet altijd op 1 A4; dan is de namenlijst de hoogte. Tests: twee nieuwe
+  in afdrukken-trainingsplan ("identieke teams één keer op de afdruk").
+- **Preview-gotcha's**: `/login/...`-previewroutes werken niet meer — zonder team toont AppShell de
+  lege-teamstaat, ingelogd stuurt proxy `/login*` door naar `/`. Gebruik een tijdelijke route
+  buiten /login in het ingelogde paneel (eerste request kan 404 geven tot Turbopack hem oppikt).

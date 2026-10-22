@@ -844,6 +844,39 @@ a, button, input, select, textarea, label, [role="button"] {
   /* Scheiding tússen opeenvolgende blokken (los of parallel), niet om elk
      kaartje heen: één dunne lijn per overgang. */
   .print-oefening-blok { padding: 1.2mm 0; }
+
+  /* Teamindeling naast de oefening (TeamIndelingEditor/ParallelGroepEditor,
+     2026-10-22): per team een kolom met de namen onder elkaar, groot genoeg
+     om op het veld te lezen. auto-fill met 34mm-kolommen: 2 teams naast
+     elkaar staan altijd op één rij, 3–4 teams lopen netjes door naar een
+     tweede rij in plaats van namen af te knippen. */
+  .print-indeling-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(34mm, 1fr));
+    gap: 1.6mm 4mm;
+  }
+  .print-indeling-team { break-inside: avoid; }
+  .print-indeling-kop {
+    font-size: 7.5pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding-bottom: 0.6mm;
+    margin-bottom: 0.8mm;
+    border-bottom: 0.3mm solid #e5e7eb;
+  }
+  .print-indeling-namen li {
+    font-size: 10.5pt;
+    line-height: 1.25;
+    font-weight: 600;
+    color: #111827;
+  }
+  .print-indeling-pool {
+    margin-top: 1.4mm;
+    font-size: 8pt;
+    line-height: 1.3;
+    color: #374151;
+  }
   .print-oefening-blok + .print-oefening-blok { border-top: 0.2mm solid #e5e7eb; }
 
   /* ── Wedstrijdselectie-teamsheet (components/MatchSquadPrintList.tsx) ──

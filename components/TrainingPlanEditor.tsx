@@ -1066,10 +1066,10 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         // Binnen een parallelle groep (isGroup) is de kolom te
                         // smal voor de gefloate volle-breedte-stijl: geen float,
                         // smaller diagram/formatievelden.
-                        <div className={isGroup ? 'mt-2 print:mt-[1mm] print:float-none print:w-[26mm] print:mr-[3mm]' : 'mt-2 print:mt-[1mm] print:float-left print:w-[32mm] print:mr-[3mm]'}>
+                        <div className={isGroup ? 'mt-2 print:mt-[1mm] print:float-none print:w-[26mm] print:mr-[3mm]' : 'mt-2 print:mt-[1mm] print:float-left print:w-[28mm] print:mr-[3mm]'}>
                           {o.diagram ? (
                             <>
-                              <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[26mm]!' : 'print:w-[32mm]!'} />
+                              <DiagramView diagram={o.diagram} sizePx={110} className={isGroup ? 'print:w-[26mm]!' : 'print:w-[28mm]!'} />
                               {/* Op scherm alleen: op de afdruk zit dezelfde
                                   info al in de kopregel hierboven (geen extra
                                   mm). print:hidden. */}
@@ -1081,7 +1081,15 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             </>
                           ) : (
                             <div className="flex flex-wrap gap-2 print:flex-col print:gap-[1mm]">
-                              {k.bezetting.teams.map((tm, i) => {
+                              {(() => {
+                              // Afdruk (2026-10-22): identieke veldjes (zelfde
+                              // label = zelfde maat + formatie) maar één keer,
+                              // met het aantal erbij ("2× …"). Bij 4v4 of 4
+                              // gelijke teams stonden er anders 2–4 dezelfde
+                              // veldjes ónder elkaar en bepaalden zíj de hoogte
+                              // van de oefening (tot 151mm), niet de namen.
+                              // Op het scherm blijft elk team zijn eigen veldje.
+                              const labels = k.bezetting.teams.map((tm, i) => {
                                 const basis = basisFormatieDef(tm)
                                 // Mismatch-resolutie, PER TEAM (eigenaarsbesluit):
                                 // vergelijk de effectieve grootte van DIT team
@@ -1093,19 +1101,33 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                                 // bereik zouden verliezen. `Object.is` i.p.v.
                                 // `!==` zodat een corrupte NaN-basisgrootte
                                 // niet eeuwig als "afwijkend" telt.
-                                const basisGrootte = o.teams[i]?.grootte
-                                const effectiefAfwijkend = !Object.is(tm.grootte, basisGrootte)
+                                const effectiefAfwijkend = !Object.is(tm.grootte, o.teams[i]?.grootte)
                                 const maat = effectiefAfwijkend ? String(tm.grootte) : teamBereikLabel(tm)
+                                return `${maat}${basis ? ` · ${basis.label}` : ''}`
+                              })
+                              const eersteIndex = new Map<string, number>()
+                              const aantal = new Map<string, number>()
+                              labels.forEach((l, i) => {
+                                if (!eersteIndex.has(l)) eersteIndex.set(l, i)
+                                aantal.set(l, (aantal.get(l) ?? 0) + 1)
+                              })
+                              return k.bezetting.teams.map((tm, i) => {
+                                const basis = basisFormatieDef(tm)
+                                const label = labels[i]
+                                const dubbel = eersteIndex.get(label) !== i
+                                const n = aantal.get(label) ?? 1
                                 return (
                                   <FormationField
                                     key={i}
                                     positions={basis?.positions ?? []}
-                                    label={`${maat}${basis ? ` · ${basis.label}` : ''}`}
+                                    label={label}
+                                    printLabel={n > 1 ? `${n}× ${label}` : undefined}
                                     sizePx={56}
-                                    className={isGroup ? 'print:w-[18mm]!' : 'print:w-[22mm]!'}
+                                    className={`${isGroup ? 'print:w-[18mm]!' : 'print:w-[20mm]!'}${dubbel ? ' print:hidden' : ''}`}
                                   />
                                 )
-                              })}
+                              })
+                              })()}
                             </div>
                           )}
                         </div>

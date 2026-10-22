@@ -496,37 +496,43 @@ export default function TeamIndelingEditor({ koppelingId, eventId, teams, initia
       </div>
       </div>
 
-      {/* Print-only compacte teamindeling. Prioriteit van de eigenaar: de
-          indeling (wie waar staat) moet goed leesbaar blijven — het
+      {/* Print-only teamindeling. Prioriteit van de eigenaar: de indeling (wie
+          waar staat) moet op het veld in één oogopslag leesbaar zijn — het
           diagram/formatieveld ernaast (TrainingPlanEditor.tsx) is slechts een
-          geheugensteun en mag klein. Eén regel per team i.p.v. losse chips
-          met padding/border; leest dezelfde `indeling`/`pool`-state als de
-          interactieve editor hierboven (zie comment bij de openende div). */}
-      <div className="hidden print:block print:text-[9px] print:leading-snug print:text-ink">
-        {teams.map((team, i) => {
-          const ids = indeling[i] ?? []
-          if (ids.length === 0) return null
-          const teamLabel = t.teamIndeling.teamLabel.replace('{n}', String(i + 1))
-          const names = ids
-            .map((id) => {
-              const player = playerById.get(id)
-              if (!player) return t.teamIndeling.unknownPlayer
-              const absent = !presentSet.has(id)
-              return absent ? `${player.name} (${t.teamIndeling.absentWarning})` : player.name
-            })
-            .join(', ')
-          return (
-            <p key={i}>
-              <span className="font-bold">{teamLabel} ({ids.length})</span>: {names}
-            </p>
-          )
-        })}
+          geheugensteun en mag klein. Sinds 2026-10-22 (op verzoek) per team
+          een kolommetje met de namen ONDER ELKAAR op ±10,5pt (was één
+          komma-regel op 9px ≈ 6,5pt); opmaak via .print-indeling-* in het
+          printblok van app/globals.css. Leest dezelfde `indeling`/`pool`-
+          state als de interactieve editor hierboven (zie comment bij de
+          openende div). */}
+      <div className="hidden print:block print:text-ink">
+        <div className="print-indeling-grid">
+          {teams.map((team, i) => {
+            const ids = indeling[i] ?? []
+            if (ids.length === 0) return null
+            const teamLabel = t.teamIndeling.teamLabel.replace('{n}', String(i + 1))
+            return (
+              <div key={i} className="print-indeling-team">
+                <p className="print-indeling-kop print-accent-text">{teamLabel} ({ids.length})</p>
+                <ul className="print-indeling-namen">
+                  {ids.map((id) => {
+                    const player = playerById.get(id)
+                    if (!player) return <li key={id}>{t.teamIndeling.unknownPlayer}</li>
+                    const absent = !presentSet.has(id)
+                    return <li key={id}>{absent ? `${player.name} (${t.teamIndeling.absentWarning})` : player.name}</li>
+                  })}
+                </ul>
+              </div>
+            )
+          })}
+        </div>
         {/* Alleen zodra er íéts is ingedeeld: bij een volledig lege indeling
             zou "Nog niet ingedeeld: <alle aanwezigen>" geen informatie
             toevoegen en (per oefening herhaald) de afdruk volproppen —
-            print-verstrakking 2026-08-24. */}
+            print-verstrakking 2026-08-24. Bewust één regel en kleiner: het
+            is restinformatie, niet de indeling zelf. */}
         {pool.length > 0 && indeling.some((ids) => (ids ?? []).length > 0) && (
-          <p>
+          <p className="print-indeling-pool">
             <span className="font-bold">{t.teamIndeling.poolLabelPrint}</span>: {pool.map((p) => p.name).join(', ')}
           </p>
         )}
