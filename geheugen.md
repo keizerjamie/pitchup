@@ -3947,7 +3947,7 @@ tabbladen, en **korte, zachte animaties voor menu's en onderbladen**.
 - Checks: typecheck/lint/build groen; alleen `cyclusweek-correctie` AC1/AC12 rood (bekend).
   Nieuw: components/RouteTransition.test.tsx (10).
 
-## Trainingsplan-print: teamnamen groot en onder elkaar (2026-10-22)
+## Trainingsplan-print: teamnamen groot en onder elkaar (2026-10-22, commit `5596b83`, live)
 Vraag: "de namen een stuk groter naast de oefeningen". Jamie koos: **teamindeling per oefening**
 (niet de aanwezigheidskolom), **namen onder elkaar per team**, en **zo veel mogelijk op 1 A4**.
 - `TeamIndelingEditor` en `ParallelGroepEditor` (zelfde vorm voor consistentie): print-blok is nu
