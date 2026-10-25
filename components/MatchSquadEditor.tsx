@@ -1,6 +1,7 @@
 'use client'
 
-import { useRef, useState, useTransition } from 'react'
+import { useRef, useState } from 'react'
+import { useOpslagTransition } from '@/lib/opslag-wachtrij'
 import Link from 'next/link'
 import { toggleSquadPlayer } from '@/app/actions/match-squad'
 import { updateGatherTime } from '@/app/actions/events'
@@ -19,6 +20,8 @@ interface Props {
   hasAnyActivePlayers: boolean
   opponent: string | null
   dateLabel: string
+  // Kale YYYY-MM-DD van de wedstrijd; alleen voor de bestandsnaam van de PDF.
+  eventDate: string
   teamName: string | null
   teamLogoUrl: string | null
   // Inline literal union i.p.v. het `HomeAway`-type — dit component geeft de
@@ -52,6 +55,7 @@ export default function MatchSquadEditor({
   hasAnyActivePlayers,
   opponent,
   dateLabel,
+  eventDate,
   teamName,
   teamLogoUrl,
   homeAway,
@@ -70,7 +74,7 @@ export default function MatchSquadEditor({
   // zelf — enkel gebruikt om een niet-aanwezige, al-geselecteerde speler een
   // duidelijk label te geven i.p.v. hem stilzwijgend te verbergen.
   const presentIds = new Set(presentPlayerIds)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useOpslagTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
   const t = useDict()
 
@@ -85,7 +89,7 @@ export default function MatchSquadEditor({
   // selectie-toggle hierboven, maar losstaand (eigen pending/error-state) —
   // een mislukte tijd-save mag de spelerselectie niet blokkeren en andersom.
   const [gatherTime, setGatherTime] = useState<string | null>(initialGatherTime)
-  const [gatherPending, startGatherTransition] = useTransition()
+  const [gatherPending, startGatherTransition] = useOpslagTransition()
   const [gatherError, setGatherError] = useState<string | null>(null)
   const lastConfirmedGatherRef = useRef<string | null>(initialGatherTime)
 
@@ -164,7 +168,7 @@ export default function MatchSquadEditor({
           <span className="font-display text-[17px] font-bold text-ink">
             {t.matchSquad.selectedCount.replace('{n}', String(selected.size))}
           </span>
-          <PrintButton disabled={selected.size === 0} />
+          <PrintButton disabled={selected.size === 0} pdf={{ doel: 'selectie', eventId, datum: eventDate }} />
         </div>
         {selected.size === 0 && (
           <p className="text-[13px] font-semibold text-faint">{t.matchSquad.emptyExportHint}</p>

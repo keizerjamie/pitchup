@@ -51,6 +51,7 @@ function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]>
         presentPlayerIds={overrides.presentPlayerIds ?? []}
         hasAnyActivePlayers={overrides.hasAnyActivePlayers ?? true}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
+        eventDate="2026-08-09"
         dateLabel={overrides.dateLabel ?? 'zondag 9 augustus 2026'}
         teamName={'teamName' in overrides ? overrides.teamName ?? null : null}
         teamLogoUrl={'teamLogoUrl' in overrides ? overrides.teamLogoUrl ?? null : null}

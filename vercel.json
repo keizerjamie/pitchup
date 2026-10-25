@@ -1,4 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["dub1"]
+  "regions": ["dub1"],
+  "functions": {
+    "app/api/pdf/route.ts": { "memory": 2048 }
+  }
 }

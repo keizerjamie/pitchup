@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useOpslagTransition } from '@/lib/opslag-wachtrij'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { OefeningTeam, Player, Spelerindeling } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
@@ -83,7 +84,7 @@ function hasSize(team: OefeningTeam): boolean {
 
 export default function TeamIndelingEditor({ koppelingId, eventId, teams, initialIndeling, players, presentPlayerIds, canEdit = true }: Props) {
   const t = useDict()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useOpslagTransition()
   const [indeling, setIndeling] = useState<string[][]>(() => normalize(initialIndeling, teams.length).teams)
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)

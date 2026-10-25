@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useOpslagTransition } from '@/lib/opslag-wachtrij'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Player } from '@/lib/types'
 import type { TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
@@ -66,7 +67,7 @@ function buildAssignments(leden: TrainingOefeningMetBezetting[]): Record<string,
 
 export default function ParallelGroepEditor({ eventId, groepId, leden, players, presentPlayerIds, canEdit = true }: Props) {
   const t = useDict()
-  const [, startTransition] = useTransition()
+  const [, startTransition] = useOpslagTransition()
   const [assignments, setAssignments] = useState<Record<string, string[]>>(() => buildAssignments(leden))
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)

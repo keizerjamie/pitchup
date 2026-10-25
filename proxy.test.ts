@@ -92,6 +92,13 @@ describe('isPublicPath', () => {
     }
   })
 
+  // GET /api/pdf start Chromium met de sessie van de gebruiker; zonder sessie
+  // moet de proxy al doorverwijzen naar /login (Delen als PDF).
+  it('houdt de PDF-route achter de login', () => {
+    expect(isPublicPath('/api/pdf')).toBe(false)
+    expect(isPublicPath('/api/pdf?doel=inzichten')).toBe(false)
+  })
+
   // Zonder deze grens zou een pad dat toevallig met dezelfde letters begint
   // de hele app openzetten. (De reset-pagina gebruikt al sinds jaar en dag een
   // kale prefix-match; die semantiek is hier bewust niet aangescherpt, want

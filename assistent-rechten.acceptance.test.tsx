@@ -493,7 +493,7 @@ describe('Addendum §8.8 — verzameltijd onder wedstrijd, trainingstype onder t
       <DictProvider dict={nl}>
         <MatchSquadEditor
           eventId="e1" players={[makePlayer()]} initialSelectedIds={[]} presentPlayerIds={[]}
-          hasAnyActivePlayers={true} opponent={null} dateLabel="" teamName={null} teamLogoUrl={null}
+          hasAnyActivePlayers={true} opponent={null} dateLabel="" eventDate="2026-08-09" teamName={null} teamLogoUrl={null}
           homeAway={null} kickoffTime={null} location={null} initialGatherTime={null} formItems={[]}
           primaryColor="#000" secondaryColor="#000" canEdit={canEdit(ctx, 'wedstrijd')}
         />
@@ -509,7 +509,7 @@ describe('Addendum §8.8 — verzameltijd onder wedstrijd, trainingstype onder t
       <DictProvider dict={nl}>
         <MatchSquadEditor
           eventId="e1" players={[makePlayer()]} initialSelectedIds={[]} presentPlayerIds={[]}
-          hasAnyActivePlayers={true} opponent={null} dateLabel="" teamName={null} teamLogoUrl={null}
+          hasAnyActivePlayers={true} opponent={null} dateLabel="" eventDate="2026-08-09" teamName={null} teamLogoUrl={null}
           homeAway={null} kickoffTime={null} location={null} initialGatherTime={null} formItems={[]}
           primaryColor="#000" secondaryColor="#000" canEdit={canEdit(ctx, 'wedstrijd')}
         />

@@ -82,6 +82,7 @@ export default async function MatchSquadPage({ params }: Props) {
         hasAnyActivePlayers={hasAnyActivePlayers}
         opponent={event.opponent}
         dateLabel={dateLabel}
+        eventDate={event.date}
         teamName={teamName}
         teamLogoUrl={teamLogoUrl}
         homeAway={event.home_away}

@@ -422,7 +422,7 @@ describe('AC2 — klik roept window.print() precies één keer aan', () => {
     const printSpy = stubPrint()
     render(
       <DictProvider dict={nl}>
-        <PrintButton />
+        <PrintButton pdf={{ doel: 'trainingsplan', eventId: 'e1', datum: '2026-10-28' }} />
       </DictProvider>,
     )
     const button = screen.getByRole('button', { name: nl.trainingPlan.print })
@@ -900,7 +900,7 @@ describe('AC18 — printer-icoon + label "Afdrukken", i18n in alle 5 talen', () 
   it('toont een SVG-icoon náást het tekstlabel', () => {
     render(
       <DictProvider dict={nl}>
-        <PrintButton />
+        <PrintButton pdf={{ doel: 'trainingsplan', eventId: 'e1', datum: '2026-10-28' }} />
       </DictProvider>,
     )
     const button = screen.getByRole('button', { name: nl.trainingPlan.print })
@@ -917,7 +917,7 @@ describe('AC18 — printer-icoon + label "Afdrukken", i18n in alle 5 talen', () 
     expect(dict.trainingPlan.print).toBe(expected)
     render(
       <DictProvider dict={dict}>
-        <PrintButton />
+        <PrintButton pdf={{ doel: 'trainingsplan', eventId: 'e1', datum: '2026-10-28' }} />
       </DictProvider>,
     )
     expect(screen.getByRole('button', { name: expected })).toBeInTheDocument()

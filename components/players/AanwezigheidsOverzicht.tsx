@@ -27,10 +27,10 @@ export function overzichtHref(p: Periode): string {
 
 // Designronde 3: titel eerst, de weergaveschakelaar (lijst/aanwezigheid)
 // eronder — hij stond eerder als grote knoppenrij bóven de titel.
-function Kop({ t, printKnop, schakelaar }: { t: Dict; printKnop: boolean; schakelaar?: ReactNode }) {
+function Kop({ t, printPeriode, schakelaar }: { t: Dict; printPeriode?: Periode; schakelaar?: ReactNode }) {
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title={t.players.title} subtitle={t.players.overzichtSubtitle} actions={printKnop ? <PrintButton /> : undefined} />
+      <PageHeader title={t.players.title} subtitle={t.players.overzichtSubtitle} actions={printPeriode ? <PrintButton pdf={{ doel: 'aanwezigheid', periode: printPeriode }} /> : undefined} />
       {schakelaar}
     </div>
   )
@@ -40,7 +40,7 @@ export default function AanwezigheidsOverzicht({ staat, t, schakelaar }: { staat
   if (staat.soort === 'geenSeizoen') {
     return (
       <div className="flex flex-col gap-5">
-        <Kop t={t} printKnop={false} schakelaar={schakelaar} />
+        <Kop t={t} schakelaar={schakelaar} />
         <div className="max-w-lg surface-card p-10 text-center flex flex-col items-center gap-3">
           <span className="ms text-[40px] text-faint" aria-hidden="true">calendar_month</span>
           <p className="text-ink font-bold">{t.insights.noSeason}</p>
@@ -62,7 +62,7 @@ export default function AanwezigheidsOverzicht({ staat, t, schakelaar }: { staat
     // blijft bruikbaar zodat een andere periode meteen opnieuw kan proberen.
     return (
       <div className="flex flex-col gap-5">
-        <Kop t={t} printKnop={false} schakelaar={schakelaar} />
+        <Kop t={t} schakelaar={schakelaar} />
         <PeriodeFilter actief={staat.periode} t={t} hrefVoor={overzichtHref} />
         <div
           role="alert"
@@ -78,7 +78,7 @@ export default function AanwezigheidsOverzicht({ staat, t, schakelaar }: { staat
     const kleinerDanSeizoen = staat.periode !== 'seizoen'
     return (
       <div className="flex flex-col gap-5">
-        <Kop t={t} printKnop={false} schakelaar={schakelaar} />
+        <Kop t={t} schakelaar={schakelaar} />
         {/* Bij een kortere periode kan er elders wél data zijn: de kiezer
             moet blijven staan, anders zit de gebruiker vast. */}
         {kleinerDanSeizoen && <PeriodeFilter actief={staat.periode} t={t} hrefVoor={overzichtHref} />}
@@ -94,7 +94,7 @@ export default function AanwezigheidsOverzicht({ staat, t, schakelaar }: { staat
   const { rijen, periode } = staat
   return (
     <div className="flex flex-col gap-5">
-      <Kop t={t} printKnop schakelaar={schakelaar} />
+      <Kop t={t} printPeriode={staat.periode} schakelaar={schakelaar} />
       <PeriodeFilter actief={periode} t={t} hrefVoor={overzichtHref} />
 
       <div className="surface-card overflow-hidden">

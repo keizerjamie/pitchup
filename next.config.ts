@@ -12,6 +12,16 @@ const securityHeaders = [
 // <ViewTransition> werkt in de App Router zonder configuratie
 // (node_modules/next/dist/docs/01-app/02-guides/view-transitions.md).
 const nextConfig: NextConfig = {
+  // GET /api/pdf (Delen als PDF): @sparticuz/chromium leest zijn gecomprimeerde
+  // Chromium-binary via `fs` uit zijn eigen bin/-map. Zo'n runtime-pad ziet de
+  // file tracer mogelijk niet, en dan ontbreekt de binary in de functiebundel
+  // ("The input directory .../bin does not exist"). Of dit strikt nodig is,
+  // blijkt uit de preview-build; schaden doet het niet
+  // (node_modules/next/dist/docs/01-app/03-api-reference/05-config/
+  // 01-next-config-js/output.md, outputFileTracingIncludes).
+  outputFileTracingIncludes: {
+    '/api/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
+  },
   experimental: {
     serverActions: {
       // Server-action-bodies zijn standaard op 1MB gecapt. Het clublogo mag 2MB

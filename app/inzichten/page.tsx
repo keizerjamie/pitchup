@@ -342,7 +342,7 @@ export default async function InzichtenPage({
           en een schermindeling op A4 leveren nooit een presentabel document
           op. Zelfde patroon als de wedstrijdselectie (MatchSquadEditor). */}
       <div className="print:hidden max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
-      <PageHeader title={t.insights.pageTitle} subtitle={t.insights.pageSubtitle} actions={<PrintButton />} />
+      <PageHeader title={t.insights.pageTitle} subtitle={t.insights.pageSubtitle} actions={<PrintButton pdf={{ doel: 'inzichten', periode }} />} />
 
       <PeriodeFilter actief={periode} t={t} />
 

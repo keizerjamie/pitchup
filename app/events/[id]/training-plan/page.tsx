@@ -220,7 +220,7 @@ export default async function TrainingPlanPage({ params }: Props) {
             {teamName && <span className="text-xs font-bold print-accent-text">{teamName}</span>}
           </div>
         )}
-        <PrintButton />
+        <PrintButton pdf={{ doel: 'trainingsplan', eventId: id, datum: event.date }} />
       </div>
 
       {/* Desktop: planner left, attendance overview right (sticky). Mobile: overview on top.

@@ -406,6 +406,7 @@ describe('Live-update — verzameltijd-wijziging beweegt het print-blok direct m
           presentPlayerIds={['p1']}
           hasAnyActivePlayers
           opponent="FC Rivalen"
+          eventDate="2026-08-09"
           dateLabel="zondag 9 augustus 2026"
           teamName="FC Voorbeeld"
           teamLogoUrl={null}

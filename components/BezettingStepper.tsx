@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useOpslagTransition } from '@/lib/opslag-wachtrij'
 import type { AantallenOverride } from '@/lib/types'
 import {
   bereikLabelVoor,
@@ -53,7 +54,7 @@ function concreteVan(basis: BezettingBasis, initialAantallen: AantallenOverride 
 
 export default function BezettingStepper({ koppelingId, eventId, basis, initialAantallen, aanwezigAantal, canEdit = true }: Props) {
   const t = useDict()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useOpslagTransition()
   const [aantallen, setAantallen] = useState<Aantallen>(() => concreteVan(basis, initialAantallen, aanwezigAantal))
   const [error, setError] = useState<string | null>(null)
 

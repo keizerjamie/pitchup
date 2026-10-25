@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { registreerFlush, useOpslagTransition } from '@/lib/opslag-wachtrij'
 import Link from 'next/link'
 import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, type TrainingsType } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
@@ -81,7 +82,7 @@ const EMPTY_INDELING: Spelerindeling = []
 
 export default function TrainingPlanEditor({ eventId, initialDoelstelling, initialOefeningen, library, currentSteps, hasNulmeting, suggestion, players, presentPlayerIds, startTijd, kopieerOpties, initialTrainingstype, canEdit = true, userId }: Props) {
   const t = useDict()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useOpslagTransition()
   const [doelstelling, setDoelstelling] = useState(initialDoelstelling ?? '')
   const [doelstellingSaved, setDoelstellingSaved] = useState(false)
   const [koppelingen, setKoppelingen] = useState<TrainingOefeningMetBezetting[]>(initialOefeningen)
@@ -178,15 +179,35 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     lastConfirmedDuurRef.current = Object.fromEntries(initialOefeningen.map((k) => [k.id, k.duur_min ?? null]))
   }, [initialOefeningen])
   const duurTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  // Opslagen die nog op hun debounce wachten (sleutel 'doelstelling' of
+  // `duur:<koppelingId>`), als uit te voeren functie. "PDF delen" vuurt ze
+  // via de flusher hieronder direct af, zodat de PDF de net getypte waarde
+  // bevat in plaats van de oude database-stand.
+  const openstaandeOpslagen = useRef(new Map<string, () => void>())
   const [duurAuto, setDuurAuto] = useState<Record<string, true>>({})
 
-  // Cleanup bij unmount: zonder dit blijven openstaande debounce-timers
-  // (doelstellingTimer, duurTimers) na het verlaten van de pagina hangen en
-  // vuren ze hun setTimeout-callback nog af op een ontmount component. Eén
-  // effect voor beide refs — geen gedragswijziging voor de gebruiker, puur
-  // opruimen.
+  // Eén effect voor beide refs. Bij mount registreert het de PDF-flusher
+  // (voert openstaande debounce-opslagen direct uit); bij unmount meldt het die
+  // af en ruimt het de openstaande debounce-timers (doelstellingTimer,
+  // duurTimers) op, zodat ze niet op een ontmount component afvuren.
   useEffect(() => {
+    const afmelden = registreerFlush(() => {
+      const opslagen = openstaandeOpslagen.current
+      for (const [sleutel, voerUit] of [...opslagen]) {
+        if (sleutel === 'doelstelling') {
+          if (doelstellingTimer.current) clearTimeout(doelstellingTimer.current)
+          doelstellingTimer.current = null
+        } else {
+          const koppelingId = sleutel.slice('duur:'.length)
+          if (duurTimers.current[koppelingId]) clearTimeout(duurTimers.current[koppelingId])
+          delete duurTimers.current[koppelingId]
+        }
+        opslagen.delete(sleutel)
+        voerUit()
+      }
+    })
     return () => {
+      afmelden()
       if (doelstellingTimer.current) clearTimeout(doelstellingTimer.current)
       // Bewust de ref op unmount-moment lezen, geen snapshot bij mount:
       // precies de (mogelijk nog lopende) timers op het moment van weggaan
@@ -214,12 +235,17 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     setDoelstelling(val)
     setDoelstellingSaved(false)
     if (doelstellingTimer.current) clearTimeout(doelstellingTimer.current)
-    doelstellingTimer.current = setTimeout(() => {
+    const opslaan = () => {
       startTransition(async () => {
         await saveDoelstelling(eventId, val)
         setDoelstellingSaved(true)
         setTimeout(() => setDoelstellingSaved(false), 2000)
       })
+    }
+    openstaandeOpslagen.current.set('doelstelling', opslaan)
+    doelstellingTimer.current = setTimeout(() => {
+      openstaandeOpslagen.current.delete('doelstelling')
+      opslaan()
     }, 1000)
   }
 
@@ -416,7 +442,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     })
 
     if (duurTimers.current[koppelingId]) clearTimeout(duurTimers.current[koppelingId])
-    duurTimers.current[koppelingId] = setTimeout(() => {
+    const opslaan = () => {
       startTransition(async () => {
         try {
           await updateKoppeling(koppelingId, eventId, { duur_min: value })
@@ -427,6 +453,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           setDuurErrors((prev) => ({ ...prev, [koppelingId]: t.trainingPlan.duurOpslaanMislukt }))
         }
       })
+    }
+    openstaandeOpslagen.current.set(`duur:${koppelingId}`, opslaan)
+    duurTimers.current[koppelingId] = setTimeout(() => {
+      openstaandeOpslagen.current.delete(`duur:${koppelingId}`)
+      opslaan()
     }, 500)
   }
 
