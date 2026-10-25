@@ -3724,8 +3724,9 @@ Feature-factory-keten; werkdocumenten 01–06 in `~/.claude/projects/-Users-jami
 - Print: `AanwezigheidsOverzichtPrint` (dual markup, `.overzicht-tabel` in ongelaagd print-blok,
   `thead` table-header-group, `tr` break-inside avoid). Alleen naam + cijfers (privacy). `PrintButton`
   kreeg een dubbelklik-guard (500 ms) — **teruggedraaid in `6f5b537`**: daarna deden alle printknoppen
-  niets meer in de iOS-beginscherm-app (standalone). Niets meer aan `PrintButton` toevoegen; iOS-print is
-  niet in jsdom/Chromium te testen, alleen op de echte iPhone. `PeriodeFilter` kreeg optionele `hrefVoor`.
+  niets meer in de iOS-beginscherm-app (standalone). **Echte oorzaak (2026-10-25):** iOS voert `window.print()`
+  in een standalone web-app nooit uit (in Safari wel); de guard was het niet. Fix `fb8e8d5`: zie sectie
+  "PrintButton in de iOS-beginscherm-app". iOS-print is niet in jsdom/Chromium te testen, alleen op de iPhone. `PeriodeFilter` kreeg optionele `hrefVoor`.
 
 ### Migraties en livegang
 - `blessure-status.sql` (A-1) + `aanwezigheidsoverzicht.sql` (B-1) gedraaid op 2026-10-20 vóór de push;
@@ -3977,3 +3978,16 @@ Vraag: "de namen een stuk groter naast de oefeningen". Jamie koos: **teamindelin
 - **Preview-gotcha's**: `/login/...`-previewroutes werken niet meer — zonder team toont AppShell de
   lege-teamstaat, ingelogd stuurt proxy `/login*` door naar `/`. Gebruik een tijdelijke route
   buiten /login in het ingelogde paneel (eerste request kan 404 geven tot Turbopack hem oppikt).
+
+## PrintButton in de iOS-beginscherm-app (2026-10-25, `fb8e8d5`)
+- iOS negeert `window.print()` in een standalone web-app (beginscherm, geen browserbalk); de knop deed
+  daar niets. In Safari werkt hij wel. Geen app-bug; niet te repareren in de print-aanroep zelf.
+- `components/PrintButton.tsx`: als `navigator.standalone === true` (bestaat **alleen op iOS**) →
+  `window.open(location.href, '_blank', 'noopener')`, een Safari-weergave met deelknop (Afdrukken,
+  Bewaar als PDF). Anders `window.print()`. Bewust niet `display-mode: standalone`: dat matcht ook
+  Android/desktop-PWA's, waar printen wél werkt.
+- Gotchas: de Safari-weergave laadt de pagina opnieuw van de server (opgeslagen stand, geen
+  niet-opgeslagen schermstate) en deelt mogelijk geen inlog met de app.
+- **Open:** op de iPhone bevestigen dat de weergave opent en ingelogd is.
+- Achtergrond: eerdere vraag "afdrukknop vervangen door deelknop" → Web Share deelt alleen link/tekst/
+  bestand, niet de afdruk-opmaak; volwaardig delen vraagt PDF-generatie (nieuwe dependency/server).
