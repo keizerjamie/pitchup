@@ -57,32 +57,56 @@ describe('PrintButton', () => {
   })
 
   describe('iOS-beginscherm-app (navigator.standalone)', () => {
-    let openSpy: ReturnType<typeof vi.fn<typeof window.open>>
+    let writeText: ReturnType<typeof vi.fn<(tekst: string) => Promise<void>>>
 
     beforeEach(() => {
-      openSpy = vi.fn<typeof window.open>()
-      window.open = openSpy
+      writeText = vi.fn<(tekst: string) => Promise<void>>().mockResolvedValue(undefined)
       Object.defineProperty(window.navigator, 'standalone', { value: true, configurable: true })
+      Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true })
     })
 
     afterEach(() => {
       delete (window.navigator as Navigator & { standalone?: boolean }).standalone
+      Reflect.deleteProperty(window.navigator, 'clipboard')
     })
 
-    it('opent de huidige pagina in een nieuwe (Safari-)weergave in plaats van window.print()', () => {
+    it('toont een melding in plaats van window.print() aan te roepen', () => {
       renderButton()
       fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-      expect(openSpy).toHaveBeenCalledTimes(1)
-      expect(openSpy).toHaveBeenCalledWith(window.location.href, '_blank', 'noopener')
       expect(printSpy).not.toHaveBeenCalled()
+      expect(screen.getByRole('dialog')).toHaveTextContent(nl.trainingPlan.printStandaloneHint)
     })
 
-    it('navigator.standalone === false (Safari zelf): gewoon window.print()', () => {
+    it('"Link kopiëren" zet de huidige URL op het klembord en bevestigt dat', async () => {
+      renderButton()
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.printCopyLink }))
+      expect(writeText).toHaveBeenCalledWith(window.location.href)
+      expect(await screen.findByRole('button', { name: nl.trainingPlan.printLinkCopied })).toBeInTheDocument()
+    })
+
+    it('klembord faalt: toont de link in een veld om zelf te kopiëren', async () => {
+      writeText.mockRejectedValue(new Error('geweigerd'))
+      renderButton()
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.printCopyLink }))
+      const veld = await screen.findByRole('textbox', { name: nl.trainingPlan.printCopyFailed })
+      expect(veld).toHaveValue(window.location.href)
+    })
+
+    it('tik buiten de melding sluit hem', () => {
+      renderButton()
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      fireEvent.pointerDown(document.body)
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('navigator.standalone === false (Safari zelf): gewoon window.print(), geen melding', () => {
       Object.defineProperty(window.navigator, 'standalone', { value: false, configurable: true })
       renderButton()
       fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
       expect(printSpy).toHaveBeenCalledTimes(1)
-      expect(openSpy).not.toHaveBeenCalled()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
   })
 

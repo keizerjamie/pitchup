@@ -3979,15 +3979,19 @@ Vraag: "de namen een stuk groter naast de oefeningen". Jamie koos: **teamindelin
   lege-teamstaat, ingelogd stuurt proxy `/login*` door naar `/`. Gebruik een tijdelijke route
   buiten /login in het ingelogde paneel (eerste request kan 404 geven tot Turbopack hem oppikt).
 
-## PrintButton in de iOS-beginscherm-app (2026-10-25, `fb8e8d5`)
+## PrintButton in de iOS-beginscherm-app (2026-10-25)
 - iOS negeert `window.print()` in een standalone web-app (beginscherm, geen browserbalk); de knop deed
   daar niets. In Safari werkt hij wel. Geen app-bug; niet te repareren in de print-aanroep zelf.
-- `components/PrintButton.tsx`: als `navigator.standalone === true` (bestaat **alleen op iOS**) →
-  `window.open(location.href, '_blank', 'noopener')`, een Safari-weergave met deelknop (Afdrukken,
-  Bewaar als PDF). Anders `window.print()`. Bewust niet `display-mode: standalone`: dat matcht ook
-  Android/desktop-PWA's, waar printen wél werkt.
-- Gotchas: de Safari-weergave laadt de pagina opnieuw van de server (opgeslagen stand, geen
-  niet-opgeslagen schermstate) en deelt mogelijk geen inlog met de app.
-- **Open:** op de iPhone bevestigen dat de weergave opent en ingelogd is.
-- Achtergrond: eerdere vraag "afdrukknop vervangen door deelknop" → Web Share deelt alleen link/tekst/
-  bestand, niet de afdruk-opmaak; volwaardig delen vraagt PDF-generatie (nieuwe dependency/server).
+- **Mislukte poging `fb8e8d5`:** `window.open(location.href, '_blank')` geeft op de iPhone een kort zwart
+  scherm en verder niets. iOS houdt adressen binnen het bereik van de web-app (manifest `start_url: "/"`,
+  geen `scope` → de hele site) in de app; alleen adressen daarbuiten openen een Safari-weergave.
+- **Tussenoplossing (huidig):** als `navigator.standalone === true` (bestaat **alleen op iOS**) opent de knop
+  een melding (`role="dialog"`, popover-stijl van `OverflowMenu`) met "Link kopiëren" (`navigator.clipboard`,
+  fallback = geselecteerd invoerveld, zelfde als `InviteLinkCard`). Anders `window.print()`. Bewust niet
+  `display-mode: standalone`: dat matcht ook Android/desktop-PWA's, waar printen wél werkt.
+  i18n: `trainingPlan.printStandaloneHint|printCopyLink|printLinkCopied|printCopyFailed` (5 talen).
+- **Definitieve oplossing:** delen als PDF (Web Share met bestand), via de feature-factory.
+- Les: twee iOS-gokken live gezet zonder meting (`6f5b537`, `fb8e8d5`). Eerst vragen "Safari of
+  beginscherm-app?" en geen iOS-gedrag aannemen dat niet op het toestel is bevestigd.
+- Achtergrond: Web Share deelt alleen link/tekst/bestand, niet de afdruk-opmaak; een link is voor
+  ontvangers zonder account onbruikbaar.
