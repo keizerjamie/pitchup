@@ -56,6 +56,36 @@ describe('PrintButton', () => {
     expect(button).not.toBeDisabled()
   })
 
+  describe('iOS-beginscherm-app (navigator.standalone)', () => {
+    let openSpy: ReturnType<typeof vi.fn<typeof window.open>>
+
+    beforeEach(() => {
+      openSpy = vi.fn<typeof window.open>()
+      window.open = openSpy
+      Object.defineProperty(window.navigator, 'standalone', { value: true, configurable: true })
+    })
+
+    afterEach(() => {
+      delete (window.navigator as Navigator & { standalone?: boolean }).standalone
+    })
+
+    it('opent de huidige pagina in een nieuwe (Safari-)weergave in plaats van window.print()', () => {
+      renderButton()
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      expect(openSpy).toHaveBeenCalledTimes(1)
+      expect(openSpy).toHaveBeenCalledWith(window.location.href, '_blank', 'noopener')
+      expect(printSpy).not.toHaveBeenCalled()
+    })
+
+    it('navigator.standalone === false (Safari zelf): gewoon window.print()', () => {
+      Object.defineProperty(window.navigator, 'standalone', { value: false, configurable: true })
+      renderButton()
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      expect(printSpy).toHaveBeenCalledTimes(1)
+      expect(openSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it('disabled={true}: de knop heeft het disabled-attribuut en een klik roept window.print() niet aan', () => {
     render(
       <DictProvider dict={nl}>

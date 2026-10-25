@@ -2,12 +2,29 @@
 
 import { useDict } from '@/lib/i18n-context'
 
+// iOS voert window.print() niet uit in de beginscherm-app (standalone): de
+// tik doet dan niets, terwijl dezelfde knop in Safari wel afdrukt. Daar openen
+// we de pagina daarom in een Safari-weergave, waarvan de deelknop Afdrukken en
+// Bewaar als PDF biedt. `navigator.standalone` bestaat alleen op iOS, dus een
+// geïnstalleerde app op Android/desktop (waar printen wél werkt) blijft printen.
+function isIosBeginschermApp() {
+  return (navigator as Navigator & { standalone?: boolean }).standalone === true
+}
+
+function handleClick() {
+  if (isIosBeginschermApp()) {
+    window.open(window.location.href, '_blank', 'noopener')
+    return
+  }
+  window.print()
+}
+
 export default function PrintButton({ className = '', disabled = false }: { className?: string; disabled?: boolean }) {
   const t = useDict()
   return (
     <button
       type="button"
-      onClick={() => window.print()}
+      onClick={handleClick}
       disabled={disabled}
       // Designronde 3: pilvorm in de secundaire knopstijl; op smalle schermen
       // alleen het icoon (label blijft voor schermlezers), anders drukt hij
