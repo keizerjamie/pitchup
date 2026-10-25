@@ -3990,8 +3990,46 @@ Vraag: "de namen een stuk groter naast de oefeningen". Jamie koos: **teamindelin
   fallback = geselecteerd invoerveld, zelfde als `InviteLinkCard`). Anders `window.print()`. Bewust niet
   `display-mode: standalone`: dat matcht ook Android/desktop-PWA's, waar printen wél werkt.
   i18n: `trainingPlan.printStandaloneHint|printCopyLink|printLinkCopied|printCopyFailed` (5 talen).
-- **Definitieve oplossing:** delen als PDF (Web Share met bestand), via de feature-factory.
+- **Definitieve oplossing:** delen als PDF, live als `9781223` — zie sectie "Feature: Delen als PDF".
 - Les: twee iOS-gokken live gezet zonder meting (`6f5b537`, `fb8e8d5`). Eerst vragen "Safari of
   beginscherm-app?" en geen iOS-gedrag aannemen dat niet op het toestel is bevestigd.
 - Achtergrond: Web Share deelt alleen link/tekst/bestand, niet de afdruk-opmaak; een link is voor
   ontvangers zonder account onbruikbaar.
+
+## Feature: Delen als PDF (2026-10-25, `9781223`)
+Via de feature-factory. Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-delen-pdf/`.
+- **Gedrag:** `PrintButton` heeft een verplichte `pdf`-prop (`PdfKnopDoel`: trainingsplan/selectie met
+  `eventId` + `datum`, aanwezigheid/inzichten met `periode`). Modus via `lib/deel-modus.ts`
+  (`useSyncExternalStore`, server-snapshot `afdrukken`): `delen` = touch-toestel of iOS-standalone én
+  `canShare({files:[pdf]})`; `link` = iOS-standalone zonder canShare (oude melding als noodroute);
+  anders `afdrukken` (`window.print()`). jsdom heeft `matches:false` → bestaande tests zien `afdrukken`.
+- **Server:** `GET /api/pdf?doel=&id=|periode=&tz=` (`app/api/pdf/route.ts`, `runtime nodejs`,
+  `maxDuration 60`). Volgorde: `parsePdfParams` → `requireTeamContext` → `assertOwn*Event` (vóór Chromium)
+  → `getSiteUrl()` (nooit Host/Origin) → slot (`lib/pdf/gelijktijdig.ts`, max 2 per instance, anders 429
+  `te_druk`) → `zorgVoorRuimeSessie` → `renderPdf` (`lib/pdf/render.ts`). Fouten: vaste `{fout}`-codes +
+  `logError`-label, `Cache-Control: private, no-store`.
+- **Render:** `playwright-core` 1.61.1 + `@sparticuz/chromium` 149.0.0 (exact gepind; sparticuz volgt geen
+  semver, ESM-only, Node ≥22.17 — Vercel draait 24.x). Op Vercel (`VERCEL=1`) sparticuz, lokaal de
+  Playwright-browsers. Per request een eigen browser + context (viewport 703×1000, light, `timezoneId`
+  van het toestel), cookies host-only op de site-origin, netwerk-allowlist (eigen origin + Supabase),
+  `emulateMedia print` → `pdf({A4, printBackground, preferCSSPageSize})`, `finally` sluit alles.
+  `vercel.json` memory 2048; `next.config.ts` `outputFileTracingIncludes` voor `@sparticuz/chromium/bin`.
+- **Gotcha streaming:** door `app/loading.tsx` streamt elke pagina; `notFound()`/`redirect()` geven dan
+  status 200 met een marker in de HTML. `renderPdf` wacht op `template[id^="B:"]`/`div[hidden][id^="S:"]`
+  en herkent de markers (rust op Next-internals; bij Next-upgrade hertesten).
+- **Gotcha sessie:** supabase-js ververst pas binnen 90 s vóór expiry (`EXPIRY_MARGIN_MS`). Wie de sessie
+  aan een ander proces geeft (hier Chromium) moet zelf zorgen dat het token lang genoeg geldig blijft,
+  anders krijgt alleen dat proces het geroteerde refresh-token. Route ververst zelf bij < 150 s.
+  Client-timeout (65 s) bewust > `maxDuration` en start pas na de opslag-wacht.
+- **Opslag-wachtrij** (`lib/opslag-wachtrij.ts`): `useOpslagTransition` vervangt `useTransition` in
+  TrainingPlanEditor/TeamIndelingEditor/ParallelGroepEditor/BezettingStepper/MatchSquadEditor;
+  debounces (doelstelling 1000 ms, duur 500 ms) registreren een flusher. Modals volgen de wachtrij niet
+  (deelknop onbereikbaar achter scrim; toetsenbordfocus niet gecontroleerd).
+- **iOS:** `navigator.share` vereist een vers gebaar; na de fetch vaak verlopen → staat `klaar`
+  ("PDF delen", tweede tik deelt zonder nieuwe fetch, cache 60 s, vervalt bij nieuwe opslag).
+- **Bestandsnaam:** `lib/pdf-bestandsnaam.ts`; eventdatum (kale YYYY-MM-DD) of `todayLocal()`.
+- **Tests:** `delen-als-pdf.acceptance.test.tsx` (jsdom) + `delen-als-pdf-route.acceptance.test.ts`
+  (node). `npm run test:all` stopt na rode vitest (`&&`) → `test:node` apart draaien.
+- **Open:** iPhone-test (deelmenu, WhatsApp, Bestanden, tweestaps, vergelijking met desktop-afdruk);
+  bevestigen dat Vercel Deployment Protection (standard, geen eigen domein) de server-render niet
+  blokkeert; Vercel-plan vs. `memory 2048`; functieduur/geheugen in de logs.
