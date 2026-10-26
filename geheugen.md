@@ -4082,3 +4082,57 @@ Geen migratie, geen nieuwe dependency.
   koppeling in groep zonder partner. "Alles aanwezig" bij spelers zonder attendance-rij: bestaand gedrag.
 - **Open:** iPhone-test in de beginscherm-app (vegen, `window.confirm` in standalone, rubber-banding, toast-positie
   en timerpauze bij app op achtergrond).
+
+## Feature: Inzichten-metrics fase 1 — wedstrijden + tegendoelpunten (2026-10-26, `7d0a602`, live)
+Eerste van 3 fasen (fase 2 spelers, fase 3 training/kwaliteit volgen apart). Ketendocumenten:
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-metrics/fase1/` (01–07).
+- **Wat:** zes kaarten onderaan /inzichten na `TrainingsinhoudChart`, vaste volgorde: `ThuisUitKaart`,
+  `FormatieKaart`, `TopscorersKaart`, `GeleRodeKaartenLijst`, `KwartierChart`, `TegendoelpuntenChart`
+  (gedeelde tabelcellen in `ResultaatTabel`). Wedstrijdanalyse kreeg `TegendoelpuntenSectie` (na Events, via
+  optionele prop `initialTegendoelpunten` op `MatchAnalysisEditor`; de early return zonder aanwezige spelers
+  blijft, dus dan ook geen tegendoelpunten-invoer). KPI-strook, signalen en seizoensrapport bewust NIET
+  aangeraakt — de conclusielaag komt pas na alle drie de fasen.
+- **Nieuwe infra:** tabel `tegendoelpunten` (team_id FK teams cascade, event_id FK events cascade, `soort`
+  `set_piece|open_play` verplicht, `minute` 0..130 optioneel, `created_at` timestamptz) + RPC's
+  `inzichten_wedstrijd_uitslagen`, `inzichten_speler_momenten`, `inzichten_doelpunten_per_minuut`,
+  `inzichten_tegendoelpunten` in **`supabase/inzichten-metrics.sql`** (gedraaid op productie 2026-10-26 via
+  Supabase-MCP als migratie `inzichten_metrics_fase1`; RLS-blokken 2/22/26 geslaagd; functiebodies identiek).
+  RLS: lezen `is_team_member`, insert/delete `can_edit(team_id,'wedstrijd')` + insert-check "wedstrijd van
+  hetzelfde team"; **bewust geen update-policy**. In `TEAM_TABELLEN` (nu veertien) na `match_events`.
+- **Waarom een eigen tabel** en niet `match_events.player_id` nullable: dat zou `deleteMatchEvent`,
+  `HerstelWedstrijdMoment`, `playerName()`, de kind-whitelist, `telMatchEvents` en `getSpelerStatistieken`
+  raken. Kolom heet `soort`, niet `type` (alias-valkuil `e.type`/`p.type`).
+- **Rekenwerk hybride:** SQL filtert/groepeert per team, uitslag/punten/bakken in pure functies in
+  `lib/inzichten.ts` (`splitsThuisUit`, `resultatenPerFormatie`, `bepaalTopscorers`, `kaartenPerSpeler`,
+  `telPerKwartier`, `telTegendoelpunten`, `kwartierBak`, `PUNTEN_PER_UITSLAG`, `KWARTIER_BAKKEN`) —
+  `matchResult()` blijft de enige uitslagregel. Vier losse RPC's zodat elke bron los faalt (`unwrapBron` in
+  page.tsx → `bronFout` per kaart; `PGRST202` als de migratie ontbreekt).
+- **Productbesluiten (V1–V9):** `home_away = null` telt alleen in het totaal (regel "Onbekend"); gasten én
+  inactieven tellen mee in topscorers/kaarten (label "gast"; de RPC filtert bewust NIET op `p.active`/`p.type` —
+  afwijkend van de andere inzichten-RPC's); alle wedstrijdtypen; bakken 1–15 … 76–90 + `90+` (91–130), minuut 0
+  in de eerste, 45+2 (=47) valt in 46–60; % met assist = assists/doelpunten, gelabeld als benadering, max 100;
+  punten 3/1/0; afwijkingshint tegendoelpunten pas bij ≥1 vastgelegd (anders zeurt elke oude wedstrijd).
+- **Totalen uit de uitslag, `match_events` alleen voor toewijzing.** Assists zijn niet aan een doelpunt
+  gekoppeld. "x van y met minuut": y = vastgelegde momenten, niet `goals_for`.
+- **Venster:** alle vier RPC's krijgen `venster`, niet `verleden` (consistent met `doelsaldo`, totaal saldo
+  Thuis/uit == KPI). `limit 201` = `MAX_SEIZOEN_WEDSTRIJDEN + 1` → bij 201 rijen toont de kaart "afgekapt"
+  i.p.v. stil verkeerde cijfers (structuurtest bindt dit).
+- **Idempotent toevoegen:** client kiest `id` (`crypto.randomUUID`, nieuw na succes of wijziging van soort/
+  minuut, gelijk bij retry); server: 23505 + eigen rij bestaat → no-op. Zonder secure context (LAN-IP over http)
+  → opslaanfout, nooit een verzonnen id. Actions in eigen bestand `app/actions/tegendoelpunten.ts` (zodat de
+  bestaande `vi.mock('@/app/actions/match-analysis')`-factory niet onvolledig wordt).
+- **Kleur:** standaardsituatie `--panel-blue-fg` + nieuwe `.chart-fill-blue`, open spel rood. Amber/rood faalde
+  de palette-validator in light (CVD ΔE ~5, normal-vision 9,1 < 15).
+- **Tests:** `inzichten-metrics.acceptance.test.tsx` (verifier, 93, per AC-id, eigen harnas met in-memory DB),
+  `inzichten-metrics-migratie.acceptance.test.ts` (leest de SQL als tekst: invoker, teamfilter op elke alias,
+  lineups-filter in de ON, limit, grants, geen update-policy, blok 26), uitgebreide `inzichten.acceptance.test.tsx`
+  (handlers gebruiken `args.p_team_id`, niet de constante). Mutatiecheck 12/12 rood.
+- **Gotchas:** `supabase/inzichten.sql` is verouderd (auth.uid()-signaturen) en `inzichten-team-id.sql` NOOIT
+  opnieuw draaien — nieuwe RPC's dus in een eigen bestand. `npm run test:all` slaat `test:node` over zodra
+  vitest rood is (`&&`); met de bekende rode `cyclusweek-correctie` AC1/AC12 apart `npm run test:node` draaien.
+  Verificatiescript zonder assistent: tijdelijk een `team_members`-rij binnen de rollback-transactie invoegen.
+- **Bewust geaccepteerd / open:** `analyseBestaat` telt tegendoelpunten niet mee (wedstrijd met alleen
+  tegendoelpunten = "geen analyse"); event van wedstrijd naar training omgezet houdt zijn tegendoelpunten maar
+  ze tellen niet meer. Verouderde "dertien tabellen"-commentaren in `app/actions/auth.ts`, `app/actions/team.ts`,
+  `supabase/team-fk-naar-teams.sql`, `app/actions/team.test.ts`, `team-verwijderen.acceptance.test.tsx`.
+  Rooktest met twee echte accounts na live open.
