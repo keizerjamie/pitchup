@@ -21,7 +21,9 @@ import {
   saveParallelIndeling,
   verplaatsParallelSpeler,
   saveDoelstelling,
+  herstelKoppeling,
 } from '@/app/actions/training-plan'
+import type { HerstelKoppeling } from '@/lib/herstel'
 
 type TableResult = { data?: unknown; error?: unknown }
 
@@ -57,7 +59,7 @@ function makeSupabase(opts: {
     // de vlakke `eq`-lijst mengt alle statements door elkaar.
     select: [] as { table: string; cols: unknown; eqs: Eq[] }[],
     insert: [] as { table: string; payload: Record<string, unknown> }[],
-    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
+    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; iss?: Eq[] }[],
     delete: [] as { table: string }[],
     // De kolom-begrensde RPC set_event_doelstelling uit
     // supabase/team-rls-gevolgacties.sql. `rpcError` bootst de SQLSTATE na die
@@ -80,10 +82,14 @@ function makeSupabase(opts: {
     for (const m of ['gt', 'lt', 'gte', 'lte', 'in', 'order', 'limit', 'neq']) {
       c[m] = () => c
     }
+    // `.is()` (herstelKoppeling: alleen een partner/kind zonder groep/nesting)
+    // apart vastgelegd, zodat `eqs` de tenant-check blijft.
+    const iss: Eq[] = []
+    c.is = (col: string, val: unknown) => { iss.push({ col, val }); return c }
     c.select = (cols: unknown) => { calls.select.push({ table, cols, eqs }); return c }
     c.eq = (col: string, val: unknown) => { calls.eq.push({ table, col, val }); eqs.push({ col, val }); return c }
     c.insert = (payload: Record<string, unknown>) => { calls.insert.push({ table, payload }); return c }
-    c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload, eqs }); return c }
+    c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload, eqs, iss }); return c }
     c.delete = () => { calls.delete.push({ table }); return c }
     c.single = () => Promise.resolve(nextResult(table))
     c.maybeSingle = () => Promise.resolve(nextResult(table))
@@ -490,15 +496,33 @@ describe('updateKoppeling', () => {
 })
 
 describe('removeOefeningFromTraining', () => {
+  const K1_RIJ = {
+    id: 'k1',
+    event_id: 'e1',
+    oefening_id: 'o1',
+    volgorde: 1,
+    duur_min: 15,
+    stap_override: 3,
+    genest_in: null,
+    spelerindeling: [['p1'], []],
+    aantallen_override: null,
+    parallel_groep_id: null,
+    parallel_spelers: [],
+    created_at: '2024-01-02T00:00:00Z',
+  }
+
+  // training_oefeningen in volgorde: de rij zelf, geneste kinderen, de
+  // volgorde vóór de delete, de delete, (groepsopruiming), normalisatie.
   it('verwijdert alleen de koppeling, niet het bibliotheekitem', async () => {
     const m = makeSupabase({
-      tables: { events: { data: { id: 'e1' } }, training_oefeningen: { error: null } },
+      tables: { events: { data: { id: 'e1' } } },
+      queues: { training_oefeningen: [{ data: K1_RIJ }, { data: [] }, { data: [] }, { error: null }, { data: [] }] },
     })
     use(m)
     await removeOefeningFromTraining('k1', 'e1')
     expect(m.calls.delete).toContainEqual({ table: 'training_oefeningen' })
     expect(m.calls.delete.some((d) => d.table === 'oefeningen')).toBe(false)
-    // Zowel het lezen van de groep als de delete zelf is op event + team gescoped.
+    // Zowel het lezen van de rij als de delete zelf is op event + team gescoped.
     const select = m.calls.select.find((s) => s.table === 'training_oefeningen')!
     expect(select.eqs).toEqual([
       { col: 'id', val: 'k1' },
@@ -508,6 +532,61 @@ describe('removeOefeningFromTraining', () => {
     expect(m.calls.eq).toContainEqual({ table: 'training_oefeningen', col: 'event_id', val: 'e1' })
   })
 
+  it('gooit "Koppeling niet gevonden" bij een onbekende of vreemde koppeling, zonder delete', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e1' } }, training_oefeningen: { data: null } },
+    })
+    use(m)
+    await expect(removeOefeningFromTraining('vreemd', 'e1')).rejects.toThrow('Koppeling niet gevonden')
+    expect(m.calls.delete).toHaveLength(0)
+  })
+
+  it('geeft de volledige herstel-snapshot terug: rij, kinderen en volgorde van vóór de delete', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e1' } } },
+      queues: {
+        training_oefeningen: [
+          { data: K1_RIJ },
+          { data: [{ id: 'k3' }] },
+          { data: [
+            { id: 'k2', volgorde: 0, parallel_groep_id: null, created_at: '2024-01-01T00:00:00Z' },
+            { id: 'k1', volgorde: 1, parallel_groep_id: null, created_at: '2024-01-02T00:00:00Z' },
+            { id: 'k3', volgorde: 2, parallel_groep_id: null, created_at: '2024-01-03T00:00:00Z' },
+          ] },
+          { error: null },
+          { data: [] },
+        ],
+      },
+    })
+    use(m)
+    expect(await removeOefeningFromTraining('k1', 'e1')).toEqual({
+      soort: 'koppeling',
+      teamId: 'team-1',
+      id: 'k1',
+      eventId: 'e1',
+      oefeningId: 'o1',
+      volgorde: 1,
+      duurMin: 15,
+      stapOverride: 3,
+      genestIn: null,
+      spelerindeling: [['p1'], []],
+      aantallenOverride: null,
+      parallelGroepId: null,
+      parallelSpelers: [],
+      createdAt: '2024-01-02T00:00:00Z',
+      partner: null,
+      kinderenGenestIds: ['k3'],
+      volgordeIds: ['k2', 'k1', 'k3'],
+    })
+    // Kinderen gelezen binnen dit event en team.
+    const kinderen = m.calls.select.filter((s) => s.table === 'training_oefeningen')[1]
+    expect(kinderen.eqs).toEqual([
+      { col: 'event_id', val: 'e1' },
+      { col: 'team_id', val: 'team-1' },
+      { col: 'genest_in', val: 'k1' },
+    ])
+  })
+
   it('gooit "Event niet gevonden" bij een event van een ander team', async () => {
     const m = makeSupabase({ tables: { events: { data: null } } })
     use(m)
@@ -515,21 +594,23 @@ describe('removeOefeningFromTraining', () => {
     expect(m.calls.delete).toHaveLength(0)
   })
 
-  it('laat de parallelle groep vervallen als er nog één lid overblijft', async () => {
+  it('laat de parallelle groep vervallen als er nog één lid overblijft, en geeft dat lid als partner terug', async () => {
     const m = makeSupabase({
       tables: { events: { data: { id: 'e1' } } },
       queues: {
         training_oefeningen: [
-          { data: { id: 'k1', parallel_groep_id: 'g1' } },  // groep vóór het verwijderen
-          { error: null },                                   // de delete zelf
-          { data: [{ id: 'k2' }] },                          // resterende leden
-          { error: null },                                   // opruim-update
+          { data: { ...K1_RIJ, parallel_groep_id: 'g1', parallel_spelers: ['p1'] } },  // rij vóór het verwijderen
+          { data: [] },                                                               // geneste kinderen
+          { data: [] },                                                               // volgorde vóór
+          { error: null },                                                            // de delete zelf
+          { data: [{ id: 'k2', parallel_spelers: ['p2'] }] },                         // resterende leden
+          { error: null },                                                            // opruim-update
           { data: [{ id: 'k2', volgorde: 0, parallel_groep_id: null, created_at: '2024-01-02T00:00:00Z' }] },
         ],
       },
     })
     use(m)
-    await removeOefeningFromTraining('k1', 'e1')
+    const herstel = await removeOefeningFromTraining('k1', 'e1')
 
     expect(m.calls.update).toHaveLength(1)
     expect(m.calls.update[0].payload).toEqual({ parallel_groep_id: null, parallel_spelers: [] })
@@ -538,14 +619,20 @@ describe('removeOefeningFromTraining', () => {
       { col: 'event_id', val: 'e1' },
       { col: 'team_id', val: 'team-1' },
     ])
+    expect(herstel.parallelGroepId).toBe('g1')
+    expect(herstel.parallelSpelers).toEqual(['p1'])
+    // Indeling van de partner van vóór het opruimen.
+    expect(herstel.partner).toEqual({ id: 'k2', parallelSpelers: ['p2'] })
   })
 
-  it('laat een groep met twee overgebleven leden intact', async () => {
+  it('laat een groep met twee overgebleven leden intact (geen partner)', async () => {
     const m = makeSupabase({
       tables: { events: { data: { id: 'e1' } } },
       queues: {
         training_oefeningen: [
-          { data: { id: 'k1', parallel_groep_id: 'g1' } },
+          { data: { ...K1_RIJ, parallel_groep_id: 'g1' } },
+          { data: [] },
+          { data: [] },
           { error: null },
           { data: [{ id: 'k2' }, { id: 'k3' }] },
           { data: [
@@ -556,8 +643,350 @@ describe('removeOefeningFromTraining', () => {
       },
     })
     use(m)
-    await removeOefeningFromTraining('k1', 'e1')
+    const herstel = await removeOefeningFromTraining('k1', 'e1')
     expect(m.calls.update).toHaveLength(0)
+    expect(herstel.partner).toBeNull()
+  })
+})
+
+describe('herstelKoppeling', () => {
+  const ID = '0a000000-0000-4000-8000-000000000001'
+  const EVENT = '0e000000-0000-4000-8000-000000000001'
+  const OEF = '0f000000-0000-4000-8000-000000000001'
+  const GROEP = '06000000-0000-4000-8000-000000000001'
+  const PARTNER = '0a000000-0000-4000-8000-000000000002'
+  const KIND = '0a000000-0000-4000-8000-000000000003'
+  const OUDER = '0a000000-0000-4000-8000-000000000004'
+  const P1 = '11111111-1111-4111-8111-111111111111'
+  const P2 = '22222222-2222-4222-8222-222222222222'
+
+  const SNAPSHOT: HerstelKoppeling = {
+    soort: 'koppeling',
+    teamId: 'team-1',
+    id: ID,
+    eventId: EVENT,
+    oefeningId: OEF,
+    volgorde: 1,
+    duurMin: 15,
+    stapOverride: 3,
+    genestIn: null,
+    spelerindeling: [[P1], []],
+    aantallenOverride: null,
+    parallelGroepId: null,
+    parallelSpelers: [],
+    createdAt: '2024-01-02T00:00:00+00:00',
+    partner: null,
+    kinderenGenestIds: [],
+    volgordeIds: [PARTNER, ID],
+  }
+
+  const EIGEN_OEFENING = {
+    data: { id: OEF, categorie: 'partijen_klein', teams: [{ grootte: 4 }, { grootte: 4 }], aantal_neutralen: 0, aantal_neutralen_max: null },
+  }
+
+  function teHerstellen(opts: {
+    koppelingen?: TableResult[]
+    oefening?: TableResult
+    players?: TableResult
+  } = {}) {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: EVENT } },
+        oefeningen: opts.oefening ?? EIGEN_OEFENING,
+        players: opts.players ?? { data: [{ id: P1 }, { id: P2 }] },
+      },
+      queues: {
+        training_oefeningen: opts.koppelingen ?? [
+          { data: null },     // bestaat al?
+          { error: null },    // insert
+          { data: [] },       // normaliseerBlokVolgorde
+        ],
+      },
+    })
+  }
+
+  function insertVan(m: ReturnType<typeof makeSupabase>) {
+    return m.calls.insert.find((i) => i.table === 'training_oefeningen')!.payload
+  }
+
+  it('zet de koppeling terug met originele id/created_at en alle trainingsvelden, team_id uit de sessie', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelKoppeling(SNAPSHOT)
+    expect(insertVan(m)).toEqual({
+      id: ID,
+      team_id: 'team-1',
+      event_id: EVENT,
+      oefening_id: OEF,
+      volgorde: 1,
+      duur_min: 15,
+      stap_override: 3,
+      genest_in: null,
+      spelerindeling: [[P1], []],
+      aantallen_override: null,
+      parallel_groep_id: null,
+      parallel_spelers: [],
+      created_at: '2024-01-02T00:00:00+00:00',
+    })
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT}/training-plan`)
+  })
+
+  it('leest de eigen oefening op ctx.userId (persoonlijk bezit)', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelKoppeling(SNAPSHOT)
+    const sel = m.calls.select.find((s) => s.table === 'oefeningen')!
+    expect(sel.eqs).toEqual([{ col: 'id', val: OEF }, { col: 'team_id', val: 'team-1' }])
+  })
+
+  it('clamt duur en stap opnieuw (stap op de categoriegrens)', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelKoppeling({ ...SNAPSHOT, duurMin: 9999, stapOverride: 999 })
+    expect(insertVan(m).duur_min).toBe(600)
+    expect(insertVan(m).stap_override).toBe(13)
+  })
+
+  it('accepteert andermans oefening als die al in dit team gekoppeld is (oefening_koppelbaar)', async () => {
+    const m = teHerstellen({
+      oefening: { data: null },
+      koppelingen: [
+        { data: null },
+        { data: { id: 'kx', oefeningen: { categorie: 'partijen_klein', teams: [{ grootte: 4 }, { grootte: 4 }] } } },
+        { error: null },
+        { data: [] },
+      ],
+    })
+    use(m)
+    await herstelKoppeling(SNAPSHOT)
+    expect(insertVan(m).oefening_id).toBe(OEF)
+    const koppelbaar = m.calls.select.filter((s) => s.table === 'training_oefeningen')[1]
+    expect(koppelbaar.eqs).toEqual([{ col: 'oefening_id', val: OEF }, { col: 'team_id', val: 'team-1' }])
+  })
+
+  it('weigert andermans oefening zonder bestaande koppeling in dit team', async () => {
+    const m = teHerstellen({ oefening: { data: null }, koppelingen: [{ data: null }, { data: null }] })
+    use(m)
+    await expect(herstelKoppeling(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert een spelerindeling met een vreemde speler', async () => {
+    const m = teHerstellen({ players: { data: [{ id: P2 }] } })
+    use(m)
+    await expect(herstelKoppeling(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('zet genest_in alleen terug als de ouder nog in dit event/team bestaat', async () => {
+    const m = teHerstellen({ koppelingen: [{ data: null }, { data: null }, { error: null }, { data: [] }] })
+    use(m)
+    await herstelKoppeling({ ...SNAPSHOT, genestIn: OUDER })
+    expect(insertVan(m).genest_in).toBeNull()
+
+    const m2 = teHerstellen({ koppelingen: [{ data: null }, { data: { id: OUDER } }, { error: null }, { data: [] }] })
+    use(m2)
+    await herstelKoppeling({ ...SNAPSHOT, genestIn: OUDER })
+    expect(insertVan(m2).genest_in).toBe(OUDER)
+  })
+
+  it('nest de kinderen weer, alleen als ze nog nergens genest zijn, event+team-gescoped', async () => {
+    const m = teHerstellen({ koppelingen: [{ data: null }, { error: null }, { error: null }, { data: [] }] })
+    use(m)
+    await herstelKoppeling({ ...SNAPSHOT, kinderenGenestIds: [KIND] })
+    const upd = m.calls.update.find((u) => 'genest_in' in u.payload)!
+    expect(upd.payload).toEqual({ genest_in: ID })
+    expect(upd.eqs).toEqual([{ col: 'event_id', val: EVENT }, { col: 'team_id', val: 'team-1' }])
+    expect(upd.iss).toEqual([{ col: 'genest_in', val: null }])
+  })
+
+  it('vervallen groep: zet de partner (nog los) met zijn oude indeling terug en de koppeling in de groep', async () => {
+    const m = teHerstellen({
+      koppelingen: [
+        { data: null },                                   // bestaat al?
+        { data: [] },                                     // groep heeft geen leden meer
+        { data: { id: PARTNER, parallel_groep_id: null } }, // partner staat los
+        { error: null },                                  // partner-update
+        { error: null },                                  // insert
+        { data: [] },                                     // normalisatie
+      ],
+    })
+    use(m)
+    await herstelKoppeling({
+      ...SNAPSHOT,
+      parallelGroepId: GROEP,
+      parallelSpelers: [P1],
+      partner: { id: PARTNER, parallelSpelers: [P2] },
+    })
+    const partnerUpdate = m.calls.update.find((u) => u.payload.parallel_groep_id === GROEP)!
+    expect(partnerUpdate.payload).toEqual({ parallel_groep_id: GROEP, parallel_spelers: [P2] })
+    expect(partnerUpdate.eqs).toEqual([
+      { col: 'id', val: PARTNER },
+      { col: 'event_id', val: EVENT },
+      { col: 'team_id', val: 'team-1' },
+    ])
+    expect(partnerUpdate.iss).toEqual([{ col: 'parallel_groep_id', val: null }])
+    expect(insertVan(m).parallel_groep_id).toBe(GROEP)
+    expect(insertVan(m).parallel_spelers).toEqual([P1])
+  })
+
+  it('partner intussen in een andere groep: koppeling komt zonder groep terug', async () => {
+    const m = teHerstellen({
+      koppelingen: [
+        { data: null },
+        { data: [] },
+        { data: { id: PARTNER, parallel_groep_id: 'andere-groep' } },
+        { error: null },
+        { data: [] },
+      ],
+    })
+    use(m)
+    await herstelKoppeling({ ...SNAPSHOT, parallelGroepId: GROEP, parallelSpelers: [P1], partner: { id: PARTNER, parallelSpelers: [] } })
+    expect(m.calls.update.some((u) => u.payload.parallel_groep_id === GROEP)).toBe(false)
+    expect(insertVan(m).parallel_groep_id).toBeNull()
+    expect(insertVan(m).parallel_spelers).toEqual([])
+  })
+
+  it('groep heeft nog leden: koppeling gaat erbij; bij overlap met een lid een lege indeling', async () => {
+    const m = teHerstellen({
+      koppelingen: [{ data: null }, { data: [{ id: PARTNER, parallel_spelers: [P1] }] }, { error: null }, { data: [] }],
+    })
+    use(m)
+    await herstelKoppeling({ ...SNAPSHOT, parallelGroepId: GROEP, parallelSpelers: [P1] })
+    expect(insertVan(m).parallel_groep_id).toBe(GROEP)
+    expect(insertVan(m).parallel_spelers).toEqual([])
+  })
+
+  it('is idempotent: een al teruggezette koppeling levert geen insert op', async () => {
+    const m = teHerstellen({ koppelingen: [{ data: { id: ID } }] })
+    use(m)
+    await herstelKoppeling(SNAPSHOT)
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('23505 en de koppeling staat er in dit team → succes; zonder eigen rij → "Herstel niet mogelijk"', async () => {
+    use(teHerstellen({ koppelingen: [{ data: null }, { error: { code: '23505' } }, { data: { id: ID } }] }))
+    await expect(herstelKoppeling(SNAPSHOT)).resolves.toBeUndefined()
+
+    use(teHerstellen({ koppelingen: [{ data: null }, { error: { code: '23505' } }, { data: null }] }))
+    await expect(herstelKoppeling(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+  })
+
+  it('maakt de partner weer los als de insert faalt, met de generieke melding', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = teHerstellen({
+      koppelingen: [
+        { data: null },
+        { data: [] },
+        { data: { id: PARTNER, parallel_groep_id: null } },
+        { error: null },                                     // partner-update
+        { error: { code: '42501', message: 'new row violates row-level security' } }, // insert
+        { error: null },                                     // compensatie
+      ],
+    })
+    use(m)
+    await expect(herstelKoppeling({
+      ...SNAPSHOT, parallelGroepId: GROEP, partner: { id: PARTNER, parallelSpelers: [] },
+    })).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    const laatste = m.calls.update[m.calls.update.length - 1]
+    expect(laatste.payload).toEqual({ parallel_groep_id: null, parallel_spelers: [] })
+    expect(laatste.eqs).toContainEqual({ col: 'id', val: PARTNER })
+    expect(consoleError.mock.calls.join(' ')).not.toContain('row-level security')
+    consoleError.mockRestore()
+  })
+
+  it('kinderen-update faalt: koppeling en partner worden teruggedraaid, generieke melding, geen succes', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = teHerstellen({
+      koppelingen: [
+        { data: null },                                     // bestaat al?
+        { data: [] },                                       // groep heeft geen leden meer
+        { data: { id: PARTNER, parallel_groep_id: null } }, // partner staat los
+        { error: null },                                    // partner-update
+        { error: null },                                    // insert
+        { error: { code: '57014', message: 'canceling statement due to timeout' } }, // kinderen
+        { error: null },                                    // compensatie: delete koppeling
+        { error: null },                                    // compensatie: partner los
+        { data: [] },                                       // compensatie: normalisatie
+      ],
+    })
+    use(m)
+    await expect(herstelKoppeling({
+      ...SNAPSHOT, parallelGroepId: GROEP, partner: { id: PARTNER, parallelSpelers: [] }, kinderenGenestIds: [KIND],
+    })).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(m.calls.delete).toEqual([{ table: 'training_oefeningen' }])
+    const laatste = m.calls.update[m.calls.update.length - 1]
+    expect(laatste.payload).toEqual({ parallel_groep_id: null, parallel_spelers: [] })
+    expect(laatste.eqs).toContainEqual({ col: 'id', val: PARTNER })
+    expect(revalidatePath).not.toHaveBeenCalled()
+    expect(consoleError.mock.calls.join(' ')).not.toContain('canceling statement')
+    consoleError.mockRestore()
+  })
+
+  it('normalisatie faalt na de insert: koppeling wordt weer verwijderd, generieke melding', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = teHerstellen({
+      koppelingen: [
+        { data: null },                                     // bestaat al?
+        { error: null },                                    // insert
+        { data: [{ id: PARTNER, volgorde: 5, parallel_groep_id: null, created_at: '2024-01-01T00:00:00+00:00' }] }, // normalisatie leest
+        { error: { code: '57014', message: 'canceling statement due to timeout' } }, // volgorde-update
+        { error: null },                                    // compensatie: delete koppeling
+        { data: [] },                                       // compensatie: normalisatie
+      ],
+    })
+    use(m)
+    await expect(herstelKoppeling(SNAPSHOT)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(m.calls.delete).toEqual([{ table: 'training_oefeningen' }])
+    expect(revalidatePath).not.toHaveBeenCalled()
+    expect(consoleError.mock.calls.join(' ')).not.toContain('canceling statement')
+    consoleError.mockRestore()
+  })
+
+  it('zonder kinderen en met geslaagde normalisatie wordt er niets gecompenseerd', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelKoppeling(SNAPSHOT)
+    expect(m.calls.delete).toHaveLength(0)
+  })
+
+  it('weigert een snapshot van een ander team zonder iets te lezen of schrijven', async () => {
+    const m = teHerstellen()
+    use(m)
+    await expect(herstelKoppeling({ ...SNAPSHOT, teamId: 'ander-team' })).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.select.filter((s) => s.table === 'training_oefeningen')).toHaveLength(0)
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert vervalste velden zonder query', async () => {
+    const m = teHerstellen()
+    use(m)
+    for (const fout of [
+      { ...SNAPSHOT, id: 'k1' },
+      { ...SNAPSHOT, eventId: 'e1' },
+      { ...SNAPSHOT, oefeningId: 'o1' },
+      { ...SNAPSHOT, genestIn: 'k0' },
+      { ...SNAPSHOT, parallelGroepId: 'g1' },
+      { ...SNAPSHOT, partner: { id: 'k2', parallelSpelers: [] } },
+      { ...SNAPSHOT, volgorde: Number.NaN },
+      { ...SNAPSHOT, duurMin: '15' as never },
+      { ...SNAPSHOT, createdAt: 'gisteren' },
+      { ...SNAPSHOT, kinderenGenestIds: ['k3'] },
+      { ...SNAPSHOT, volgordeIds: 'k1' as never },
+    ]) {
+      await expect(herstelKoppeling(fout)).rejects.toThrow('Herstel niet mogelijk')
+    }
+    expect(m.calls.select.filter((s) => s.table === 'training_oefeningen')).toHaveLength(0)
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert zonder Training-recht met "Geen toegang"', async () => {
+    const m = makeSupabase({
+      tables: { team_members: { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null } },
+    })
+    use(m)
+    await expect(herstelKoppeling(SNAPSHOT)).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
   })
 })
 

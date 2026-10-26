@@ -36,7 +36,7 @@ export default function ThemeToggle({ className = '' }: { className?: string }) 
       onClick={toggle}
       title={t.home.themeToggle}
       aria-label={t.home.themeToggle}
-      className={`w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:text-ink hover:bg-surface transition-colors ${className}`}
+      className={`relative hit-slop md:[--hit-slop-gap:0px] w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:text-ink hover:bg-surface transition-colors ${className}`}
     >
       <span className="ms text-[20px]">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
     </button>

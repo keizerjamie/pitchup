@@ -16,7 +16,7 @@ const BASE =
   'disabled:opacity-50 disabled:pointer-events-none aria-disabled:opacity-50 aria-disabled:pointer-events-none'
 
 const SIZES: Record<ButtonSize, string> = {
-  sm: 'h-9 px-3.5 text-[13px]',
+  sm: 'relative hit-slop h-9 px-3.5 text-[13px]',
   md: 'h-11 px-5 text-sm',
   lg: 'h-12 px-6 text-[15px]',
 }
@@ -96,7 +96,7 @@ type IconButtonProps = Omit<ComponentProps<'button'>, 'aria-label' | 'children'>
 }
 
 export function IconButton({ className = '', size = 'md', type = 'button', children, ...rest }: IconButtonProps) {
-  const dim = size === 'sm' ? 'w-9 h-9' : 'w-11 h-11'
+  const dim = size === 'sm' ? 'relative hit-slop w-9 h-9' : 'w-11 h-11'
   return (
     <button
       type={type}

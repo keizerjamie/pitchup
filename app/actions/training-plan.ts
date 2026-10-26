@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { assertOwnEvent, assertOwnTrainingEvent, getOwnPlayerIds } from '@/lib/authz'
+import { assertOwnEvent, assertOwnTrainingEvent, getOwnPlayerIds, isUuid } from '@/lib/authz'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefening'
 import { validateSpelerindeling } from '@/lib/spelerindeling'
@@ -12,7 +12,8 @@ import { normalizeOefeningTeams, type AantallenOverride } from '@/lib/types'
 import { joinedCategorie } from '@/lib/periodization'
 import { clampDuurMin } from '@/lib/sessie-tijdlijn'
 import { clampStapOverride, berekenDuurUitStap } from '@/lib/periodization-stappen'
-import { genericError, logError, rpcEventError } from '@/lib/errors'
+import { errorCode, genericError, logError, rpcEventError } from '@/lib/errors'
+import { herstelNietMogelijk, schoonCreatedAt, uuidLijst, type HerstelKoppeling } from '@/lib/herstel'
 import { kopieerKoppelingen, type BronKoppeling } from '@/lib/kopieer-trainingsplan'
 
 // ────────────────────────────────────────────────
@@ -196,26 +197,45 @@ export async function createAndAddOefening(
   return { oefeningId }
 }
 
-// Koppeling verwijderen (laat de bibliotheek-oefening zelf staan).
-export async function removeOefeningFromTraining(koppelingId: string, eventId: string): Promise<void> {
+// Koppeling verwijderen (laat de bibliotheek-oefening zelf staan). Leest de
+// volledige rij, de erin geneste koppelingen en de volgorde van de training
+// vóór de delete, en geeft die als herstel-snapshot terug voor "Ongedaan
+// maken" (herstelKoppeling hieronder).
+export async function removeOefeningFromTraining(
+  koppelingId: string,
+  eventId: string,
+): Promise<HerstelKoppeling> {
   const supabase = await createClient()
   const ctx = await requireTeamContext()
   assertCanEdit(ctx, 'training')
 
   await assertOwnEvent(supabase, eventId, ctx.teamId)
 
-  // Eerst de eventuele parallelle groep lezen: na het verwijderen is niet meer
-  // te achterhalen bij welke groep deze koppeling hoorde. Op event_id gescoped,
-  // zodat een koppeling uit een ándere training van dit team de opruiming niet
-  // op het verkeerde event laat draaien.
+  // De volledige rij, op event_id gescoped zodat een koppeling uit een ándere
+  // training van dit team de opruiming niet op het verkeerde event laat
+  // draaien. Expliciete kolomlijst: de snapshot bevat precies wat herstel
+  // terugschrijft, niets meer.
   const { data: koppeling } = await supabase
     .from('training_oefeningen')
-    .select('id, parallel_groep_id')
+    .select(KOPPELING_SNAPSHOT_KOLOMMEN)
     .eq('id', koppelingId)
     .eq('event_id', eventId)
     .eq('team_id', ctx.teamId)
     .maybeSingle()
-  const groepId = (koppeling as { parallel_groep_id?: string | null } | null)?.parallel_groep_id ?? null
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+  const rij = koppeling as unknown as KoppelingSnapshotRij
+  const groepId = rij.parallel_groep_id ?? null
+
+  // Geneste kinderen: ON DELETE SET NULL wist straks hun genest_in.
+  const { data: kinderen } = await supabase
+    .from('training_oefeningen')
+    .select('id')
+    .eq('event_id', eventId)
+    .eq('team_id', ctx.teamId)
+    .eq('genest_in', koppelingId)
+  const kinderenGenestIds = Array.isArray(kinderen) ? (kinderen as { id: string }[]).map((k) => k.id) : []
+
+  const volgordeIds = sorteerRijen(await haalKoppelingRijen(supabase, eventId, ctx.teamId)).map((r) => r.id)
 
   const { error } = await supabase
     .from('training_oefeningen')
@@ -227,10 +247,331 @@ export async function removeOefeningFromTraining(koppelingId: string, eventId: s
   if (error) throw genericError('trainingPlan.removeOefeningFromTraining', error)
 
   // Blijft er één lid over, dan is het geen parallelle groep meer.
-  await ruimEenzameGroepOp(supabase, eventId, ctx.teamId, groepId)
+  const partner = await ruimEenzameGroepOp(supabase, eventId, ctx.teamId, groepId)
   await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId)
 
   revalidatePath(`/events/${eventId}/training-plan`)
+
+  return {
+    soort: 'koppeling',
+    teamId: ctx.teamId,
+    id: rij.id,
+    eventId,
+    oefeningId: rij.oefening_id,
+    volgorde: rij.volgorde ?? 0,
+    duurMin: rij.duur_min ?? null,
+    stapOverride: rij.stap_override ?? null,
+    genestIn: rij.genest_in ?? null,
+    spelerindeling: rij.spelerindeling ?? [],
+    aantallenOverride: rij.aantallen_override ?? null,
+    parallelGroepId: groepId,
+    parallelSpelers: rij.parallel_spelers ?? [],
+    createdAt: rij.created_at ?? null,
+    partner,
+    kinderenGenestIds,
+    volgordeIds,
+  }
+}
+
+const KOPPELING_SNAPSHOT_KOLOMMEN =
+  'id, event_id, oefening_id, volgorde, duur_min, stap_override, genest_in, spelerindeling, ' +
+  'aantallen_override, parallel_groep_id, parallel_spelers, created_at'
+
+type KoppelingSnapshotRij = {
+  id: string
+  event_id: string
+  oefening_id: string
+  volgorde: number | null
+  duur_min: number | null
+  stap_override: number | null
+  genest_in: string | null
+  spelerindeling: unknown
+  aantallen_override: unknown
+  parallel_groep_id: string | null
+  parallel_spelers: unknown
+  created_at: string | null
+}
+
+async function koppelingBestaat(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+  teamId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('training_oefeningen')
+    .select('id')
+    .eq('id', id)
+    .eq('team_id', teamId)
+    .maybeSingle()
+  return !!data
+}
+
+// Een validator uit lib/ gooit een eigen melding; bij herstel moet de client
+// alleen de niet-onthullende herstelmelding zien.
+function ofNietMogelijk<T>(fn: () => T): T {
+  try {
+    return fn()
+  } catch {
+    throw herstelNietMogelijk()
+  }
+}
+
+// "Ongedaan maken" van removeOefeningFromTraining. Zet de koppeling terug met
+// dezelfde id en created_at (tiebreak in sorteerRijen), herstelt de parallelle
+// groep (partner of resterende leden), de geneste kinderen en de volgorde.
+//
+// De snapshot komt van de client: alles wordt opnieuw gevalideerd en geclampt
+// zoals bij de gewone schrijfacties; `herstel.teamId` alleen als
+// weigercontrole, schrijven altijd met ctx.teamId. De oefening moet koppelbaar
+// zijn (zelfde regel als de INSERT-policy oefening_koppelbaar): eigen oefening
+// van deze gebruiker, of al gekoppeld in dit team. Idempotent.
+export async function herstelKoppeling(herstel: HerstelKoppeling): Promise<void> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
+
+  if (!herstel || typeof herstel !== 'object' || herstel.soort !== 'koppeling') throw herstelNietMogelijk()
+  if (herstel.teamId !== ctx.teamId) throw herstelNietMogelijk()
+  if (!isUuid(herstel.id) || !isUuid(herstel.eventId) || !isUuid(herstel.oefeningId)) throw herstelNietMogelijk()
+  if (herstel.genestIn !== null && !isUuid(herstel.genestIn)) throw herstelNietMogelijk()
+  if (herstel.parallelGroepId !== null && !isUuid(herstel.parallelGroepId)) throw herstelNietMogelijk()
+  if (herstel.partner !== null && (typeof herstel.partner !== 'object' || !isUuid(herstel.partner.id))) {
+    throw herstelNietMogelijk()
+  }
+  if (typeof herstel.volgorde !== 'number' || !Number.isFinite(herstel.volgorde)) throw herstelNietMogelijk()
+  if (herstel.duurMin !== null && typeof herstel.duurMin !== 'number') throw herstelNietMogelijk()
+  if (herstel.stapOverride !== null && typeof herstel.stapOverride !== 'number') throw herstelNietMogelijk()
+  const createdAt = schoonCreatedAt(herstel.createdAt)
+  if (createdAt === undefined) throw herstelNietMogelijk()
+  const kinderen = uuidLijst(herstel.kinderenGenestIds)
+  const volgordeIds = uuidLijst(herstel.volgordeIds)
+  if (!kinderen || !volgordeIds) throw herstelNietMogelijk()
+
+  const eventId = herstel.eventId
+  const id = herstel.id
+
+  try {
+    await assertOwnEvent(supabase, eventId, ctx.teamId)
+  } catch {
+    throw herstelNietMogelijk()
+  }
+
+  const klaar = () => revalidatePath(`/events/${eventId}/training-plan`)
+
+  if (await koppelingBestaat(supabase, id, ctx.teamId)) {
+    klaar()
+    return
+  }
+
+  // Koppelbaarheid + de bibliotheekgegevens voor het clampen, in één
+  // tenant-gescopede query per pad. oefeningen.team_id = EIGENAAR-USER, dus
+  // ctx.userId (lib/authz.ts, assertOwnOefening).
+  type OefData = { categorie?: unknown; teams?: unknown; aantal_neutralen?: unknown; aantal_neutralen_max?: unknown }
+  let oef: OefData | null = null
+  const { data: eigen } = await supabase
+    .from('oefeningen')
+    .select('id, categorie, teams, aantal_neutralen, aantal_neutralen_max')
+    .eq('id', herstel.oefeningId)
+    .eq('team_id', ctx.userId)
+    .maybeSingle()
+  if (eigen) {
+    oef = eigen as OefData
+  } else {
+    const { data: gekoppeld } = await supabase
+      .from('training_oefeningen')
+      .select('id, oefeningen(categorie, teams, aantal_neutralen, aantal_neutralen_max)')
+      .eq('oefening_id', herstel.oefeningId)
+      .eq('team_id', ctx.teamId)
+      .limit(1)
+      .maybeSingle()
+    if (!gekoppeld) throw herstelNietMogelijk()
+    const joined = (gekoppeld as { oefeningen?: unknown }).oefeningen
+    oef = ((Array.isArray(joined) ? joined[0] : joined) ?? {}) as OefData
+  }
+
+  const categorie = joinedCategorie({ oefeningen: oef }) ?? ''
+  const teams = Array.isArray(oef?.teams) ? (oef.teams as unknown[]) : []
+  const neutralenMax = oef?.aantal_neutralen_max
+  const basis: BezettingBasis = {
+    teams: normalizeOefeningTeams(oef?.teams),
+    aantal_neutralen: Number(oef?.aantal_neutralen) || 0,
+    aantal_neutralen_max: typeof neutralenMax === 'number' ? neutralenMax : null,
+  }
+
+  const ownPlayerIds = await getOwnPlayerIds(supabase, ctx.teamId)
+  const spelerindeling = ofNietMogelijk(() =>
+    validateSpelerindeling(herstel.spelerindeling ?? [], { teamCount: teams.length, ownPlayerIds }),
+  )
+  const aantallenOverride = ofNietMogelijk(() => valideerAantallenOverride(herstel.aantallenOverride, basis))
+  let parallelSpelers = ofNietMogelijk(() =>
+    validateParallelSpelers(herstel.parallelSpelers ?? [], { ownPlayerIds }),
+  )
+
+  // genest_in alleen als die ouder nog in deze training van dit team bestaat.
+  let genestIn: string | null = null
+  if (herstel.genestIn && herstel.genestIn !== id) {
+    const { data: ouder } = await supabase
+      .from('training_oefeningen')
+      .select('id')
+      .eq('id', herstel.genestIn)
+      .eq('event_id', eventId)
+      .eq('team_id', ctx.teamId)
+      .maybeSingle()
+    if (ouder) genestIn = herstel.genestIn
+  }
+
+  // Parallelle groep: (a) groep heeft nog leden → erbij, zonder overlap;
+  // (b) groep verviel en de partner staat nog los → partner terug in de groep;
+  // (c) anders (partner intussen elders, of geen groep) → zonder groep.
+  let groepId: string | null = null
+  let partnerTerug: { id: string; spelers: string[] } | null = null
+  if (herstel.parallelGroepId) {
+    const { data: ledenData } = await supabase
+      .from('training_oefeningen')
+      .select('id, parallel_spelers')
+      .eq('event_id', eventId)
+      .eq('team_id', ctx.teamId)
+      .eq('parallel_groep_id', herstel.parallelGroepId)
+    const leden = Array.isArray(ledenData)
+      ? (ledenData as { id: string; parallel_spelers?: string[] | null }[])
+      : []
+    if (leden.length > 0) {
+      groepId = herstel.parallelGroepId
+      try {
+        assertGeenOverlap(parallelSpelers, leden.map((lid) => lid.parallel_spelers))
+      } catch {
+        parallelSpelers = []
+      }
+    } else if (herstel.partner) {
+      const { data: partnerRij } = await supabase
+        .from('training_oefeningen')
+        .select('id, parallel_groep_id')
+        .eq('id', herstel.partner.id)
+        .eq('event_id', eventId)
+        .eq('team_id', ctx.teamId)
+        .maybeSingle()
+      if (partnerRij && !(partnerRij as { parallel_groep_id?: string | null }).parallel_groep_id) {
+        let partnerSpelers: string[]
+        try {
+          partnerSpelers = validateParallelSpelers(herstel.partner.parallelSpelers ?? [], { ownPlayerIds })
+        } catch {
+          partnerSpelers = []
+        }
+        try {
+          assertGeenOverlap(parallelSpelers, [partnerSpelers])
+        } catch {
+          parallelSpelers = []
+        }
+        groepId = herstel.parallelGroepId
+        partnerTerug = { id: herstel.partner.id, spelers: partnerSpelers }
+      }
+    }
+  }
+  if (!groepId) parallelSpelers = []
+
+  // Compensatie: faalt een stap na de partner-update, dan wordt alles wat dit
+  // herstel schreef teruggedraaid, zodat "het item blijft verwijderd" klopt
+  // (zelfde patroon als herstelAfmeldperiode). Na een geslaagde insert gaat de
+  // koppeling weer weg (ON DELETE SET NULL maakt teruggenestte kinderen weer
+  // los) en wordt de volgorde zonder deze koppeling opnieuw genormaliseerd. Elke
+  // stap is best-effort en wordt alleen gelogd: de oorspronkelijke fout bepaalt
+  // de melding.
+  const compenseer = async (koppelingTerug: boolean) => {
+    if (koppelingTerug) {
+      const { error } = await supabase
+        .from('training_oefeningen')
+        .delete()
+        .eq('id', id)
+        .eq('event_id', eventId)
+        .eq('team_id', ctx.teamId)
+      if (error) logError('trainingPlan.herstelKoppeling.compensatie.koppeling', error)
+    }
+    // Alleen losmaken als de partner nog in de groep van dit herstel staat: is
+    // hij intussen elders gegroepeerd (of raakte de guarded partner-update hem
+    // niet), dan blijft hij ongemoeid.
+    if (partnerTerug && groepId) {
+      const { error } = await supabase
+        .from('training_oefeningen')
+        .update({ parallel_groep_id: null, parallel_spelers: [] })
+        .eq('id', partnerTerug.id)
+        .eq('event_id', eventId)
+        .eq('team_id', ctx.teamId)
+        .eq('parallel_groep_id', groepId)
+      if (error) logError('trainingPlan.herstelKoppeling.compensatie', error)
+    }
+    if (koppelingTerug) {
+      try {
+        await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId, volgordeIds.filter((v) => v !== id))
+      } catch {
+        // normaliseerBlokVolgorde logde de fout al (genericError).
+      }
+    }
+  }
+
+  // Eerst de partner terug in de groep (alleen als hij nog los staat), dan de
+  // koppeling zelf. Faalt de insert, dan gaat de partner weer los.
+  if (partnerTerug) {
+    const { error } = await supabase
+      .from('training_oefeningen')
+      .update({ parallel_groep_id: groepId, parallel_spelers: partnerTerug.spelers })
+      .eq('id', partnerTerug.id)
+      .eq('event_id', eventId)
+      .eq('team_id', ctx.teamId)
+      .is('parallel_groep_id', null)
+    if (error) throw genericError('trainingPlan.herstelKoppeling.partner', error)
+  }
+
+  const { error: insertError } = await supabase.from('training_oefeningen').insert({
+    id,
+    team_id: ctx.teamId,
+    event_id: eventId,
+    oefening_id: herstel.oefeningId,
+    volgorde: Math.max(0, Math.min(32767, Math.floor(herstel.volgorde))),
+    duur_min: clampDuurMin(herstel.duurMin),
+    stap_override: clampStapOverride(herstel.stapOverride, categorie),
+    genest_in: genestIn,
+    spelerindeling,
+    aantallen_override: aantallenOverride,
+    parallel_groep_id: groepId,
+    parallel_spelers: parallelSpelers,
+    ...(createdAt ? { created_at: createdAt } : {}),
+  })
+
+  if (insertError) {
+    if (errorCode(insertError) === '23505' && (await koppelingBestaat(supabase, id, ctx.teamId))) {
+      klaar()
+      return
+    }
+    await compenseer(false)
+    if (errorCode(insertError) === '23505') throw herstelNietMogelijk()
+    throw genericError('trainingPlan.herstelKoppeling', insertError)
+  }
+
+  // Kinderen weer in deze koppeling nesten, alleen als ze intussen niet
+  // elders genest zijn. Faalt dit, dan geen half herstel: compenseren en gooien.
+  if (kinderen.length > 0) {
+    const { error } = await supabase
+      .from('training_oefeningen')
+      .update({ genest_in: id })
+      .in('id', kinderen)
+      .eq('event_id', eventId)
+      .eq('team_id', ctx.teamId)
+      .is('genest_in', null)
+    if (error) {
+      const fout = genericError('trainingPlan.herstelKoppeling.kinderen', error)
+      await compenseer(true)
+      throw fout
+    }
+  }
+
+  try {
+    await normaliseerBlokVolgorde(supabase, eventId, ctx.teamId, volgordeIds)
+  } catch (e) {
+    await compenseer(true)
+    throw e
+  }
+
+  klaar()
 }
 
 // Koppeling bijwerken: volgorde / stap_override / genest_in / duur_min.
@@ -547,17 +888,20 @@ async function ruimEenzameGroepOp(
   eventId: string,
   teamId: string,
   groepId: string | null,
-): Promise<void> {
-  if (!groepId) return
+): Promise<{ id: string; parallelSpelers: unknown } | null> {
+  if (!groepId) return null
 
+  // parallel_spelers wordt vóór de update gelezen: removeOefeningFromTraining
+  // geeft het overgebleven lid mét zijn oude indeling terug in de
+  // herstel-snapshot, zodat "Ongedaan maken" de groep in oude staat terugzet.
   const { data } = await supabase
     .from('training_oefeningen')
-    .select('id')
+    .select('id, parallel_spelers')
     .eq('event_id', eventId)
     .eq('team_id', teamId)
     .eq('parallel_groep_id', groepId)
-  const leden = Array.isArray(data) ? (data as { id: string }[]) : []
-  if (leden.length !== 1) return
+  const leden = Array.isArray(data) ? (data as { id: string; parallel_spelers?: unknown }[]) : []
+  if (leden.length !== 1) return null
 
   const { error } = await supabase
     .from('training_oefeningen')
@@ -566,6 +910,7 @@ async function ruimEenzameGroepOp(
     .eq('event_id', eventId)
     .eq('team_id', teamId)
   if (error) throw genericError('trainingPlan.ruimEenzameGroepOp', error)
+  return { id: leden[0].id, parallelSpelers: leden[0].parallel_spelers ?? [] }
 }
 
 // ────────────────────────────────────────────────

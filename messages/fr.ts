@@ -73,6 +73,7 @@ export const fr: Dict = {
     taskAnalysis: "Remplir l'analyse du match",
     taskTraining: "Créer l'entraînement",
     overdue: 'En retard',
+    saveError: "L'enregistrement de la tâche a échoué. Veuillez réessayer.",
   },
   calendar: {
     today: "Aujourd'hui",
@@ -117,7 +118,7 @@ export const fr: Dict = {
     lineupView: 'Voir la composition', lineupViewHint: 'La composition a déjà été créée',
     analysis: 'Analyse du match', analysisHint: 'Résultat, évaluations et événements', analysisCta: "Remplir l'analyse !",
     analysisView: "Voir l'analyse du match", analysisViewHint: "L'analyse est remplie",
-    attendance: 'Présences', markAllPresent: 'Tous présents', deleteEvent: "Supprimer l'événement",
+    attendance: 'Présences', markAllPresent: 'Tous présents', attendanceSaveError: "L'enregistrement de la présence a échoué. Veuillez réessayer.", deleteEvent: "Supprimer l'événement",
     editEvent: 'Modifier',
     editTitleTraining: "Modifier l'entraînement",
     editTitleMatch: 'Modifier le match',
@@ -747,6 +748,15 @@ export const fr: Dict = {
     close: 'Fermer',
     moreActions: 'Plus d\'actions',
     cancel: 'Annuler',
+  },
+  undo: {
+    deleted: 'Supprimé',
+    action: 'Annuler',
+    restoreError: "La restauration a échoué. L'élément reste supprimé.",
+    deleteError: 'La suppression a échoué. Veuillez réessayer.',
+  },
+  sheet: {
+    discardConfirm: 'Vos modifications seront perdues. Fermer quand même ?',
   },
   errors: {
     noPermission: "Vous n'avez pas les droits pour cette rubrique",

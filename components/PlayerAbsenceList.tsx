@@ -2,11 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { updateAttendance, markAbsentForPeriod, revokeAbsencePeriod } from '@/app/actions/attendance'
+import { updateAttendance, markAbsentForPeriod, revokeAbsencePeriod, herstelAfmeldperiode } from '@/app/actions/attendance'
 import { AttendanceStatus, FootballEvent, AbsencePeriod } from '@/lib/types'
 import { formatDate, formatTime } from '@/lib/utils'
 import { findCoveringPeriod } from '@/lib/absence-periods'
 import { useDict } from '@/lib/i18n-context'
+import { useRijOpslag } from '@/lib/use-rij-opslag'
+import { useToast } from '@/components/ui/Toast'
 
 interface EventWithStatus extends FootballEvent {
   status: AttendanceStatus
@@ -29,6 +31,10 @@ interface Props {
   canEdit: boolean
 }
 
+function statussenVan(events: { id: string; status: AttendanceStatus }[]): Record<string, AttendanceStatus> {
+  return Object.fromEntries(events.map((e) => [e.id, e.status]))
+}
+
 function todayStr() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -37,17 +43,29 @@ function todayStr() {
 export default function PlayerAbsenceList({ playerId, events: initialEvents, periods: initialPeriods, defaultStatus, canEdit }: Props) {
   const [events, setEvents] = useState(initialEvents)
   const [periods, setPeriods] = useState(initialPeriods)
-  const [, startTransition] = useTransition()
   const [isPeriodPending, startPeriodTransition] = useTransition()
   const [isRevokePending, startRevokeTransition] = useTransition()
   const t = useDict()
   const router = useRouter()
+  const toast = useToast()
 
   const [fromDate, setFromDate] = useState(todayStr)
   const [toDate, setToDate] = useState('')
   const [periodResult, setPeriodResult] = useState<number | null>(null)
   const [periodError, setPeriodError] = useState<string | null>(null)
   const [revokeError, setRevokeError] = useState<string | null>(null)
+  const [statusError, setStatusError] = useState(false)
+
+  // Per-rij optimistische status (laatste tik wint, rollback per rij). De
+  // hook beheert de status per event; `events` blijft de bron voor de
+  // periode-/intrekpaden en de serverprops.
+  const { waarden: statusVan, zet, synchroniseer } = useRijOpslag<AttendanceStatus>({
+    bevestigd: statussenVan(initialEvents),
+    opslaan: (eventId, status) => updateAttendance(eventId, playerId, status),
+    onFout: () => setStatusError(true),
+  })
+  // Wat de gebruiker ziet: de status uit de hook boven de lijst uit `events`.
+  const shownEvents = events.map((e) => (statusVan[e.id] !== undefined ? { ...e, status: statusVan[e.id] } : e))
 
   // Sync wanneer de server (na router.refresh()) nieuwe props stuurt — zelfde
   // "adjust state during render"-patroon als components/TeamIndelingEditor.tsx
@@ -65,25 +83,29 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     setPeriods(initialPeriods)
   }
 
+  // Elke wijziging van `events` (serverprops, periode, intrekken, rollback)
+  // gaat via de hook-sync naar de rijen die niet onderweg zijn.
+  const [prevEvents, setPrevEvents] = useState(events)
+  if (prevEvents !== events) {
+    setPrevEvents(events)
+    synchroniseer(statussenVan(events))
+  }
+
   function setStatus(eventId: string, next: AttendanceStatus) {
-    setEvents((prev) =>
-      prev.map((e) => (e.id === eventId ? { ...e, status: next } : e))
-    )
-    startTransition(() => {
-      updateAttendance(eventId, playerId, next)
-    })
+    setStatusError(false)
+    zet(eventId, next)
   }
 
   function handlePeriodAbsence() {
     if (!fromDate || !toDate || fromDate > toDate) return
     setPeriodError(null)
     setPeriodResult(null)
-    const previousEvents = events
+    const previousEvents = shownEvents
     // Optimistische eerste-orde-benadering: de definitieve teller komt uit de
     // `affected`-waarde van de server (zie hieronder) — die telt ook events
     // buiten deze lokaal geladen (toekomstige) lijst mee.
-    setEvents((prev) =>
-      prev.map((e) =>
+    setEvents(
+      shownEvents.map((e) =>
         // Een geblesseerde rij blijft 'injured' (de server zet daar alleen de
         // herkomst van de periode, de status blijft staan).
         e.date >= fromDate && e.date <= toDate && e.status !== 'injured'
@@ -108,11 +130,11 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     if (!revoked) return
     setRevokeError(null)
     const previousPeriods = periods
-    const previousEvents = events
+    const previousEvents = shownEvents
     const remaining = periods.filter((p) => p.id !== periodId)
     setPeriods(remaining)
-    setEvents((prev) =>
-      prev.map((e) => {
+    setEvents(
+      shownEvents.map((e) => {
         if (e.date < revoked.from_date || e.date > revoked.to_date) return e
         // Een 'injured'-rij blijft bij intrekken ongemoeid (de server wist alleen de herkomst).
         if (e.status === 'injured') return e
@@ -122,21 +144,35 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     )
     startRevokeTransition(async () => {
       try {
-        await revokeAbsencePeriod(periodId)
+        const { herstel } = await revokeAbsencePeriod(periodId)
         // De server houdt handmatige rijen bewust op 'absent' en laat 'injured' staan;
         // de optimistische update hierboven kent dat onderscheid niet. Een
         // refresh haalt de definitieve serverstaat op.
         router.refresh()
-      } catch (err) {
+        toast.toon({
+          bericht: t.undo.deleted,
+          actie: {
+            label: t.undo.action,
+            foutBericht: t.undo.restoreError,
+            onActie: async () => {
+              await herstelAfmeldperiode(herstel)
+              setPeriods((prev) => (prev.some((p) => p.id === revoked.id) ? prev : [...prev, revoked]))
+              setEvents(previousEvents)
+              router.refresh()
+            },
+          },
+        })
+      } catch {
         setPeriods(previousPeriods)
         setEvents(previousEvents)
-        setRevokeError(err instanceof Error ? err.message : t.players.periodRevokeError)
+        // Nooit de rauwe serverstring tonen (geen NL-tekst in een niet-NL UI).
+        setRevokeError(t.players.periodRevokeError)
       }
     })
   }
 
   const weeks: { label: string; events: EventWithStatus[] }[] = []
-  for (const event of events) {
+  for (const event of shownEvents) {
     const date = new Date(event.date + 'T00:00:00')
     const weekStart = new Date(date)
     weekStart.setDate(date.getDate() - date.getDay() + 1)
@@ -149,7 +185,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
     }
   }
 
-  const absentCount = events.filter((e) => e.status === 'absent').length
+  const absentCount = shownEvents.filter((e) => e.status === 'absent').length
 
   return (
     <div className="space-y-5">
@@ -249,6 +285,12 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
         </div>
       )}
 
+      {statusError && (
+        <p role="alert" className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-3 py-2 rounded-lg">
+          {t.event.attendanceSaveError}
+        </p>
+      )}
+
       {/* Per-event list */}
       {weeks.map((week) => (
         <div key={week.label}>
@@ -344,7 +386,7 @@ export default function PlayerAbsenceList({ playerId, events: initialEvents, per
         </div>
       ))}
 
-      {events.length === 0 && (
+      {shownEvents.length === 0 && (
         <div className="text-center py-8 text-faint text-sm">
           {t.players.noUpcomingEvents}
         </div>

@@ -4,12 +4,15 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { createClient } from '@/lib/supabase/server'
+import { revalidatePath } from 'next/cache'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
+import type { HerstelWedstrijdMoment } from '@/lib/herstel'
 import {
   saveMatchResult,
   saveMatchRating,
   addMatchEvent,
   deleteMatchEvent,
+  herstelWedstrijdMoment,
 } from '@/app/actions/match-analysis'
 
 type TableResult = { data?: unknown; error?: unknown }
@@ -28,10 +31,15 @@ function teamMembersFixture(userId: string | undefined) {
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
+  // Per tabel opeenvolgende antwoorden (patroon app/actions/attendance.test.ts):
+  // deleteMatchEvent leest de rij vóór de delete, herstelWedstrijdMoment kijkt
+  // eerst of de rij al terug is en schrijft dan pas.
+  queues?: Record<string, TableResult[]>
   rpcError?: { code?: string; message: string }
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
+  const queues = opts.queues ?? {}
   type Eq = { col: string; val: unknown }
   const calls = {
     rpc: [] as { fn: string; args: Record<string, unknown> }[],
@@ -41,8 +49,13 @@ function makeSupabase(opts: {
     delete: [] as { table: string; eqs: Eq[] }[],
   }
 
+  function nextResult(table: string): TableResult {
+    const queue = queues[table]
+    if (queue && queue.length > 0) return queue.length === 1 ? queue[0] : queue.shift()!
+    return tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
+  }
+
   function chain(table: string) {
-    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const eqs: Eq[] = []
     const c: Record<string, unknown> = {}
     c.select = () => c
@@ -55,9 +68,9 @@ function makeSupabase(opts: {
     c.update = (payload: Record<string, unknown>) => { calls.update.push({ table, payload, eqs }); return c }
     c.upsert = (payload: Record<string, unknown>) => { calls.upsert.push({ table, payload }); return c }
     c.delete = () => { calls.delete.push({ table, eqs }); return c }
-    c.maybeSingle = () => Promise.resolve(result)
-    c.single = () => Promise.resolve(result)
-    ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(result)
+    c.maybeSingle = () => Promise.resolve(nextResult(table))
+    c.single = () => Promise.resolve(nextResult(table))
+    ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(nextResult(table))
     return c
   }
 
@@ -294,18 +307,72 @@ describe('addMatchEvent', () => {
   })
 })
 
+const TEAM = 'team-1'
+const EVENT_E1 = '0e000000-0000-4000-8000-000000000001'
+const MOMENT_ID = '0d000000-0000-4000-8000-000000000001'
+const MOMENT_RIJ = {
+  id: MOMENT_ID,
+  event_id: EVENT_E1,
+  player_id: PLAYER_A,
+  kind: 'goal',
+  minute: 12,
+  created_at: '2026-10-25T08:15:30.123456+00:00',
+}
+
 describe('deleteMatchEvent', () => {
+  // match_events: eerst de rij zelf (snapshot), dan de delete.
+  function teVerwijderen(opts: { rij?: TableResult; schrijf?: TableResult } = {}) {
+    return makeSupabase({
+      tables: { events: { data: { id: EVENT_E1 }, error: null } },
+      queues: {
+        match_events: [
+          opts.rij ?? { data: MOMENT_RIJ, error: null },
+          opts.schrijf ?? { data: null, error: null },
+        ],
+      },
+    })
+  }
+
   it('verwijdert team-gescoped', async () => {
-    const m = eigenTeam()
+    const m = teVerwijderen()
     use(m)
 
-    await deleteMatchEvent('me1', 'e1')
+    await deleteMatchEvent(MOMENT_ID, EVENT_E1)
 
     const del = m.calls.delete.find((d) => d.table === 'match_events')!
     expect(del.eqs).toEqual([
-      { col: 'id', val: 'me1' },
-      { col: 'team_id', val: 'team-1' },
+      { col: 'id', val: MOMENT_ID },
+      { col: 'team_id', val: TEAM },
     ])
+  })
+
+  it('geeft de herstel-snapshot terug uit de gelezen rij, met het team uit de sessie', async () => {
+    use(teVerwijderen())
+    expect(await deleteMatchEvent(MOMENT_ID, EVENT_E1)).toEqual({
+      soort: 'wedstrijdmoment',
+      teamId: TEAM,
+      id: MOMENT_ID,
+      eventId: EVENT_E1,
+      playerId: PLAYER_A,
+      kind: 'goal',
+      minute: 12,
+      createdAt: '2026-10-25T08:15:30.123456+00:00',
+    })
+  })
+
+  it('revalideert met het event uit de rij, niet met het meegegeven eventId', async () => {
+    use(teVerwijderen())
+    await deleteMatchEvent(MOMENT_ID, 'iets-anders')
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/analysis`)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}`)
+    expect(revalidatePath).not.toHaveBeenCalledWith('/events/iets-anders')
+  })
+
+  it('gooit "Gebeurtenis niet gevonden" bij een onbekende of vreemde rij, zonder delete', async () => {
+    const m = teVerwijderen({ rij: { data: null, error: null } })
+    use(m)
+    await expect(deleteMatchEvent(MOMENT_ID, EVENT_E1)).rejects.toThrow('Gebeurtenis niet gevonden')
+    expect(m.calls.delete).toHaveLength(0)
   })
 
   it('weigert zonder ingelogde gebruiker', async () => {
@@ -314,13 +381,129 @@ describe('deleteMatchEvent', () => {
   })
 
   it('geeft een generieke melding bij een databasefout', async () => {
-    use(eigenTeam({
-      match_events: { data: null, error: { code: '42501', message: 'permission denied for table match_events' } },
+    use(teVerwijderen({
+      schrijf: { data: null, error: { code: '42501', message: 'permission denied for table match_events' } },
     }))
 
-    await expect(deleteMatchEvent('me1', 'e1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    await expect(deleteMatchEvent(MOMENT_ID, EVENT_E1)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
 
     expect(logged()).toContain('matchAnalysis.deleteMatchEvent')
+    expect(logged()).not.toContain('permission denied')
+  })
+})
+
+describe('herstelWedstrijdMoment', () => {
+  const SNAPSHOT: HerstelWedstrijdMoment = {
+    soort: 'wedstrijdmoment',
+    teamId: TEAM,
+    id: MOMENT_ID,
+    eventId: EVENT_E1,
+    playerId: PLAYER_A,
+    kind: 'goal',
+    minute: 12,
+    createdAt: '2026-10-25T08:15:30.123456+00:00',
+  }
+
+  // match_events: eerst de bestaan-check, dan de insert (en evt. hercontrole).
+  function teHerstellen(matchEvents: TableResult[] = [{ data: null }, { error: null }], extra: Record<string, TableResult> = {}) {
+    return makeSupabase({
+      tables: {
+        events: { data: { id: EVENT_E1 }, error: null },
+        players: { data: { id: PLAYER_A }, error: null },
+        ...extra,
+      },
+      queues: { match_events: matchEvents },
+    })
+  }
+
+  it('zet de rij terug met originele id en created_at, team_id uit de sessie', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelWedstrijdMoment(SNAPSHOT)
+    expect(m.calls.insert).toEqual([{
+      table: 'match_events',
+      payload: {
+        id: MOMENT_ID,
+        team_id: TEAM,
+        event_id: EVENT_E1,
+        player_id: PLAYER_A,
+        kind: 'goal',
+        minute: 12,
+        created_at: '2026-10-25T08:15:30.123456+00:00',
+      },
+    }])
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/analysis`)
+  })
+
+  it('laat created_at weg bij null (DB-default)', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelWedstrijdMoment({ ...SNAPSHOT, createdAt: null })
+    expect(m.calls.insert[0].payload).not.toHaveProperty('created_at')
+  })
+
+  it('weigert een snapshot van een ander team, zonder iets te schrijven', async () => {
+    const m = teHerstellen()
+    use(m)
+    await expect(herstelWedstrijdMoment({ ...SNAPSHOT, teamId: 'ander-team' })).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert niet-UUID ids, een ongeldige soort of minuut en een vrije-tekst created_at', async () => {
+    const m = teHerstellen()
+    use(m)
+    for (const fout of [
+      { ...SNAPSHOT, id: 'me1' },
+      { ...SNAPSHOT, eventId: 'e1' },
+      { ...SNAPSHOT, playerId: 'p1' },
+      { ...SNAPSHOT, kind: 'penalty' as never },
+      { ...SNAPSHOT, minute: 131 },
+      { ...SNAPSHOT, createdAt: 'gisteren' },
+      { ...SNAPSHOT, soort: 'nulmeting' as never },
+    ]) {
+      await expect(herstelWedstrijdMoment(fout)).rejects.toThrow('Herstel niet mogelijk')
+    }
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert als event of speler niet (meer) van dit team is', async () => {
+    const m = teHerstellen(undefined, { players: { data: null, error: null } })
+    use(m)
+    await expect(herstelWedstrijdMoment(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert zonder Wedstrijd-recht met "Geen toegang"', async () => {
+    const m = makeSupabase({
+      tables: { team_members: { data: [{ team_id: TEAM, user_id: 'team-1', rol: 'assistent' }], error: null } },
+    })
+    use(m)
+    await expect(herstelWedstrijdMoment(SNAPSHOT)).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('is idempotent: een rij die al terug is levert geen tweede insert op', async () => {
+    const m = teHerstellen([{ data: { id: MOMENT_ID } }])
+    use(m)
+    await herstelWedstrijdMoment(SNAPSHOT)
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}`)
+  })
+
+  it('23505 en de rij bestaat in dit team → succes', async () => {
+    use(teHerstellen([{ data: null }, { error: { code: '23505' } }, { data: { id: MOMENT_ID } }]))
+    await expect(herstelWedstrijdMoment(SNAPSHOT)).resolves.toBeUndefined()
+  })
+
+  it('23505 zonder eigen rij (id elders bezet) → "Herstel niet mogelijk"', async () => {
+    use(teHerstellen([{ data: null }, { error: { code: '23505' } }, { data: null }]))
+    await expect(herstelWedstrijdMoment(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+  })
+
+  it('geeft bij een andere databasefout de generieke melding', async () => {
+    use(teHerstellen([{ data: null }, { error: { code: '42501', message: 'permission denied' } }]))
+    await expect(herstelWedstrijdMoment(SNAPSHOT)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(logged()).toContain('matchAnalysis.herstelWedstrijdMoment')
     expect(logged()).not.toContain('permission denied')
   })
 })

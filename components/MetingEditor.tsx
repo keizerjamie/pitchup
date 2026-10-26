@@ -79,12 +79,12 @@ export default function MetingEditor({ eventId, initialMeting, canEdit }: Props)
                 <div className="font-semibold text-ink text-sm">{t.periodization.categories[cat.key] ?? cat.label}</div>
                 <div className="text-xs text-faint mt-0.5">{t.periodization.maxSteps.replace('{n}', String(cat.maxStap))}</div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 [--hit-slop-gap:8px]">
                 {canEdit && (
                   <button
                     type="button"
                     onClick={() => handleStepChange(stepKey, String(Math.max(1, currentStep - 1)))}
-                    className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
+                    className="relative hit-slop w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
                   >
                     −
                   </button>
@@ -105,7 +105,7 @@ export default function MetingEditor({ eventId, initialMeting, canEdit }: Props)
                   <button
                     type="button"
                     onClick={() => handleStepChange(stepKey, String(Math.min(cat.maxStap, currentStep + 1)))}
-                    className="w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
+                    className="relative hit-slop w-8 h-8 rounded-lg bg-surface-sunken hover:bg-[var(--track)] active:scale-90 transition flex items-center justify-center text-muted font-bold text-lg"
                   >
                     +
                   </button>

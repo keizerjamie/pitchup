@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { updateAttendance, markAllPresent } from '@/app/actions/attendance'
 import { AttendanceStatus, Player, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 import { telAanwezigheid } from '@/lib/aanwezigheid-telling'
+import { useRijOpslag } from '@/lib/use-rij-opslag'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 function initialsOf(name: string): string {
@@ -27,15 +28,27 @@ interface Props {
 }
 
 export default function TrainingAttendance({ eventId, players, initialStatuses, canEdit }: Props) {
-  const [statuses, setStatuses] = useState(initialStatuses)
-  const [isPending, startTransition] = useTransition()
   const t = useDict()
+  const [saveError, setSaveError] = useState(false)
+  const { waarden: statuses, zet, zetAlles, bulkOnderweg, iemandOnderweg, synchroniseer } = useRijOpslag<AttendanceStatus>({
+    bevestigd: initialStatuses,
+    opslaan: (playerId, status) => updateAttendance(eventId, playerId, status),
+    onFout: () => setSaveError(true),
+  })
+
+  // Nieuwe server-props (na revalidatePath): serverwaarde overnemen voor rijen
+  // die niet onderweg zijn ("adjust state during render").
+  const [prevInitial, setPrevInitial] = useState(initialStatuses)
+  if (prevInitial !== initialStatuses) {
+    setPrevInitial(initialStatuses)
+    synchroniseer(initialStatuses)
+  }
 
   function setStatus(playerId: string, status: AttendanceStatus) {
     // Clicking the active button again clears back to "unknown".
     const next: AttendanceStatus = (statuses[playerId] ?? 'unknown') === status ? 'unknown' : status
-    setStatuses((s) => ({ ...s, [playerId]: next }))
-    startTransition(() => updateAttendance(eventId, playerId, next))
+    setSaveError(false)
+    zet(playerId, next)
   }
 
   function handleMarkAll() {
@@ -43,8 +56,8 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
     // staan, de rest wordt 'present'.
     const all: Record<string, AttendanceStatus> = {}
     players.forEach((p) => { all[p.id] = (statuses[p.id] ?? 'unknown') === 'injured' ? 'injured' : 'present' })
-    setStatuses(all)
-    startTransition(() => markAllPresent(eventId))
+    setSaveError(false)
+    zetAlles(all, () => markAllPresent(eventId))
   }
 
   if (players.length === 0) {
@@ -106,14 +119,20 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
           <button
             type="button"
             onClick={handleMarkAll}
-            disabled={isPending}
-            className="h-9 px-3 rounded-lg text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors disabled:opacity-60"
+            disabled={iemandOnderweg}
+            className="relative hit-slop h-9 px-3 rounded-lg text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors disabled:opacity-60"
             style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)' }}
           >
             {t.event.markAllPresent}
           </button>
         )}
       </div>
+
+      {saveError && (
+        <p role="alert" className="text-[13px] font-semibold text-panel-red-ink bg-panel-red border border-panel-red-edge px-3 py-2 rounded-lg">
+          {t.event.attendanceSaveError}
+        </p>
+      )}
 
       {/* Player rows */}
       <div className="surface-card overflow-hidden">
@@ -133,17 +152,17 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
                   {POSITION_ABBREVIATIONS[player.position] ?? player.position}
                 </span>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex gap-2 [--hit-slop-gap:8px] flex-shrink-0">
                 {canEdit ? (
                   <>
                     <StatusButton
-                      active={s === 'present'} onClick={() => setStatus(player.id, 'present')} disabled={isPending}
+                      active={s === 'present'} onClick={() => setStatus(player.id, 'present')} disabled={bulkOnderweg}
                       icon="check" label={t.event.presentStat} activeBg="var(--primary)" />
                     <StatusButton
-                      active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={isPending}
+                      active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={bulkOnderweg}
                       icon="close" label={t.event.absentStat} activeBg="#dc2626" />
                     <StatusButton
-                      active={s === 'injured'} onClick={() => setStatus(player.id, 'injured')} disabled={isPending}
+                      active={s === 'injured'} onClick={() => setStatus(player.id, 'injured')} disabled={bulkOnderweg}
                       icon="healing" label={t.event.injuredStat} activeBg="var(--danger)" />
                   </>
                 ) : (
@@ -200,7 +219,7 @@ function StatusButton({
       disabled={disabled}
       aria-pressed={active}
       aria-label={label}
-      className="h-9 rounded-[10px] px-3 flex items-center gap-1.5 text-[12.5px] font-bold transition-[color,background-color,transform] duration-[160ms] ease-out active:scale-[0.97] disabled:opacity-60"
+      className="relative hit-slop h-9 rounded-[10px] px-3 flex items-center gap-1.5 text-[12.5px] font-bold transition-[color,background-color,transform] duration-[160ms] ease-out active:scale-[0.97] disabled:opacity-60"
       style={active
         ? { background: activeBg, color: '#fff' }
         : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}

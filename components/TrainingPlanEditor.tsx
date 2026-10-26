@@ -3,10 +3,11 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { registreerFlush, useOpslagTransition } from '@/lib/opslag-wachtrij'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Oefening, OefeningCategorie, PERIODIZATION_CATEGORIES, Player, Spelerindeling, type TrainingsType } from '@/lib/types'
 import { basisFormatieDef } from '@/lib/formaties'
 import { saveDoelstelling } from '@/app/actions/training-plan'
-import { removeOefeningFromTraining, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
+import { removeOefeningFromTraining, herstelKoppeling, updateKoppeling, reorderKoppelingen } from '@/app/actions/training-plan'
 import { vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
 import { updateOefening } from '@/app/actions/oefening-library'
 import { updateTrainingstype } from '@/app/actions/events'
@@ -29,6 +30,7 @@ import BezettingStepper from '@/components/BezettingStepper'
 import TrainingstypeSchakelaar from '@/components/TrainingstypeSchakelaar'
 import { useDict } from '@/lib/i18n-context'
 import Button from '@/components/ui/Button'
+import { useToast } from '@/components/ui/Toast'
 
 interface Props {
   eventId: string
@@ -142,6 +144,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   const [editingOefening, setEditingOefening] = useState<Oefening | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [unlinkConfirm, setUnlinkConfirm] = useState<string | null>(null)
+  const [unlinkError, setUnlinkError] = useState<string | null>(null)
+  const toast = useToast()
+  const router = useRouter()
   const doelstellingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Foutmeldingen per koppeling voor een mislukte stap_override-save (nooit
@@ -261,11 +266,49 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
     setShowPicker(true)
   }
 
-  function handleUnlink(koppelingId: string) {
+  // Terugzetten op de oorspronkelijke plek; no-op als de rij er al staat (bv.
+  // doordat de revalidatie de serverstand al binnenbracht).
+  function zetKoppelingTerug(rij: (typeof koppelingen)[number], index: number) {
+    setKoppelingen((prev) => {
+      if (prev.some((k) => k.id === rij.id)) return prev
+      const next = [...prev]
+      next.splice(Math.min(index, next.length), 0, rij)
+      return next
+    })
+  }
+
+  // Eigen oefening: direct weg + undo-toast. Niet-eigen oefening: de inline
+  // bevestiging blijft en er is geen undo (herstel mag server-side niet, V-B).
+  function handleUnlink(koppelingId: string, metUndo: boolean) {
+    const index = koppelingen.findIndex((k) => k.id === koppelingId)
+    const rij = index >= 0 ? koppelingen[index] : null
+    setUnlinkError(null)
+    setUnlinkConfirm(null)
+    setKoppelingen((prev) => prev.filter((k) => k.id !== koppelingId))
     startTransition(async () => {
-      setKoppelingen((prev) => prev.filter((k) => k.id !== koppelingId))
-      setUnlinkConfirm(null)
-      await removeOefeningFromTraining(koppelingId, eventId)
+      try {
+        const herstel = await removeOefeningFromTraining(koppelingId, eventId)
+        if (metUndo) {
+          toast.toon({
+            bericht: t.undo.deleted,
+            actie: {
+              label: t.undo.action,
+              foutBericht: t.undo.restoreError,
+              onActie: async () => {
+                await herstelKoppeling(herstel)
+                if (rij) zetKoppelingTerug(rij, index)
+              },
+            },
+          })
+        }
+      } catch {
+        if (rij) zetKoppelingTerug(rij, index)
+        setUnlinkError(t.undo.deleteError)
+        // De koppeling kan op de server al weg zijn ('Koppeling niet gevonden'):
+        // laat de serverstand het winnen. Bij een echte fout komt de kaart via
+        // props terug.
+        router.refresh()
+      }
     })
   }
 
@@ -647,6 +690,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
           </div>
         ) : (
           <div className="space-y-2 print:space-y-[3mm]">
+            {unlinkError && (
+              <div role="alert" className="print:hidden bg-panel-red border border-panel-red-edge text-panel-red-ink text-xs px-4 py-2.5 rounded-xl">
+                {unlinkError}
+              </div>
+            )}
             {blokken.map((blok, blokIndex) => {
               // Een blok is een echte parallelle groep zodra het ≥2 leden
               // heeft (blokkenVanKoppelingen degradeert een eenzaam lid al
@@ -788,11 +836,11 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
               // van de kaart, naast de tijd — niet meer náást de titel, zodat
               // de titel op een smal scherm de volle breedte houdt.
               const acties = (
-                <div className="print:hidden flex items-center gap-1 flex-shrink-0 -my-1 -mr-1.5">
+                <div className="print:hidden flex items-center gap-1 [--hit-slop-gap:4px] flex-shrink-0 -my-1 -mr-1.5">
                   <button
                     type="button"
                     onClick={() => setExpandedId(isExpanded ? null : k.id)}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors active:scale-95 ${isExpanded ? 'bg-surface-sunken text-ink' : 'text-faint hover:bg-surface-sunken hover:text-muted'}`}
+                    className={`relative hit-slop w-8 h-8 rounded-lg flex items-center justify-center transition-colors active:scale-95 ${isExpanded ? 'bg-surface-sunken text-ink' : 'text-faint hover:bg-surface-sunken hover:text-muted'}`}
                     aria-label={t.trainingPlan.detailsToggle}
                     aria-expanded={isExpanded}
                   >
@@ -803,7 +851,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                       type="button"
                       onClick={() => openOefeningEditor(o)}
                       aria-label={t.oefeningen.editAriaNamed.replace('{name}', o.naam)}
-                      className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
+                      className="relative hit-slop w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -812,7 +860,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   )}
                   {canEdit && (unlinkConfirm === k.id ? (
                     <div className="flex gap-1">
-                      <button type="button" onClick={() => handleUnlink(k.id)}
+                      <button type="button" onClick={() => handleUnlink(k.id, false)}
                         disabled={isPending}
                         className="text-xs font-semibold text-panel-red-ink px-2 py-1 rounded-lg hover:bg-panel-red transition-colors">
                         {t.trainingPlan.confirmYes}
@@ -825,9 +873,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setUnlinkConfirm(k.id)}
+                      onClick={() => (isEigen ? handleUnlink(k.id, true) : setUnlinkConfirm(k.id))}
                       aria-label={t.trainingPlan.unlink}
-                      className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors active:scale-95"
+                      className="relative hit-slop w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors active:scale-95"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -865,13 +913,13 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                         {blokLabel(blokIndex, blok.leden.length, ledenIndex)}
                       </span>
                       {canEdit && (
-                        <div className="print:hidden flex flex-col">
+                        <div className="print:hidden flex flex-col [--hit-slop-gap-y:0px]">
                           <button
                             type="button"
                             onClick={() => move(blokIndex, -1)}
                             disabled={blokIndex === 0}
                             aria-label={t.trainingPlan.moveUp}
-                            className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
+                            className="relative hit-slop w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" /></svg>
                           </button>
@@ -880,7 +928,7 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                             onClick={() => move(blokIndex, 1)}
                             disabled={blokIndex === blokken.length - 1}
                             aria-label={t.trainingPlan.moveDown}
-                            className="w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
+                            className="relative hit-slop w-6 h-5 flex items-center justify-center text-faint hover:text-muted disabled:opacity-30 disabled:hover:text-faint"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
                           </button>

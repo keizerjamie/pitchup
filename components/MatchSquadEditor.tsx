@@ -217,7 +217,7 @@ export default function MatchSquadEditor({
                     disabled={isPending}
                     aria-pressed={isSelected}
                     aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
-                    className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
+                    className="relative hit-slop w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
                     style={isSelected
                       ? { background: 'var(--primary)', color: '#fff' }
                       : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}

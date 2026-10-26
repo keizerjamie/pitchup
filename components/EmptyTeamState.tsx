@@ -28,7 +28,7 @@ export default async function EmptyTeamState() {
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <h1 className="font-display text-[19px] font-bold text-ink">{t.team.noTeamTitle}</h1>
+        <h1 className="font-display text-[19px] font-bold text-ink text-balance">{t.team.noTeamTitle}</h1>
         <p className="text-[13.5px] font-medium text-muted">{t.team.noTeamBody}</p>
         <p className="text-[13px] text-faint">{t.team.noTeamInviteHint}</p>
       </div>

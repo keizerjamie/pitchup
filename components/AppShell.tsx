@@ -10,6 +10,7 @@ import RouteTransition from '@/components/RouteTransition'
 import ThemeToggle from '@/components/ThemeToggle'
 import TeamLogo from '@/components/TeamLogo'
 import TeamSwitcher from '@/components/TeamSwitcher'
+import { ToastProvider } from '@/components/ui/Toast'
 import { TeamContextClientProvider } from '@/lib/team-context-client'
 import type { TeamLidmaatschap } from '@/lib/team-context'
 import type { TeamRechten, TeamRol } from '@/lib/team-rechten'
@@ -83,6 +84,9 @@ export default function AppShell({
 
   return (
     <TeamContextClientProvider value={teamCtxValue}>
+      {/* Toast-viewport staat BUITEN RouteTransition (transform op een ouder zou
+          position:fixed breken); de provider wist de toast bij teamwissel. */}
+      <ToastProvider teamId={teamId}>
       {/* ── Desktop sidebar (light) ── */}
       <div
         className="anchor-sidebar hidden md:flex md:fixed md:inset-y-0 md:w-64 md:flex-col bg-surface"
@@ -173,6 +177,7 @@ export default function AppShell({
 
       {showChrome && <Navigation />}
       {showChrome && <GlobalFab pathname={pathname} />}
+      </ToastProvider>
     </TeamContextClientProvider>
   )
 }

@@ -10,7 +10,9 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import { getDefaultAttendance } from '@/app/actions/settings'
+import type { HerstelAfmeldperiode } from '@/lib/herstel'
 import {
+  herstelAfmeldperiode,
   markAbsentForPeriod,
   markAllPresent,
   revokeAbsencePeriod,
@@ -48,7 +50,7 @@ function makeSupabase(opts: {
     select: [] as { table: string; eqs: Eq[]; ins?: In[] }[],
     insert: [] as { table: string; payload: unknown }[],
     upsert: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
-    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; ins: In[]; neqs: Eq[] }[],
+    update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; ins: In[]; neqs: Eq[]; iss: Eq[] }[],
     delete: [] as { table: string; eqs: Eq[] }[],
     // Volgorde van schrijfacties, om te kunnen aantonen dat het herstellen vóór
     // het verwijderen van de periode gebeurt.
@@ -69,7 +71,11 @@ function makeSupabase(opts: {
     // `.neq()` apart vastgelegd (niet in eqs, dat de tenant-check blijft):
     // markAllPresent slaat er de 'injured'-rijen mee over.
     const neqs: Eq[] = []
+    // `.is()` (herstelAfmeldperiode: alleen rijen zonder herkomst) apart, net
+    // als neqs, zodat eqs de tenant-check blijft.
+    const iss: Eq[] = []
     const c: Record<string, unknown> = {}
+    c.is = (col: string, val: unknown) => { iss.push({ col, val }); return c }
     c.select = () => { calls.select.push({ table, eqs, ins }); return c }
     c.eq = (col: string, val: unknown) => { eqs.push({ col, val }); return c }
     // Periodefilters van markAbsentForPeriod en de sortering van de
@@ -91,7 +97,7 @@ function makeSupabase(opts: {
       return c
     }
     c.update = (payload: Record<string, unknown>) => {
-      calls.update.push({ table, payload, eqs, ins, neqs })
+      calls.update.push({ table, payload, eqs, ins, neqs, iss })
       calls.sequence.push(`${table}.update`)
       return c
     }
@@ -656,7 +662,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 2 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 2 })
 
     const update = m.calls.update.find((u) => u.table === 'attendance')!
     expect(update.payload).toEqual({ status: 'present', absence_period_id: null })
@@ -728,7 +734,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 1 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 1 })
 
     const updates = m.calls.update.filter((u) => u.table === 'attendance')
     expect(updates).toHaveLength(2)
@@ -761,7 +767,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 0 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 0 })
 
     const update = m.calls.update.find((u) => u.table === 'attendance')!
     expect(update.payload).toEqual({ absence_period_id: null })
@@ -778,7 +784,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 0 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 0 })
 
     const update = m.calls.update.find((u) => u.table === 'attendance')!
     expect(update.payload).toEqual({ absence_period_id: null })
@@ -794,7 +800,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 0 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 0 })
 
     const update = m.calls.update.find((u) => u.table === 'attendance')!
     expect(update.payload).toEqual({ absence_period_id: null })
@@ -816,7 +822,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 1 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 1 })
 
     const updates = m.calls.update.filter((u) => u.table === 'attendance')
     expect(updates).toHaveLength(2)
@@ -836,7 +842,7 @@ describe('revokeAbsencePeriod', () => {
     })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 1 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 1 })
     expect(m.calls.update.find((u) => u.table === 'attendance')!.ins)
       .toEqual([{ col: 'event_id', val: ['oud'] }])
   })
@@ -866,7 +872,7 @@ describe('revokeAbsencePeriod', () => {
     const m = intrekken({ rows: [], events: [] })
     use(m)
 
-    expect(await revokeAbsencePeriod(PERIOD_1)).toEqual({ restored: 0 })
+    expect(await revokeAbsencePeriod(PERIOD_1)).toMatchObject({ restored: 0 })
     expect(m.calls.update).toHaveLength(0)
     expect(m.calls.delete).toHaveLength(1)
     expect(revalidatePath).toHaveBeenCalledWith(`/players/${PLAYER_A}/absence`)
@@ -939,6 +945,256 @@ describe('revokeAbsencePeriod', () => {
 // O2 — een gastspeler blijft afwezig, ook nadat zijn afmeldperiode is
 // ingetrokken. Dezelfde regel als bij het aanmaken van een rij
 // (lib/attendance-rows.ts), hier hergebruikt.
+describe('revokeAbsencePeriod — herstel-snapshot', () => {
+  it('geeft periode, created_at en de verdeling naarStandaard/alleenHerkomst terug; overgedragen rijen niet', async () => {
+    const m = makeSupabase({
+      tables: {
+        attendance: {
+          data: [
+            { event_id: 'e1', status: 'absent' },  // → standaard
+            { event_id: 'e2', status: 'present' }, // → alleen herkomst
+            { event_id: 'e3', status: 'absent' },  // → overgedragen aan P2
+          ],
+          error: null,
+        },
+        events: {
+          data: [
+            { id: 'e1', date: '2026-08-20', type: 'training' },
+            { id: 'e2', date: '2026-08-21', type: 'training' },
+            { id: 'e3', date: '2026-08-05', type: 'training' },
+          ],
+          error: null,
+        },
+        players: { data: { id: PLAYER_A, type: 'regular' }, error: null },
+      },
+      queues: {
+        absence_periods: [
+          { data: { id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-08-01', to_date: '2026-08-31', created_at: '2026-07-30T09:00:00+00:00' } },
+          { data: [{ id: PERIOD_2, player_id: PLAYER_A, from_date: '2026-08-01', to_date: '2026-08-10' }] },
+          { data: null, error: null },
+        ],
+      },
+    })
+    use(m)
+
+    const res = await revokeAbsencePeriod(PERIOD_1)
+    expect(res).toEqual({
+      restored: 1,
+      herstel: {
+        soort: 'afmeldperiode',
+        teamId: 'team-1',
+        id: PERIOD_1,
+        playerId: PLAYER_A,
+        fromDate: '2026-08-01',
+        toDate: '2026-08-31',
+        createdAt: '2026-07-30T09:00:00+00:00',
+        naarStandaardEventIds: ['e1'],
+        alleenHerkomstEventIds: ['e2'],
+      },
+    })
+  })
+
+  it('levert lege lijsten bij een periode zonder aanwezigheidsrijen', async () => {
+    const m = makeSupabase({
+      tables: { attendance: { data: [], error: null } },
+      queues: {
+        absence_periods: [
+          { data: { id: PERIOD_1, player_id: PLAYER_A, from_date: '2026-08-01', to_date: '2026-08-31' } },
+          { data: null, error: null },
+        ],
+      },
+    })
+    use(m)
+    const { herstel } = await revokeAbsencePeriod(PERIOD_1)
+    expect(herstel.naarStandaardEventIds).toEqual([])
+    expect(herstel.alleenHerkomstEventIds).toEqual([])
+    expect(herstel.createdAt).toBeNull()
+  })
+})
+
+describe('herstelAfmeldperiode', () => {
+  const EV1 = '0e000000-0000-4000-8000-000000000001'
+  const EV2 = '0e000000-0000-4000-8000-000000000002'
+  const SNAPSHOT: HerstelAfmeldperiode = {
+    soort: 'afmeldperiode',
+    teamId: 'team-1',
+    id: PERIOD_1,
+    playerId: PLAYER_A,
+    fromDate: '2026-08-01',
+    toDate: '2026-08-31',
+    createdAt: '2026-07-30T09:00:00+00:00',
+    naarStandaardEventIds: [EV1],
+    alleenHerkomstEventIds: [EV2],
+  }
+
+  // absence_periods: bestaat-check, insert, (evt. hercontrole / compensatie-delete).
+  function teHerstellen(opts: {
+    periodes?: TableResult[]
+    attendance?: TableResult[]
+    player?: TableResult
+  } = {}) {
+    return makeSupabase({
+      tables: { players: opts.player ?? { data: { id: PLAYER_A, type: 'regular' }, error: null } },
+      queues: {
+        absence_periods: opts.periodes ?? [{ data: null }, { error: null }],
+        attendance: opts.attendance ?? [{ error: null }],
+      },
+    })
+  }
+
+  it('zet de periode terug met originele id/created_at en team_id uit de sessie', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelAfmeldperiode(SNAPSHOT)
+    expect(m.calls.insert).toEqual([{
+      table: 'absence_periods',
+      payload: {
+        id: PERIOD_1,
+        team_id: 'team-1',
+        player_id: PLAYER_A,
+        from_date: '2026-08-01',
+        to_date: '2026-08-31',
+        created_at: '2026-07-30T09:00:00+00:00',
+      },
+    }])
+  })
+
+  it('zet naarStandaard-rijen weer op absent met herkomst, alleen als ze nog zonder herkomst op de standaard staan', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelAfmeldperiode(SNAPSHOT)
+    const updates = m.calls.update.filter((u) => u.table === 'attendance')
+    expect(updates).toHaveLength(2)
+    expect(updates[0].payload).toEqual({ status: 'absent', absence_period_id: PERIOD_1 })
+    expect(updates[0].eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'player_id', val: PLAYER_A },
+      { col: 'status', val: 'present' },
+    ])
+    expect(updates[0].iss).toEqual([{ col: 'absence_period_id', val: null }])
+    expect(updates[0].ins).toEqual([{ col: 'event_id', val: [EV1] }])
+  })
+
+  it('geeft alleenHerkomst-rijen alleen hun herkomst terug, status blijft', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelAfmeldperiode(SNAPSHOT)
+    const update = m.calls.update.filter((u) => u.table === 'attendance')[1]
+    expect(update.payload).toEqual({ absence_period_id: PERIOD_1 })
+    expect(update.eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'player_id', val: PLAYER_A },
+    ])
+    expect(update.iss).toEqual([{ col: 'absence_period_id', val: null }])
+    expect(update.ins).toEqual([{ col: 'event_id', val: [EV2] }])
+  })
+
+  it('gebruikt voor een gastspeler zijn eigen standaardstatus (absent) als filter', async () => {
+    const m = teHerstellen({ player: { data: { id: PLAYER_A, type: 'guest' }, error: null } })
+    use(m)
+    await herstelAfmeldperiode(SNAPSHOT)
+    const update = m.calls.update.filter((u) => u.table === 'attendance')[0]
+    expect(update.eqs).toContainEqual({ col: 'status', val: 'absent' })
+  })
+
+  it('revalideert het afmeldscherm en elk geraakt event', async () => {
+    use(teHerstellen())
+    await herstelAfmeldperiode(SNAPSHOT)
+    expect(revalidatePath).toHaveBeenCalledWith(`/players/${PLAYER_A}/absence`)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EV1}`)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EV2}`)
+  })
+
+  it('is idempotent: een periode die al terug is levert geen insert of update op', async () => {
+    const m = teHerstellen({ periodes: [{ data: { id: PERIOD_1 } }] })
+    use(m)
+    await herstelAfmeldperiode(SNAPSHOT)
+    expect(m.calls.insert).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('23505 en de periode staat er in dit team → succes; zonder eigen rij → "Herstel niet mogelijk"', async () => {
+    use(teHerstellen({ periodes: [{ data: null }, { error: { code: '23505' } }, { data: { id: PERIOD_1 } }] }))
+    await expect(herstelAfmeldperiode(SNAPSHOT)).resolves.toBeUndefined()
+
+    const m = teHerstellen({ periodes: [{ data: null }, { error: { code: '23505' } }, { data: null }] })
+    use(m)
+    await expect(herstelAfmeldperiode(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('compenseert bij een fout halverwege: bijgewerkte rijen terug, periode weg, generieke melding', async () => {
+    const m = teHerstellen({
+      periodes: [{ data: null }, { error: null }, { data: null, error: null }],
+      attendance: [
+        { error: null },                                        // naarStandaard lukt
+        { error: { code: '57014', message: 'canceling statement' } }, // alleenHerkomst faalt
+        { error: null },                                        // compensatie
+      ],
+    })
+    use(m)
+    await expect(herstelAfmeldperiode(SNAPSHOT)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+
+    const updates = m.calls.update.filter((u) => u.table === 'attendance')
+    expect(updates[2].payload).toEqual({ status: 'present', absence_period_id: null })
+    expect(updates[2].eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'player_id', val: PLAYER_A },
+      { col: 'absence_period_id', val: PERIOD_1 },
+    ])
+    expect(updates[2].ins).toEqual([{ col: 'event_id', val: [EV1] }])
+    expect(m.calls.delete).toEqual([{
+      table: 'absence_periods',
+      eqs: [{ col: 'id', val: PERIOD_1 }, { col: 'team_id', val: 'team-1' }],
+    }])
+    expect(logged()).toContain('attendance.herstelAfmeldperiode.herkomst')
+    expect(logged()).not.toContain('canceling statement')
+  })
+
+  it('weigert een snapshot van een ander team, zonder iets te schrijven', async () => {
+    const m = teHerstellen()
+    use(m)
+    await expect(herstelAfmeldperiode({ ...SNAPSHOT, teamId: 'ander-team' })).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('weigert vervalste velden zonder query of schrijfactie', async () => {
+    const m = teHerstellen()
+    use(m)
+    for (const fout of [
+      { ...SNAPSHOT, id: 'p1' },
+      { ...SNAPSHOT, playerId: 'speler' },
+      { ...SNAPSHOT, fromDate: '2026-02-30' },
+      { ...SNAPSHOT, fromDate: '2026-09-01' }, // na toDate
+      { ...SNAPSHOT, createdAt: 'nu' },
+      { ...SNAPSHOT, naarStandaardEventIds: ['e1'] },
+      { ...SNAPSHOT, alleenHerkomstEventIds: 'e1' as never },
+      { ...SNAPSHOT, naarStandaardEventIds: Array.from({ length: 501 }, () => EV1) },
+    ]) {
+      await expect(herstelAfmeldperiode(fout)).rejects.toThrow('Herstel niet mogelijk')
+    }
+    expect(m.calls.select.filter((x) => x.table === 'absence_periods')).toHaveLength(0)
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert een speler die niet (meer) van dit team is', async () => {
+    const m = teHerstellen({ player: { data: null, error: null } })
+    use(m)
+    await expect(herstelAfmeldperiode(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert zonder Aanwezigheid-recht met "Geen toegang"', async () => {
+    const m = makeSupabase({
+      tables: { team_members: { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null } },
+    })
+    use(m)
+    await expect(herstelAfmeldperiode(SNAPSHOT)).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+})
+
 describe('revokeAbsencePeriod — gastspeler', () => {
   const PERIODE_RIJ = {
     id: PERIOD_1,

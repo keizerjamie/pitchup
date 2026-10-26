@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { CYCLE_LENGTH_WEEKS } from '@/lib/periodization'
 import { saveCyclusWeekCorrectie, deleteCyclusWeekCorrectie } from '@/app/actions/periodisering'
 import { useDict } from '@/lib/i18n-context'
+import BottomSheet from '@/components/ui/BottomSheet'
 
 interface Props {
   // Voorselectie in de sheet — de effectieve week van vandaag. `null` (nog
@@ -23,18 +24,20 @@ interface Props {
 
 const WEEKS = Array.from({ length: CYCLE_LENGTH_WEEKS }, (_, i) => i + 1)
 
-// Sheet-markup één-op-één van components/NulmetingManager.tsx (container,
-// backdrop, paneel, sticky kop/voet, foutbalk): dezelfde patronen, nu voor het
-// instellen van de cyclusweek in plaats van een nulmeting.
+// Sheet via de gedeelde components/ui/BottomSheet (zelfde als NulmetingManager),
+// nu voor het instellen van de cyclusweek in plaats van een nulmeting.
 export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, triggerClassName, canEdit = true }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   const [open, setOpen] = useState(false)
   const [gekozenWeek, setGekozenWeek] = useState(huidigeWeek ?? 1)
+  // Week op het moment van openen: basis voor de dirty-waarschuwing.
+  const [beginWeek, setBeginWeek] = useState(huidigeWeek ?? 1)
   const [error, setError] = useState<string | null>(null)
 
   function openSheet() {
     setGekozenWeek(huidigeWeek ?? 1)
+    setBeginWeek(huidigeWeek ?? 1)
     setError(null)
     setOpen(true)
   }
@@ -89,70 +92,13 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
-          <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeSheet} />
-          <div className="anim-sheet relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
-            <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl">
-              <h3 className="font-bold text-ink text-lg">{t.periodization.adjustWeekTitle}</h3>
-              <button
-                type="button"
-                onClick={closeSheet}
-                aria-label={t.trainingPlan.cancel}
-                className="w-8 h-8 rounded-full bg-surface-sunken flex items-center justify-center text-faint hover:bg-surface-sunken"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <p className="text-sm text-faint">{t.periodization.adjustWeekHint}</p>
-
-              {error && (
-                <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl">{error}</div>
-              )}
-
-              <div role="radiogroup" aria-labelledby="cyclus-week-legend">
-                <p id="cyclus-week-legend" className="block text-sm font-semibold text-muted mb-1.5">
-                  {t.periodization.adjustWeekLegend}
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  {WEEKS.map((n) => {
-                    const gekozen = gekozenWeek === n
-                    return (
-                      <button
-                        key={n}
-                        type="button"
-                        role="radio"
-                        aria-checked={gekozen}
-                        onClick={() => setGekozenWeek(n)}
-                        className={`rounded-xl py-2.5 text-[13px] font-bold transition-colors active:scale-[0.97] ${
-                          gekozen
-                            ? 'bg-primary text-white'
-                            : 'bg-surface-sunken text-muted border border-[var(--border-soft)]'
-                        }`}
-                      >
-                        {t.periodization.adjustWeekOption.replace('{n}', String(n))}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {heeftCorrectie && (
-                <button
-                  type="button"
-                  onClick={handleBackToAutomatic}
-                  disabled={isPending}
-                  className="text-xs font-semibold text-brand-accent px-3 py-1.5 rounded-full border border-[var(--border-soft)] hover:border-brand-accent/50 transition active:scale-[0.97] disabled:opacity-60"
-                >
-                  {t.periodization.backToAutomatic}
-                </button>
-              )}
-            </div>
-
-            <div className="sticky bottom-0 bg-surface border-t border-[var(--border-soft)] p-4 flex gap-3">
+        <BottomSheet
+          onClose={closeSheet}
+          titel={t.periodization.adjustWeekTitle}
+          sluitLabel={t.trainingPlan.cancel}
+          dirty={gekozenWeek !== beginWeek}
+          voet={
+            <>
               <button
                 type="button"
                 onClick={closeSheet}
@@ -168,9 +114,55 @@ export default function CyclusWeekCorrectie({ huidigeWeek, heeftCorrectie, trigg
               >
                 {isPending ? t.periodization.saving : t.periodization.saveWeek}
               </button>
+            </>
+          }
+        >
+          <div className="p-5 space-y-4">
+            <p className="text-sm text-faint">{t.periodization.adjustWeekHint}</p>
+
+            {error && (
+              <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl">{error}</div>
+            )}
+
+            <div role="radiogroup" aria-labelledby="cyclus-week-legend">
+              <p id="cyclus-week-legend" className="block text-sm font-semibold text-muted mb-1.5">
+                {t.periodization.adjustWeekLegend}
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {WEEKS.map((n) => {
+                  const gekozen = gekozenWeek === n
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      role="radio"
+                      aria-checked={gekozen}
+                      onClick={() => setGekozenWeek(n)}
+                      className={`rounded-xl py-2.5 text-[13px] font-bold transition-colors active:scale-[0.97] ${
+                        gekozen
+                          ? 'bg-primary text-white'
+                          : 'bg-surface-sunken text-muted border border-[var(--border-soft)]'
+                      }`}
+                    >
+                      {t.periodization.adjustWeekOption.replace('{n}', String(n))}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
+
+            {heeftCorrectie && (
+              <button
+                type="button"
+                onClick={handleBackToAutomatic}
+                disabled={isPending}
+                className="text-xs font-semibold text-brand-accent px-3 py-1.5 rounded-full border border-[var(--border-soft)] hover:border-brand-accent/50 transition active:scale-[0.97] disabled:opacity-60"
+              >
+                {t.periodization.backToAutomatic}
+              </button>
+            )}
           </div>
-        </div>
+        </BottomSheet>
       )}
     </>
   )

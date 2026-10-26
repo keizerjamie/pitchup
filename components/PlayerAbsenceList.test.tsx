@@ -18,8 +18,22 @@ function revokeAriaName(fromDate: string, toDate: string) {
 vi.mock('@/app/actions/attendance', () => ({
   updateAttendance: vi.fn().mockResolvedValue(undefined),
   markAbsentForPeriod: vi.fn().mockResolvedValue({ periodId: 'period-new', affected: 1 }),
-  revokeAbsencePeriod: vi.fn().mockResolvedValue({ restored: 1 }),
+  revokeAbsencePeriod: vi.fn(),
+  herstelAfmeldperiode: vi.fn().mockResolvedValue(undefined),
 }))
+
+// Snapshot-fixture zoals revokeAbsencePeriod hem sinds UT teruggeeft.
+const HERSTEL: HerstelAfmeldperiode = {
+  soort: 'afmeldperiode',
+  teamId: 'team-1',
+  id: 'period-1',
+  playerId: 'p1',
+  fromDate: '2026-08-10',
+  toDate: '2026-08-20',
+  createdAt: '2026-08-01T00:00:00Z',
+  naarStandaardEventIds: ['e1'],
+  alleenHerkomstEventIds: [],
+}
 
 // Zelfde precedent als wedstrijden-bulk-toevoegen.acceptance.test.tsx: een
 // gestubde router zodat router.refresh() (bevinding 3) verifieerbaar is
@@ -29,9 +43,12 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: mockRefresh }),
 }))
 
-import { updateAttendance, markAbsentForPeriod, revokeAbsencePeriod } from '@/app/actions/attendance'
+import { updateAttendance, markAbsentForPeriod, revokeAbsencePeriod, herstelAfmeldperiode } from '@/app/actions/attendance'
+import type { HerstelAfmeldperiode } from '@/lib/herstel'
+import { ToastProvider } from '@/components/ui/Toast'
 const mockMarkAbsentForPeriod = markAbsentForPeriod as unknown as ReturnType<typeof vi.fn>
 const mockRevokeAbsencePeriod = revokeAbsencePeriod as unknown as ReturnType<typeof vi.fn>
+const mockHerstelAfmeldperiode = herstelAfmeldperiode as unknown as ReturnType<typeof vi.fn>
 
 interface EventWithStatus extends FootballEvent {
   status: AttendanceStatus
@@ -79,7 +96,8 @@ function renderList(overrides: Partial<Parameters<typeof PlayerAbsenceList>[0]> 
 beforeEach(() => {
   vi.clearAllMocks()
   mockMarkAbsentForPeriod.mockResolvedValue({ periodId: 'period-new', affected: 1 })
-  mockRevokeAbsencePeriod.mockResolvedValue({ restored: 1 })
+  mockRevokeAbsencePeriod.mockResolvedValue({ restored: 1, herstel: HERSTEL })
+  mockHerstelAfmeldperiode.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -305,7 +323,7 @@ describe('statusknoppen uitgeschakeld tijdens een lopende periode-transitie', ()
   })
 
   it('schakelt de per-event statusknoppen uit zolang revokeAbsencePeriod nog in behandeling is', async () => {
-    let resolveRevoke: (value: { restored: number }) => void
+    let resolveRevoke: (value: { restored: number; herstel: HerstelAfmeldperiode }) => void
     mockRevokeAbsencePeriod.mockReturnValueOnce(
       new Promise((resolve) => { resolveRevoke = resolve }),
     )
@@ -324,7 +342,7 @@ describe('statusknoppen uitgeschakeld tijdens een lopende periode-transitie', ()
     expect(screen.getByRole('button', { name: nl.players.absent })).toBeDisabled()
 
     await act(async () => {
-      resolveRevoke({ restored: 1 })
+      resolveRevoke({ restored: 1, herstel: HERSTEL })
     })
 
     expect(screen.getByRole('button', { name: nl.players.present })).not.toBeDisabled()
@@ -335,7 +353,7 @@ describe('statusknoppen uitgeschakeld tijdens een lopende periode-transitie', ()
 // Bevinding 4: bij een afwijzing van markAbsentForPeriod/revokeAbsencePeriod
 // moet de optimistische update teruggedraaid worden en een foutmelding
 // getoond worden — zelfde patroon als components/DeleteAccountSection.tsx en
-// components/NulmetingManager.tsx (lokale error-state met err.message).
+// components/NulmetingManager.tsx (lokale error-state).
 describe('foutafhandeling rond markAbsentForPeriod/revokeAbsencePeriod (bevinding 4)', () => {
   it('draait de optimistische periode-afmelding terug en toont een foutmelding als markAbsentForPeriod afwijst', async () => {
     mockMarkAbsentForPeriod.mockRejectedValueOnce(new Error('Periode kon niet worden opgeslagen'))
@@ -389,8 +407,9 @@ describe('foutafhandeling rond markAbsentForPeriod/revokeAbsencePeriod (bevindin
       fireEvent.click(screen.getByRole('button', { name: revokeAriaName('2026-08-10', '2026-08-20') }))
     })
 
-    // Foutmelding zichtbaar.
-    expect(screen.getByText('Periode niet gevonden')).toBeInTheDocument()
+    // Vertaalde foutmelding zichtbaar, nooit de rauwe serverstring.
+    expect(screen.getByText(nl.players.periodRevokeError)).toBeInTheDocument()
+    expect(screen.queryByText('Periode niet gevonden')).not.toBeInTheDocument()
     // De periode staat weer in de lijst (optimistische verwijdering teruggedraaid).
     expect(
       screen.getByRole('button', { name: revokeAriaName('2026-08-10', '2026-08-20') }),
@@ -480,5 +499,127 @@ describe('blessure als eigen aanwezigheidsstatus', () => {
     renderList({ canEdit: false, events: [makeEvent({ id: 'e1', status: 'injured' })] })
     expect(screen.getByText(nl.players.injuredStatus)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: new RegExp(nl.players.injuredStatus) })).not.toBeInTheDocument()
+  })
+})
+
+// Fase 2 (OU): setStatus loopt via useRijOpslag — optimistisch, rollback per rij.
+describe('setStatus: optimistisch met rollback per rij (OU)', () => {
+  const mockUpdateAttendance = updateAttendance as unknown as ReturnType<typeof vi.fn>
+
+  it('toont de nieuwe status direct, vóór de server antwoordt', async () => {
+    let resolve: () => void = () => {}
+    mockUpdateAttendance.mockReturnValueOnce(new Promise<void>((r) => { resolve = r }))
+    renderList({ events: [makeEvent({ id: 'e1', status: 'unknown' })] })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: nl.players.absent })) })
+    expect(screen.getByRole('button', { name: nl.players.absent }).className).toContain('bg-danger')
+    expect(mockUpdateAttendance).toHaveBeenCalledWith('e1', 'p1', 'absent')
+    await act(async () => { resolve() })
+    expect(screen.getByRole('button', { name: nl.players.absent }).className).toContain('bg-danger')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('bij een weigering: rij terug naar de bevestigde status en een i18n-melding, niet de serverstring', async () => {
+    mockUpdateAttendance.mockRejectedValueOnce(new Error('Geen toegang'))
+    renderList({ events: [makeEvent({ id: 'e1', status: 'present' })] })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: nl.players.absent })) })
+    expect(screen.getByRole('button', { name: nl.players.present }).className).toContain('bg-primary')
+    expect(screen.getByRole('button', { name: nl.players.absent }).className).not.toContain('bg-danger')
+    expect(screen.getByRole('alert')).toHaveTextContent(nl.event.attendanceSaveError)
+    expect(screen.queryByText('Geen toegang')).not.toBeInTheDocument()
+  })
+
+  it('een mislukte rij laat een andere rij ongemoeid', async () => {
+    mockUpdateAttendance.mockRejectedValueOnce(new Error('x'))
+    renderList({ events: [
+      makeEvent({ id: 'e1', date: '2026-08-12', status: 'unknown' }),
+      makeEvent({ id: 'e2', date: '2026-08-13', status: 'unknown' }),
+    ] })
+    const absent = screen.getAllByRole('button', { name: nl.players.absent })
+    await act(async () => { fireEvent.click(absent[0]) })
+    await act(async () => { fireEvent.click(absent[1]) })
+    const after = screen.getAllByRole('button', { name: nl.players.absent })
+    expect(after[0].className).not.toContain('bg-danger')
+    expect(after[1].className).toContain('bg-danger')
+  })
+
+  it('statusknoppen blijven uit zolang een periode-afmelding loopt (ongewijzigd)', async () => {
+    let resolve: (v: { periodId: string; affected: number }) => void = () => {}
+    mockMarkAbsentForPeriod.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    renderList({ events: [makeEvent({ id: 'e1', date: '2026-09-05' })] })
+    const [fromInput, toInput] = [nl.players.periodFrom, nl.players.periodTo].map(
+      (l) => screen.getByText(l).parentElement?.querySelector('input') as HTMLInputElement,
+    )
+    fireEvent.change(fromInput, { target: { value: '2026-09-01' } })
+    fireEvent.change(toInput, { target: { value: '2026-09-10' } })
+    act(() => { fireEvent.click(screen.getByRole('button', { name: nl.players.periodButton })) })
+    expect(screen.getByRole('button', { name: nl.players.present })).toBeDisabled()
+    await act(async () => { resolve({ periodId: 'p', affected: 1 }) })
+  })
+
+  it('neemt nieuwe server-props over voor rijen die niet onderweg zijn', () => {
+    const { rerender } = renderList({ events: [makeEvent({ id: 'e1', status: 'unknown' })] })
+    rerender(listElement({ events: [makeEvent({ id: 'e1', status: 'absent' })] }))
+    expect(screen.getByRole('button', { name: nl.players.absent }).className).toContain('bg-danger')
+  })
+})
+
+// ── Undo na intrekken van een periode (UT) ──
+describe('undo-toast na intrekken', () => {
+  function renderMetToast() {
+    return render(
+      <DictProvider dict={nl}>
+        <ToastProvider teamId="team-1">
+          <PlayerAbsenceList
+            playerId="p1"
+            events={[makeEvent({ id: 'e1', date: '2026-08-12', status: 'absent' })]}
+            periods={[{ id: 'period-1', player_id: 'p1', from_date: '2026-08-10', to_date: '2026-08-20' }]}
+            defaultStatus="unknown"
+            canEdit
+          />
+        </ToastProvider>
+      </DictProvider>,
+    )
+  }
+  const revokeKnop = () => screen.getByRole('button', { name: revokeAriaName('2026-08-10', '2026-08-20') })
+
+  it('intrekken toont een toast; "Ongedaan maken" roept herstelAfmeldperiode met de snapshot aan, zet de periode terug en ververst', async () => {
+    renderMetToast()
+    await act(async () => {
+      fireEvent.click(revokeKnop())
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(nl.undo.deleted)
+    expect(screen.queryByRole('button', { name: revokeAriaName('2026-08-10', '2026-08-20') })).not.toBeInTheDocument()
+    mockRefresh.mockClear()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: nl.undo.action }))
+    })
+    expect(mockHerstelAfmeldperiode).toHaveBeenCalledTimes(1)
+    expect(mockHerstelAfmeldperiode).toHaveBeenCalledWith(HERSTEL)
+    expect(revokeKnop()).toBeInTheDocument()
+    expect(mockRefresh).toHaveBeenCalled()
+  })
+
+  it('herstel faalt: fouttoast, de periode blijft ingetrokken', async () => {
+    mockHerstelAfmeldperiode.mockRejectedValueOnce(new Error('Herstel niet mogelijk'))
+    renderMetToast()
+    await act(async () => {
+      fireEvent.click(revokeKnop())
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: nl.undo.action }))
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent(nl.undo.restoreError)
+    expect(screen.queryByRole('button', { name: revokeAriaName('2026-08-10', '2026-08-20') })).not.toBeInTheDocument()
+  })
+
+  it('intrekken faalt: geen toast', async () => {
+    mockRevokeAbsencePeriod.mockRejectedValueOnce(new Error('x'))
+    renderMetToast()
+    await act(async () => {
+      fireEvent.click(revokeKnop())
+    })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByText(nl.players.periodRevokeError)).toBeInTheDocument()
   })
 })

@@ -1,9 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import { markTaskDone, reopenTask } from '@/app/actions/todos'
 import { useDict } from '@/lib/i18n-context'
+import { useRijOpslag } from '@/lib/use-rij-opslag'
 import { daysUntil, formatDate } from '@/lib/utils'
 
 export type TaskType = 'squad' | 'lineup' | 'analysis' | 'training_plan'
@@ -17,6 +18,10 @@ export interface TodoItem {
   auto: boolean
   manual: boolean
 }
+
+const taskKey = (item: TodoItem) => `${item.eventId}:${item.taskType}`
+const manualVan = (items: TodoItem[]): Record<string, boolean> =>
+  Object.fromEntries(items.map((item) => [taskKey(item), item.manual]))
 
 // Route per taak-type — zelfde paden als de ActionCard-hrefs op de event-detailpagina.
 const TASK_HREF: Record<TaskType, string> = {
@@ -38,21 +43,33 @@ const TASK_HREF: Record<TaskType, string> = {
 // wordt uitgeschakeld.
 export default function TodoList({ items, canEditTask }: { items: TodoItem[]; canEditTask: Record<TaskType, boolean> }) {
   const t = useDict()
-  const [manual, setManual] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(items.map((item) => [`${item.eventId}:${item.taskType}`, item.manual]))
-  )
-  const [isPending, startTransition] = useTransition()
+  const [saveError, setSaveError] = useState(false)
+  const { waarden: manual, zet, synchroniseer } = useRijOpslag<boolean>({
+    bevestigd: manualVan(items),
+    opslaan: (key, done) => {
+      const item = items.find((i) => taskKey(i) === key)
+      // Onbekende sleutel kan alleen als de lijst intussen is ververst; dan
+      // is er niets meer op te slaan.
+      if (!item) return Promise.resolve()
+      return done ? markTaskDone(item.eventId, item.taskType) : reopenTask(item.eventId, item.taskType)
+    },
+    onFout: () => setSaveError(true),
+  })
+
+  // Nieuwe server-props (na revalidatePath('/')): serverwaarde overnemen voor
+  // taken die niet onderweg zijn. "Adjust state during render", zoals
+  // PlayerAbsenceList.
+  const [prevItems, setPrevItems] = useState(items)
+  if (prevItems !== items) {
+    setPrevItems(items)
+    synchroniseer(manualVan(items))
+  }
 
   function toggle(item: TodoItem) {
-    const key = `${item.eventId}:${item.taskType}`
+    const key = taskKey(item)
     const effective = item.auto || manual[key]
-    if (effective) {
-      setManual((m) => ({ ...m, [key]: false }))
-      startTransition(() => reopenTask(item.eventId, item.taskType))
-    } else {
-      setManual((m) => ({ ...m, [key]: true }))
-      startTransition(() => markTaskDone(item.eventId, item.taskType))
-    }
+    setSaveError(false)
+    zet(key, !effective)
   }
 
   const label: Record<TaskType, string> = {
@@ -64,7 +81,7 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
 
   // Teller = alleen ÓPEN taken (afgevinkt telt niet mee) en beweegt live mee
   // met de optimistische checkbox-state.
-  const openCount = items.filter((item) => !(item.auto || manual[`${item.eventId}:${item.taskType}`])).length
+  const openCount = items.filter((item) => !(item.auto || manual[taskKey(item)])).length
 
   return (
     <div className="surface-card p-5 flex flex-col gap-3.5">
@@ -80,11 +97,17 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
         )}
       </div>
 
+      {saveError && (
+        <p role="alert" className="text-[13px] font-semibold text-panel-red-ink bg-panel-red border border-panel-red-edge px-3 py-2 rounded-lg">
+          {t.todo.saveError}
+        </p>
+      )}
+
       {items.length === 0 ? (
         <p className="text-[13.5px] text-faint font-medium py-2">{t.todo.empty}</p>
       ) : (
         items.map((item) => {
-          const key = `${item.eventId}:${item.taskType}`
+          const key = taskKey(item)
           const checked = item.auto || manual[key]
           const overdue = !checked && daysUntil(item.deadline) < 0
           const context = item.opponent ? `${t.lineup.vsLabel} ${item.opponent}` : t.event.training
@@ -98,11 +121,11 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
               <button
                 type="button"
                 onClick={() => toggle(item)}
-                disabled={isPending || !canEditTask[item.taskType]}
+                disabled={!canEditTask[item.taskType]}
                 aria-pressed={checked}
                 aria-label={label[item.taskType]}
                 title={canEditTask[item.taskType] ? undefined : t.errors.noPermission}
-                className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
+                className="relative hit-slop w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
                 style={checked
                   ? { background: 'var(--primary)', color: '#fff' }
                   : { background: 'var(--surface)', border: '1.5px solid var(--border-soft)' }}

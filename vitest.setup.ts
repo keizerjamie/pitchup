@@ -30,3 +30,14 @@ beforeEach(() => {
     })),
   })
 })
+
+// next/navigation's useRouter() gooit buiten een gemounte App Router. Sinds
+// TrainingPlanEditor bij een mislukte ontkoppeling router.refresh() aanroept,
+// renderen tientallen bestaande tests de editor zonder eigen router-mock. Deze
+// standaardmock houdt ze werkend; een testbestand dat zelf
+// vi.mock('next/navigation', ...) doet, overschrijft hem.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => '/',
+  useSearchParams: () => new URLSearchParams(),
+}))

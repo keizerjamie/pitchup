@@ -10,10 +10,12 @@
 // gestubd via een generieke tabel-engine — geen kant-en-klare fixtures.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { act } from 'react'
 import { render, screen, within, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import { formatDate } from '@/lib/utils'
+import { ToastProvider } from '@/components/ui/Toast'
 
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => {
@@ -411,6 +413,18 @@ async function renderPeriodiseringMutable(
   return render(<DictProvider dict={nl}>{el}</DictProvider>)
 }
 
+// Zoals renderPeriodiseringMutable, maar mét ToastProvider (zoals AppShell):
+// nodig voor het undo-pad.
+async function renderPeriodiseringMetToast(db: ReturnType<typeof makeMutableDb>) {
+  installMutableDb(db, { id: TEAM })
+  const el = await PeriodizationPage()
+  return render(
+    <DictProvider dict={nl}>
+      <ToastProvider teamId={TEAM}>{el}</ToastProvider>
+    </DictProvider>,
+  )
+}
+
 // ── DOM-helpers voor de sheet (components/NulmetingManager.tsx) — datum- en
 // stapveld zijn gekoppeld via htmlFor/id, dus getByLabelText werkt. Het
 // stapveld-label toont een categorie-afhankelijk maximum ("max {n}
@@ -544,7 +558,7 @@ describe('NulmetingManager: alleen de nieuwste meting is bewerkbaar', () => {
 
 // ═══════════════════════════════════════════════════════════════════════
 // AC 27 (verwijderen) — de verwijderknop in de gerenderde NulmetingManager,
-// succes- en foutpad. Klikt écht op de knop (confirm gemockt), tegen het
+// succes- en foutpad. Klikt écht op de knop (geen bevestiging meer; undo-toast), tegen het
 // muteerbare db-harnas — geen call-recording.
 // ═══════════════════════════════════════════════════════════════════════
 describe('Verwijderen via de UI (AC 27)', () => {
@@ -556,7 +570,6 @@ describe('Verwijderen via de UI (AC 27)', () => {
 
     const blok = blokVoor('partijen_groot')
     fireEvent.click(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!)
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
 
     await clickAndWaitFor(
       within(blok).getByLabelText(nl.periodization.deleteNulmeting),
@@ -575,7 +588,6 @@ describe('Verwijderen via de UI (AC 27)', () => {
 
     const blok = blokVoor('partijen_groot')
     fireEvent.click(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!)
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
 
     // Een ander tabblad heeft de rij intussen al verwijderd: deleteCategorieMeting
     // vindt 'm niet meer en gooit 'Meting niet gevonden'.
@@ -600,7 +612,6 @@ describe('Verwijderen via de UI (AC 27)', () => {
     const blok = blokVoor('partijen_groot')
     const toggle = within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!
     fireEvent.click(toggle)
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     db.tables.categorie_metingen.length = 0 // simuleert een race-conditie
 
     await clickAndWaitFor(
@@ -608,8 +619,11 @@ describe('Verwijderen via de UI (AC 27)', () => {
       () => expect(within(blok).getByText(nl.oefeningen.genericError)).toBeInTheDocument(),
     )
 
-    fireEvent.click(toggle) // dichtklappen
-    fireEvent.click(toggle) // en weer open
+    // De enige rij werd optimistisch verborgen (geschiedenis-sectie even weg)
+    // en kwam na de fout terug: de toggle is dus een nieuw element.
+    const toggleNa = within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!
+    fireEvent.click(toggleNa) // dichtklappen
+    fireEvent.click(toggleNa) // en weer open
     expect(within(blok).queryByText(nl.oefeningen.genericError)).toBeNull()
   })
 
@@ -621,7 +635,6 @@ describe('Verwijderen via de UI (AC 27)', () => {
 
     const blok = blokVoor('partijen_groot')
     fireEvent.click(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!)
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     db.tables.categorie_metingen.length = 0
 
     await clickAndWaitFor(
@@ -633,6 +646,89 @@ describe('Verwijderen via de UI (AC 27)', () => {
     // dus de knop heet nog "Hermeten"; openNew() moet de oude melding wissen.
     fireEvent.click(within(blok).getByText(nl.periodization.remeasureCta).closest('button')!)
     expect(screen.queryByText(nl.oefeningen.genericError)).toBeNull()
+  })
+})
+
+// herstelCategorieMeting valideert het id als UUID.
+const MID = '0a000000-0000-4000-8000-0000000000a1'
+
+describe('Verwijderen met undo-toast (UT)', () => {
+  it('verwijderen vraagt niet om bevestiging, verbergt de rij en toont een toast; "Ongedaan maken" zet dezelfde rij (id + created_at) terug', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const origineel = meting({ id: MID, categorie: 'partijen_groot', datum: '2026-05-01', stap: 5 })
+    const db = makeMutableDb({ categorieMetingen: [origineel] })
+    await renderPeriodiseringMetToast(db)
+
+    const blok = blokVoor('partijen_groot')
+    fireEvent.click(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!)
+
+    await clickAndWaitFor(
+      within(blok).getByLabelText(nl.periodization.deleteNulmeting),
+      () => expect(screen.getByRole('status')).toHaveTextContent(nl.undo.deleted),
+    )
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(db.tables.categorie_metingen).toHaveLength(0)
+    // Optimistisch verborgen: geen verwijderknop meer in dit blok.
+    expect(within(blok).queryByLabelText(nl.periodization.deleteNulmeting)).toBeNull()
+
+    await clickAndWaitFor(
+      screen.getByRole('button', { name: nl.undo.action }),
+      () => expect(db.tables.categorie_metingen).toHaveLength(1),
+    )
+    expect(db.tables.categorie_metingen[0]).toMatchObject({ id: MID, created_at: origineel.created_at, categorie: 'partijen_groot', datum: '2026-05-01', stap: 5 })
+    await vi.waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 2000 })
+    // De rij is weer zichtbaar (history-sectie met één item).
+    expect(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1'))).toBeInTheDocument()
+  })
+
+  it('herstel faalt: fouttoast met t.undo.restoreError, de rij blijft verborgen', async () => {
+    const db = makeMutableDb({
+      categorieMetingen: [meting({ id: MID, categorie: 'partijen_groot', datum: '2026-05-01', stap: 5 })],
+    })
+    await renderPeriodiseringMetToast(db)
+    const blok = blokVoor('partijen_groot')
+    fireEvent.click(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!)
+    await clickAndWaitFor(
+      within(blok).getByLabelText(nl.periodization.deleteNulmeting),
+      () => expect(screen.getByRole('status')).toHaveTextContent(nl.undo.deleted),
+    )
+
+    vi.mocked(createClient).mockRejectedValueOnce(new Error('db weg'))
+    await clickAndWaitFor(
+      screen.getByRole('button', { name: nl.undo.action }),
+      () => expect(screen.getByRole('alert')).toHaveTextContent(nl.undo.restoreError),
+    )
+    expect(db.tables.categorie_metingen).toHaveLength(0)
+    expect(within(blok).queryByText(nl.periodization.historyForCategory.replace('{n}', '1'))).toBeNull()
+    expect(screen.queryByRole('button', { name: nl.undo.action })).toBeNull()
+  })
+
+  // UT5 (validator-bevinding 4): de test "fout: de meting bestaat niet meer"
+  // hierboven rendert zonder ToastProvider, waar toast een no-op is — daar kan
+  // een ten onrechte getoonde "Verwijderd"-toast dus nooit zichtbaar worden.
+  // Deze variant draait mét provider (zoals AppShell).
+  it('UT5: verwijderen faalt (mét ToastProvider) -> foutmelding bij het blok, GEEN "Verwijderd"-toast en geen "Ongedaan maken"-knop', async () => {
+    const db = makeMutableDb({
+      categorieMetingen: [meting({ id: MID, categorie: 'partijen_groot', datum: '2026-05-01', stap: 5 })],
+    })
+    await renderPeriodiseringMetToast(db)
+
+    const blok = blokVoor('partijen_groot')
+    fireEvent.click(within(blok).getByText(nl.periodization.historyForCategory.replace('{n}', '1')).closest('button')!)
+
+    // Een ander tabblad heeft de rij intussen verwijderd: de server gooit 'Meting niet gevonden'.
+    db.tables.categorie_metingen.length = 0
+
+    await clickAndWaitFor(
+      within(blok).getByLabelText(nl.periodization.deleteNulmeting),
+      () => expect(within(blok).getByText(nl.oefeningen.genericError)).toBeInTheDocument(),
+    )
+
+    // Geef een eventueel (ten onrechte) geplande toast ruim de tijd om te verschijnen.
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    expect(screen.queryByText(nl.undo.deleted)).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('button', { name: nl.undo.action })).toBeNull()
   })
 })
 

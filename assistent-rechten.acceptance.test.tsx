@@ -46,6 +46,8 @@ import { nl } from '@/messages/nl'
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((to: string) => { throw new Error(`__redirect__:${to}`) }),
+  useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => '/',
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined, set: vi.fn() }),

@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { kopieerTrainingsplan } from '@/app/actions/training-plan'
 import { formatDateLong } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
+import BottomSheet from '@/components/ui/BottomSheet'
 
 export interface KopieerOptie {
   id: string
@@ -60,38 +61,38 @@ export default function KopieerVorigeTraining({
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center print:hidden">
-          <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <div className="anim-sheet relative w-full max-w-md bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
-            <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-soft)' }}>
-              <h3 className="font-bold text-ink text-lg">{t.trainingPlan.copyPreviousTitle}</h3>
-              <p className="text-xs text-faint mt-1">{t.trainingPlan.copyPreviousHint}</p>
-            </div>
+        <BottomSheet
+          onClose={() => setOpen(false)}
+          titel={t.trainingPlan.copyPreviousTitle}
+          ondertitel={t.trainingPlan.copyPreviousHint}
+          sluitLabel={t.common.close}
+          toonSluitknop={false}
+          breedte="md"
+          wrapperClassName="print:hidden"
+        >
+          <div className="p-5 flex flex-col gap-2">
+            {error && (
+              <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
+                {error}
+              </div>
+            )}
 
-            <div className="p-5 flex flex-col gap-2">
-              {error && (
-                <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
-                  {error}
+            {opties.map((optie) => (
+              <button
+                key={optie.id}
+                type="button"
+                disabled={isPending}
+                onClick={() => kopieer(optie.id)}
+                className="w-full text-left bg-surface rounded-xl border border-[var(--border-soft)] hover:border-warning/50 hover:bg-warning/10 px-4 py-3 transition-colors disabled:opacity-50"
+              >
+                <div className="font-semibold text-ink text-sm">{formatDateLong(optie.date, t.browserLocale)}</div>
+                <div className="text-xs text-faint mt-0.5">
+                  {t.trainingPlan.copyPreviousCount.replace('{n}', String(optie.aantal))}
                 </div>
-              )}
-
-              {opties.map((optie) => (
-                <button
-                  key={optie.id}
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => kopieer(optie.id)}
-                  className="w-full text-left bg-surface rounded-xl border border-[var(--border-soft)] hover:border-warning/50 hover:bg-warning/10 px-4 py-3 transition-colors disabled:opacity-50"
-                >
-                  <div className="font-semibold text-ink text-sm">{formatDateLong(optie.date, t.browserLocale)}</div>
-                  <div className="text-xs text-faint mt-0.5">
-                    {t.trainingPlan.copyPreviousCount.replace('{n}', String(optie.aantal))}
-                  </div>
-                </button>
-              ))}
-            </div>
+              </button>
+            ))}
           </div>
-        </div>
+        </BottomSheet>
       )}
     </>
   )

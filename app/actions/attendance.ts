@@ -5,11 +5,12 @@ import { createClient } from '@/lib/supabase/server'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { AttendanceStatus } from '@/lib/types'
 import { assertKnownPlayerId, assertOwnEvent, assertOwnPlayer, getOwnPlayerIds, isUuid } from '@/lib/authz'
-import { genericError } from '@/lib/errors'
+import { errorCode, genericError, logError } from '@/lib/errors'
 import { findCoveringPeriod, type AbsencePeriodRange } from '@/lib/absence-periods'
 import { isDateString } from '@/lib/season-dates'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { resolveAttendanceStatus } from '@/lib/attendance-rows'
+import { herstelNietMogelijk, schoonCreatedAt, uuidLijst, type HerstelAfmeldperiode } from '@/lib/herstel'
 
 // Maximale lengte van een `.in()`-lijst, gelijk aan de batchgrootte van
 // generateSeasonTrainings (app/actions/settings.ts): een periode kan een
@@ -21,6 +22,33 @@ function chunked<T>(items: T[]): T[][] {
   const chunks: T[][] = []
   for (let i = 0; i < items.length; i += ID_CHUNK) chunks.push(items.slice(i, i + ID_CHUNK))
   return chunks
+}
+
+// De status waarnaar het intrekken van een periode een rij terugzet: de
+// teamstandaard, behalve voor een gastspeler (die blijft standaard afwezig —
+// alleen de trainer zet hem handmatig op 'present'). Zelfde regel als bij het
+// aanmaken van een rij, hergebruikt uit lib/attendance-rows.ts. Gedeeld door
+// revokeAbsencePeriod en herstelAfmeldperiode, zodat het herstel precies de
+// rijen terugvindt die het intrekken zette. Hard falen bij een fout: stil
+// doorgaan zou de gast alsnog aanwezig melden.
+async function herstelStatusVoorSpeler(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  teamId: string,
+  playerId: string,
+  context: string,
+): Promise<AttendanceStatus> {
+  const defaultStatus = await getDefaultAttendance()
+  const { data: player, error: playerError } = await supabase
+    .from('players')
+    .select('type')
+    .eq('id', playerId)
+    .eq('team_id', teamId)
+    .maybeSingle()
+  if (playerError) throw genericError(context, playerError)
+  return resolveAttendanceStatus({
+    defaultStatus,
+    isGuest: player?.type === 'guest',
+  })
 }
 
 export async function updateAttendance(
@@ -199,7 +227,15 @@ export async function markAbsentForPeriod(
 // Herstelt bewust ook rijen van verstreken events — een periode intrekken
 // betekent "dit is nooit gebeurd", anders dan markRecovered() dat alleen
 // toekomstige events aanraakt.
-export async function revokeAbsencePeriod(periodId: string): Promise<{ restored: number }> {
+//
+// Geeft naast `restored` de herstel-snapshot terug voor "Ongedaan maken"
+// (herstelAfmeldperiode hieronder): de periode zelf plus welke rijen naar de
+// standaard gingen en welke alleen hun herkomst kwijtraakten. Rijen die aan
+// een andere periode werden overgedragen staan er bewust niet in — die blijven
+// bij die andere periode (V-A).
+export async function revokeAbsencePeriod(
+  periodId: string,
+): Promise<{ restored: number; herstel: HerstelAfmeldperiode }> {
   const supabase = await createClient()
   const ctx = await requireTeamContext()
   assertCanEdit(ctx, 'aanwezigheid')
@@ -211,13 +247,15 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
 
   const { data: period } = await supabase
     .from('absence_periods')
-    .select('id, player_id, from_date, to_date')
+    .select('id, player_id, from_date, to_date, created_at')
     .eq('id', periodId)
     .eq('team_id', ctx.teamId)
     .maybeSingle()
 
   if (!period) throw new Error('Periode niet gevonden')
   const playerId = period.player_id as string
+  const naarStandaardEventIds: string[] = []
+  const alleenHerkomstEventIds: string[] = []
 
   const { data: rows, error: rowsError } = await supabase
     .from('attendance')
@@ -261,24 +299,12 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
     if (othersError) throw genericError('attendance.revokeAbsencePeriod.periods', othersError)
     const otherPeriods = (others ?? []) as AbsencePeriodRange[]
 
-    const defaultStatus = await getDefaultAttendance()
-
-    // Een gastspeler staat standaard afwezig: het intrekken van een periode mag
-    // hem niet alsnog op de teamstandaard zetten — alleen de trainer zet hem
-    // handmatig op 'present'. Zelfde regel als bij het aanmaken van een rij,
-    // hergebruikt uit lib/attendance-rows.ts. Hard falen bij een fout, zoals de
-    // queries hierboven: stil doorgaan zou de gast alsnog aanwezig melden.
-    const { data: player, error: playerError } = await supabase
-      .from('players')
-      .select('type')
-      .eq('id', playerId)
-      .eq('team_id', ctx.teamId)
-      .maybeSingle()
-    if (playerError) throw genericError('attendance.revokeAbsencePeriod.player', playerError)
-    const restoreStatus = resolveAttendanceStatus({
-      defaultStatus,
-      isGuest: player?.type === 'guest',
-    })
+    const restoreStatus = await herstelStatusVoorSpeler(
+      supabase,
+      ctx.teamId,
+      playerId,
+      'attendance.revokeAbsencePeriod.player',
+    )
 
     const transferByPeriod = new Map<string, string[]>()
     const clearOnly: string[] = []
@@ -307,6 +333,8 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
       }
     }
     restored = toDefault.length
+    naarStandaardEventIds.push(...toDefault)
+    alleenHerkomstEventIds.push(...clearOnly)
 
     // Gebundeld per doel zodat er hooguit een handvol updates nodig is. Het
     // filter op absence_period_id houdt elke update begrensd tot precies de
@@ -363,7 +391,189 @@ export async function revokeAbsencePeriod(periodId: string): Promise<{ restored:
   for (const matchEventId of matchEventIds) {
     revalidatePath(`/events/${matchEventId}/squad`)
   }
-  return { restored }
+  return {
+    restored,
+    herstel: {
+      soort: 'afmeldperiode',
+      teamId: ctx.teamId,
+      id: periodId,
+      playerId,
+      fromDate: period.from_date as string,
+      toDate: period.to_date as string,
+      createdAt: (period.created_at as string | null | undefined) ?? null,
+      naarStandaardEventIds,
+      alleenHerkomstEventIds,
+    },
+  }
+}
+
+async function periodeBestaat(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+  teamId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('absence_periods')
+    .select('id')
+    .eq('id', id)
+    .eq('team_id', teamId)
+    .maybeSingle()
+  return !!data
+}
+
+// "Ongedaan maken" van revokeAbsencePeriod: zet de periode terug met dezelfde
+// id en created_at, en draait het intrekken op de attendance-rijen terug:
+//   - naarStandaard: weer 'absent' met deze periode als herkomst — maar alleen
+//     als de rij nog precies zo staat als het intrekken hem achterliet (geen
+//     herkomst, status = de standaardstatus). Heeft de coach intussen iets
+//     anders gekozen, dan wint die keuze.
+//   - alleenHerkomst: alleen de herkomst terug; de status (handmatig present,
+//     geblesseerd, ...) blijft zoals hij is.
+// Rijen die bij het intrekken aan een andere periode werden overgedragen
+// blijven daar (V-A).
+//
+// De snapshot komt van de client: alles wordt opnieuw gevalideerd zoals bij
+// markAbsentForPeriod, `herstel.teamId` dient alleen als weigercontrole en elke
+// schrijfactie is gescoped op ctx.teamId én de speler. Idempotent: bestaat de
+// periode al in dit team, dan gebeurt er niets.
+export async function herstelAfmeldperiode(herstel: HerstelAfmeldperiode): Promise<void> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'aanwezigheid')
+
+  if (!herstel || typeof herstel !== 'object' || herstel.soort !== 'afmeldperiode') throw herstelNietMogelijk()
+  if (herstel.teamId !== ctx.teamId) throw herstelNietMogelijk()
+  if (!isUuid(herstel.id) || !isUuid(herstel.playerId)) throw herstelNietMogelijk()
+  if (!isDateString(herstel.fromDate) || !isDateString(herstel.toDate)) throw herstelNietMogelijk()
+  // Kale 'YYYY-MM-DD'-stringvergelijking, zoals markAbsentForPeriod.
+  if (herstel.fromDate > herstel.toDate) throw herstelNietMogelijk()
+  const createdAt = schoonCreatedAt(herstel.createdAt)
+  if (createdAt === undefined) throw herstelNietMogelijk()
+  const naarStandaard = uuidLijst(herstel.naarStandaardEventIds)
+  const alleenHerkomst = uuidLijst(herstel.alleenHerkomstEventIds)
+  if (!naarStandaard || !alleenHerkomst) throw herstelNietMogelijk()
+
+  const periodId = herstel.id
+  const playerId = herstel.playerId
+
+  try {
+    await assertOwnPlayer(supabase, playerId, ctx.teamId)
+  } catch {
+    throw herstelNietMogelijk()
+  }
+
+  const klaar = () => {
+    revalidatePath(`/players/${playerId}/absence`)
+    // Zelfde paden als revokeAbsencePeriod. De snapshot kent het eventtype
+    // niet; een squad-pad van een training revalideren is onschadelijk.
+    for (const eventId of new Set([...naarStandaard, ...alleenHerkomst])) {
+      revalidatePath(`/events/${eventId}`)
+      revalidatePath(`/events/${eventId}/squad`)
+    }
+  }
+
+  if (await periodeBestaat(supabase, periodId, ctx.teamId)) {
+    klaar()
+    return
+  }
+
+  const { error: insertError } = await supabase.from('absence_periods').insert({
+    id: periodId,
+    team_id: ctx.teamId,
+    player_id: playerId,
+    from_date: herstel.fromDate,
+    to_date: herstel.toDate,
+    ...(createdAt ? { created_at: createdAt } : {}),
+  })
+  if (insertError) {
+    if (errorCode(insertError) === '23505') {
+      if (await periodeBestaat(supabase, periodId, ctx.teamId)) {
+        klaar()
+        return
+      }
+      throw herstelNietMogelijk()
+    }
+    throw genericError('attendance.herstelAfmeldperiode.period', insertError)
+  }
+
+  // Vanaf hier bestaat de periode: elke fout compenseert (bijgewerkte rijen
+  // terug, periode weg), zodat er nooit een half herstel blijft staan.
+  // Patroon markAbsentForPeriod.
+  let restoreStatus: AttendanceStatus = 'present'
+  const bijgewerktStandaard: string[][] = []
+  const bijgewerktHerkomst: string[][] = []
+  const compenseer = async (context: string, fout: unknown): Promise<never> => {
+    for (const chunk of bijgewerktStandaard) {
+      const { error } = await supabase
+        .from('attendance')
+        .update({ status: restoreStatus, absence_period_id: null })
+        .eq('team_id', ctx.teamId)
+        .eq('player_id', playerId)
+        .eq('absence_period_id', periodId)
+        .in('event_id', chunk)
+      if (error) logError('attendance.herstelAfmeldperiode.compensatie', error)
+    }
+    for (const chunk of bijgewerktHerkomst) {
+      const { error } = await supabase
+        .from('attendance')
+        .update({ absence_period_id: null })
+        .eq('team_id', ctx.teamId)
+        .eq('player_id', playerId)
+        .eq('absence_period_id', periodId)
+        .in('event_id', chunk)
+      if (error) logError('attendance.herstelAfmeldperiode.compensatie', error)
+    }
+    const { error } = await supabase
+      .from('absence_periods')
+      .delete()
+      .eq('id', periodId)
+      .eq('team_id', ctx.teamId)
+    if (error) logError('attendance.herstelAfmeldperiode.compensatie', error)
+    throw genericError(context, fout)
+  }
+
+  if (naarStandaard.length > 0) {
+    try {
+      restoreStatus = await herstelStatusVoorSpeler(
+        supabase,
+        ctx.teamId,
+        playerId,
+        'attendance.herstelAfmeldperiode.player',
+      )
+    } catch (fout) {
+      await compenseer('attendance.herstelAfmeldperiode.player', fout)
+    }
+  }
+
+  // Het filter op "geen herkomst + nog steeds de standaardstatus" houdt elke
+  // update begrensd tot rijen die nog precies zo staan als het intrekken ze
+  // achterliet.
+  for (const chunk of chunked(naarStandaard)) {
+    const { error } = await supabase
+      .from('attendance')
+      .update({ status: 'absent', absence_period_id: periodId })
+      .eq('team_id', ctx.teamId)
+      .eq('player_id', playerId)
+      .is('absence_period_id', null)
+      .eq('status', restoreStatus)
+      .in('event_id', chunk)
+    if (error) await compenseer('attendance.herstelAfmeldperiode.restore', error)
+    bijgewerktStandaard.push(chunk)
+  }
+
+  for (const chunk of chunked(alleenHerkomst)) {
+    const { error } = await supabase
+      .from('attendance')
+      .update({ absence_period_id: periodId })
+      .eq('team_id', ctx.teamId)
+      .eq('player_id', playerId)
+      .is('absence_period_id', null)
+      .in('event_id', chunk)
+    if (error) await compenseer('attendance.herstelAfmeldperiode.herkomst', error)
+    bijgewerktHerkomst.push(chunk)
+  }
+
+  klaar()
 }
 
 export async function markAllPresent(eventId: string) {
