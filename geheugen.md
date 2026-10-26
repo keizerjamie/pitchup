@@ -4033,3 +4033,52 @@ Via de feature-factory. Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer-
 - **Open:** iPhone-test (deelmenu, WhatsApp, Bestanden, tweestaps, vergelijking met desktop-afdruk);
   bevestigen dat Vercel Deployment Protection (standard, geen eigen domein) de server-render niet
   blokkeert; Vercel-plan vs. `memory 2048`; functieduur/geheugen in de logs.
+
+## Feature: Vijf UX-details uit de reel (2026-10-26, `072db45` via merge `11eadb4`, live)
+Via de feature-factory, gebouwd in een tijdelijke worktree (`ux-details`) omdat "delen als PDF" nog
+uncommitted in de hoofd-tree stond. Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-ux-details/`.
+Geen migratie, geen nieuwe dependency.
+- **Koppen:** `text-wrap: balance` op `.page-title` (`app/globals.css`) + `text-balance` op de losse h1's van
+  login/register/forgot/reset/invite en `EmptyTeamState`. CalendarView-h1 en de trainingsplan-printkop bewust niet.
+- **Hit slop:** `.hit-slop::after` (ongelaagd, geen `position` in de utility — knop zelf krijgt `relative hit-slop`).
+  Groeit tot 44×44 maar nooit verder dan de helft van `--hit-slop-gap`/`--hit-slop-gap-y` (zet op de flex-ouder
+  bij krappe gaps). `Button`/`IconButton` sm hebben het standaard. Bewust buiten scope: segment-/filterknoppen,
+  SidebarNav, RechtenToggles. Krappe plekken: trainingsplan-pijltjes 44×20, kaartacties 36×44; ThemeToggle
+  `md:[--hit-slop-gap:0px]` (anders overlap met uitlogknop).
+- **Optimistic per rij:** `lib/use-rij-opslag.ts` (`useRijOpslag`): per rij een wachtrij, laatste tik wint,
+  rollback naar laatst bevestigde waarde + `onFout(k)`, `synchroniseer` tijdens render, bulkpad via `zetAlles`
+  (`BULK_SLEUTEL='*'`). Gebruikt door TodoList, TrainingAttendance (rijen alleen uit tijdens bulk) en
+  `PlayerAbsenceList.setStatus`. i18n `todo.saveError`, `event.attendanceSaveError`.
+- **BottomSheet** (`components/ui/BottomSheet.tsx` + pure `lib/sheet-gebaar.ts`): vervangt de vijf gekopieerde
+  onderbladen (NulmetingManager, OefeningEditor, CyclusWeekCorrectie, OefeningPicker, KopieerVorigeTraining).
+  Slepen alleen vanaf de kop, alleen touch/pen én < 640px; slop 8px; sluiten bij `dy ≥ min(120, 0.3·hoogte)` of
+  flick (`vy ≥ 0.5` en `dy ≥ 24`), niet bij `vy < -0.1`. `dirty` → `window.confirm(t.sheet.discardConfirm)` bij
+  veeg én scrimtik; sluitknop vraagt niets. Tijdens slepen inline `animation:none` op sheet+scrim (blijft staan,
+  anders herhaalt de entree). TeamSwitcher doet niet mee.
+- **Undo-toasts:** `components/ui/Toast.tsx` (`ToastProvider teamId` in AppShell, viewport buiten RouteTransition;
+  `useToast()` is no-op zonder provider). 5 s, één tegelijk, pauze bij hover/focus/verborgen tab, teamwissel wist,
+  `--z-toast: 85` (onder open onderblad). Herstel via snapshots (`lib/herstel.ts`, géén `'use server'`) die de
+  delete-actions teruggeven: `deleteCategorieMeting`→`herstelCategorieMeting`, `deleteMatchEvent`→
+  `herstelWedstrijdMoment`, `revokeAbsencePeriod`→`{restored, herstel}`/`herstelAfmeldperiode`,
+  `removeOefeningFromTraining`→`herstelKoppeling`. Elke herstel-action: requireTeamContext → assertCanEdit →
+  isUuid → `herstel.teamId === ctx.teamId` (alleen weigeren, schrijven altijd met ctx.teamId) → idempotent
+  (bestaat id al → no-op; 23505 → hercontrole). Gooit alleen `'Herstel niet mogelijk'` of generiek.
+  `herstelAfmeldperiode` en `herstelKoppeling` compenseren bij een fout na de insert (koppeling-compensatie
+  laat de partner alleen los als die nog in de eigen groep zit).
+- **Bewust geen undo:** event, speler, team, account, schema opnieuw, teamlogo, staflid (bevestiging blijft);
+  oefening van een teamgenoot uit training (RLS `oefening_koppelbaar` laat herstel niet toe → inline bevestiging).
+- **Gedragswijziging:** `removeOefeningFromTraining` gooit nu `'Koppeling niet gevonden'` (was stille no-op);
+  `handleUnlink` doet dan `router.refresh()`.
+- **Tests:** `ux-details-story.acceptance.test.tsx` (verifier, per criterium-id), `ux-details.acceptance.test.tsx`,
+  `undo-herstel.acceptance.test.ts` (eigen filterende engine), Toast/BottomSheet/sheet-gebaar/use-rij-opslag-tests.
+  Globale `next/navigation`-standaardmock in `vitest.setup.ts` (useRouter/usePathname/useSearchParams) — eigen
+  `vi.mock` per bestand overschrijft hem.
+- **Gotchas:** tabel-engines in bestaande tests gaven live rij-referenties terug → vóór een update gelezen waarde
+  werd stil overschreven; nieuwe engine kopieert bij lezen. Een extra leesquery in een action verschuift elke
+  stub-wachtrij, ook in acceptatiebestanden buiten `app/actions` — grep de actienaam in alle `*.test.*`.
+  Turbopack-build weigert een gesymlinkte `node_modules` (worktree: `npm ci`).
+- **Bewust geaccepteerd:** extra altijd-gemounte live regions voor de toast teruggedraaid (geneste regions →
+  dubbele VoiceOver-aankondiging). Restrisico: partner precies tijdens herstel elders gegroepeerd → herstelde
+  koppeling in groep zonder partner. "Alles aanwezig" bij spelers zonder attendance-rij: bestaand gedrag.
+- **Open:** iPhone-test in de beginscherm-app (vegen, `window.confirm` in standalone, rubber-banding, toast-positie
+  en timerpauze bij app op achtergrond).
