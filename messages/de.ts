@@ -73,6 +73,7 @@ export const de: Dict = {
     taskAnalysis: 'Spielanalyse ausfüllen',
     taskTraining: 'Training erstellen',
     overdue: 'Überfällig',
+    saveError: "Speichern der Aufgabe fehlgeschlagen. Bitte erneut versuchen.",
   },
   calendar: {
     today: 'Heute',
@@ -116,7 +117,7 @@ export const de: Dict = {
     lineupView: 'Aufstellung ansehen', lineupViewHint: 'Aufstellung wurde bereits erstellt',
     analysis: 'Spielanalyse', analysisHint: 'Ergebnis, Bewertungen und Ereignisse', analysisCta: 'Analyse ausfüllen!',
     analysisView: 'Spielanalyse ansehen', analysisViewHint: 'Analyse ist ausgefüllt',
-    attendance: 'Anwesenheit', markAllPresent: 'Alle anwesend', deleteEvent: 'Event löschen',
+    attendance: 'Anwesenheit', markAllPresent: 'Alle anwesend', attendanceSaveError: "Speichern der Anwesenheit fehlgeschlagen. Bitte erneut versuchen.", deleteEvent: 'Event löschen',
     editEvent: 'Bearbeiten',
     editTitleTraining: 'Training bearbeiten',
     editTitleMatch: 'Spiel bearbeiten',
@@ -735,6 +736,15 @@ export const de: Dict = {
     close: 'Schließen',
     moreActions: 'Weitere Aktionen',
     cancel: 'Abbrechen',
+  },
+  undo: {
+    deleted: 'Gelöscht',
+    action: 'Rückgängig',
+    restoreError: 'Wiederherstellen fehlgeschlagen. Der Eintrag bleibt gelöscht.',
+    deleteError: 'Löschen fehlgeschlagen. Bitte erneut versuchen.',
+  },
+  sheet: {
+    discardConfirm: 'Deine Änderungen gehen verloren. Trotzdem schließen?',
   },
   errors: {
     noPermission: 'Du hast keine Rechte für diesen Bereich',

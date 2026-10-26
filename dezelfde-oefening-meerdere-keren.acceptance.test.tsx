@@ -26,6 +26,7 @@ import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { Oefening, Player, TrainingOefeningWithData } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
+import { ToastProvider } from '@/components/ui/Toast'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import OefeningPicker from '@/components/OefeningPicker'
 import { countCategoryOccurrences } from '@/lib/periodization'
@@ -206,6 +207,7 @@ function renderPlan(
 ) {
   return render(
     <DictProvider dict={nl}>
+      <ToastProvider teamId="team-1">
       <TrainingPlanEditor
         eventId="e1"
         initialDoelstelling={null}
@@ -218,6 +220,7 @@ function renderPlan(
         presentPlayerIds={opts.presentPlayerIds ?? players2.map((p) => p.id)} startTijd={null} kopieerOpties={[]} initialTrainingstype="vct"
         userId="team-1"
       />
+      </ToastProvider>
     </DictProvider>,
   )
 }
@@ -426,6 +429,25 @@ describe('AC4 — tweede toevoeging krijgt volgorde = max + 1', () => {
   })
 })
 
+// Wachtrij voor removeOefeningFromTraining (training_oefeningen, in
+// uitvoervolgorde): de rij zelf, geneste kinderen, volgorde vóór, de delete,
+// normalisatie. Zonder parallelle groep volgt geen opruimquery.
+function koppelingVerwijderWachtrij(id: string): TableResult[] {
+  return [
+    {
+      data: {
+        id, event_id: 'e1', oefening_id: 'o1', volgorde: 1, duur_min: null, stap_override: null,
+        genest_in: null, spelerindeling: null, aantallen_override: null,
+        parallel_groep_id: null, parallel_spelers: [], created_at: '2024-01-02T00:00:00Z',
+      },
+    },
+    { data: [] },
+    { data: [] },
+    { error: null },
+    { data: [] },
+  ]
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // AC5 — één van twee identieke kaarten verwijderen laat de andere intact met
 // eigen spelerindeling en volgorde.
@@ -433,10 +455,8 @@ describe('AC4 — tweede toevoeging krijgt volgorde = max + 1', () => {
 describe('AC5 — één van twee identieke kaarten verwijderen laat de andere intact', () => {
   it('via de echte "Ontkoppelen"-knop op kaart 2: removeOefeningFromTraining krijgt koppeling-id k2, kaart 1 blijft in de DOM', async () => {
     const m = makeSupabase({
-      tables: {
-        events: { data: { id: 'e1' } },
-        training_oefeningen: { data: null, error: null },
-      },
+      tables: { events: { data: { id: 'e1' } } },
+      queues: { training_oefeningen: koppelingVerwijderWachtrij('k2') },
     })
     use(m)
 
@@ -447,8 +467,8 @@ describe('AC5 — één van twee identieke kaarten verwijderen laat de andere in
 
     const unlinkButtons = screen.getAllByLabelText(nl.trainingPlan.unlink)
     expect(unlinkButtons).toHaveLength(2)
+    // Eigen oefening (team_id === userId): geen bevestiging, direct weg (undo-toast).
     fireEvent.click(unlinkButtons[1]) // kaart 2 (k2)
-    fireEvent.click(screen.getByText(nl.trainingPlan.confirmYes))
 
     await waitFor(() => expect(blokBadges(container)).toEqual(['1']))
     // Precies k2 is aan de server action doorgegeven, niet k1.
@@ -467,10 +487,8 @@ describe('AC5 — één van twee identieke kaarten verwijderen laat de andere in
   it('UI: kaart 1 behoudt haar eigen spelerindeling én volgorde-positie nadat identieke kaart 2 verwijderd is', async () => {
     const teams = [{ grootte: 2, formaties: [] }, { grootte: 2, formaties: [] }]
     const m = makeSupabase({
-      tables: {
-        events: { data: { id: 'e1' } },
-        training_oefeningen: { data: null, error: null },
-      },
+      tables: { events: { data: { id: 'e1' } } },
+      queues: { training_oefeningen: koppelingVerwijderWachtrij('k2') },
     })
     use(m)
 
@@ -492,8 +510,7 @@ describe('AC5 — één van twee identieke kaarten verwijderen laat de andere in
     expect(within(team1Zones[1]).getByText('Jan')).toBeInTheDocument()
 
     const unlinkButtons = screen.getAllByLabelText(nl.trainingPlan.unlink)
-    fireEvent.click(unlinkButtons[1]) // kaart 2 (k2, met Jan)
-    fireEvent.click(screen.getByText(nl.trainingPlan.confirmYes))
+    fireEvent.click(unlinkButtons[1]) // kaart 2 (k2, met Jan); eigen oefening → geen bevestiging
 
     await waitFor(() => expect(blokBadges(container)).toEqual(['1'])) // eigen volgorde-positie: nog steeds badge "1"
 
@@ -549,11 +566,79 @@ describe('AC7 — event buiten het eigen team: geen insert', () => {
 })
 
 // ────────────────────────────────────────────────────────────────────────────
+// UT — ontkoppelen met undo (alleen eigen oefening) of met inline bevestiging
+// (andermans oefening), plus rollback bij een mislukte delete.
+// ────────────────────────────────────────────────────────────────────────────
+describe('UT — ontkoppelen: undo-toast, bevestiging bij andermans oefening, rollback', () => {
+  it('eigen oefening: geen bevestiging, kaart direct weg en een undo-toast', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e1' } } },
+      queues: { training_oefeningen: koppelingVerwijderWachtrij('k2') },
+    })
+    use(m)
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const k1 = makeKoppeling({ id: 'k1', volgorde: 0, created_at: '2024-01-01T00:00:00Z' })
+    const k2 = makeKoppeling({ id: 'k2', volgorde: 1, created_at: '2024-01-02T00:00:00Z' })
+    const { container } = renderPlan([k1, k2])
+
+    fireEvent.click(screen.getAllByLabelText(nl.trainingPlan.unlink)[1])
+
+    expect(screen.queryByText(nl.trainingPlan.confirmYes)).toBeNull()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(nl.undo.deleted))
+    expect(blokBadges(container)).toEqual(['1'])
+    expect(screen.getByRole('button', { name: nl.undo.action })).toBeInTheDocument()
+  })
+
+  it('andermans oefening: de inline bevestiging blijft, en na bevestigen is er geen undo-toast', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e1' } } },
+      queues: { training_oefeningen: koppelingVerwijderWachtrij('k2') },
+    })
+    use(m)
+    const k1 = makeKoppeling({ id: 'k1', volgorde: 0, created_at: '2024-01-01T00:00:00Z' })
+    const k2 = makeKoppeling({
+      id: 'k2', volgorde: 1, created_at: '2024-01-02T00:00:00Z',
+      oefeningen: makeOefening({ team_id: 'ander-team-lid' }),
+    })
+    const { container } = renderPlan([k1, k2])
+
+    fireEvent.click(screen.getAllByLabelText(nl.trainingPlan.unlink)[1])
+    expect(blokBadges(container)).toEqual(['1', '2']) // nog niet weg
+    fireEvent.click(screen.getByText(nl.trainingPlan.confirmYes))
+
+    await waitFor(() => expect(blokBadges(container)).toEqual(['1']))
+    expect(m.calls.delete.some((d) => d.eqs.some((e) => e.col === 'id' && e.val === 'k2'))).toBe(true)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('delete mislukt: kaart terug op dezelfde plek, inline t.undo.deleteError, geen toast, geen rauwe fout', async () => {
+    const queue = koppelingVerwijderWachtrij('k2')
+    queue[3] = { error: { message: 'db stuk', code: 'XX000' } } // de delete zelf faalt
+    const m = makeSupabase({
+      tables: { events: { data: { id: 'e1' } } },
+      queues: { training_oefeningen: queue },
+    })
+    use(m)
+    const k1 = makeKoppeling({ id: 'k1', volgorde: 0, created_at: '2024-01-01T00:00:00Z' })
+    const k2 = makeKoppeling({ id: 'k2', volgorde: 1, created_at: '2024-01-02T00:00:00Z' })
+    const { container } = renderPlan([k1, k2])
+
+    fireEvent.click(screen.getAllByLabelText(nl.trainingPlan.unlink)[1])
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(nl.undo.deleteError))
+    expect(blokBadges(container)).toEqual(['1', '2'])
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByText('db stuk')).toBeNull()
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────────
 // AC8 — verwijderen met een koppeling-id dat niet bij dit event/team hoort:
 // niets verwijderd, beide kaarten blijven staan.
 // ────────────────────────────────────────────────────────────────────────────
 describe('AC8 — verwijderen met een koppeling-id buiten dit event/team', () => {
-  it('removeOefeningFromTraining("vreemd", "e1"): de delete blijft gescoped op id + event_id + team_id', async () => {
+  it('removeOefeningFromTraining("vreemd", "e1"): weigert, de leesquery is gescoped op id + event_id + team_id en er wordt niets verwijderd', async () => {
     // Dit is bewust een acceptatietest op het server-action-niveau (het
     // publieke contract), niet via de UI: een gebruiker kan in de UI nooit
     // een koppeling-id van een andere training/team aanklikken — dat id komt
@@ -569,14 +654,17 @@ describe('AC8 — verwijderen met een koppeling-id buiten dit event/team', () =>
     })
     use(m)
 
-    await removeOefeningFromTraining('vreemd', 'e1')
+    // Sinds UT leest de action de rij vóór de delete en gooit bij ontbreken.
+    await expect(removeOefeningFromTraining('vreemd', 'e1')).rejects.toThrow('Koppeling niet gevonden')
 
-    const del = m.calls.delete.find((d) => d.table === 'training_oefeningen')!
-    expect(del.eqs).toEqual([
+    // De leesquery is getenant-scoped en er wordt niets verwijderd.
+    const sel = m.calls.select.filter((c) => c.table === 'training_oefeningen')
+    expect(sel[0].eqs).toEqual([
       { col: 'id', val: 'vreemd' },
       { col: 'event_id', val: 'e1' },
       { col: 'team_id', val: 'team-1' },
     ])
+    expect(m.calls.delete).toHaveLength(0)
   })
 })
 
@@ -843,9 +931,13 @@ describe('Edge case — ruimEenzameGroepOp raakt nooit een identieke, niet-gegro
       tables: { events: { data: { id: 'e1' } } },
       queues: {
         training_oefeningen: [
-          { data: { id: 'kA', parallel_groep_id: 'g1' } }, // groep vóór het verwijderen van A
+          { data: { id: 'kA', event_id: 'e1', oefening_id: 'o1', volgorde: 0, duur_min: null, stap_override: null,
+              genest_in: null, spelerindeling: null, aantallen_override: null,
+              parallel_groep_id: 'g1', parallel_spelers: [], created_at: '2024-01-01T00:00:00Z' } }, // rij vóór het verwijderen van A
+          { data: [] },                                      // geneste kinderen
+          { data: [] },                                      // volgorde vóór
           { error: null },                                  // delete van A zelf
-          { data: [{ id: 'kC' }] },                          // resterende leden van g1 → alleen C over
+          { data: [{ id: 'kC', parallel_spelers: [] }] },    // resterende leden van g1 → alleen C over
           { error: null },                                   // opruim-update op C
           { data: [ // normaliseerBlokVolgorde: C los, B (identiek aan A) blijft los en ongemoeid
             { id: 'kB', volgorde: 0, parallel_groep_id: null, created_at: '2024-01-01T00:00:00Z' },

@@ -14,7 +14,7 @@
 //   AC2.e (noemer 0 => "—", nooit "0%")             → 'AC2 — uitsluitend gasten'
 //   Regressie (AC5, spelerrij + markAllPresent)     → describe('Regressie...')
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act } from 'react'
 import { render, screen, within, fireEvent } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
@@ -260,5 +260,116 @@ describe('Blessure als eigen status (injured)', () => {
     const row = attendanceRowFor('Gewonde Gert')
     expect(within(row).queryAllByRole('button')).toHaveLength(0)
     expect(within(row).getByText(nl.event.injuredStat)).toBeInTheDocument()
+  })
+})
+
+// Fase 2 (OU): per-rij optimistische updates met rollback via useRijOpslag.
+import { updateAttendance, markAllPresent } from '@/app/actions/attendance'
+const mockUpdate = updateAttendance as unknown as ReturnType<typeof vi.fn>
+const mockMarkAll = markAllPresent as unknown as ReturnType<typeof vi.fn>
+
+describe('OU — optimistisch per rij, rollback bij fout', () => {
+  beforeEach(() => {
+    mockUpdate.mockReset().mockResolvedValue(undefined)
+    mockMarkAll.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('roept updateAttendance aan met (eventId, playerId, status) en houdt de status na succes', async () => {
+    renderAttendance([makePlayer('r1', 'regular', { name: 'Rij Een' })], { r1: 'unknown' })
+    const row = attendanceRowFor('Rij Een')
+    await act(async () => { fireEvent.click(within(row).getByRole('button', { name: nl.event.presentStat })) })
+    expect(mockUpdate).toHaveBeenCalledWith('e1', 'r1', 'present')
+    expect(within(row).getByRole('button', { name: nl.event.presentStat })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('een andere rij blijft klikbaar terwijl rij A nog opslaat', async () => {
+    let resolveA: () => void = () => {}
+    mockUpdate.mockReturnValueOnce(new Promise<void>((r) => { resolveA = r }))
+    renderAttendance([makePlayer('a', 'regular', { name: 'Speler A' }), makePlayer('b', 'regular', { name: 'Speler B' })], {})
+    await act(async () => { fireEvent.click(within(attendanceRowFor('Speler A')).getByRole('button', { name: nl.event.presentStat })) })
+    const knopB = within(attendanceRowFor('Speler B')).getByRole('button', { name: nl.event.absentStat })
+    expect(knopB).not.toBeDisabled()
+    await act(async () => { fireEvent.click(knopB) })
+    expect(mockUpdate).toHaveBeenCalledTimes(2)
+    expect(knopB).toHaveAttribute('aria-pressed', 'true')
+    await act(async () => { resolveA() })
+  })
+
+  it('twee tikken op dezelfde rij: twee calls in volgorde, laatste tik wint', async () => {
+    const resolvers: Array<() => void> = []
+    mockUpdate.mockImplementation(() => new Promise<void>((r) => { resolvers.push(r) }))
+    renderAttendance([makePlayer('a', 'regular', { name: 'Speler A' })], {})
+    const row = attendanceRowFor('Speler A')
+    await act(async () => { fireEvent.click(within(row).getByRole('button', { name: nl.event.presentStat })) })
+    await act(async () => { fireEvent.click(within(row).getByRole('button', { name: nl.event.absentStat })) })
+    expect(mockUpdate).toHaveBeenCalledTimes(1) // tweede wacht
+    await act(async () => { resolvers[0]() })
+    expect(mockUpdate).toHaveBeenCalledTimes(2)
+    expect(mockUpdate.mock.calls.map((c) => c[2])).toEqual(['present', 'absent'])
+    await act(async () => { resolvers[1]() })
+    expect(within(row).getByRole('button', { name: nl.event.absentStat })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('rollback + i18n-melding (niet de serverstring) als de server weigert', async () => {
+    mockUpdate.mockRejectedValueOnce(new Error('Geen toegang'))
+    renderAttendance([makePlayer('a', 'regular', { name: 'Speler A' })], { a: 'absent' })
+    const row = attendanceRowFor('Speler A')
+    await act(async () => { fireEvent.click(within(row).getByRole('button', { name: nl.event.presentStat })) })
+    expect(within(row).getByRole('button', { name: nl.event.absentStat })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(row).getByRole('button', { name: nl.event.presentStat })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('alert')).toHaveTextContent(nl.event.attendanceSaveError)
+    expect(screen.queryByText('Geen toegang')).not.toBeInTheDocument()
+    expect(statValue(nl.event.absentStat)).toBe('1')
+  })
+
+  it('"alles aanwezig" met een geblesseerde: injured blijft, rest present; bulk onderweg zet rijknoppen en bulkknop uit', async () => {
+    let resolve: () => void = () => {}
+    mockMarkAll.mockReturnValueOnce(new Promise<void>((r) => { resolve = r }))
+    renderAttendance([makePlayer('a', 'regular', { name: 'Speler A' }), makePlayer('b', 'regular', { name: 'Speler B' })], { a: 'injured', b: 'absent' })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: nl.event.markAllPresent })) })
+    expect(mockMarkAll).toHaveBeenCalledWith('e1')
+    expect(statValue(nl.event.injuredStat)).toBe('1')
+    expect(statValue(nl.event.presentStat)).toBe('1')
+    expect(screen.getByRole('button', { name: nl.event.markAllPresent })).toBeDisabled()
+    expect(within(attendanceRowFor('Speler B')).getByRole('button', { name: nl.event.absentStat })).toBeDisabled()
+    await act(async () => { resolve() })
+    expect(screen.getByRole('button', { name: nl.event.markAllPresent })).not.toBeDisabled()
+    expect(within(attendanceRowFor('Speler B')).getByRole('button', { name: nl.event.absentStat })).not.toBeDisabled()
+  })
+
+  it('bulkknop uit zolang een rij onderweg is', async () => {
+    let resolve: () => void = () => {}
+    mockUpdate.mockReturnValueOnce(new Promise<void>((r) => { resolve = r }))
+    renderAttendance([makePlayer('a', 'regular', { name: 'Speler A' })], {})
+    await act(async () => { fireEvent.click(within(attendanceRowFor('Speler A')).getByRole('button', { name: nl.event.presentStat })) })
+    expect(screen.getByRole('button', { name: nl.event.markAllPresent })).toBeDisabled()
+    await act(async () => { resolve() })
+    expect(screen.getByRole('button', { name: nl.event.markAllPresent })).not.toBeDisabled()
+  })
+
+  it('bulk faalt: alles terug naar de bevestigde statussen + melding', async () => {
+    mockMarkAll.mockRejectedValueOnce(new Error('kapot'))
+    renderAttendance([makePlayer('a', 'regular'), makePlayer('b', 'regular')], { a: 'absent', b: 'unknown' })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: nl.event.markAllPresent })) })
+    expect(statValue(nl.event.absentStat)).toBe('1')
+    expect(statValue(nl.event.unknownStat)).toBe('1')
+    expect(statValue(nl.event.presentStat)).toBe('0')
+    expect(screen.getByRole('alert')).toHaveTextContent(nl.event.attendanceSaveError)
+  })
+
+  it('neemt nieuwe server-props over voor rijen die niet onderweg zijn', () => {
+    const players = [makePlayer('a', 'regular')]
+    const view = (s: Record<string, AttendanceStatus>) => (
+      <DictProvider dict={nl}><TrainingAttendance eventId="e1" players={players} initialStatuses={s} canEdit /></DictProvider>
+    )
+    const { rerender } = render(view({ a: 'unknown' }))
+    rerender(view({ a: 'present' }))
+    expect(statValue(nl.event.presentStat)).toBe('1')
+  })
+
+  it('lege lijst toont geen bulkknop', () => {
+    renderAttendance([], {})
+    expect(screen.queryByRole('button', { name: nl.event.markAllPresent })).not.toBeInTheDocument()
   })
 })

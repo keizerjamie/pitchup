@@ -15,7 +15,7 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
           <Image src="/logo.png" alt="Pitchup" width={64} height={64} className="rounded-2xl mb-4" />
-          <h1 className="text-2xl font-bold text-white">{t.auth.forgotTitle}</h1>
+          <h1 className="text-2xl font-bold text-white text-balance">{t.auth.forgotTitle}</h1>
           <p className="text-white/75 text-sm mt-2 text-center">{t.auth.forgotHint}</p>
         </div>
 

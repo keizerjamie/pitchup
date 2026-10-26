@@ -85,20 +85,20 @@ export default function CalendarView({ events, attendanceMap, canEdit }: Props) 
         <div className="flex items-center justify-between gap-x-3 gap-y-2 flex-wrap flex-shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="font-display text-[22px] lg:text-[28px] font-bold tracking-tight text-ink capitalize whitespace-nowrap">{monthLabel}</h1>
-            <div className="flex gap-1.5">
+            <div className="flex gap-1.5 [--hit-slop-gap:6px]">
               <button type="button" onClick={() => shiftMonth(-1)} aria-label={t.calendar.prevMonth}
-                className="w-9 h-9 rounded-full bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
+                className="relative hit-slop w-9 h-9 rounded-full bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
                 <span className="ms text-[20px]">chevron_left</span>
               </button>
               <button type="button" onClick={() => shiftMonth(1)} aria-label={t.calendar.nextMonth}
-                className="w-9 h-9 rounded-full bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
+                className="relative hit-slop w-9 h-9 rounded-full bg-surface flex items-center justify-center text-muted hover:text-ink transition-colors" style={{ border: '1px solid var(--border-soft)' }}>
                 <span className="ms text-[20px]">chevron_right</span>
               </button>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={goToday}
-              className="h-9 px-3 rounded-full text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors">
+              className="relative hit-slop h-9 px-3 rounded-full text-[13px] font-bold text-brand-accent hover:bg-surface-sunken transition-colors">
               {t.calendar.today}
             </button>
             {canEdit && (

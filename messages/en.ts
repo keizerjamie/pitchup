@@ -86,6 +86,7 @@ export const en: Dict = {
     taskAnalysis: 'Fill in the match analysis',
     taskTraining: 'Plan the training',
     overdue: 'Overdue',
+    saveError: "Saving the task failed. Please try again.",
   },
   calendar: {
     today: 'Today',
@@ -170,6 +171,7 @@ export const en: Dict = {
     analysisViewHint: 'Analysis is filled in',
     attendance: 'Attendance',
     markAllPresent: 'Everyone present',
+    attendanceSaveError: "Saving attendance failed. Please try again.",
     deleteEvent: 'Delete event',
     editEvent: 'Edit',
     editTitleTraining: 'Edit training',
@@ -910,6 +912,15 @@ export const en: Dict = {
     close: 'Close',
     moreActions: 'More actions',
     cancel: 'Cancel',
+  },
+  undo: {
+    deleted: 'Deleted',
+    action: 'Undo',
+    restoreError: 'Restoring failed. The item stays deleted.',
+    deleteError: 'Deleting failed. Please try again.',
+  },
+  sheet: {
+    discardConfirm: 'Your changes will be lost. Close anyway?',
   },
   errors: {
     noPermission: 'You do not have permission for this area',

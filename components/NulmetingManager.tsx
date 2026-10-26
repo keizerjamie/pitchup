@@ -3,10 +3,12 @@
 import { useState, useTransition } from 'react'
 import { PERIODIZATION_CATEGORIES, type CategorieMeting } from '@/lib/types'
 import { actueleMetingen, metingenPerCategorie } from '@/lib/periodization'
-import { saveCategorieMeting, deleteCategorieMeting } from '@/app/actions/periodisering'
+import { saveCategorieMeting, deleteCategorieMeting, herstelCategorieMeting } from '@/app/actions/periodisering'
 import { formatDate, todayLocal } from '@/lib/utils'
 import { useDict } from '@/lib/i18n-context'
 import ChevronIcon from '@/components/icons/ChevronIcon'
+import { useToast } from '@/components/ui/Toast'
+import BottomSheet from '@/components/ui/BottomSheet'
 
 const METING_CATEGORIES = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
 
@@ -32,6 +34,9 @@ interface Props {
 // server-guard assertNieuwsteMeting in app/actions/periodisering.ts.
 export default function NulmetingManager({ metingen, peildatumExclusief, canEdit = true }: Props) {
   const t = useDict()
+  const toast = useToast()
+  // Lokaal verborgen rijen: verwijderen is optimistisch (geen bevestiging, undo-toast).
+  const [verborgen, setVerborgen] = useState<Set<string>>(new Set())
   const [isPending, startTransition] = useTransition()
   const [openCategorie, setOpenCategorie] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -39,6 +44,8 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
   const [stap, setStap] = useState(1)
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Waarden op het moment van openen: basis voor de dirty-waarschuwing.
+  const [beginWaarden, setBeginWaarden] = useState<{ datum: string; stap: number; notes: string } | null>(null)
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({})
   // Apart van `error` (die alleen ín de sheet zichtbaar is): verwijderen
   // gebeurt vanuit de geschiedenis-lijst, BUITEN de sheet, dus een fout daar
@@ -46,9 +53,13 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
   // blok van de betreffende categorie.
   const [deleteError, setDeleteError] = useState<{ categorie: string; message: string } | null>(null)
 
-  const actueel = actueleMetingen(metingen, peildatumExclusief)
-  const perCategorie = metingenPerCategorie(metingen)
+  const zichtbaar = verborgen.size === 0 ? metingen : metingen.filter((m) => !verborgen.has(m.id))
+  const actueel = actueleMetingen(zichtbaar, peildatumExclusief)
+  const perCategorie = metingenPerCategorie(zichtbaar)
   const openCat = METING_CATEGORIES.find((c) => c.key === openCategorie) ?? null
+  const sheetDirty =
+    beginWaarden !== null &&
+    (datum !== beginWaarden.datum || stap !== beginWaarden.stap || notes !== beginWaarden.notes)
 
   function openNew(categorie: string) {
     setOpenCategorie(categorie)
@@ -56,6 +67,7 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
     setDatum(todayLocal())
     setStap(1)
     setNotes('')
+    setBeginWaarden({ datum: todayLocal(), stap: 1, notes: '' })
     setError(null)
     setDeleteError(null)
   }
@@ -66,6 +78,7 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
     setDatum(rij.datum)
     setStap(rij.stap)
     setNotes(rij.notes ?? '')
+    setBeginWaarden({ datum: rij.datum, stap: rij.stap, notes: rij.notes ?? '' })
     setError(null)
     setDeleteError(null)
   }
@@ -115,13 +128,34 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
     })
   }
 
+  function verberg(id: string, aan: boolean) {
+    setVerborgen((prev) => {
+      const next = new Set(prev)
+      if (aan) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
   function handleDelete(categorie: string, id: string) {
-    if (!confirm(t.periodization.deleteConfirm)) return
     setDeleteError(null)
+    verberg(id, true)
     startTransition(async () => {
       try {
-        await deleteCategorieMeting(id)
+        const herstel = await deleteCategorieMeting(id)
+        toast.toon({
+          bericht: t.undo.deleted,
+          actie: {
+            label: t.undo.action,
+            foutBericht: t.undo.restoreError,
+            onActie: async () => {
+              await herstelCategorieMeting(herstel)
+              verberg(id, false)
+            },
+          },
+        })
       } catch (err) {
+        verberg(id, false)
         setDeleteError({ categorie, message: translateError(err) })
       }
     })
@@ -229,7 +263,7 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
                             )}
                           </div>
                           {canEdit && i === 0 && (
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex items-center gap-2 [--hit-slop-gap:8px] flex-shrink-0">
                               <button
                                 type="button"
                                 onClick={() => openEdit(cat.key, rij)}
@@ -242,7 +276,7 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
                                 onClick={() => handleDelete(cat.key, rij.id)}
                                 disabled={isPending}
                                 aria-label={t.periodization.deleteNulmeting}
-                                className="w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition active:scale-[0.97] disabled:opacity-60"
+                                className="relative hit-slop w-8 h-8 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition active:scale-[0.97] disabled:opacity-60"
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -264,98 +298,26 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
         )
       })}
 
-      {/* Editor sheet — bestaande markup hergebruikt (z-[var(--z-modal)],
-          backdrop bg-black/40 backdrop-blur-sm, sticky kop/voet, max-h-[92dvh]),
+      {/* Editor sheet via de gedeelde BottomSheet (swipe-to-dismiss, dirty-waarschuwing),
           nu per categorie i.p.v. alle vijf tegelijk. */}
       {openCat && (
-        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
-          <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeSheet} />
-          <div role="dialog" aria-modal="true" className="anim-sheet relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
-            <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl">
-              <h3 className="font-bold text-ink text-lg">
-                {editingId
-                  ? t.periodization.editNulmeting
-                  : actueel[openCat.key]
-                    ? t.periodization.remeasureCta
-                    : t.periodization.measureCta}
-                {' · '}
-                {t.periodization.categories[openCat.key] ?? openCat.label}
-              </h3>
-              <button
-                type="button"
-                onClick={closeSheet}
-                aria-label={t.trainingPlan.cancel}
-                className="w-8 h-8 rounded-full bg-surface-sunken flex items-center justify-center text-faint hover:bg-surface-sunken"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <p className="text-sm text-faint">{t.periodization.hint}</p>
-
-              {error && (
-                <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl">{error}</div>
-              )}
-
-              <div>
-                <label htmlFor="nulmeting-datum" className="block text-sm font-semibold text-muted mb-1.5">{t.periodization.date}</label>
-                <input
-                  id="nulmeting-datum"
-                  type="date"
-                  value={datum}
-                  onChange={(e) => setDatum(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="nulmeting-stap" className="block text-sm font-semibold text-muted mb-1.5">
-                  {t.periodization.maxSteps.replace('{n}', String(openCat.maxStap))}
-                </label>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => changeStap(-1, openCat.maxStap)}
-                    className="w-9 h-9 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-[0.97] transition flex items-center justify-center text-muted font-bold text-lg"
-                  >
-                    −
-                  </button>
-                  <input
-                    id="nulmeting-stap"
-                    type="number"
-                    min={1}
-                    max={openCat.maxStap}
-                    value={stap}
-                    onChange={(e) => setStapValue(e.target.value, openCat.maxStap)}
-                    className="w-16 text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 font-semibold text-ink"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => changeStap(1, openCat.maxStap)}
-                    className="w-9 h-9 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-[0.97] transition flex items-center justify-center text-muted font-bold text-lg"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="nulmeting-notitie" className="block text-sm font-semibold text-muted mb-1.5">{t.event.notes}</label>
-                <textarea
-                  id="nulmeting-notitie"
-                  rows={2}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder={t.event.notesMeetingPlaceholder}
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink placeholder:text-faint resize-none text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="sticky bottom-0 bg-surface border-t border-[var(--border-soft)] p-4 flex gap-3">
+        <BottomSheet
+          onClose={closeSheet}
+          sluitLabel={t.trainingPlan.cancel}
+          dirty={sheetDirty}
+          titel={
+            <>
+              {editingId
+                ? t.periodization.editNulmeting
+                : actueel[openCat.key]
+                  ? t.periodization.remeasureCta
+                  : t.periodization.measureCta}
+              {' · '}
+              {t.periodization.categories[openCat.key] ?? openCat.label}
+            </>
+          }
+          voet={
+            <>
               <button
                 type="button"
                 onClick={closeSheet}
@@ -371,9 +333,71 @@ export default function NulmetingManager({ metingen, peildatumExclusief, canEdit
               >
                 {isPending ? t.periodization.saving : t.periodization.save}
               </button>
+            </>
+          }
+        >
+          <div className="p-5 space-y-4">
+            <p className="text-sm text-faint">{t.periodization.hint}</p>
+
+            {error && (
+              <div className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3 rounded-xl">{error}</div>
+            )}
+
+            <div>
+              <label htmlFor="nulmeting-datum" className="block text-sm font-semibold text-muted mb-1.5">{t.periodization.date}</label>
+              <input
+                id="nulmeting-datum"
+                type="date"
+                value={datum}
+                onChange={(e) => setDatum(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="nulmeting-stap" className="block text-sm font-semibold text-muted mb-1.5">
+                {t.periodization.maxSteps.replace('{n}', String(openCat.maxStap))}
+              </label>
+              <div className="flex items-center gap-2 [--hit-slop-gap:8px]">
+                <button
+                  type="button"
+                  onClick={() => changeStap(-1, openCat.maxStap)}
+                  className="relative hit-slop w-9 h-9 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-[0.97] transition flex items-center justify-center text-muted font-bold text-lg"
+                >
+                  −
+                </button>
+                <input
+                  id="nulmeting-stap"
+                  type="number"
+                  min={1}
+                  max={openCat.maxStap}
+                  value={stap}
+                  onChange={(e) => setStapValue(e.target.value, openCat.maxStap)}
+                  className="w-16 text-center px-2 py-1.5 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 font-semibold text-ink"
+                />
+                <button
+                  type="button"
+                  onClick={() => changeStap(1, openCat.maxStap)}
+                  className="relative hit-slop w-9 h-9 rounded-lg bg-surface-sunken hover:bg-surface-sunken active:scale-[0.97] transition flex items-center justify-center text-muted font-bold text-lg"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="nulmeting-notitie" className="block text-sm font-semibold text-muted mb-1.5">{t.event.notes}</label>
+              <textarea
+                id="nulmeting-notitie"
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder={t.event.notesMeetingPlaceholder}
+                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/30 text-ink placeholder:text-faint resize-none text-sm"
+              />
             </div>
           </div>
-        </div>
+        </BottomSheet>
       )}
     </div>
   )

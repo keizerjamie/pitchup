@@ -13,8 +13,10 @@ import {
 } from '@/lib/periodization'
 import { isDateString } from '@/lib/season-dates'
 import { addDays, todayLocal } from '@/lib/utils'
-import { genericError } from '@/lib/errors'
+import { errorCode, genericError } from '@/lib/errors'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
+import { isUuid } from '@/lib/authz'
+import { herstelNietMogelijk, schoonCreatedAt, type HerstelMeting } from '@/lib/herstel'
 
 // ────────────────────────────────────────────────
 // Nulmeting per periodiseringsonderdeel
@@ -28,7 +30,16 @@ import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 // vandaan en NOOIT uit de client (patroon updateKoppeling in
 // app/actions/training-plan.ts): de client mag niet bepalen welk onderdeel er
 // bijgewerkt wordt.
-type MetingRij = { id: string; categorie: string; datum: string }
+type MetingRij = {
+  id: string
+  categorie: string
+  datum: string
+  // Alleen voor de herstel-snapshot van deleteCategorieMeting; de guards
+  // gebruiken ze niet.
+  stap?: number
+  notes?: string | null
+  created_at?: string | null
+}
 
 // De meting zelf, altijd op team_id gescoped: een rij van een ander team
 // bestaat voor deze actie simpelweg niet — zelfde melding als een onbekend id,
@@ -40,7 +51,7 @@ async function haalEigenMeting(
 ): Promise<MetingRij> {
   const { data } = await supabase
     .from('categorie_metingen')
-    .select('id, categorie, datum')
+    .select('id, categorie, datum, stap, notes, created_at')
     .eq('id', id)
     .eq('team_id', teamId)
     .maybeSingle()
@@ -157,8 +168,10 @@ export async function saveCategorieMeting(input: {
 }
 
 // Nulmeting verwijderen. Alleen de nieuwste van dat onderdeel; de rest van de
-// geschiedenis blijft staan.
-export async function deleteCategorieMeting(id: string): Promise<void> {
+// geschiedenis blijft staan. Geeft de herstel-snapshot terug voor "Ongedaan
+// maken" (herstelCategorieMeting hieronder); die komt uit de rij die de guard
+// toch al las, dus kost geen extra query.
+export async function deleteCategorieMeting(id: string): Promise<HerstelMeting> {
   const supabase = await createClient()
   const ctx = await requireTeamContext()
   assertCanEdit(ctx, 'periodisering')
@@ -176,6 +189,102 @@ export async function deleteCategorieMeting(id: string): Promise<void> {
 
   revalidatePath('/periodisering')
   revalidatePath('/')
+
+  return {
+    soort: 'nulmeting',
+    teamId: ctx.teamId,
+    id: bestaand.id,
+    categorie: bestaand.categorie,
+    datum: bestaand.datum,
+    stap: bestaand.stap ?? 1,
+    notes: bestaand.notes ?? null,
+    createdAt: bestaand.created_at ?? null,
+  }
+}
+
+// Bestaat deze meting (weer) in dit team? Basis voor de idempotentie van
+// herstelCategorieMeting: twee keer "Ongedaan maken" levert één rij op.
+async function metingBestaat(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+  teamId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from('categorie_metingen')
+    .select('id')
+    .eq('id', id)
+    .eq('team_id', teamId)
+    .maybeSingle()
+  return !!data
+}
+
+// "Ongedaan maken" van deleteCategorieMeting: zet de rij terug met dezelfde id
+// en created_at. De snapshot komt van de client en wordt daarom volledig
+// opnieuw gevalideerd zoals bij een nieuwe meting; `herstel.teamId` dient
+// alleen als weigercontrole, geschreven wordt altijd met ctx.teamId.
+//
+// Bewust GEEN assertNieuwsteMeting: terugzetten naast een intussen nieuwere
+// meting levert gewoon een geschiedenisrij op. Een andere meting op dezelfde
+// datum (UNIQUE team_id, categorie, datum) maakt herstel onmogelijk.
+export async function herstelCategorieMeting(herstel: HerstelMeting): Promise<void> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'periodisering')
+
+  if (!herstel || typeof herstel !== 'object' || herstel.soort !== 'nulmeting') throw herstelNietMogelijk()
+  if (herstel.teamId !== ctx.teamId) throw herstelNietMogelijk()
+  if (!isUuid(herstel.id)) throw herstelNietMogelijk()
+  if (!MEETBARE_CATEGORIES.includes(herstel.categorie as OefeningCategorie)) throw herstelNietMogelijk()
+  if (!isDateString(herstel.datum)) throw herstelNietMogelijk()
+  if (typeof herstel.stap !== 'number' || !Number.isFinite(herstel.stap)) throw herstelNietMogelijk()
+  if (herstel.notes !== null && typeof herstel.notes !== 'string') throw herstelNietMogelijk()
+  const createdAt = schoonCreatedAt(herstel.createdAt)
+  if (createdAt === undefined) throw herstelNietMogelijk()
+
+  const klaar = () => {
+    revalidatePath('/periodisering')
+    revalidatePath('/')
+  }
+
+  // Al terug (dubbel tikken, tweede tabblad): niets te doen.
+  if (await metingBestaat(supabase, herstel.id, ctx.teamId)) {
+    klaar()
+    return
+  }
+
+  const { data: bezet } = await supabase
+    .from('categorie_metingen')
+    .select('id')
+    .eq('team_id', ctx.teamId)
+    .eq('categorie', herstel.categorie)
+    .eq('datum', herstel.datum)
+    .maybeSingle()
+  if (bezet) throw herstelNietMogelijk()
+
+  const { error } = await supabase.from('categorie_metingen').insert({
+    id: herstel.id,
+    team_id: ctx.teamId,
+    categorie: herstel.categorie,
+    datum: herstel.datum,
+    stap: stapVoor(herstel.stap, herstel.categorie),
+    notes: herstel.notes?.trim().slice(0, 1000) || null,
+    ...(createdAt ? { created_at: createdAt } : {}),
+  })
+
+  if (error) {
+    // 23505 = unieke sleutel: een gelijktijdig herstel was ons voor (succes),
+    // of de id/datum is door iets anders bezet (weigeren).
+    if (errorCode(error) === '23505') {
+      if (await metingBestaat(supabase, herstel.id, ctx.teamId)) {
+        klaar()
+        return
+      }
+      throw herstelNietMogelijk()
+    }
+    throw genericError('periodisering.herstelCategorieMeting', error)
+  }
+
+  klaar()
 }
 
 // ────────────────────────────────────────────────

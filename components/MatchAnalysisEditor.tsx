@@ -3,9 +3,10 @@
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { MatchEvent, MatchEventKind, MatchRating, Player, HomeAway, MATCH_EVENT_KINDS, POSITION_ABBREVIATIONS } from '@/lib/types'
-import { saveMatchResult, saveMatchRating, addMatchEvent, deleteMatchEvent } from '@/app/actions/match-analysis'
+import { saveMatchResult, saveMatchRating, addMatchEvent, deleteMatchEvent, herstelWedstrijdMoment } from '@/app/actions/match-analysis'
 import { goalsSum } from '@/lib/match-analysis.mjs'
 import { useDict } from '@/lib/i18n-context'
+import { useToast } from '@/components/ui/Toast'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 function initialsOf(name: string): string {
@@ -67,6 +68,8 @@ export default function MatchAnalysisEditor({
 }: Props) {
   const t = useDict()
   const router = useRouter()
+  const toast = useToast()
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   // ── Result ──
@@ -173,14 +176,41 @@ export default function MatchAnalysisEditor({
     })
   }
 
+  // Terugzetten op de oorspronkelijke plek; no-op als de rij er al (weer) staat
+  // (bv. doordat router.refresh() de serverstand al binnenbracht).
+  function zetTerug(ev: MatchEvent, index: number) {
+    setEvents((prev) => {
+      if (prev.some((e) => e.id === ev.id)) return prev
+      const next = [...prev]
+      next.splice(Math.min(index, next.length), 0, ev)
+      return next
+    })
+  }
+
   function handleDeleteEvent(id: string) {
+    const index = events.findIndex((e) => e.id === id)
+    const ev = index >= 0 ? events[index] : null
+    setDeleteError(null)
     setEvents((prev) => prev.filter((e) => e.id !== id))
     startTransition(async () => {
       try {
-        await deleteMatchEvent(id, eventId)
+        const herstel = await deleteMatchEvent(id, eventId)
         router.refresh()
+        toast.toon({
+          bericht: t.undo.deleted,
+          actie: {
+            label: t.undo.action,
+            foutBericht: t.undo.restoreError,
+            onActie: async () => {
+              await herstelWedstrijdMoment(herstel)
+              if (ev) zetTerug(ev, index)
+              router.refresh()
+            },
+          },
+        })
       } catch {
-        // ignore
+        if (ev) zetTerug(ev, index)
+        setDeleteError(t.undo.deleteError)
       }
     })
   }
@@ -253,7 +283,7 @@ export default function MatchAnalysisEditor({
                     {POSITION_ABBREVIATIONS[player.position] ?? player.position}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 [--hit-slop-gap:8px] flex-shrink-0">
                   {canEdit ? (
                     <>
                       <button
@@ -261,7 +291,7 @@ export default function MatchAnalysisEditor({
                         onClick={() => stepRating(player.id, -1)}
                         disabled={rating !== null && rating <= 1}
                         aria-label="−"
-                        className="w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
+                        className="relative hit-slop w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
                         style={{ background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }}
                       >
                         −
@@ -280,7 +310,7 @@ export default function MatchAnalysisEditor({
                         onClick={() => stepRating(player.id, 1)}
                         disabled={rating === 10}
                         aria-label="+"
-                        className="w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
+                        className="relative hit-slop w-9 h-9 rounded-lg flex items-center justify-center text-muted font-bold text-xl transition-colors hover:bg-surface-sunken active:scale-95 disabled:opacity-40"
                         style={{ background: 'var(--surface-sunken)', border: '1px solid var(--border-soft)' }}
                       >
                         +
@@ -320,6 +350,12 @@ export default function MatchAnalysisEditor({
           </p>
         )}
 
+        {deleteError && (
+          <div role="alert" className="bg-panel-red border border-panel-red-edge text-panel-red-ink text-xs px-4 py-2.5 rounded-xl">
+            {deleteError}
+          </div>
+        )}
+
         {/* Existing events */}
         {events.length === 0 ? (
           <div className="surface-card p-5 text-center">
@@ -344,7 +380,7 @@ export default function MatchAnalysisEditor({
                     onClick={() => handleDeleteEvent(ev.id)}
                     disabled={isPending}
                     aria-label={t.analysis.delete}
-                    className="w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:text-ink transition-colors disabled:opacity-40"
+                    className="relative hit-slop w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:text-ink transition-colors disabled:opacity-40"
                   >
                     <span className="ms text-[20px]">close</span>
                   </button>

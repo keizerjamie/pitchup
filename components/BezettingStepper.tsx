@@ -160,13 +160,13 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
           return (
             <div key={i} className="flex items-center justify-between gap-3">
               <span className="text-sm text-ink flex-shrink-0">{label}</span>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 [--hit-slop-gap:8px] flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => adjustTeam(i, -1)}
                   disabled={waarde <= bereik.min}
                   aria-label={t.bezetting.decreaseAria.replace('{label}', label)}
-                  className="w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
+                  className="relative hit-slop w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
                 >
                   −
                 </button>
@@ -178,7 +178,7 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
                   onClick={() => adjustTeam(i, 1)}
                   disabled={waarde >= bereik.max}
                   aria-label={t.bezetting.increaseAria.replace('{label}', label)}
-                  className="w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
+                  className="relative hit-slop w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
                 >
                   +
                 </button>
@@ -191,13 +191,13 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
         {neutraalBereik.max > neutraalBereik.min && (
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm text-ink flex-shrink-0">{t.oefeningen.neutralsLabel}</span>
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 [--hit-slop-gap:8px] flex-shrink-0">
               <button
                 type="button"
                 onClick={() => adjustNeutralen(-1)}
                 disabled={aantallen.neutralen <= neutraalBereik.min}
                 aria-label={t.bezetting.decreaseAria.replace('{label}', t.oefeningen.neutralsLabel)}
-                className="w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
+                className="relative hit-slop w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
               >
                 −
               </button>
@@ -209,7 +209,7 @@ export default function BezettingStepper({ koppelingId, eventId, basis, initialA
                 onClick={() => adjustNeutralen(1)}
                 disabled={aantallen.neutralen >= neutraalBereik.max}
                 aria-label={t.bezetting.increaseAria.replace('{label}', t.oefeningen.neutralsLabel)}
-                className="w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
+                className="relative hit-slop w-9 h-9 rounded-lg border border-[var(--border-soft)] bg-surface-sunken text-ink font-bold text-lg flex items-center justify-center hover:border-warning/50 active:scale-95 transition-transform duration-150 ease-out disabled:opacity-50 disabled:active:scale-100 disabled:hover:border-[var(--border-soft)]"
               >
                 +
               </button>

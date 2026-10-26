@@ -19,6 +19,7 @@ import { markerFill } from '@/components/DiagramElements'
 import { generateDiagram } from '@/lib/diagram'
 import { useDict } from '@/lib/i18n-context'
 import ChevronIcon from '@/components/icons/ChevronIcon'
+import BottomSheet from '@/components/ui/BottomSheet'
 
 const ALL_CATS = PERIODIZATION_CATEGORIES
 const TEAM_SIZES = VALID_TEAM_SIZES
@@ -183,6 +184,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
       ? generateDiagram(diagramTeams, aantalNeutralen, veldzone)
       : null
 
+  // Vingerafdruk van de invoer bij openen; dirty = er is sindsdien iets gewijzigd.
+  const [initieleInput] = useState(() => stableStringify(bouwInput()))
+  const dirty = stableStringify(bouwInput()) !== initieleInput
+
   function handleDiagramChange(d: Diagram) {
     setHandmatigDiagram(d)
     // Elke handmatige aanpassing geldt als "past bij de teams van nu".
@@ -270,9 +275,10 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
     }))
   }
 
-  function handleSubmit() {
-    setError(null)
-    const input: OefeningInput = {
+  // Eén bron voor wat er opgeslagen wordt: gebruikt door handleSubmit én door
+  // de dirty-vergelijking (BottomSheet-waarschuwing bij wegvegen).
+  function bouwInput(): OefeningInput {
+    return {
       naam: naam.trim(),
       beschrijving: beschrijving || null,
       categorie,
@@ -295,6 +301,11 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
       aantal_neutralen_max: aantalNeutralenMax,
       diagram: effectiefDiagram,
     }
+  }
+
+  function handleSubmit() {
+    setError(null)
+    const input = bouwInput()
     startTransition(async () => {
       try {
         await onSubmit(input)
@@ -307,445 +318,436 @@ export default function OefeningEditor({ initial, onCancel, onSubmit, presetCate
   const isEdit = !!initial
 
   return (
-    <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center">
-      <div className="anim-scrim absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
-      <div className="anim-sheet relative w-full max-w-lg bg-surface rounded-t-3xl sm:rounded-2xl shadow-2xl max-h-[92dvh] overflow-y-auto">
-        <div className="sticky top-0 bg-surface border-b border-[var(--border-soft)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-2xl z-10">
-          <h3 className="font-bold text-ink text-lg">
-            {isEdit ? t.oefeningen.editTitle : t.oefeningen.newTitle}
-          </h3>
-          <button type="button" onClick={onCancel} className="w-8 h-8 rounded-full bg-surface-sunken flex items-center justify-center text-muted hover:bg-surface-sunken">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+    <BottomSheet
+      onClose={onCancel}
+      titel={isEdit ? t.oefeningen.editTitle : t.oefeningen.newTitle}
+      sluitLabel={t.common.close}
+      dirty={dirty}
+    >
+      <div className="p-5 space-y-4">
+        {hint && (
+          <p className="text-xs text-faint bg-surface-sunken rounded-lg px-3 py-2">{hint}</p>
+        )}
+        {error && (
+          <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
+            {error}
+          </div>
+        )}
+
+        {/* Naam */}
+        <div>
+          <label htmlFor="oefening-naam" className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.exerciseName} *</label>
+          <input
+            id="oefening-naam"
+            type="text"
+            value={naam}
+            onChange={(e) => setNaam(e.target.value)}
+            placeholder={t.trainingPlan.exerciseNamePlaceholder}
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
+          />
         </div>
 
-        <div className="p-5 space-y-4">
-          {hint && (
-            <p className="text-xs text-faint bg-surface-sunken rounded-lg px-3 py-2">{hint}</p>
-          )}
-          {error && (
-            <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
-              {error}
-            </div>
-          )}
+        {/* Categorie */}
+        <div>
+          <label htmlFor="oefening-categorie" className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.category}</label>
+          <select
+            id="oefening-categorie"
+            value={categorie}
+            onChange={(e) => handleCategorieChange(e.target.value as OefeningCategorie)}
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink bg-surface"
+          >
+            {ALL_CATS.map((cat) => (
+              <option key={cat.key} value={cat.key}>{catLabel(cat.key)}</option>
+            ))}
+          </select>
+        </div>
 
-          {/* Naam */}
+        {/* Beschrijving */}
+        <div>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.exerciseDescription}</label>
+          <textarea
+            rows={3}
+            value={beschrijving ?? ''}
+            onChange={(e) => setBeschrijving(e.target.value)}
+            placeholder={t.trainingPlan.exerciseDescriptionPlaceholder}
+            className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint resize-none text-sm"
+          />
+        </div>
+
+        {/* Duur + Aantal neutralen (+ bovengrens) */}
+        <div className="grid grid-cols-3 gap-3">
           <div>
-            <label htmlFor="oefening-naam" className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.exerciseName} *</label>
+            <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.duration}</label>
             <input
-              id="oefening-naam"
-              type="text"
-              value={naam}
-              onChange={(e) => setNaam(e.target.value)}
-              placeholder={t.trainingPlan.exerciseNamePlaceholder}
+              type="number" min={0} max={120}
+              value={duurMin ?? ''}
+              onChange={(e) => setDuurMin(e.target.value ? parseInt(e.target.value) : null)}
+              placeholder="15"
               className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
             />
           </div>
-
-          {/* Categorie */}
           <div>
-            <label htmlFor="oefening-categorie" className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.category}</label>
-            <select
-              id="oefening-categorie"
-              value={categorie}
-              onChange={(e) => handleCategorieChange(e.target.value as OefeningCategorie)}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-ink bg-surface"
-            >
-              {ALL_CATS.map((cat) => (
-                <option key={cat.key} value={cat.key}>{catLabel(cat.key)}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Beschrijving */}
-          <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.exerciseDescription}</label>
-            <textarea
-              rows={3}
-              value={beschrijving ?? ''}
-              onChange={(e) => setBeschrijving(e.target.value)}
-              placeholder={t.trainingPlan.exerciseDescriptionPlaceholder}
-              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint resize-none text-sm"
+            <label htmlFor="oefening-neutralen" className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.neutralsLabel}</label>
+            <input
+              id="oefening-neutralen"
+              type="number" min={0} max={30}
+              value={aantalNeutralen}
+              onChange={(e) => {
+                const raw = parseInt(e.target.value)
+                const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(30, raw)) : 0
+                setAantalNeutralen(clamped)
+              }}
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink"
             />
           </div>
-
-          {/* Duur + Aantal neutralen (+ bovengrens) */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.duration}</label>
-              <input
-                type="number" min={0} max={120}
-                value={duurMin ?? ''}
-                onChange={(e) => setDuurMin(e.target.value ? parseInt(e.target.value) : null)}
-                placeholder="15"
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
-              />
-            </div>
-            <div>
-              <label htmlFor="oefening-neutralen" className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.neutralsLabel}</label>
-              <input
-                id="oefening-neutralen"
-                type="number" min={0} max={30}
-                value={aantalNeutralen}
-                onChange={(e) => {
-                  const raw = parseInt(e.target.value)
-                  const clamped = Number.isFinite(raw) ? Math.max(0, Math.min(30, raw)) : 0
-                  setAantalNeutralen(clamped)
-                }}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink"
-              />
-            </div>
-            <div>
-              <label htmlFor="oefening-neutralen-max" className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.neutralsMaxLabel}</label>
-              <input
-                id="oefening-neutralen-max"
-                type="number" min={aantalNeutralen} max={30}
-                value={aantalNeutralenMax ?? ''}
-                // Eerst op '' testen, nooit `|| null` — 0 is een geldige
-                // bovengrens bij een basisaantal van 0 (falsy-zero-valkuil).
-                onChange={(e) => setAantalNeutralenMax(e.target.value === '' ? null : Number(e.target.value))}
-                placeholder={t.oefeningen.rangeNone}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
-              />
-            </div>
-          </div>
-
-          {/* Veldgrootte */}
           <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.fieldSize}</label>
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="number" min={0} max={200} step={0.5}
-                value={breedteM ?? ''}
-                onChange={(e) => setBreedteM(e.target.value ? parseFloat(e.target.value) : null)}
-                placeholder={t.trainingPlan.fieldWidth}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
-              />
-              <input
-                type="number" min={0} max={200} step={0.5}
-                value={lengteM ?? ''}
-                onChange={(e) => setLengteM(e.target.value ? parseFloat(e.target.value) : null)}
-                placeholder={t.trainingPlan.fieldLength}
-                className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
-              />
-            </div>
+            <label htmlFor="oefening-neutralen-max" className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.neutralsMaxLabel}</label>
+            <input
+              id="oefening-neutralen-max"
+              type="number" min={aantalNeutralen} max={30}
+              value={aantalNeutralenMax ?? ''}
+              // Eerst op '' testen, nooit `|| null` — 0 is een geldige
+              // bovengrens bij een basisaantal van 0 (falsy-zero-valkuil).
+              onChange={(e) => setAantalNeutralenMax(e.target.value === '' ? null : Number(e.target.value))}
+              placeholder={t.oefeningen.rangeNone}
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint"
+            />
           </div>
+        </div>
 
-          {/* Veldzone */}
-          <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.fieldZone}</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['links', 'midden', 'rechts'] as const).map((zone) => (
-                <button
-                  key={zone}
-                  type="button"
-                  onClick={() => setVeldzone(veldzone === zone ? null : zone)}
-                  className={`py-2 px-3 rounded-xl text-sm font-semibold border-2 transition ${
-                    veldzone === zone
-                      ? 'bg-warning text-white border-warning'
-                      : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
-                  }`}
-                >
-                  {t.trainingPlan.fieldZones[zone]}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-2 mt-2">
-              {(['strafschopgebied_links', 'strafschopgebied_rechts'] as const).map((zone) => (
-                <button
-                  key={zone}
-                  type="button"
-                  onClick={() => setVeldzone(veldzone === zone ? null : zone)}
-                  className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition ${
-                    veldzone === zone
-                      ? 'bg-warning text-white border-warning'
-                      : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
-                  }`}
-                >
-                  {t.trainingPlan.fieldZones[zone]}
-                </button>
-              ))}
-            </div>
+        {/* Veldgrootte */}
+        <div>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.fieldSize}</label>
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              type="number" min={0} max={200} step={0.5}
+              value={breedteM ?? ''}
+              onChange={(e) => setBreedteM(e.target.value ? parseFloat(e.target.value) : null)}
+              placeholder={t.trainingPlan.fieldWidth}
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
+            />
+            <input
+              type="number" min={0} max={200} step={0.5}
+              value={lengteM ?? ''}
+              onChange={(e) => setLengteM(e.target.value ? parseFloat(e.target.value) : null)}
+              placeholder={t.trainingPlan.fieldLength}
+              className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 bg-surface text-ink placeholder:text-faint text-sm"
+            />
           </div>
+        </div>
 
-          {/* Teams — dynamische lijst. De toevoegknop staat ONDER de lijst
-              (waar het nieuwe team verschijnt) en is groot genoeg om op
-              mobiel niet te missen. */}
-          <div>
-            <label className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.teamsSection}</label>
+        {/* Veldzone */}
+        <div>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.trainingPlan.fieldZone}</label>
+          <div className="grid grid-cols-3 gap-2">
+            {(['links', 'midden', 'rechts'] as const).map((zone) => (
+              <button
+                key={zone}
+                type="button"
+                onClick={() => setVeldzone(veldzone === zone ? null : zone)}
+                className={`py-2 px-3 rounded-xl text-sm font-semibold border-2 transition ${
+                  veldzone === zone
+                    ? 'bg-warning text-white border-warning'
+                    : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
+                }`}
+              >
+                {t.trainingPlan.fieldZones[zone]}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {(['strafschopgebied_links', 'strafschopgebied_rechts'] as const).map((zone) => (
+              <button
+                key={zone}
+                type="button"
+                onClick={() => setVeldzone(veldzone === zone ? null : zone)}
+                className={`py-2 px-2 rounded-xl text-xs font-semibold border-2 transition ${
+                  veldzone === zone
+                    ? 'bg-warning text-white border-warning'
+                    : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
+                }`}
+              >
+                {t.trainingPlan.fieldZones[zone]}
+              </button>
+            ))}
+          </div>
+        </div>
 
-            {teams.length === 0 && (
-              <p className="text-xs text-faint">{t.oefeningen.noTeamsHint}</p>
-            )}
+        {/* Teams — dynamische lijst. De toevoegknop staat ONDER de lijst
+            (waar het nieuwe team verschijnt) en is groot genoeg om op
+            mobiel niet te missen. */}
+        <div>
+          <label className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.teamsSection}</label>
 
-            <div className="space-y-3">
-              {teams.map((team, i) => {
-                const formationOptions =
-                  team.grootte !== null
-                    ? formatiesVoorTeam({ grootte: team.grootte, keeperInGrootte: team.keeperInGrootte }, categorie)
-                    : []
-                const basis =
-                  team.grootte !== null
-                    ? basisFormatieDef({ grootte: team.grootte, formaties: team.formaties, keeperInGrootte: team.keeperInGrootte })
-                    : null
-                return (
-                  <div key={i} className="rounded-xl border border-[var(--border-soft)] p-3 space-y-2">
-                    {/* Kop: "Team n" met de kleur die dit team in de tekening
-                        krijgt (markerFill), zodat team en tekening aan elkaar
-                        te koppelen zijn. Verwijderknop rechts in de kop. */}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-                        <span
-                          aria-hidden="true"
-                          className="inline-block w-3 h-3 rounded-full border border-[#111827]/40"
-                          style={{ background: markerFill('speler', i) }}
-                        />
-                        {t.oefeningen.teamLabel.replace('{n}', String(i + 1))}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => removeTeam(i)}
-                        aria-label={t.oefeningen.removeTeamAria}
-                        className="flex-shrink-0 w-9 h-9 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <label htmlFor={`team-size-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.teamSize}</label>
-                        <select
-                          id={`team-size-${i}`}
-                          value={team.grootte ?? ''}
-                          onChange={(e) => handleTeamSizeChange(i, e.target.value ? Number(e.target.value) : null)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
-                        >
-                          <option value="">{t.oefeningen.noTeamSize}</option>
-                          {TEAM_SIZES.map((n) => (
-                            <option key={n} value={n}>{n}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <label htmlFor={`team-size-max-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.teamSizeMax}</label>
-                        <select
-                          id={`team-size-max-${i}`}
-                          value={team.grootteMax ?? ''}
-                          disabled={team.grootte === null || team.formaties.length > 0}
-                          onChange={(e) => setTeamGrootteMax(i, e.target.value ? Number(e.target.value) : null)}
-                          className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface disabled:opacity-50"
-                        >
-                          <option value="">{t.oefeningen.rangeNone}</option>
-                          {team.grootte !== null && TEAM_SIZES.filter((n) => n >= (team.grootte as number)).map((n) => (
-                            <option key={n} value={n}>{n}</option>
-                          ))}
-                        </select>
-                        {/* Bereik-hint: legt uit wat dit veld doet, of waarom
-                            het (samen met de formatiechips hieronder) disabled
-                            staat — nooit de een de ander stilzwijgend wissen. */}
-                        <p className="text-[11px] text-faint mt-1">
-                          {team.formaties.length > 0 ? t.oefeningen.rangeFormationHint : t.oefeningen.rangeHint}
-                        </p>
-                      </div>
-                    </div>
+          {teams.length === 0 && (
+            <p className="text-xs text-faint">{t.oefeningen.noTeamsHint}</p>
+          )}
 
-                    {/* Keeper-schakelaar per team — verborgen bij een 11-tal
-                        (die forceert de keeper altijd, geen keuze nodig). */}
-                    {team.grootte !== null && team.grootte !== 11 && (
-                      <div>
-                        <label className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.keeperLabel}</label>
-                        <div role="group" aria-label={t.oefeningen.keeperLabel} className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            aria-pressed={team.keeperInGrootte}
-                            onClick={() => setTeamKeeper(i, true)}
-                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
-                              team.keeperInGrootte
-                                ? 'bg-warning text-white border-warning'
-                                : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
-                            }`}
-                          >
-                            {t.oefeningen.keeperIncluded}
-                          </button>
-                          <button
-                            type="button"
-                            aria-pressed={!team.keeperInGrootte}
-                            onClick={() => setTeamKeeper(i, false)}
-                            className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
-                              !team.keeperInGrootte
-                                ? 'bg-warning text-white border-warning'
-                                : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
-                            }`}
-                          >
-                            {t.oefeningen.keeperExcluded}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.formation}</label>
-                      {team.grootte !== null && (
-                        formationOptions.length > 0 ? (
-                          <div role="group" aria-label={t.oefeningen.formation} className="flex flex-wrap gap-2">
-                            {formationOptions.map((f) => {
-                              const selected = team.formaties.includes(f.key)
-                              const bereikActief = team.grootteMax !== null
-                              return (
-                                <button
-                                  key={f.key}
-                                  type="button"
-                                  aria-pressed={selected}
-                                  disabled={bereikActief}
-                                  onClick={() => selectTeamFormatie(i, f.key)}
-                                  className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[var(--border-soft)] ${
-                                    selected
-                                      ? 'bg-warning text-white border-warning'
-                                      : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
-                                  }`}
-                                >
-                                  {f.label}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        ) : (
-                          // AC18 — lege catalogus (bv. grootte 3 + inclusief keeper +
-                          // partijen_groot): geen opties om uit te kiezen, disabled-staat.
-                          <span
-                            data-testid={`geen-formaties-${i}`}
-                            aria-disabled="true"
-                            className="inline-block py-1.5 px-3 rounded-lg text-xs font-semibold border-2 border-[var(--border-soft)] text-faint opacity-60 cursor-not-allowed"
-                          >
-                            {t.oefeningen.noFormationsAvailable}
-                          </span>
-                        )
-                      )}
-                      {team.grootte !== null && team.grootteMax !== null && (
-                        <p className="text-[11px] text-faint mt-1">{t.oefeningen.rangeFormationHint}</p>
-                      )}
-                    </div>
-
-                    {/* Preview: bij een gekozen formatie de bekende
-                        `grootte · label`; bij een bereik (per definitie geen
-                        formatie) het bereik-label, zodat de trainer het ook
-                        hier terugziet — nu ook zonder formatie getoond zodra
-                        er een bereik is. */}
-                    {team.grootte !== null && (basis || team.grootteMax !== null) && (
-                      <FormationField
-                        positions={basis?.positions ?? []}
-                        label={`${teamBereikLabel({ grootte: team.grootte, formaties: team.formaties, keeperInGrootte: team.keeperInGrootte, grootteMax: team.grootteMax })}${basis ? ` · ${basis.label}` : ''}`}
-                        sizePx={110}
+          <div className="space-y-3">
+            {teams.map((team, i) => {
+              const formationOptions =
+                team.grootte !== null
+                  ? formatiesVoorTeam({ grootte: team.grootte, keeperInGrootte: team.keeperInGrootte }, categorie)
+                  : []
+              const basis =
+                team.grootte !== null
+                  ? basisFormatieDef({ grootte: team.grootte, formaties: team.formaties, keeperInGrootte: team.keeperInGrootte })
+                  : null
+              return (
+                <div key={i} className="rounded-xl border border-[var(--border-soft)] p-3 space-y-2">
+                  {/* Kop: "Team n" met de kleur die dit team in de tekening
+                      krijgt (markerFill), zodat team en tekening aan elkaar
+                      te koppelen zijn. Verwijderknop rechts in de kop. */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+                      <span
+                        aria-hidden="true"
+                        className="inline-block w-3 h-3 rounded-full border border-[#111827]/40"
+                        style={{ background: markerFill('speler', i) }}
                       />
+                      {t.oefeningen.teamLabel.replace('{n}', String(i + 1))}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeTeam(i)}
+                      aria-label={t.oefeningen.removeTeamAria}
+                      className="relative hit-slop flex-shrink-0 w-9 h-9 rounded-lg hover:bg-panel-red flex items-center justify-center text-faint hover:text-panel-red-ink transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <label htmlFor={`team-size-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.teamSize}</label>
+                      <select
+                        id={`team-size-${i}`}
+                        value={team.grootte ?? ''}
+                        onChange={(e) => handleTeamSizeChange(i, e.target.value ? Number(e.target.value) : null)}
+                        className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface"
+                      >
+                        <option value="">{t.oefeningen.noTeamSize}</option>
+                        {TEAM_SIZES.map((n) => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <label htmlFor={`team-size-max-${i}`} className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.teamSizeMax}</label>
+                      <select
+                        id={`team-size-max-${i}`}
+                        value={team.grootteMax ?? ''}
+                        disabled={team.grootte === null || team.formaties.length > 0}
+                        onChange={(e) => setTeamGrootteMax(i, e.target.value ? Number(e.target.value) : null)}
+                        className="w-full px-3 py-2 rounded-lg border border-[var(--border-soft)] focus:outline-none focus:border-warning focus:ring-2 focus:ring-warning/30 text-sm text-ink bg-surface disabled:opacity-50"
+                      >
+                        <option value="">{t.oefeningen.rangeNone}</option>
+                        {team.grootte !== null && TEAM_SIZES.filter((n) => n >= (team.grootte as number)).map((n) => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                      {/* Bereik-hint: legt uit wat dit veld doet, of waarom
+                          het (samen met de formatiechips hieronder) disabled
+                          staat — nooit de een de ander stilzwijgend wissen. */}
+                      <p className="text-[11px] text-faint mt-1">
+                        {team.formaties.length > 0 ? t.oefeningen.rangeFormationHint : t.oefeningen.rangeHint}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Keeper-schakelaar per team — verborgen bij een 11-tal
+                      (die forceert de keeper altijd, geen keuze nodig). */}
+                  {team.grootte !== null && team.grootte !== 11 && (
+                    <div>
+                      <label className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.keeperLabel}</label>
+                      <div role="group" aria-label={t.oefeningen.keeperLabel} className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          aria-pressed={team.keeperInGrootte}
+                          onClick={() => setTeamKeeper(i, true)}
+                          className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
+                            team.keeperInGrootte
+                              ? 'bg-warning text-white border-warning'
+                              : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
+                          }`}
+                        >
+                          {t.oefeningen.keeperIncluded}
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={!team.keeperInGrootte}
+                          onClick={() => setTeamKeeper(i, false)}
+                          className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition ${
+                            !team.keeperInGrootte
+                              ? 'bg-warning text-white border-warning'
+                              : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
+                          }`}
+                        >
+                          {t.oefeningen.keeperExcluded}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-muted mb-1">{t.oefeningen.formation}</label>
+                    {team.grootte !== null && (
+                      formationOptions.length > 0 ? (
+                        <div role="group" aria-label={t.oefeningen.formation} className="flex flex-wrap gap-2">
+                          {formationOptions.map((f) => {
+                            const selected = team.formaties.includes(f.key)
+                            const bereikActief = team.grootteMax !== null
+                            return (
+                              <button
+                                key={f.key}
+                                type="button"
+                                aria-pressed={selected}
+                                disabled={bereikActief}
+                                onClick={() => selectTeamFormatie(i, f.key)}
+                                className={`py-1.5 px-3 rounded-lg text-xs font-semibold border-2 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[var(--border-soft)] ${
+                                  selected
+                                    ? 'bg-warning text-white border-warning'
+                                    : 'border-[var(--border-soft)] text-muted hover:border-warning/50'
+                                }`}
+                              >
+                                {f.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        // AC18 — lege catalogus (bv. grootte 3 + inclusief keeper +
+                        // partijen_groot): geen opties om uit te kiezen, disabled-staat.
+                        <span
+                          data-testid={`geen-formaties-${i}`}
+                          aria-disabled="true"
+                          className="inline-block py-1.5 px-3 rounded-lg text-xs font-semibold border-2 border-[var(--border-soft)] text-faint opacity-60 cursor-not-allowed"
+                        >
+                          {t.oefeningen.noFormationsAvailable}
+                        </span>
+                      )
+                    )}
+                    {team.grootte !== null && team.grootteMax !== null && (
+                      <p className="text-[11px] text-faint mt-1">{t.oefeningen.rangeFormationHint}</p>
                     )}
                   </div>
-                )
-              })}
-            </div>
 
+                  {/* Preview: bij een gekozen formatie de bekende
+                      `grootte · label`; bij een bereik (per definitie geen
+                      formatie) het bereik-label, zodat de trainer het ook
+                      hier terugziet — nu ook zonder formatie getoond zodra
+                      er een bereik is. */}
+                  {team.grootte !== null && (basis || team.grootteMax !== null) && (
+                    <FormationField
+                      positions={basis?.positions ?? []}
+                      label={`${teamBereikLabel({ grootte: team.grootte, formaties: team.formaties, keeperInGrootte: team.keeperInGrootte, grootteMax: team.grootteMax })}${basis ? ` · ${basis.label}` : ''}`}
+                      sizePx={110}
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={addTeam}
+            disabled={teams.length >= MAX_TEAMS}
+            className="mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/60 text-sm font-semibold text-warning-text hover:border-warning hover:bg-panel-orange transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-warning/60"
+          >
+            {t.oefeningen.addTeam}
+          </button>
+          {teams.length >= MAX_TEAMS && (
+            <p className="text-[11px] text-faint mt-1 text-center">{t.oefeningen.maxTeamsHint.replace('{n}', String(MAX_TEAMS))}</p>
+          )}
+        </div>
+
+        {/* Tekening — achter een toggle zodat de sheet op mobiel kort blijft.
+            Zie het commentaar bij handmatigDiagram voor de twee standen. */}
+        <div>
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
-              onClick={addTeam}
-              disabled={teams.length >= MAX_TEAMS}
-              className="mt-3 w-full py-3 rounded-xl border-2 border-dashed border-warning/60 text-sm font-semibold text-warning-text hover:border-warning hover:bg-panel-orange transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:border-warning/60"
+              onClick={toggleDiagramEditor}
+              className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
             >
-              {t.oefeningen.addTeam}
+              <ChevronIcon open={showDiagramEditor} className="w-[18px] h-[18px] inline-block align-middle mr-1" />{t.oefeningen.diagramToggle}
             </button>
-            {teams.length >= MAX_TEAMS && (
-              <p className="text-[11px] text-faint mt-1 text-center">{t.oefeningen.maxTeamsHint.replace('{n}', String(MAX_TEAMS))}</p>
-            )}
-          </div>
-
-          {/* Tekening — achter een toggle zodat de sheet op mobiel kort blijft.
-              Zie het commentaar bij handmatigDiagram voor de twee standen. */}
-          <div>
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={toggleDiagramEditor}
-                className="text-sm font-semibold text-warning-text hover:text-panel-orange-ink transition-colors"
+            {tekeningActief && (
+              <span
+                data-testid="diagram-mode-badge"
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                  isHandmatig ? 'bg-panel-orange text-panel-orange-ink' : 'bg-surface-sunken text-muted'
+                }`}
               >
-                <ChevronIcon open={showDiagramEditor} className="w-[18px] h-[18px] inline-block align-middle mr-1" />{t.oefeningen.diagramToggle}
-              </button>
-              {tekeningActief && (
-                <span
-                  data-testid="diagram-mode-badge"
-                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                    isHandmatig ? 'bg-panel-orange text-panel-orange-ink' : 'bg-surface-sunken text-muted'
-                  }`}
-                >
-                  {isHandmatig ? t.oefeningen.diagramManualBadge : t.oefeningen.diagramAutoBadge}
-                </span>
-              )}
-            </div>
-
-            {/* Handmatige tekening loopt achter op de teams: altijd zichtbaar,
-                ook als de sectie dicht is — anders slaat de trainer een
-                verouderde tekening op zonder het te merken. */}
-            {tekeningVerouderd && (
-              <div role="status" className="mt-3 rounded-xl border border-warning/30 bg-panel-orange p-3 space-y-2">
-                <p className="text-sm text-panel-orange-ink">{t.oefeningen.diagramStale}</p>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleDiagramRegenerate}
-                    className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                    style={{ background: 'var(--color-accent-strong)' }}
-                  >
-                    {t.oefeningen.diagramStaleAction}
-                  </button>
-                  <span className="text-[11px] text-panel-orange-ink">{t.oefeningen.diagramStaleWarning}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Dichtgeklapt maar wél een tekening: kleine preview, zodat de
-                trainer ziet wat er opgeslagen wordt. */}
-            {!showDiagramEditor && effectiefDiagram && (
-              <button type="button" onClick={toggleDiagramEditor} className="mt-3 block rounded-lg" aria-label={t.oefeningen.diagramSection}>
-                <DiagramView diagram={effectiefDiagram} sizePx={120} />
-              </button>
-            )}
-
-            {showDiagramEditor && (
-              <div className="mt-3">
-                <label className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.diagramSection}</label>
-                <DiagramEditor
-                  value={effectiefDiagram}
-                  teams={diagramTeams}
-                  aantalNeutralen={aantalNeutralen}
-                  veldzone={veldzone}
-                  onChange={handleDiagramChange}
-                  autoSync={!isHandmatig}
-                  onRegenerate={handleDiagramRegenerate}
-                />
-              </div>
+                {isHandmatig ? t.oefeningen.diagramManualBadge : t.oefeningen.diagramAutoBadge}
+              </span>
             )}
           </div>
-        </div>
 
-        <div className="sticky bottom-0 bg-surface border-t border-[var(--border-soft)] p-4 flex gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition active:scale-95"
-          >
-            {t.trainingPlan.cancel}
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isPending || !naam.trim()}
-            className="flex-1 py-3 rounded-xl bg-warning hover:bg-warning/90 text-white font-semibold transition active:scale-95 disabled:opacity-50"
-          >
-            {isPending ? t.trainingPlan.saving : t.trainingPlan.save}
-          </button>
+          {/* Handmatige tekening loopt achter op de teams: altijd zichtbaar,
+              ook als de sectie dicht is — anders slaat de trainer een
+              verouderde tekening op zonder het te merken. */}
+          {tekeningVerouderd && (
+            <div role="status" className="mt-3 rounded-xl border border-warning/30 bg-panel-orange p-3 space-y-2">
+              <p className="text-sm text-panel-orange-ink">{t.oefeningen.diagramStale}</p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleDiagramRegenerate}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: 'var(--color-accent-strong)' }}
+                >
+                  {t.oefeningen.diagramStaleAction}
+                </button>
+                <span className="text-[11px] text-panel-orange-ink">{t.oefeningen.diagramStaleWarning}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Dichtgeklapt maar wél een tekening: kleine preview, zodat de
+              trainer ziet wat er opgeslagen wordt. */}
+          {!showDiagramEditor && effectiefDiagram && (
+            <button type="button" onClick={toggleDiagramEditor} className="mt-3 block rounded-lg" aria-label={t.oefeningen.diagramSection}>
+              <DiagramView diagram={effectiefDiagram} sizePx={120} />
+            </button>
+          )}
+
+          {showDiagramEditor && (
+            <div className="mt-3">
+              <label className="block text-sm font-semibold text-muted mb-1.5">{t.oefeningen.diagramSection}</label>
+              <DiagramEditor
+                value={effectiefDiagram}
+                teams={diagramTeams}
+                aantalNeutralen={aantalNeutralen}
+                veldzone={veldzone}
+                onChange={handleDiagramChange}
+                autoSync={!isHandmatig}
+                onRegenerate={handleDiagramRegenerate}
+              />
+            </div>
+          )}
         </div>
       </div>
-    </div>
+
+      <div className="sticky bottom-0 bg-surface border-t border-[var(--border-soft)] p-4 flex gap-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 py-3 rounded-xl border-2 border-[var(--border-soft)] font-semibold text-muted hover:text-ink transition active:scale-95"
+        >
+          {t.trainingPlan.cancel}
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isPending || !naam.trim()}
+          className="flex-1 py-3 rounded-xl bg-warning hover:bg-warning/90 text-white font-semibold transition active:scale-95 disabled:opacity-50"
+        >
+          {isPending ? t.trainingPlan.saving : t.trainingPlan.save}
+        </button>
+      </div>
+    </BottomSheet>
   )
 }

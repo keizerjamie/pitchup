@@ -6,9 +6,11 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
+import type { HerstelMeting } from '@/lib/herstel'
 import {
   saveCategorieMeting,
   deleteCategorieMeting,
+  herstelCategorieMeting,
   saveCyclusWeekCorrectie,
   deleteCyclusWeekCorrectie,
 } from '@/app/actions/periodisering'
@@ -417,6 +419,32 @@ describe('deleteCategorieMeting', () => {
     expect(revalidatePath).toHaveBeenCalledWith('/')
   })
 
+  it('geeft de herstel-snapshot terug uit de door de guard gelezen rij', async () => {
+    const m = teVerwijderen({
+      rij: {
+        data: {
+          id: 'm1', categorie: 'partijen_klein', datum: '2026-08-01', stap: 4, notes: 'fris',
+          created_at: '2026-08-01T10:00:00+00:00',
+        },
+      },
+    })
+    use(m)
+    expect(await deleteCategorieMeting('m1')).toEqual({
+      soort: 'nulmeting',
+      teamId: 'team-1',
+      id: 'm1',
+      categorie: 'partijen_klein',
+      datum: '2026-08-01',
+      stap: 4,
+      notes: 'fris',
+      createdAt: '2026-08-01T10:00:00+00:00',
+    })
+    // Snapshot-kolommen zitten in dezelfde, tenant-gescopede select.
+    const select = m.calls.select.find((x) => x.table === 'categorie_metingen')!
+    expect(select.cols).toBe('id, categorie, datum, stap, notes, created_at')
+    expect(select.eqs).toEqual([{ col: 'id', val: 'm1' }, { col: 'team_id', val: 'team-1' }])
+  })
+
   it('gooit "Meting niet gevonden" bij een meting van een ander team of een onbekend id (AC 25, 27)', async () => {
     const m = teVerwijderen({ rij: { data: null } })
     use(m)
@@ -443,6 +471,132 @@ describe('deleteCategorieMeting', () => {
     const m = teVerwijderen({ schrijf: { error: { code: '42501', message: 'permission denied' } } })
     use(m)
     await expect(deleteCategorieMeting('m1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    consoleError.mockRestore()
+  })
+})
+
+// ────────────────────────────────────────────────
+// Meting herstellen ("Ongedaan maken")
+// ────────────────────────────────────────────────
+
+describe('herstelCategorieMeting', () => {
+  const ID = '0c000000-0000-4000-8000-000000000001'
+  const SNAPSHOT: HerstelMeting = {
+    soort: 'nulmeting',
+    teamId: 'team-1',
+    id: ID,
+    categorie: 'partijen_klein',
+    datum: '2026-08-01',
+    stap: 4,
+    notes: '  fris  ',
+    createdAt: '2026-08-01T10:00:00+00:00',
+  }
+
+  // categorie_metingen: bestaat-check, bezette-datum-check, insert, evt. hercontrole.
+  function teHerstellen(antwoorden: TableResult[] = [{ data: null }, { data: null }, { error: null }]) {
+    return makeSupabase({ queues: { categorie_metingen: antwoorden } })
+  }
+
+  it('zet de rij terug met originele id en created_at, team_id uit de sessie, en vernieuwt beide paden', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelCategorieMeting(SNAPSHOT)
+    expect(m.calls.insert).toEqual([{
+      table: 'categorie_metingen',
+      payload: {
+        id: ID,
+        team_id: 'team-1',
+        categorie: 'partijen_klein',
+        datum: '2026-08-01',
+        stap: 4,
+        notes: 'fris',
+        created_at: '2026-08-01T10:00:00+00:00',
+      },
+    }])
+    expect(revalidatePath).toHaveBeenCalledWith('/periodisering')
+    expect(revalidatePath).toHaveBeenCalledWith('/')
+  })
+
+  it('clamt de stap opnieuw op de categoriegrens', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelCategorieMeting({ ...SNAPSHOT, stap: 999 })
+    expect(m.calls.insert[0].payload.stap).toBe(13) // maxStap partijen_klein
+  })
+
+  it('controleert de bezette datum team-gescoped op categorie + datum', async () => {
+    const m = teHerstellen()
+    use(m)
+    await herstelCategorieMeting(SNAPSHOT)
+    const bezet = m.calls.select.filter((x) => x.table === 'categorie_metingen')[1]
+    expect(bezet.eqs).toEqual([
+      { col: 'team_id', val: 'team-1' },
+      { col: 'categorie', val: 'partijen_klein' },
+      { col: 'datum', val: '2026-08-01' },
+    ])
+  })
+
+  it('weigert als er intussen een andere meting op die datum staat, zonder insert', async () => {
+    const m = teHerstellen([{ data: null }, { data: { id: 'ander' } }])
+    use(m)
+    await expect(herstelCategorieMeting(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('is idempotent: een al teruggezette meting levert geen tweede insert op', async () => {
+    const m = teHerstellen([{ data: { id: ID } }])
+    use(m)
+    await herstelCategorieMeting(SNAPSHOT)
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).toHaveBeenCalledWith('/periodisering')
+  })
+
+  it('23505 en de rij staat er in dit team → succes; anders "Herstel niet mogelijk"', async () => {
+    use(teHerstellen([{ data: null }, { data: null }, { error: { code: '23505' } }, { data: { id: ID } }]))
+    await expect(herstelCategorieMeting(SNAPSHOT)).resolves.toBeUndefined()
+
+    use(teHerstellen([{ data: null }, { data: null }, { error: { code: '23505' } }, { data: null }]))
+    await expect(herstelCategorieMeting(SNAPSHOT)).rejects.toThrow('Herstel niet mogelijk')
+  })
+
+  it('weigert een snapshot van een ander team zonder enige query op categorie_metingen', async () => {
+    const m = teHerstellen()
+    use(m)
+    await expect(herstelCategorieMeting({ ...SNAPSHOT, teamId: 'ander-team' })).rejects.toThrow('Herstel niet mogelijk')
+    expect(m.calls.select.filter((x) => x.table === 'categorie_metingen')).toHaveLength(0)
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert vervalste velden: niet-UUID, onbekend onderdeel, ongeldige datum, stap, notes of created_at', async () => {
+    const m = teHerstellen()
+    use(m)
+    for (const fout of [
+      { ...SNAPSHOT, id: 'm1' },
+      { ...SNAPSHOT, categorie: 'warming_up' },
+      { ...SNAPSHOT, datum: '2026-02-30' },
+      { ...SNAPSHOT, stap: Number.NaN },
+      { ...SNAPSHOT, notes: 5 as never },
+      { ...SNAPSHOT, createdAt: 'DROP TABLE' },
+      { ...SNAPSHOT, soort: 'koppeling' as never },
+    ]) {
+      await expect(herstelCategorieMeting(fout)).rejects.toThrow('Herstel niet mogelijk')
+    }
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert zonder Periodisering-recht met "Geen toegang"', async () => {
+    const m = makeSupabase({
+      tables: { team_members: { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null } },
+    })
+    use(m)
+    await expect(herstelCategorieMeting(SNAPSHOT)).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('geeft bij een andere databasefout de generieke melding', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    use(teHerstellen([{ data: null }, { data: null }, { error: { code: '42501', message: 'permission denied' } }]))
+    await expect(herstelCategorieMeting(SNAPSHOT)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
     consoleError.mockRestore()
   })
 })

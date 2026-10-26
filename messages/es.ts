@@ -73,6 +73,7 @@ export const es: Dict = {
     taskAnalysis: 'Completar el análisis del partido',
     taskTraining: 'Crear el entrenamiento',
     overdue: 'Atrasado',
+    saveError: "No se pudo guardar la tarea. Inténtalo de nuevo.",
   },
   calendar: {
     today: 'Hoy',
@@ -117,7 +118,7 @@ export const es: Dict = {
     lineupView: 'Ver alineación', lineupViewHint: 'La alineación ya ha sido creada',
     analysis: 'Análisis del partido', analysisHint: 'Resultado, valoraciones y eventos', analysisCta: '¡Rellenar análisis!',
     analysisView: 'Ver análisis del partido', analysisViewHint: 'El análisis está completo',
-    attendance: 'Asistencia', markAllPresent: 'Todos presentes', deleteEvent: 'Eliminar evento',
+    attendance: 'Asistencia', markAllPresent: 'Todos presentes', attendanceSaveError: "No se pudo guardar la asistencia. Inténtalo de nuevo.", deleteEvent: 'Eliminar evento',
     editEvent: 'Editar',
     editTitleTraining: 'Editar entrenamiento',
     editTitleMatch: 'Editar partido',
@@ -736,6 +737,15 @@ export const es: Dict = {
     close: 'Cerrar',
     moreActions: 'Más acciones',
     cancel: 'Cancelar',
+  },
+  undo: {
+    deleted: 'Eliminado',
+    action: 'Deshacer',
+    restoreError: 'No se pudo restaurar. El elemento sigue eliminado.',
+    deleteError: 'No se pudo eliminar. Inténtalo de nuevo.',
+  },
+  sheet: {
+    discardConfirm: 'Se perderán tus cambios. ¿Cerrar de todos modos?',
   },
   errors: {
     noPermission: 'No tienes permisos para esta sección',

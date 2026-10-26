@@ -164,6 +164,7 @@
   --z-sheet: 70;
   --z-fab: 80;
   --z-modal: 90;
+  --z-toast: 85;
 }
 
 /* Dark theme — flips every runtime token above. Set on <html> by the
@@ -460,9 +461,22 @@ body::after {
   letter-spacing: -0.02em;
   color: var(--ink);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 @media (min-width: 1024px) {
   .page-title { font-size: 2rem; }
+}
+/* Hit slop: onzichtbaar tikvlak rond een kleine knop. Groeit tot 44x44, maar
+   nooit verder dan de helft van de tussenruimte naar een buur. De ouder zet
+   --hit-slop-gap (horizontaal) en --hit-slop-gap-y (verticaal); de knop moet
+   zelf `relative` zijn. Bewust ongelaagd en zonder position hier. */
+.hit-slop::after {
+  content: '';
+  position: absolute;
+  top:    max(min(0px, calc((100% - 44px) / 2)), calc(var(--hit-slop-gap-y, 88px) / -2));
+  bottom: max(min(0px, calc((100% - 44px) / 2)), calc(var(--hit-slop-gap-y, 88px) / -2));
+  left:   max(min(0px, calc((100% - 44px) / 2)), calc(var(--hit-slop-gap, 88px) / -2));
+  right:  max(min(0px, calc((100% - 44px) / 2)), calc(var(--hit-slop-gap, 88px) / -2));
 }
 .eyebrow {
   font-size: 11px;

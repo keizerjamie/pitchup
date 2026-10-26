@@ -84,6 +84,7 @@ export const nl = {
     taskAnalysis: 'Wedstrijdanalyse invullen',
     taskTraining: 'Training maken',
     overdue: 'Te laat',
+    saveError: "Opslaan van de taak is mislukt. Probeer het opnieuw.",
   },
   calendar: {
     today: 'Vandaag',
@@ -170,6 +171,7 @@ export const nl = {
     analysisViewHint: 'Analyse is ingevuld',
     attendance: 'Aanwezigheid',
     markAllPresent: 'Iedereen aanwezig',
+    attendanceSaveError: "Opslaan van de aanwezigheid is mislukt. Probeer het opnieuw.",
     deleteEvent: 'Event verwijderen',
     editEvent: 'Bewerken',
     editTitleTraining: 'Training bewerken',
@@ -972,6 +974,15 @@ export const nl = {
     close: 'Sluiten',
     moreActions: 'Meer acties',
     cancel: 'Annuleren',
+  },
+  undo: {
+    deleted: 'Verwijderd',
+    action: 'Ongedaan maken',
+    restoreError: 'Herstellen is mislukt. Het item blijft verwijderd.',
+    deleteError: 'Verwijderen is mislukt. Probeer het opnieuw.',
+  },
+  sheet: {
+    discardConfirm: 'Je wijzigingen gaan verloren. Toch sluiten?',
   },
   errors: {
     noPermission: 'Je hebt geen rechten voor dit onderdeel',

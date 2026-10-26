@@ -6,6 +6,11 @@ import TrainingPlanEditor from '@/components/TrainingPlanEditor'
 import type { Oefening, OefeningCategorie, Player, TrainingOefeningWithData } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 
+const refreshMock = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: refreshMock }),
+}))
+
 vi.mock('@/app/actions/training-plan', () => ({
   saveDoelstelling: vi.fn().mockResolvedValue(undefined),
   removeOefeningFromTraining: vi.fn().mockResolvedValue(undefined),
@@ -31,9 +36,10 @@ vi.mock('@/app/actions/oefening-library', () => ({
   kopieerOefeningNaarBibliotheek: vi.fn(),
 }))
 
-import { saveSpelerindeling, updateKoppeling, reorderKoppelingen, vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
+import { removeOefeningFromTraining, saveSpelerindeling, updateKoppeling, reorderKoppelingen, vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
 import { updateOefening } from '@/app/actions/oefening-library'
 import { en } from '@/messages/en'
+const mockRemove = removeOefeningFromTraining as unknown as ReturnType<typeof vi.fn>
 const mockSave = saveSpelerindeling as unknown as ReturnType<typeof vi.fn>
 const mockUpdateKoppeling = updateKoppeling as unknown as ReturnType<typeof vi.fn>
 const mockReorder = reorderKoppelingen as unknown as ReturnType<typeof vi.fn>
@@ -757,5 +763,29 @@ describe('TrainingPlanEditor — eigenaarschap van de gekoppelde oefening (fase 
     renderPlanAls(k, 'ik')
 
     expect(screen.getByLabelText(nl.trainingPlan.unlink)).toBeInTheDocument()
+  })
+})
+
+describe('TrainingPlanEditor — verwijderen van een koppeling die op de server al weg is', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('bij een mislukte verwijdering: foutmelding, kaart terug en router.refresh() zodat de serverstand overneemt', async () => {
+    mockRemove.mockRejectedValueOnce(new Error('Koppeling niet gevonden'))
+    renderPlan([makeKoppeling()])
+
+    fireEvent.click(screen.getByLabelText(nl.trainingPlan.unlink))
+
+    await waitFor(() => expect(refreshMock).toHaveBeenCalledTimes(1))
+    expect(screen.getByText(nl.undo.deleteError)).toBeInTheDocument()
+    expect(screen.getByLabelText(nl.trainingPlan.unlink)).toBeInTheDocument()
+  })
+
+  it('bij een geslaagde verwijdering wordt niet ververst', async () => {
+    renderPlan([makeKoppeling()])
+    fireEvent.click(screen.getByLabelText(nl.trainingPlan.unlink))
+    await waitFor(() => expect(mockRemove).toHaveBeenCalled())
+    expect(refreshMock).not.toHaveBeenCalled()
   })
 })

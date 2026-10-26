@@ -37,6 +37,15 @@ describe('Button', () => {
     }
   })
 
+  it('geeft sm-knoppen een hit-slop zodat het tikvlak 44px haalt', () => {
+    const klassen = buttonClasses({ size: 'sm' })
+    expect(klassen).toContain('relative')
+    expect(klassen).toContain('hit-slop')
+    expect(buttonClasses({ size: 'md' })).not.toContain('hit-slop')
+    render(<IconButton size="sm" aria-label="Sluiten">x</IconButton>)
+    expect(screen.getByRole('button', { name: 'Sluiten' }).className).toContain('hit-slop')
+  })
+
   it('schakelt uit en meldt aria-busy tijdens loading', () => {
     const onClick = vi.fn()
     render(<Button loading onClick={onClick}>Opslaan</Button>)
