@@ -32,6 +32,16 @@ import {
   type SpelerOptie,
   type RatingPerSpelerRij,
   type AanwezigheidPerSpelerRij,
+  splitsThuisUit,
+  resultatenPerFormatie,
+  bepaalTopscorers,
+  kaartenPerSpeler,
+  telPerKwartier,
+  telTegendoelpunten,
+  type WedstrijdUitslagRij,
+  type SpelerMomentenRij,
+  type DoelpuntMinuutRij,
+  type TegendoelpuntMinuutRij,
 } from '@/lib/inzichten'
 import type { FormStripItem } from '@/components/dashboard/FormStrip'
 import AanwezigheidChart from '@/components/inzichten/AanwezigheidChart'
@@ -46,6 +56,12 @@ import SignalenBlok from '@/components/inzichten/SignalenBlok'
 import PeriodeFilter from '@/components/inzichten/PeriodeFilter'
 import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
 import TrainingsinhoudChart from '@/components/inzichten/TrainingsinhoudChart'
+import ThuisUitKaart from '@/components/inzichten/ThuisUitKaart'
+import FormatieKaart from '@/components/inzichten/FormatieKaart'
+import TopscorersKaart from '@/components/inzichten/TopscorersKaart'
+import GeleRodeKaartenLijst from '@/components/inzichten/GeleRodeKaartenLijst'
+import KwartierChart from '@/components/inzichten/KwartierChart'
+import TegendoelpuntenChart from '@/components/inzichten/TegendoelpuntenChart'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
@@ -152,6 +168,10 @@ export default async function InzichtenPage({
     vormResult,
     doelpuntenResult,
     spelersResult,
+    uitslagenResult,
+    spelerMomentenResult,
+    doelpuntMinutenResult,
+    tegendoelpuntenResult,
   ] = await Promise.all([
     // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
     // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
@@ -193,6 +213,14 @@ export default async function InzichtenPage({
       .eq('active', true)
       .eq('type', 'regular')
       .order('name', { ascending: true }),
+    // Vier bronnen voor de metrics-kaarten (supabase/inzichten-metrics.sql). Alle
+    // vier krijgen `venster`, niet `verleden`: een uitslag of vastgelegd moment
+    // bestaat pas ná de wedstrijd, net als bij doelsaldo en de doelpuntenquery.
+    // p_team_id komt uit de teamcontext, nooit van de client.
+    supabase.rpc('inzichten_wedstrijd_uitslagen', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_speler_momenten', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_doelpunten_per_minuut', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    supabase.rpc('inzichten_tegendoelpunten', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
   ])
 
   // Elke bron faalt onafhankelijk: bij een fout logt de pagina de context en
@@ -204,6 +232,20 @@ export default async function InzichtenPage({
       return []
     }
     return result.data ?? []
+  }
+
+  // Zoals unwrap, maar met een foutvlag: de nieuwe kaarten tonen bij een falende
+  // bron `bronFout` in plaats van een (misleidende) lege staat. Logt de fout,
+  // geeft nooit de ruwe fout door.
+  function unwrapBron<T>(
+    context: string,
+    result: { data: T[] | null; error: unknown },
+  ): { rijen: T[]; fout: boolean } {
+    if (result.error) {
+      logError(context, result.error)
+      return { rijen: [], fout: true }
+    }
+    return { rijen: result.data ?? [], fout: false }
   }
 
   const aanwezigheidRij: AanwezigheidRij | null =
@@ -245,6 +287,21 @@ export default async function InzichtenPage({
         percentage: berekenAanwezigheidPercentage(aanwezigheidRij.aanwezig, aanwezigheidRij.afwezig),
       }
     : null
+
+  // Metrics-kaarten. De RPC levert hooguit MAX_SEIZOEN_WEDSTRIJDEN + 1 uitslagen:
+  // meer dan MAX betekent afgekapt, en dan tonen de uitslagkaarten een melding
+  // in plaats van cijfers die stilletjes te laag zouden zijn.
+  const uitslagen = unwrapBron<WedstrijdUitslagRij>('inzichten.wedstrijdUitslagen', uitslagenResult)
+  const spelerMomenten = unwrapBron<SpelerMomentenRij>('inzichten.spelerMomenten', spelerMomentenResult)
+  const doelpuntMinuten = unwrapBron<DoelpuntMinuutRij>('inzichten.doelpuntenPerMinuut', doelpuntMinutenResult)
+  const tegendoelpuntRijen = unwrapBron<TegendoelpuntMinuutRij>('inzichten.tegendoelpunten', tegendoelpuntenResult)
+  const uitslagenAfgekapt = uitslagen.rijen.length > MAX_SEIZOEN_WEDSTRIJDEN
+  const thuisUit = splitsThuisUit(uitslagen.rijen)
+  const formaties = resultatenPerFormatie(uitslagen.rijen)
+  const topscorers = bepaalTopscorers(spelerMomenten.rijen)
+  const kaarten = kaartenPerSpeler(spelerMomenten.rijen)
+  const kwartieren = telPerKwartier(doelpuntMinuten.rijen)
+  const tegenKwartieren = telTegendoelpunten(tegendoelpuntRijen.rijen)
 
   // Trainingsinhoud: in hoeveel trainingen kwam elke oefeningcategorie voor.
   // Hergebruikt de bestaande telling uit de periodisering — dezelfde functie
@@ -298,7 +355,13 @@ export default async function InzichtenPage({
     // Ook de trainingsinhoud telt mee: een seizoen waarin je wél oefeningen aan
     // trainingen koppelde maar nog geen aanwezigheid of uitslagen invulde, is
     // niet leeg — die kaart heeft dan wél iets te tonen.
-    Object.values(inhoudTellingen).every((n) => n === 0)
+    Object.values(inhoudTellingen).every((n) => n === 0) &&
+    // De vier nieuwe bronnen tellen mee: alleen vastgelegde momenten (zonder
+    // uitslag) is al genoeg voor de gewone pagina.
+    uitslagen.rijen.length === 0 &&
+    spelerMomenten.rijen.length === 0 &&
+    doelpuntMinuten.rijen.length === 0 &&
+    tegendoelpuntRijen.rijen.length === 0
 
   if (geenEnkeleData) {
     // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
@@ -374,6 +437,12 @@ export default async function InzichtenPage({
         <TopWorstRatings data={ratingTopWorst} t={t} />
         <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />
         <TrainingsinhoudChart tellingen={inhoudTellingen} t={t} />
+        <ThuisUitKaart data={thuisUit} fout={uitslagen.fout} afgekapt={uitslagenAfgekapt} t={t} />
+        <FormatieKaart rijen={formaties} fout={uitslagen.fout} afgekapt={uitslagenAfgekapt} t={t} />
+        <TopscorersKaart data={topscorers} fout={spelerMomenten.fout} t={t} />
+        <GeleRodeKaartenLijst rijen={kaarten} fout={spelerMomenten.fout} t={t} />
+        <KwartierChart telling={kwartieren} fout={doelpuntMinuten.fout} t={t} />
+        <TegendoelpuntenChart telling={tegenKwartieren} fout={tegendoelpuntRijen.fout} t={t} />
       </div>
       </div>
 

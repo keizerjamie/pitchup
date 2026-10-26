@@ -51,6 +51,13 @@
 --                               en blok 23 (BUITENSTAANDER als niet-lid)
 --   * blok 25                 — vereist M6b (supabase/oefeningen-koppeling-
 --                               eigenaar.sql) en blok 23
+--   * blok 26                 — vereist supabase/inzichten-metrics.sql
+--                               (tabel tegendoelpunten + 4 RPC's) en een
+--                               assistent in TEAM_A
+--                               LET OP: sinds die migratie noemen ook blok 2
+--                               en blok 22 de tabel tegendoelpunten; zonder
+--                               inzichten-metrics.sql falen die met
+--                               "relation does not exist".
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -135,6 +142,8 @@ begin
   if n <> 0 then raise exception 'LEK: niet-lid ziet beoordelingen van een vreemd team'; end if;
   select count(*) into n from match_events       where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet wedstrijdgebeurtenissen van een vreemd team'; end if;
+  select count(*) into n from tegendoelpunten    where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: niet-lid ziet tegendoelpunten van een vreemd team'; end if;
   select count(*) into n from match_squad        where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet de wedstrijdselectie van een vreemd team'; end if;
   select count(*) into n from task_overrides     where team_id = 'TEAM_B_UUID';
@@ -1065,7 +1074,7 @@ end $$;
 --   a. een assistent (hier met alle zes rechten) en een hoofdtrainer van een
 --      ÁNDER team kunnen een team niet verwijderen — 0 rijen, geen fout;
 --   b. de hoofdtrainer kan exact de deletes van deleteTeam uitvoeren — de
---      dertien tabellen uit TEAM_TABELLEN (lib/team-opruimen.ts) en daarna
+--      veertien tabellen uit TEAM_TABELLEN (lib/team-opruimen.ts) en daarna
 --      `delete from teams` — zonder fout, ook nu de cascade van M5c overlapt
 --      met de expliciete deletes;
 --   c. daarna staat er niets meer van dat team, maar blijven de oefening van
@@ -1123,7 +1132,7 @@ begin
   -- deleteTeam, uitgevoerd onder de rol van de hoofdtrainer.
   set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
   -- TEAM_TABELLEN
-  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
+  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('delete from public.%I where team_id = $1', v_tabel) using v_team;
   end loop;
 
@@ -1131,7 +1140,7 @@ begin
   -- categorie_metingen heeft GEEN foreign key naar teams en zou anders als
   -- wees achterblijven. Daarom hier al tellen, vóór `delete from teams`.
   reset role;
-  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
+  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('select count(*) from public.%I where team_id = $1', v_tabel) into n using v_team;
     if n <> 0 then
       raise exception 'KAPOT: de hoofdtrainer kon % rij(en) in % van zijn eigen team niet verwijderen (RLS)', n, v_tabel;
@@ -1451,6 +1460,140 @@ begin
   raise notice 'OK blok 25: oefening_koppelbaar is alleen voor leden en niet voor anon';
 end $$;
 
+-- ── Blok 26: tegendoelpunten en de inzichten-metrics-RPC's ──
+-- Vereist supabase/inzichten-metrics.sql en een assistent in TEAM_A. Maakt
+-- binnen deze transactie een wedstrijd en een training in TEAM_A en een
+-- wedstrijd met tegendoelpunt in TEAM_B aan (de rollback ruimt ze op).
+--   a. OWNER_A ziet geen tegendoelpunten van TEAM_B;
+--   b. de vier RPC's met p_team_id = TEAM_B geven 0 rijen, en anon mag ze niet;
+--   c. ASSISTENT_A zonder wedstrijdrecht: insert 42501, delete 0 rijen;
+--   d. OWNER_A met team_id = TEAM_A en een event_id van TEAM_B: 42501;
+--   e. OWNER_A op een eigen wedstrijd: insert lukt, soort 'anders' en minuut
+--      131 geven 23514, een update raakt 0 rijen (geen update-policy);
+--   f. een training van het eigen team: 42501.
+do $$
+declare
+  v_match uuid; v_training uuid; v_match_b uuid; v_bestaand uuid; n int;
+begin
+  reset role;
+  if to_regclass('public.tegendoelpunten') is null then
+    raise exception 'INZICHTEN-METRICS ONTBREEKT: draai eerst supabase/inzichten-metrics.sql';
+  end if;
+  update team_members set mag_wedstrijd_bewerken = false
+   where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID';
+
+  -- Opzet als postgres (buiten RLS): eigen wedstrijd + training, één bestaand
+  -- tegendoelpunt in TEAM_A, en een wedstrijd mét uitslag en tegendoelpunt in
+  -- TEAM_B — zodat a en b iets te verbergen hebben.
+  insert into events (team_id, type, date)
+  values ('TEAM_A_UUID', 'match', current_date) returning id into v_match;
+  insert into events (team_id, type, date)
+  values ('TEAM_A_UUID', 'training', current_date) returning id into v_training;
+  insert into tegendoelpunten (team_id, event_id, soort, minute)
+  values ('TEAM_A_UUID', v_match, 'open_play', 30) returning id into v_bestaand;
+  insert into events (team_id, type, date, goals_for, goals_against)
+  values ('TEAM_B_UUID', 'match', current_date, 1, 1) returning id into v_match_b;
+  insert into tegendoelpunten (team_id, event_id, soort, minute)
+  values ('TEAM_B_UUID', v_match_b, 'set_piece', 12);
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_B_UUID') then
+    raise exception 'FOUT IN DE OPZET: OWNER_A is wél lid van TEAM_B — kies een ander TEAM_B';
+  end if;
+
+  -- a. Lezen van een vreemd team.
+  select count(*) into n from tegendoelpunten where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet % tegendoelpunten van TEAM_B', n; end if;
+  select count(*) into n from tegendoelpunten where event_id = v_match_b;
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet tegendoelpunten op een wedstrijd van TEAM_B'; end if;
+  raise notice 'OK blok 26: OWNER_A ziet geen tegendoelpunten van TEAM_B';
+
+  -- b. De vier RPC's met een vreemd team-id.
+  select count(*) into n from inzichten_wedstrijd_uitslagen('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_wedstrijd_uitslagen geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_speler_momenten('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_speler_momenten geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_doelpunten_per_minuut('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_doelpunten_per_minuut geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_tegendoelpunten('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_tegendoelpunten geeft % rijen van TEAM_B', n; end if;
+  -- Ter controle dat de RPC's zelf werken: het eigen team ziet zijn eigen tegendoelpunt.
+  select coalesce(sum(aantal), 0) into n from inzichten_tegendoelpunten('TEAM_A_UUID', current_date - 1, current_date + 1);
+  if n < 1 then raise exception 'KAPOT: inzichten_tegendoelpunten ziet het eigen tegendoelpunt van TEAM_A niet'; end if;
+  raise notice 'OK blok 26: de vier inzichten-metrics-RPC''s geven 0 rijen voor een vreemd team';
+
+  -- c. Assistent zonder wedstrijdrecht.
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  if not is_team_member('TEAM_A_UUID') or is_team_owner('TEAM_A_UUID') then
+    raise exception 'FOUT IN DE OPZET: ASSISTENT_A is geen assistent in TEAM_A';
+  end if;
+  begin
+    insert into tegendoelpunten (team_id, event_id, soort, minute)
+    values ('TEAM_A_UUID', v_match, 'open_play', 10);
+    raise exception 'LEK: een assistent zonder wedstrijdrecht kon een tegendoelpunt toevoegen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 26: insert op tegendoelpunten geweigerd zonder wedstrijdrecht';
+  end;
+  delete from tegendoelpunten where id = v_bestaand;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een assistent zonder wedstrijdrecht kon een tegendoelpunt verwijderen'; end if;
+  raise notice 'OK blok 26: delete op tegendoelpunten raakt 0 rijen zonder wedstrijdrecht';
+
+  -- d. Eigen team_id, maar het event van een ander team.
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  begin
+    insert into tegendoelpunten (team_id, event_id, soort, minute)
+    values ('TEAM_A_UUID', v_match_b, 'open_play', 10);
+    raise exception 'LEK: OWNER_A kon een tegendoelpunt aan een wedstrijd van TEAM_B hangen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 26: een event_id van een ander team wordt geweigerd';
+  end;
+
+  -- e. Eigen wedstrijd: insert lukt, CHECKs houden stand, update raakt niets.
+  insert into tegendoelpunten (team_id, event_id, soort, minute)
+  values ('TEAM_A_UUID', v_match, 'set_piece', null);
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'KAPOT: OWNER_A kon geen tegendoelpunt op een eigen wedstrijd vastleggen'; end if;
+  raise notice 'OK blok 26: OWNER_A legt een tegendoelpunt vast op een eigen wedstrijd';
+  begin
+    insert into tegendoelpunten (team_id, event_id, soort, minute)
+    values ('TEAM_A_UUID', v_match, 'anders', 10);
+    raise exception 'KAPOT: soort ''anders'' werd geaccepteerd';
+  exception when check_violation then
+    raise notice 'OK blok 26: soort ''anders'' geeft 23514';
+  end;
+  begin
+    insert into tegendoelpunten (team_id, event_id, soort, minute)
+    values ('TEAM_A_UUID', v_match, 'open_play', 131);
+    raise exception 'KAPOT: minuut 131 werd geaccepteerd';
+  exception when check_violation then
+    raise notice 'OK blok 26: minuut 131 geeft 23514';
+  end;
+  update tegendoelpunten set minute = 5 where id = v_bestaand;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een tegendoelpunt kon gewijzigd worden (er hoort geen update-policy te zijn)'; end if;
+  raise notice 'OK blok 26: een update op tegendoelpunten raakt 0 rijen';
+
+  -- f. Een training van het eigen team.
+  begin
+    insert into tegendoelpunten (team_id, event_id, soort, minute)
+    values ('TEAM_A_UUID', v_training, 'open_play', 10);
+    raise exception 'LEK: een tegendoelpunt kon aan een training gehangen worden';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 26: een training wordt geweigerd';
+  end;
+
+  reset role;
+  if has_function_privilege('anon', 'public.inzichten_wedstrijd_uitslagen(uuid, date, date)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_speler_momenten(uuid, date, date)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_doelpunten_per_minuut(uuid, date, date)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_tegendoelpunten(uuid, date, date)', 'execute') then
+    raise exception 'LEK: anon mag een inzichten-metrics-RPC uitvoeren';
+  end if;
+  raise notice 'OK blok 26: anon mag de inzichten-metrics-RPC''s niet uitvoeren';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -1479,7 +1622,8 @@ rollback;
 --   accept_team_invite en create_team_invite afdwingt.
 --
 -- DEKKING PER FASE: fase 3 (verwijderen, verlaten) staat in blok 22 en 23,
--- fase 4 (persoonlijke oefeningen) in blok 24 (M6) en 25 (M6b). Accountverwijdering zelf
+-- fase 4 (persoonlijke oefeningen) in blok 24 (M6) en 25 (M6b), en de
+-- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26. Accountverwijdering zelf
 -- (auth.admin.deleteUser) is hier niet na te bootsen; de onderdelen ervan
 -- wel: de team-opruiming is blok 22, het opzeggen van een lidmaatschap blok
 -- 23, en de cascade van een verwijderde oefening naar elk trainingsplan blok

@@ -2,9 +2,10 @@ import { notFound } from 'next/navigation'
 import PageHeader from '@/components/ui/PageHeader'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
-import { Player, MatchRating, MatchEvent } from '@/lib/types'
+import { Player, MatchRating, MatchEvent, Tegendoelpunt } from '@/lib/types'
 import MatchAnalysisEditor from '@/components/MatchAnalysisEditor'
 import { getDict } from '@/lib/i18n'
+import { logError } from '@/lib/errors'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -15,13 +16,18 @@ export default async function AnalysisPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: attendance }, { data: ratings }, { data: matchEvents }, { data: teamNameRow }] = await Promise.all([
+  const [{ data: event }, { data: attendance }, { data: ratings }, { data: matchEvents }, { data: teamNameRow }, { data: tegendoelpunten, error: tegendoelpuntenError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_ratings').select('id,event_id,player_id,rating,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_events').select('id,event_id,player_id,kind,minute,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('settings').select('value').eq('team_id', ctx.teamId).eq('key', 'team_name').maybeSingle(),
+    supabase.from('tegendoelpunten').select('id,event_id,soort,minute,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
   ])
+
+  // Een falende tegendoelpunten-query (bv. migratie nog niet gedraaid) mag de
+  // analysepagina niet breken: loggen en met een lege lijst doorgaan.
+  if (tegendoelpuntenError) logError('analysis.tegendoelpunten', tegendoelpuntenError)
 
   if (!event || event.type !== 'match') notFound()
 
@@ -57,6 +63,7 @@ export default async function AnalysisPage({ params }: Props) {
         initialRatings={(ratings ?? []) as MatchRating[]}
         initialEvents={(matchEvents ?? []) as MatchEvent[]}
         canEdit={canEdit(ctx, 'wedstrijd')}
+        initialTegendoelpunten={tegendoelpuntenError ? [] : ((tegendoelpunten ?? []) as Tegendoelpunt[])}
       />
     </div>
   )

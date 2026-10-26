@@ -13,6 +13,18 @@ import {
   topWorstAanwezigheid,
   topWorstRating,
   verledenSeizoensVenster,
+  KWARTIER_BAKKEN,
+  PUNTEN_PER_UITSLAG,
+  bepaalTopscorers,
+  kaartenPerSpeler,
+  kwartierBak,
+  resultatenPerFormatie,
+  splitsThuisUit,
+  telPerKwartier,
+  telTegendoelpunten,
+  type SpelerMomentenRij,
+  type TegendoelpuntMinuutRij,
+  type WedstrijdUitslagRij,
   type AanwezigheidPerSpelerRij,
   type DoelpuntItem,
   type RatingPerSpelerRij,
@@ -804,5 +816,312 @@ describe('telMatchEvents', () => {
     // Zelfde gedachte als MAX_SEIZOEN_WEDSTRIJDEN: de seizoenslengte is door de
     // gebruiker bepaald en mag het geheugen niet sturen.
     expect(MAX_SPELER_MATCH_EVENTS).toBe(500)
+  })
+})
+
+// ── Inzichten-metrics fase 1 ─────────────────────────────────────────
+
+const uitslag = (over: Partial<WedstrijdUitslagRij> = {}): WedstrijdUitslagRij => ({
+  event_id: 'e1',
+  datum: '2026-09-05',
+  home_away: 'home',
+  goals_for: 2,
+  goals_against: 1,
+  formatie: null,
+  ...over,
+})
+
+const momenten = (over: Partial<SpelerMomentenRij> = {}): SpelerMomentenRij => ({
+  player_id: 'p1',
+  naam: 'Anna',
+  gast: false,
+  doelpunten: 0,
+  assists: 0,
+  geel: 0,
+  rood: 0,
+  ...over,
+})
+
+describe('PUNTEN_PER_UITSLAG', () => {
+  it('is 3/1/0 (V8)', () => {
+    expect(PUNTEN_PER_UITSLAG).toEqual({ win: 3, draw: 1, loss: 0 })
+  })
+})
+
+describe('kwartierBak', () => {
+  it.each([
+    [0, '1-15'], [1, '1-15'], [14, '1-15'], [15, '1-15'],
+    [16, '16-30'], [30, '16-30'],
+    [31, '31-45'], [45, '31-45'],
+    [46, '46-60'], [47, '46-60'], [60, '46-60'],
+    [61, '61-75'], [75, '61-75'],
+    [76, '76-90'], [90, '76-90'],
+    [91, '90+'], [130, '90+'],
+  ])('minuut %s → %s', (minuut, bak) => {
+    expect(kwartierBak(minuut)).toBe(bak)
+  })
+
+  it.each([[131], [-1], [12.5], [null], [undefined], ['12'], [NaN], [Infinity]])('%s → null', (minuut) => {
+    expect(kwartierBak(minuut)).toBeNull()
+  })
+
+  it('heeft zeven bakken in vaste volgorde', () => {
+    expect([...KWARTIER_BAKKEN]).toEqual(['1-15', '16-30', '31-45', '46-60', '61-75', '76-90', '90+'])
+  })
+})
+
+describe('splitsThuisUit', () => {
+  it('splitst thuis en uit met 3/1/0-punten, saldo, clean sheets en zonder eigen doelpunt', () => {
+    const rows = [
+      uitslag({ event_id: 'e1', home_away: 'home', goals_for: 3, goals_against: 0 }), // W, clean sheet
+      uitslag({ event_id: 'e2', home_away: 'home', goals_for: 1, goals_against: 1 }), // G
+      uitslag({ event_id: 'e3', home_away: 'away', goals_for: 0, goals_against: 2 }), // V, zonder eigen
+      uitslag({ event_id: 'e4', home_away: 'away', goals_for: 0, goals_against: 0 }), // G, beide
+    ]
+    const r = splitsThuisUit(rows)
+
+    expect(r.thuis).toEqual({
+      wedstrijden: 2, win: 1, gelijk: 1, verlies: 0, punten: 4, puntenPerWedstrijd: 2,
+      voor: 4, tegen: 1, saldo: 3,
+    })
+    expect(r.uit).toEqual({
+      wedstrijden: 2, win: 0, gelijk: 1, verlies: 1, punten: 1, puntenPerWedstrijd: 0.5,
+      voor: 0, tegen: 2, saldo: -2,
+    })
+    expect(r.onbekend).toBeNull()
+    expect(r.totaal).toEqual({
+      wedstrijden: 4, win: 1, gelijk: 2, verlies: 1, punten: 5, puntenPerWedstrijd: 1.25,
+      voor: 4, tegen: 3, saldo: 1, cleanSheets: 2, zonderEigenDoelpunt: 2,
+    })
+  })
+
+  it('telt home_away = null als "onbekend" en wél in het totaal, nooit als thuis', () => {
+    const r = splitsThuisUit([
+      uitslag({ event_id: 'e1', home_away: 'home', goals_for: 1, goals_against: 0 }),
+      uitslag({ event_id: 'e2', home_away: null, goals_for: 0, goals_against: 1 }),
+    ])
+    expect(r.thuis.wedstrijden).toBe(1)
+    expect(r.thuis.verlies).toBe(0)
+    expect(r.onbekend).toEqual({
+      wedstrijden: 1, win: 0, gelijk: 0, verlies: 1, punten: 0, puntenPerWedstrijd: 0,
+      voor: 0, tegen: 1, saldo: -1,
+    })
+    expect(r.totaal.wedstrijden).toBe(2)
+    expect(r.totaal.saldo).toBe(0)
+  })
+
+  it('geeft bij 0 wedstrijden lege groepen met puntenPerWedstrijd null (nooit NaN)', () => {
+    const r = splitsThuisUit([])
+    expect(r.thuis.puntenPerWedstrijd).toBeNull()
+    expect(r.uit.puntenPerWedstrijd).toBeNull()
+    expect(r.totaal.puntenPerWedstrijd).toBeNull()
+    expect(r.totaal.wedstrijden).toBe(0)
+    expect(r.onbekend).toBeNull()
+  })
+
+  it('slaat rijen zonder bruikbare uitslag over', () => {
+    const r = splitsThuisUit([
+      uitslag({ goals_for: null as unknown as number }),
+      uitslag({ goals_against: NaN }),
+      uitslag({ goals_for: 1, goals_against: 0 }),
+    ])
+    expect(r.totaal.wedstrijden).toBe(1)
+    expect(r.thuis.wedstrijden).toBe(1)
+  })
+
+  it('totaal saldo is gelijk aan doelsaldo() over dezelfde wedstrijden (KPI)', () => {
+    const rows = [
+      uitslag({ event_id: 'e1', goals_for: 4, goals_against: 2 }),
+      uitslag({ event_id: 'e2', home_away: 'away', goals_for: 1, goals_against: 3 }),
+      uitslag({ event_id: 'e3', home_away: null, goals_for: 2, goals_against: 2 }),
+    ]
+    const kpi = doelsaldo(rows.map((r) => ({
+      id: r.event_id, date: r.datum, opponent: null, match_type: null,
+      goals_for: r.goals_for, goals_against: r.goals_against,
+    })))
+    expect(splitsThuisUit(rows).totaal.saldo).toBe(kpi.saldo)
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [uitslag(), uitslag({ event_id: 'e2', home_away: null })]
+    const kopie = structuredClone(rows)
+    splitsThuisUit(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+describe('resultatenPerFormatie', () => {
+  it('groepeert per formatie, sorteert op wedstrijden aflopend en dan formatie', () => {
+    const r = resultatenPerFormatie([
+      uitslag({ event_id: 'e1', formatie: '4-3-3', goals_for: 2, goals_against: 0 }),
+      uitslag({ event_id: 'e2', formatie: '4-4-2', goals_for: 0, goals_against: 1 }),
+      uitslag({ event_id: 'e3', formatie: '4-3-3', goals_for: 1, goals_against: 1 }),
+      uitslag({ event_id: 'e4', formatie: '3-5-2', goals_for: 1, goals_against: 0 }),
+    ])
+    expect(r.map((g) => g.formatie)).toEqual(['4-3-3', '3-5-2', '4-4-2'])
+    expect(r[0]).toEqual({
+      formatie: '4-3-3', wedstrijden: 2, win: 1, gelijk: 1, verlies: 0, punten: 4, puntenPerWedstrijd: 2,
+      voor: 3, tegen: 1, saldo: 2,
+    })
+    expect(r[2].verlies).toBe(1)
+    expect(r[2].punten).toBe(0)
+  })
+
+  it('slaat null en lege formaties over, en houdt een onbekende string letterlijk', () => {
+    const r = resultatenPerFormatie([
+      uitslag({ event_id: 'e1', formatie: null }),
+      uitslag({ event_id: 'e2', formatie: '' }),
+      uitslag({ event_id: 'e3', formatie: '   ' }),
+      uitslag({ event_id: 'e4', formatie: 'Eigen ruit' }),
+    ])
+    expect(r).toHaveLength(1)
+    expect(r[0].formatie).toBe('Eigen ruit')
+  })
+
+  it('geeft een lege lijst zonder formaties', () => {
+    expect(resultatenPerFormatie([])).toEqual([])
+  })
+})
+
+describe('bepaalTopscorers', () => {
+  it('neemt gasten en spelers met alleen assists mee, en sorteert doelpunten → betrokken → naam → id', () => {
+    const r = bepaalTopscorers([
+      momenten({ player_id: 'p1', naam: 'Anna', doelpunten: 2, assists: 0 }),
+      momenten({ player_id: 'p2', naam: 'Bram', doelpunten: 2, assists: 3 }),
+      momenten({ player_id: 'p3', naam: 'Gast', gast: true, doelpunten: 1 }),
+      momenten({ player_id: 'p4', naam: 'Daan', assists: 1 }),
+      momenten({ player_id: 'p5', naam: 'Eva', geel: 1 }),
+    ])
+    expect(r.spelers.map((s) => s.player_id)).toEqual(['p2', 'p1', 'p3', 'p4'])
+    expect(r.spelers[2]).toMatchObject({ gast: true, betrokken: 1 })
+    expect(r.spelers[0].betrokken).toBe(5)
+    expect(r.doelpunten).toBe(5)
+    expect(r.assists).toBe(4)
+    expect(r.assistPercentage).toBe(80)
+  })
+
+  it('geeft bij gelijke stand een stabiele volgorde: naam, dan player_id', () => {
+    const r = bepaalTopscorers([
+      momenten({ player_id: 'pb', naam: 'Zoë', doelpunten: 1 }),
+      momenten({ player_id: 'pz', naam: 'Anna', doelpunten: 1 }),
+      momenten({ player_id: 'pa', naam: 'Anna', doelpunten: 1 }),
+    ])
+    expect(r.spelers.map((s) => s.player_id)).toEqual(['pa', 'pz', 'pb'])
+  })
+
+  it('0 doelpunten → assistPercentage null, nooit NaN', () => {
+    const r = bepaalTopscorers([momenten({ assists: 2 })])
+    expect(r.assistPercentage).toBeNull()
+    expect(bepaalTopscorers([]).assistPercentage).toBeNull()
+  })
+
+  it('begrenst het assistpercentage op 100 als er meer assists dan doelpunten zijn', () => {
+    expect(bepaalTopscorers([momenten({ doelpunten: 1, assists: 3 })]).assistPercentage).toBe(100)
+  })
+
+  it('rondt het assistpercentage af', () => {
+    expect(bepaalTopscorers([momenten({ doelpunten: 3, assists: 2 })]).assistPercentage).toBe(67)
+  })
+
+  it('negeert niet-eindige tellingen', () => {
+    const r = bepaalTopscorers([momenten({ doelpunten: NaN, assists: Infinity })])
+    expect(r.spelers).toEqual([])
+    expect(r.doelpunten).toBe(0)
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [momenten({ doelpunten: 1 }), momenten({ player_id: 'p2', doelpunten: 2 })]
+    const kopie = structuredClone(rows)
+    bepaalTopscorers(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+describe('kaartenPerSpeler', () => {
+  it('alleen spelers met een kaart, gesorteerd op totaal → rood → naam → id', () => {
+    const r = kaartenPerSpeler([
+      momenten({ player_id: 'p1', naam: 'Anna', geel: 2 }),
+      momenten({ player_id: 'p2', naam: 'Bram', geel: 1, rood: 1 }),
+      momenten({ player_id: 'p3', naam: 'Cas', doelpunten: 4 }),
+      momenten({ player_id: 'p4', naam: 'Gast', gast: true, geel: 1 }),
+      momenten({ player_id: 'p0', naam: 'Gast', gast: true, geel: 1 }),
+    ])
+    expect(r.map((s) => s.player_id)).toEqual(['p2', 'p1', 'p0', 'p4'])
+    expect(r[2].gast).toBe(true)
+  })
+
+  it('geeft een lege lijst zonder kaarten en muteert de invoer niet', () => {
+    const rows = [momenten({ doelpunten: 1 })]
+    const kopie = structuredClone(rows)
+    expect(kaartenPerSpeler(rows)).toEqual([])
+    expect(rows).toEqual(kopie)
+  })
+})
+
+describe('telPerKwartier', () => {
+  it('telt per bak, met alle zeven bakken (ook bij 0), en houdt "zonder minuut" apart', () => {
+    const r = telPerKwartier([
+      { minuut: 0, aantal: 1 },
+      { minuut: 15, aantal: 2 },
+      { minuut: 16, aantal: 1 },
+      { minuut: 90, aantal: 1 },
+      { minuut: 91, aantal: 3 },
+      { minuut: null, aantal: 4 },
+    ])
+    expect(r.perBak).toEqual({
+      '1-15': 3, '16-30': 1, '31-45': 0, '46-60': 0, '61-75': 0, '76-90': 1, '90+': 3,
+    })
+    expect(r.metMinuut).toBe(8)
+    expect(r.totaal).toBe(12)
+  })
+
+  it('negeert niet-eindige aantallen en zet een ongeldige minuut niet in een bak', () => {
+    const r = telPerKwartier([
+      { minuut: 10, aantal: NaN },
+      { minuut: 131, aantal: 1 },
+    ])
+    expect(r.metMinuut).toBe(0)
+    expect(r.totaal).toBe(1)
+  })
+
+  it('geeft bij geen data nul overal', () => {
+    const r = telPerKwartier([])
+    expect(Object.values(r.perBak)).toEqual([0, 0, 0, 0, 0, 0, 0])
+    expect(r.metMinuut).toBe(0)
+    expect(r.totaal).toBe(0)
+  })
+})
+
+describe('telTegendoelpunten', () => {
+  it('telt per bak en soort, per soort en houdt "zonder minuut" apart', () => {
+    const r = telTegendoelpunten([
+      { minuut: 10, soort: 'set_piece', aantal: 1 },
+      { minuut: 10, soort: 'open_play', aantal: 2 },
+      { minuut: 88, soort: 'open_play', aantal: 1 },
+      { minuut: null, soort: 'set_piece', aantal: 2 },
+    ])
+    expect(r.perBak['1-15']).toEqual({ set_piece: 1, open_play: 2 })
+    expect(r.perBak['76-90']).toEqual({ set_piece: 0, open_play: 1 })
+    expect(r.perBak['90+']).toEqual({ set_piece: 0, open_play: 0 })
+    expect(r.perSoort).toEqual({ set_piece: 3, open_play: 3 })
+    expect(r.metMinuut).toBe(4)
+    expect(r.totaal).toBe(6)
+  })
+
+  it('negeert een onbekende soort volledig', () => {
+    const r = telTegendoelpunten([
+      { minuut: 10, soort: 'anders', aantal: 5 } as unknown as TegendoelpuntMinuutRij,
+      { minuut: 10, soort: 'set_piece', aantal: 1 },
+    ])
+    expect(r.totaal).toBe(1)
+    expect(r.metMinuut).toBe(1)
+    expect(r.perSoort).toEqual({ set_piece: 1, open_play: 0 })
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows: TegendoelpuntMinuutRij[] = [{ minuut: 5, soort: 'open_play', aantal: 1 }]
+    const kopie = structuredClone(rows)
+    telTegendoelpunten(rows)
+    expect(rows).toEqual(kopie)
   })
 })

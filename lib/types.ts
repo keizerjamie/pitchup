@@ -368,6 +368,25 @@ export type MatchEventKind = 'goal' | 'assist' | 'yellow' | 'red'
 
 export const MATCH_EVENT_KINDS: MatchEventKind[] = ['goal', 'assist', 'yellow', 'red']
 
+// Soort tegendoelpunt (tabel `tegendoelpunten`, supabase/inzichten-metrics.sql).
+// Zelfde patroon als MatchEventKind: DB-CHECK + const-array hier, met de
+// runtime-validatie in lib/match-analysis.mjs (isValidTegendoelpuntSoort).
+export type TegendoelpuntSoort = 'set_piece' | 'open_play'
+
+export const TEGENDOELPUNT_SOORTEN: TegendoelpuntSoort[] = ['set_piece', 'open_play']
+
+// Eén vastgelegd tegendoelpunt. Bewust een eigen tabel en geen match_event:
+// er hoort geen speler bij (match_events.player_id is NOT NULL). `minute` is
+// een speelminuut 0..130 of null (optioneel); `created_at` is UTC
+// (timestamptz) en wordt alleen voor de sortering gebruikt.
+export interface Tegendoelpunt {
+  id: string
+  event_id: string
+  soort: TegendoelpuntSoort
+  minute: number | null
+  created_at: string
+}
+
 export interface MatchRating {
   id: string
   event_id: string

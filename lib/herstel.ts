@@ -14,7 +14,7 @@
 // de types dus hier vandaan, nooit via app/actions/*.
 
 import { isUuid } from '@/lib/authz'
-import type { MatchEventKind } from '@/lib/types'
+import type { MatchEventKind, TegendoelpuntSoort } from '@/lib/types'
 
 export type HerstelMeting = {
   soort: 'nulmeting'
@@ -34,6 +34,18 @@ export type HerstelWedstrijdMoment = {
   eventId: string
   playerId: string
   kind: MatchEventKind
+  minute: number | null
+  createdAt: string | null
+}
+
+// `soort` is hier de discriminator van de snapshot (net als bij de andere
+// typen); de soort van het tegendoelpunt zelf heet daarom `doelpuntSoort`.
+export type HerstelTegendoelpunt = {
+  soort: 'tegendoelpunt'
+  teamId: string
+  id: string
+  eventId: string
+  doelpuntSoort: TegendoelpuntSoort
   minute: number | null
   createdAt: string | null
 }

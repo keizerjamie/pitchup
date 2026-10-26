@@ -76,6 +76,7 @@ describe('HS — knoppen met hit-slop', () => {
     ['components/NulmetingManager.tsx', 'w-9 h-9 rounded-lg bg-surface-sunken'],
     ['components/MatchAnalysisEditor.tsx', 'w-9 h-9 rounded-lg flex'],
     ['components/MatchAnalysisEditor.tsx', 'w-8 h-8 rounded-lg flex'],
+    ['components/TegendoelpuntenSectie.tsx', 'w-8 h-8 rounded-lg flex'],
     ['components/TrainingAttendance.tsx', 'h-9 px-3 rounded-lg'],
     ['components/TrainingAttendance.tsx', 'h-9 rounded-[10px]'],
     ['components/dashboard/TodoList.tsx', 'w-9 h-9 rounded-full'],

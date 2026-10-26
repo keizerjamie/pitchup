@@ -13,6 +13,8 @@ import {
   analyseBestaat,
   matchResult,
   MATCH_EVENT_KINDS,
+  TEGENDOELPUNT_SOORTEN,
+  isValidTegendoelpuntSoort,
 } from '../lib/match-analysis.mjs'
 
 test('clampGoals clamps to 0..99 integers', () => {
@@ -54,6 +56,18 @@ test('isValidKind accepts only the four kinds', () => {
   assert.equal(isValidKind(null), false)
 })
 
+test('isValidTegendoelpuntSoort accepts only set_piece and open_play', () => {
+  assert.deepEqual(TEGENDOELPUNT_SOORTEN, ['set_piece', 'open_play'])
+  assert.equal(isValidTegendoelpuntSoort('set_piece'), true)
+  assert.equal(isValidTegendoelpuntSoort('open_play'), true)
+  assert.equal(isValidTegendoelpuntSoort('anders'), false)
+  assert.equal(isValidTegendoelpuntSoort(''), false)
+  assert.equal(isValidTegendoelpuntSoort(null), false)
+  assert.equal(isValidTegendoelpuntSoort(undefined), false)
+  assert.equal(isValidTegendoelpuntSoort('goal'), false)
+  assert.equal(isValidTegendoelpuntSoort('SET_PIECE'), false)
+})
+
 test('isValidMinute accepts null or integer 0..130', () => {
   assert.equal(isValidMinute(null), true)
   assert.equal(isValidMinute(0), true)
@@ -63,6 +77,7 @@ test('isValidMinute accepts null or integer 0..130', () => {
   assert.equal(isValidMinute(-1), false)
   assert.equal(isValidMinute(45.5), false)
   assert.equal(isValidMinute(undefined), false)
+  assert.equal(isValidMinute('12'), false)
 })
 
 test('goalsSum counts only goal-kind events', () => {

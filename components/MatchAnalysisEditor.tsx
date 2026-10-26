@@ -2,8 +2,9 @@
 
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { MatchEvent, MatchEventKind, MatchRating, Player, HomeAway, MATCH_EVENT_KINDS, POSITION_ABBREVIATIONS } from '@/lib/types'
+import { Tegendoelpunt, MatchEvent, MatchEventKind, MatchRating, Player, HomeAway, MATCH_EVENT_KINDS, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { saveMatchResult, saveMatchRating, addMatchEvent, deleteMatchEvent, herstelWedstrijdMoment } from '@/app/actions/match-analysis'
+import TegendoelpuntenSectie from '@/components/TegendoelpuntenSectie'
 import { goalsSum } from '@/lib/match-analysis.mjs'
 import { useDict } from '@/lib/i18n-context'
 import { useToast } from '@/components/ui/Toast'
@@ -33,10 +34,16 @@ interface Props {
   // Wedstrijd-recht (brief §4.5). Default true, zelfde reden als
   // components/LineupBuilder.tsx: geen bestaande aanroep breken.
   canEdit?: boolean
+  // Optioneel (default []), zodat bestaande aanroepers en tests niet breken.
+  initialTegendoelpunten?: Tegendoelpunt[]
 }
 
 // Colour tokens per event kind. Cards (yellow/red) render as a coloured chip
 // instead of a font icon since those glyphs are not in the subset.
+// Stabiele referentie: een nieuwe [] per render zou de prop-naar-state-sync in
+// TegendoelpuntenSectie elke render laten afgaan.
+const EMPTY_TEGENDOELPUNTEN: Tegendoelpunt[] = []
+
 const KIND_COLORS: Record<MatchEventKind, string> = {
   goal: '#16a34a',
   assist: '#0f766e',
@@ -64,7 +71,7 @@ function KindIndicator({ kind }: { kind: MatchEventKind }) {
 export default function MatchAnalysisEditor({
   eventId, presentPlayers, teamName, opponent, homeAway,
   initialGoalsFor, initialGoalsAgainst, initialRatings, initialEvents,
-  canEdit = true,
+  canEdit = true, initialTegendoelpunten = EMPTY_TEGENDOELPUNTEN,
 }: Props) {
   const t = useDict()
   const router = useRouter()
@@ -455,6 +462,13 @@ export default function MatchAnalysisEditor({
         </div>
         )}
       </section>
+
+      <TegendoelpuntenSectie
+        eventId={eventId}
+        initialTegendoelpunten={initialTegendoelpunten}
+        goalsAgainst={parseGoals(goalsAgainst)}
+        canEdit={canEdit}
+      />
     </div>
   )
 }

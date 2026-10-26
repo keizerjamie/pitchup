@@ -170,6 +170,10 @@ function eventRow(overrides: Row = {}): Row {
     date: '2026-09-05',
     opponent: 'Tegenstander',
     match_type: 'league',
+    // Default 'home' (inzichten-metrics): de Thuis/uit-kaart telt een rij met
+    // home_away = null als "Onbekend" — een test die dat wil, geeft expliciet
+    // `home_away: null` mee.
+    home_away: 'home',
     goals_for: null,
     goals_against: null,
     created_at: '2026-01-01T10:00:00Z',
@@ -465,6 +469,105 @@ interface Db {
   attendance: Row[]
   match_ratings: Row[]
   players: Row[]
+  match_events: Row[]
+  lineups: Row[]
+  tegendoelpunten: Row[]
+}
+
+// ── Vier RPC's van supabase/inzichten-metrics.sql ─────────────────────
+// In tegenstelling tot de oudere handlers hierboven gebruiken deze het
+// `p_team_id`-ARGUMENT van de pagina (niet de constante TEAM) en filteren ze op
+// team_id van élke gejoinde tabel, zoals de SQL. Daardoor laat zowel een
+// weggelaten/verkeerde p_team_id als een ontbrekend team-filter hier een test
+// vallen. (De SQL zelf blijft ongedekt, zie de kop van dit bestand.)
+const MAX_UITSLAGEN_RPC = 201 // = MAX_SEIZOEN_WEDSTRIJDEN + 1 (limit 201 in de SQL)
+
+function matchEventsInVenster(db: Db, args: Row, kinds: string[]) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const players = new Map(db.players.map((p) => [p.id as string, p]))
+  const out: { me: Row; p: Row }[] = []
+  for (const me of db.match_events) {
+    if (me.team_id !== p_team_id || !kinds.includes(me.kind as string)) continue
+    const e = events.get(me.event_id as string)
+    if (!e || e.team_id !== p_team_id || e.type !== 'match') continue
+    if (!inRange(e.date as string, p_start, p_end)) continue
+    const p = players.get(me.player_id as string)
+    if (!p || p.team_id !== p_team_id) continue
+    out.push({ me, p })
+  }
+  return out
+}
+
+function rpcWedstrijdUitslagen(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  return db.events
+    .filter(
+      (e) =>
+        e.team_id === p_team_id && e.type === 'match' &&
+        e.goals_for != null && e.goals_against != null &&
+        inRange(e.date as string, p_start, p_end),
+    )
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+    .slice(0, MAX_UITSLAGEN_RPC)
+    .map((e) => {
+      // left join: het team-filter zit in de ON-clausule, zodat een lineup van
+      // een ander team op dit event_id de formatie nooit lekt.
+      const lineup = db.lineups.find((l) => l.event_id === e.id && l.team_id === p_team_id)
+      const formatie = typeof lineup?.formation === 'string' ? lineup.formation.trim() : ''
+      return {
+        event_id: e.id,
+        datum: e.date,
+        home_away: e.home_away ?? null,
+        goals_for: e.goals_for,
+        goals_against: e.goals_against,
+        formatie: formatie === '' ? null : formatie,
+      }
+    })
+}
+
+// Bewust GEEN filter op players.active of players.type (V2): gasten en
+// inactieve spelers tellen mee.
+function rpcSpelerMomenten(db: Db, args: Row) {
+  const per = new Map<string, Row>()
+  for (const { me, p } of matchEventsInVenster(db, args, ['goal', 'assist', 'yellow', 'red'])) {
+    const cur = per.get(p.id as string) ?? {
+      player_id: p.id, naam: p.name, gast: p.type === 'guest', doelpunten: 0, assists: 0, geel: 0, rood: 0,
+    }
+    const veld = { goal: 'doelpunten', assist: 'assists', yellow: 'geel', red: 'rood' }[me.kind as string]!
+    cur[veld] = (cur[veld] as number) + 1
+    per.set(p.id as string, cur)
+  }
+  return Array.from(per.values()).sort(
+    (a, b) => String(a.naam).localeCompare(String(b.naam)) || String(a.player_id).localeCompare(String(b.player_id)),
+  )
+}
+
+function rpcDoelpuntenPerMinuut(db: Db, args: Row) {
+  const per = new Map<number | null, number>()
+  for (const { me } of matchEventsInVenster(db, args, ['goal'])) {
+    const m = (me.minute as number | null | undefined) ?? null
+    per.set(m, (per.get(m) ?? 0) + 1)
+  }
+  return Array.from(per.entries()).map(([minuut, aantal]) => ({ minuut, aantal }))
+}
+
+function rpcTegendoelpunten(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const per = new Map<string, { minuut: number | null; soort: string; aantal: number }>()
+  for (const t of db.tegendoelpunten) {
+    if (t.team_id !== p_team_id) continue
+    const e = events.get(t.event_id as string)
+    if (!e || e.team_id !== p_team_id || e.type !== 'match') continue
+    if (!inRange(e.date as string, p_start, p_end)) continue
+    const minuut = (t.minute as number | null | undefined) ?? null
+    const key = `${minuut}|${t.soort}`
+    const cur = per.get(key) ?? { minuut, soort: t.soort as string, aantal: 0 }
+    cur.aantal++
+    per.set(key, cur)
+  }
+  return Array.from(per.values())
 }
 
 const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
@@ -474,6 +577,10 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_rating_speler: rpcRatingSpeler,
   inzichten_rating_per_speler: rpcRatingPerSpeler,
   inzichten_aanwezigheid_per_speler: rpcAanwezigheidPerSpeler,
+  inzichten_wedstrijd_uitslagen: rpcWedstrijdUitslagen,
+  inzichten_speler_momenten: rpcSpelerMomenten,
+  inzichten_doelpunten_per_minuut: rpcDoelpuntenPerMinuut,
+  inzichten_tegendoelpunten: rpcTegendoelpunten,
 }
 
 function makeSupabaseMock(opts: {
@@ -491,6 +598,10 @@ function makeSupabaseMock(opts: {
   // Vorm: { event_id, oefeningen: { categorie } } — de gejoinde vorm die
   // countCategoryOccurrences() leest (lib/periodization.ts).
   trainingOefeningen?: Row[]
+  // Bronnen van de vier metrics-RPC's (inzichten-metrics).
+  matchEvents?: Row[]
+  lineups?: Row[]
+  tegendoelpunten?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const db: Db = {
@@ -507,6 +618,9 @@ function makeSupabaseMock(opts: {
     // of het gast-/active-filter zelf test, geeft gewoon een eigen
     // `players`-array mee en overschrijft deze default.
     players: opts.players ?? [playerRow()],
+    match_events: opts.matchEvents ?? [],
+    lineups: opts.lineups ?? [],
+    tegendoelpunten: opts.tegendoelpunten ?? [],
   }
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)
@@ -2228,5 +2342,314 @@ describe('trainingsinhoud', () => {
       ],
     })
     expect(aantalVoor(inhoudCard(), nl.periodization.categories.positiespel)).toBe('1')
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// inzichten-metrics fase 1 — zes nieuwe kaarten op basis van vier RPC's
+// (supabase/inzichten-metrics.sql). De handlers bootsen de SQL na; de SQL
+// zelf is hier niet getest (zie de kop van dit bestand).
+// ═══════════════════════════════════════════════════════════════════════
+describe('inzichten-metrics — zes nieuwe kaarten', () => {
+  const settings = seasonSettings('2026-07-01', '2026-12-31')
+  const P1 = 'p1'
+  const PG = 'pg'
+  const PI = 'pi'
+
+  const spelers = [
+    playerRow({ id: P1, name: 'Piet Peters' }),
+    playerRow({ id: PG, name: 'Gerrit Gast', type: 'guest' }),
+    // Inactieve speler: telt in topscorers/kaarten mee (V2, geen active-filter).
+    playerRow({ id: PI, name: 'Ina Inactief', active: false }),
+  ]
+  const events = [
+    eventRow({ id: 'm1', date: '2026-09-05', home_away: 'home', goals_for: 3, goals_against: 1 }),
+    eventRow({ id: 'm2', date: '2026-09-12', home_away: 'away', goals_for: 0, goals_against: 2 }),
+    eventRow({ id: 'm3', date: '2026-09-19', home_away: null, goals_for: 1, goals_against: 1 }),
+    // Op TODAY: het venster is niet afgekapt op gisteren (vensterkeuze).
+    eventRow({ id: 'm4', date: TODAY, home_away: 'home', goals_for: 2, goals_against: 0 }),
+    // Zonder uitslag: telt niet voor thuis/uit en formatie.
+    eventRow({ id: 'm5', date: '2026-09-26', home_away: 'home' }),
+    // Training: telt nergens.
+    eventRow({ id: 'tr', type: 'training', date: '2026-09-08' }),
+  ]
+  const lineups = [
+    { team_id: TEAM, event_id: 'm1', formation: '4-3-3' },
+    { team_id: TEAM, event_id: 'm2', formation: '4-3-3' },
+    { team_id: TEAM, event_id: 'm3', formation: '   ' },
+    { team_id: TEAM, event_id: 'm4', formation: '4-4-2' },
+    // Lineup van een ander team op een eigen event_id: mag nooit doorlekken.
+    { team_id: OTHER_TEAM, event_id: 'm3', formation: '3-5-2' },
+  ]
+  const matchEvents = [
+    { id: 'me1', team_id: TEAM, event_id: 'm1', player_id: P1, kind: 'goal', minute: 10 },
+    { id: 'me2', team_id: TEAM, event_id: 'm1', player_id: P1, kind: 'goal', minute: 50 },
+    { id: 'me3', team_id: TEAM, event_id: 'm1', player_id: PG, kind: 'goal', minute: null },
+    { id: 'me4', team_id: TEAM, event_id: 'm1', player_id: PI, kind: 'assist', minute: 12 },
+    { id: 'me5', team_id: TEAM, event_id: 'm2', player_id: P1, kind: 'yellow', minute: 30 },
+    { id: 'me6', team_id: TEAM, event_id: 'm2', player_id: PG, kind: 'red', minute: 80 },
+    { id: 'me7', team_id: TEAM, event_id: 'm4', player_id: P1, kind: 'goal', minute: 92 },
+    { id: 'me8', team_id: TEAM, event_id: 'm1', player_id: P1, kind: 'assist', minute: 10 },
+  ]
+  const tegendoelpunten = [
+    { id: 't1', team_id: TEAM, event_id: 'm1', soort: 'set_piece', minute: 20 },
+    { id: 't2', team_id: TEAM, event_id: 'm1', soort: 'open_play', minute: 70 },
+    { id: 't3', team_id: TEAM, event_id: 'm2', soort: 'open_play', minute: null },
+    { id: 't4', team_id: OTHER_TEAM, event_id: 'm1', soort: 'open_play', minute: 5 },
+  ]
+  const volledig = { settings, events, players: spelers, lineups, matchEvents, tegendoelpunten }
+
+  const kaart = (titel: string): HTMLElement => screen.getByText(titel).closest('.surface-card') as HTMLElement
+  const i = nl.insights
+
+  it('Thuis en uit: cijfers per locatie, Onbekend-rij, totaal en n-van-totaal-regels', async () => {
+    await renderInzichten(volledig)
+    const c = kaart(i.thuisUitTitle)
+    const rij = (label: string) => within(c).getByRole('rowheader', { name: label }).closest('tr') as HTMLElement
+    const cellen = (tr: HTMLElement) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent)
+    // Gespeeld, W, G, V, Ptn/w, Saldo
+    expect(cellen(rij(i.thuisLabel))).toEqual(['2', '2', '0', '0', '3.00', '+4'])
+    expect(cellen(rij(i.uitLabel))).toEqual(['1', '0', '0', '1', '0.00', '-2'])
+    expect(cellen(rij(i.onbekendLabel))).toEqual(['1', '0', '1', '0', '1.00', '0'])
+    expect(cellen(rij(i.totaalLabel))).toEqual(['4', '2', '1', '1', '1.75', '+2'])
+    expect(within(c).getByText('Clean sheets: 1 van 4')).toBeInTheDocument()
+    expect(within(c).getByText('Zonder eigen doelpunt: 1 van 4')).toBeInTheDocument()
+  })
+
+  it('het totale doelsaldo van de Thuis/uit-kaart is gelijk aan de KPI Doelsaldo', async () => {
+    await renderInzichten(volledig)
+    const kpi = screen.getByText(i.kpiDoelsaldoLabel).parentElement!.parentElement as HTMLElement
+    const totaal = within(kaart(i.thuisUitTitle)).getByRole('rowheader', { name: i.totaalLabel }).closest('tr') as HTMLElement
+    const saldo = Array.from(totaal.querySelectorAll('td')).at(-1)!.textContent
+    expect(kpi.textContent).toContain(saldo)
+  })
+
+  it('zonder wedstrijd met home_away = null is er geen Onbekend-rij', async () => {
+    await renderInzichten({ ...volledig, events: events.filter((e) => e.id !== 'm3') })
+    expect(within(kaart(i.thuisUitTitle)).queryByRole('rowheader', { name: i.onbekendLabel })).toBeNull()
+  })
+
+  it('met één wedstrijd staat er nergens een percentage in de Thuis/uit-kaart', async () => {
+    await renderInzichten({ settings, events: [events[0]] })
+    expect(kaart(i.thuisUitTitle).textContent).not.toContain('%')
+  })
+
+  it('Formatie: per formatie, lege formatie overgeslagen, lineup van ander team lekt niet', async () => {
+    await renderInzichten(volledig)
+    const c = kaart(i.formatieTitle)
+    const rijen = Array.from(c.querySelectorAll('tbody tr')).map((tr) => ({
+      naam: tr.querySelector('th')!.textContent,
+      gespeeld: tr.querySelector('td')!.textContent,
+    }))
+    expect(rijen).toEqual([
+      { naam: '4-3-3', gespeeld: '2' },
+      { naam: '4-4-2', gespeeld: '1' },
+    ])
+    expect(c.textContent).not.toContain('3-5-2')
+  })
+
+  it('Topscorers: gast met label, inactieve speler telt mee, assistpercentage als benadering', async () => {
+    await renderInzichten(volledig)
+    const c = kaart(i.topscorersTitle)
+    const items = Array.from(c.querySelectorAll('li')).map((li) => li.textContent)
+    expect(items[0]).toContain('Piet Peters')
+    expect(items[0]).toContain('3 doelpunten · 1 assists · 4 betrokken')
+    expect(items[1]).toContain('Gerrit Gast')
+    expect(items[1]).toContain(i.gastLabel)
+    expect(items[2]).toContain('Ina Inactief')
+    expect(within(c).getByText(/Ongeveer 50% van de doelpunten/)).toBeInTheDocument()
+  })
+
+  it('Kaarten: gele en rode kaarten per speler, meeste kaarten en rood eerst, gast gelabeld', async () => {
+    await renderInzichten(volledig)
+    const c = kaart(i.kaartenTitle)
+    const items = Array.from(c.querySelectorAll('li')).map((li) => li.textContent ?? '')
+    expect(items).toHaveLength(2)
+    expect(items[0]).toContain('Gerrit Gast')
+    expect(items[0]).toContain('0 geel · 1 rood')
+    expect(items[1]).toContain('Piet Peters')
+    expect(items[1]).toContain('1 geel · 0 rood')
+  })
+
+  it('Kwartier: aantallen per bak, doelpunten zonder minuut als "x van y"', async () => {
+    await renderInzichten(volledig)
+    const c = kaart(i.kwartierTitle)
+    const img = within(c).getByRole('img')
+    expect(img.getAttribute('aria-label')).toBe(
+      'Eigen doelpunten per kwartier: 1–15: 1, 16–30: 0, 31–45: 0, 46–60: 1, 61–75: 0, 76–90: 0, 90+: 1',
+    )
+    expect(within(c).getByText('3 van 4 doelpunten met minuut')).toBeInTheDocument()
+  })
+
+  it('Tegendoelpunten: per kwartier en soort, tegendoelpunt van ander team telt niet', async () => {
+    await renderInzichten(volledig)
+    const c = kaart(i.tegenTitle)
+    expect(within(c).getByRole('img').getAttribute('aria-label')).toBe(
+      'Tegendoelpunten per kwartier: 1–15: 0, 16–30: 1, 31–45: 0, 46–60: 0, 61–75: 1, 76–90: 0, 90+: 0',
+    )
+    expect(within(c).getByText('2 van 3 tegendoelpunten met minuut')).toBeInTheDocument()
+    expect(within(c).getByText('1 standaardsituatie · 2 open spel')).toBeInTheDocument()
+  })
+
+  it('de zes kaarten staan na de trainingsinhoud, in de vastgestelde volgorde', async () => {
+    const { container } = await renderInzichten(volledig)
+    const titels = Array.from(container.querySelectorAll('h2')).map((h) => h.textContent)
+    const volgorde = [
+      i.inhoudTitle, i.thuisUitTitle, i.formatieTitle, i.topscorersTitle, i.kaartenTitle, i.kwartierTitle, i.tegenTitle,
+    ]
+    expect(titels.filter((t) => volgorde.includes(t as string))).toEqual(volgorde)
+  })
+
+  it('elke titel komt precies één keer voor', async () => {
+    await renderInzichten(volledig)
+    for (const titel of [i.thuisUitTitle, i.formatieTitle, i.topscorersTitle, i.kaartenTitle, i.kwartierTitle, i.tegenTitle]) {
+      expect(screen.getAllByText(titel)).toHaveLength(1)
+    }
+  })
+
+  it('alle vier de nieuwe RPC\'s krijgen p_team_id = TEAM en het gekozen venster (niet het verleden)', async () => {
+    const { rpcCalls } = await renderInzichten(volledig)
+    const nieuwe = [
+      'inzichten_wedstrijd_uitslagen', 'inzichten_speler_momenten',
+      'inzichten_doelpunten_per_minuut', 'inzichten_tegendoelpunten',
+    ]
+    for (const naam of nieuwe) {
+      const calls = rpcCalls.filter((c) => c.name === naam)
+      expect(calls).toHaveLength(1)
+      // venster.end is het seizoenseinde; `verleden` zou bij gisteren stoppen.
+      expect(calls[0].args).toEqual({ p_team_id: TEAM, p_start: '2026-07-01', p_end: '2026-12-31' })
+    }
+  })
+
+  it('bij een kortere periode krijgen de nieuwe RPC\'s dezelfde afgeknipte start', async () => {
+    const { rpcCalls } = await renderInzichten(volledig, '4w')
+    const starts = rpcCalls.filter((c) => c.name === 'inzichten_tegendoelpunten').map((c) => (c.args as Row).p_start)
+    expect(starts).toEqual(['2026-09-18'])
+  })
+
+  describe('foutafhandeling per bron', () => {
+    const RUWE_FOUT = { message: 'PGRST202 function public.inzichten_x not found', code: 'PGRST202' }
+    const kaartTitels = {
+      inzichten_wedstrijd_uitslagen: [i.thuisUitTitle, i.formatieTitle],
+      inzichten_speler_momenten: [i.topscorersTitle, i.kaartenTitle],
+      inzichten_doelpunten_per_minuut: [i.kwartierTitle],
+      inzichten_tegendoelpunten: [i.tegenTitle],
+    } as const
+    const alle = Object.values(kaartTitels).flat()
+
+    it.each(Object.entries(kaartTitels))('%s faalt: alleen die kaart(en) tonen bronFout, de rest rendert door', async (rpc, getroffen) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      await renderInzichten({ ...volledig, rpcErrors: { [rpc]: RUWE_FOUT } })
+      for (const titel of alle) {
+        const c = kaart(titel)
+        if ((getroffen as readonly string[]).includes(titel)) {
+          expect(within(c).getByText(i.bronFout)).toBeInTheDocument()
+        } else {
+          expect(within(c).queryByText(i.bronFout)).toBeNull()
+        }
+      }
+      // De bestaande kaarten blijven gewoon staan.
+      expect(screen.getByText(i.doelpuntenTitle)).toBeInTheDocument()
+      // Geen ruwe fouttekst in de DOM.
+      expect(document.body.textContent).not.toContain('PGRST202')
+    })
+  })
+
+  describe('lege staten, afkappen en tenant-isolatie', () => {
+    it('per kaart een eigen lege staat als er alleen een uitslag is', async () => {
+      await renderInzichten({ settings, events: [events[0]] })
+      expect(within(kaart(i.topscorersTitle)).getByText(i.topscorersEmpty)).toBeInTheDocument()
+      expect(within(kaart(i.kaartenTitle)).getByText(i.kaartenEmpty)).toBeInTheDocument()
+      expect(within(kaart(i.kwartierTitle)).getByText(i.kwartierEmpty)).toBeInTheDocument()
+      expect(within(kaart(i.tegenTitle)).getByText(i.tegenEmpty)).toBeInTheDocument()
+      expect(within(kaart(i.thuisUitTitle)).queryByText(i.thuisUitEmpty)).toBeNull()
+    })
+
+    it('zonder uitslag: Thuis/uit en Formatie leeg, kaarten met momenten niet', async () => {
+      await renderInzichten({
+        settings, players: spelers, matchEvents,
+        events: [eventRow({ id: 'm1', date: '2026-09-05' })],
+      })
+      expect(within(kaart(i.thuisUitTitle)).getByText(i.thuisUitEmpty)).toBeInTheDocument()
+      expect(within(kaart(i.formatieTitle)).getByText(i.formatieEmpty)).toBeInTheDocument()
+      expect(within(kaart(i.topscorersTitle)).queryByText(i.topscorersEmpty)).toBeNull()
+    })
+
+    it('alleen match_events (geen enkele andere data) geeft géén lege pagina (geenEnkeleData)', async () => {
+      await renderInzichten({
+        settings, players: spelers, matchEvents,
+        events: [eventRow({ id: 'm1', date: '2026-09-05' })],
+      })
+      expect(screen.queryByText(i.geenDataTitle)).toBeNull()
+      expect(screen.getByText(i.topscorersTitle)).toBeInTheDocument()
+    })
+
+    it('alleen tegendoelpunten geeft ook geen lege pagina', async () => {
+      await renderInzichten({
+        settings, tegendoelpunten,
+        events: [eventRow({ id: 'm1', date: '2026-09-05' })],
+      })
+      expect(screen.queryByText(i.geenDataTitle)).toBeNull()
+    })
+
+    it('bij 201 uitslagen: melding in plaats van cijfers (Thuis/uit en Formatie)', async () => {
+      const veel = Array.from({ length: 201 }, (_, n) =>
+        eventRow({ id: `w${String(n).padStart(3, '0')}`, date: '2026-09-05', goals_for: 1, goals_against: 0 }),
+      )
+      await renderInzichten({ settings, events: veel })
+      expect(within(kaart(i.thuisUitTitle)).getByText(i.afgekapt)).toBeInTheDocument()
+      expect(within(kaart(i.formatieTitle)).getByText(i.afgekapt)).toBeInTheDocument()
+      expect(within(kaart(i.thuisUitTitle)).queryByRole('table')).toBeNull()
+    })
+
+    it('precies 200 uitslagen is niet afgekapt', async () => {
+      const veel = Array.from({ length: 200 }, (_, n) =>
+        eventRow({ id: `w${String(n).padStart(3, '0')}`, date: '2026-09-05', goals_for: 1, goals_against: 0 }),
+      )
+      await renderInzichten({ settings, events: veel })
+      expect(within(kaart(i.thuisUitTitle)).queryByText(i.afgekapt)).toBeNull()
+      expect(within(kaart(i.thuisUitTitle)).getByText('Clean sheets: 200 van 200')).toBeInTheDocument()
+    })
+
+    it('rijen van team-2 (events, match_events, lineups, tegendoelpunten) tonen niets', async () => {
+      const vreemd = (r: Row): Row => ({ ...r, team_id: OTHER_TEAM })
+      await renderInzichten({
+        settings,
+        events: events.map(vreemd),
+        players: spelers.map(vreemd),
+        matchEvents: matchEvents.map(vreemd),
+        lineups: lineups.map(vreemd),
+        tegendoelpunten: tegendoelpunten.map(vreemd),
+      })
+      // Alles van team-2: lege pagina, want geen enkele bron van TEAM heeft data.
+      expect(screen.getByText(i.geenDataTitle)).toBeInTheDocument()
+    })
+
+    it('een speler van team-2 met een match_event van TEAM wordt niet geteld', async () => {
+      await renderInzichten({
+        ...volledig,
+        players: [...spelers, playerRow({ id: 'px', team_id: OTHER_TEAM, name: 'Vreemde Speler' })],
+        matchEvents: [
+          ...matchEvents,
+          { id: 'mex', team_id: TEAM, event_id: 'm1', player_id: 'px', kind: 'goal', minute: 5 },
+        ],
+      })
+      expect(kaart(i.topscorersTitle).textContent).not.toContain('Vreemde Speler')
+      // Het vreemde doelpunt telt ook niet mee in de kwartierkaart (3 van 4, niet 4 van 5).
+      expect(within(kaart(i.kwartierTitle)).getByText('3 van 4 doelpunten met minuut')).toBeInTheDocument()
+    })
+  })
+
+  describe('a11y van de twee grafieken', () => {
+    it.each([[i.kwartierTitle], [i.tegenTitle]])('%s: role="img" met aria-label, tabel als sibling, geen hex', async (titel) => {
+      await renderInzichten(volledig)
+      const c = kaart(titel)
+      const img = within(c).getByRole('img')
+      expect(img.getAttribute('aria-label')).toBeTruthy()
+      // De sr-only tabel staat NIET binnen [role="img"] (anders leest AT hem niet).
+      expect(img.querySelector('table')).toBeNull()
+      expect(c.querySelector('table.sr-only')).not.toBeNull()
+      expect(c.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+    })
   })
 })

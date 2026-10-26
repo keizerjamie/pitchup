@@ -1191,14 +1191,14 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
     return { admin: { auth: { admin: { deleteUser } } }, deleteUser }
   }
 
-  // Per eigen team: de dertien teamtabellen in FK-veilige volgorde, afgesloten
+  // Per eigen team: de veertien teamtabellen in FK-veilige volgorde, afgesloten
   // met de teams-rij (waarvan de cascade team_members en team_invites
   // opruimt). `oefeningen` volgt pas ná álle teams: dat is persoonlijk bezit
   // (team_id = eigenaar-user) en de FK-cascade daarvan raakt koppelingen in
   // trainingsplannen van ANDERE teams.
   const TEAM_OPRUIMING = [
     'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
-    'match_ratings', 'lineups', 'attendance', 'absence_periods',
+    'tegendoelpunten', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
     'categorie_metingen', 'metingen', 'events', 'players', 'settings',
     'teams',
   ]
@@ -1384,9 +1384,9 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     expect(inhoud).toMatch(/^rollback;/m)
 
     const blokken = inhoud.match(/^do \$\$/gm) ?? []
-    expect(blokken.length).toBeGreaterThanOrEqual(25)
+    expect(blokken.length).toBeGreaterThanOrEqual(26)
 
-    for (let i = 1; i <= 25; i++) {
+    for (let i = 1; i <= 26; i++) {
       expect(inhoud).toContain(`Blok ${i}`)
     }
 
@@ -1394,6 +1394,7 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     // ze echt weg (blok 22 maakt en verwijdert een team, blok 23 zegt een
     // lidmaatschap op, blok 24 en 25 maken oefeningen en koppelingen aan).
     expect(inhoud.indexOf('Blok 25')).toBeLessThan(inhoud.search(/^rollback;/m))
+    expect(inhoud.indexOf('Blok 26')).toBeLessThan(inhoud.search(/^rollback;/m))
 
     // De vervaltermijn wordt UITSLUITEND in de database beoordeeld; blok 14
     // legt beide randen vast.

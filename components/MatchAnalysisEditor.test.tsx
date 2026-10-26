@@ -15,6 +15,13 @@ vi.mock('@/app/actions/match-analysis', () => ({
   herstelWedstrijdMoment: vi.fn(),
 }))
 
+// De editor rendert nu ook TegendoelpuntenSectie, dat deze acties importeert.
+vi.mock('@/app/actions/tegendoelpunten', () => ({
+  addTegendoelpunt: vi.fn().mockResolvedValue(undefined),
+  deleteTegendoelpunt: vi.fn(),
+  herstelTegendoelpunt: vi.fn(),
+}))
+
 const mockRefresh = vi.fn()
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: mockRefresh }),
@@ -73,6 +80,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockDelete.mockResolvedValue(SNAPSHOT)
   mockHerstel.mockResolvedValue(undefined)
+})
+
+describe('MatchAnalysisEditor — tegendoelpunten-sectie', () => {
+  it('rendert de sectie, zonder prop met lege staat (bestaande aanroepers breken niet)', () => {
+    renderEditor()
+    expect(screen.getByText(nl.analysis.noTegendoelpunten)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: nl.analysis.tegendoelpuntSoorten.set_piece })).toBeInTheDocument()
+  })
 })
 
 describe('MatchAnalysisEditor: gebeurtenis verwijderen met undo', () => {

@@ -11,7 +11,8 @@
 import { matchResult } from '@/lib/match-analysis.mjs'
 import { isDateString, toUtcMs } from '@/lib/season-dates'
 import { addDays, todayLocal } from '@/lib/utils'
-import type { MatchResult, MatchType } from '@/lib/types'
+import { TEGENDOELPUNT_SOORTEN } from '@/lib/types'
+import type { HomeAway, MatchResult, MatchType, TegendoelpuntSoort } from '@/lib/types'
 
 // Bovengrens op het aantal wedstrijdrijen dat de doelpuntengrafiek ophaalt.
 // Zonder grens bepaalt de (door de gebruiker gekozen) seizoenslengte hoeveel
@@ -733,4 +734,313 @@ export function telMatchEvents(rows: { kind: string }[]): MatchEventTelling {
     }
   }
   return telling
+}
+
+// ── Inzichten-metrics fase 1 (supabase/inzichten-metrics.sql) ────────
+// Vier RPC's leveren kleine, al gegroepeerde rijsets; hier gebeurt de uitkomst
+// per wedstrijd (via matchResult, de enige bron van de uitslagregel), de
+// punten en de bakindeling per kwartier. Alles puur: de invoer wordt nooit
+// gemuteerd, en een niet-eindige of onbekende waarde wordt genegeerd in plaats
+// van stil meegeteld (zelfde houding als telMatchEvents).
+
+// inzichten_wedstrijd_uitslagen — één rij per wedstrijd MET uitslag binnen het
+// venster, oplopend op datum en id. Hooguit MAX_SEIZOEN_WEDSTRIJDEN + 1 rijen:
+// komen er meer dan MAX_SEIZOEN_WEDSTRIJDEN terug, dan is de set afgekapt en
+// mag de pagina geen cijfers tonen.
+export interface WedstrijdUitslagRij {
+  event_id: string
+  datum: string // 'YYYY-MM-DD'
+  home_away: HomeAway | null
+  goals_for: number
+  goals_against: number
+  formatie: string | null // al ge-btrimd; leeg → null (SQL)
+}
+
+// inzichten_speler_momenten — één rij per speler met minstens één moment,
+// oplopend op naam en id. Bewust GEEN filter op active of type: gasten en
+// inactieve spelers tellen mee (V2), `gast` markeert de gast.
+export interface SpelerMomentenRij {
+  player_id: string
+  naam: string
+  gast: boolean
+  doelpunten: number
+  assists: number
+  geel: number
+  rood: number
+}
+
+// inzichten_doelpunten_per_minuut — eigen doelpunten gegroepeerd per minuut;
+// minuut null = vastgelegd zonder minuut.
+export interface DoelpuntMinuutRij {
+  minuut: number | null
+  aantal: number
+}
+
+// inzichten_tegendoelpunten — tegendoelpunten gegroepeerd per minuut en soort.
+export interface TegendoelpuntMinuutRij {
+  minuut: number | null
+  soort: TegendoelpuntSoort
+  aantal: number
+}
+
+// Punten per uitslag (V8): 3 voor winst, 1 voor gelijk, 0 voor verlies.
+export const PUNTEN_PER_UITSLAG = { win: 3, draw: 1, loss: 0 } as const
+
+// Kwartierbakken (V4). '90+' vangt blessuretijd van de tweede helft en
+// verlenging (91..130). Blessuretijd van de eerste helft heeft geen eigen bak:
+// 45+2 wordt als minuut 47 vastgelegd en valt dus in '46-60'.
+export const KWARTIER_BAKKEN = ['1-15', '16-30', '31-45', '46-60', '61-75', '76-90', '90+'] as const
+export type KwartierBak = (typeof KWARTIER_BAKKEN)[number]
+
+// Minuut → bak. Grenzen: 0..15 → '1-15' (minuut 0 = aftrap), 16..30, 31..45,
+// 46..60, 61..75, 76..90 per bak, 91..130 → '90+'. null, een niet-geheel getal
+// of iets buiten 0..130 (de CHECK op minute) → null.
+export function kwartierBak(minuut: unknown): KwartierBak | null {
+  if (typeof minuut !== 'number' || !Number.isInteger(minuut)) return null
+  if (minuut < 0 || minuut > 130) return null
+  if (minuut <= 15) return '1-15'
+  if (minuut <= 30) return '16-30'
+  if (minuut <= 45) return '31-45'
+  if (minuut <= 60) return '46-60'
+  if (minuut <= 75) return '61-75'
+  if (minuut <= 90) return '76-90'
+  return '90+'
+}
+
+// Resultaten van een groep wedstrijden (thuis, uit, een formatie, ...).
+// puntenPerWedstrijd is ongerond en null bij 0 wedstrijden (nooit NaN); de UI
+// rondt af.
+export interface ResultaatGroep {
+  wedstrijden: number
+  win: number
+  gelijk: number
+  verlies: number
+  punten: number
+  puntenPerWedstrijd: number | null
+  voor: number
+  tegen: number
+  saldo: number
+}
+
+export interface ThuisUitTotaal extends ResultaatGroep {
+  cleanSheets: number // wedstrijden met 0 tegendoelpunten
+  zonderEigenDoelpunt: number // wedstrijden met 0 eigen doelpunten
+}
+
+export interface ThuisUitSplitsing {
+  thuis: ResultaatGroep
+  uit: ResultaatGroep
+  // null als er geen enkele wedstrijd zonder thuis/uit is (V1): dan geen rij
+  // "Onbekend" tonen.
+  onbekend: ResultaatGroep | null
+  totaal: ThuisUitTotaal
+}
+
+export interface FormatieResultaat extends ResultaatGroep {
+  formatie: string
+}
+
+export type SpelerBetrokkenheid = SpelerMomentenRij & { betrokken: number }
+
+export interface Topscorers {
+  spelers: SpelerBetrokkenheid[]
+  doelpunten: number
+  assists: number
+  // Benadering assists ÷ doelpunten (er is geen goal↔assist-koppeling, V5),
+  // afgerond en begrensd op 100. null bij 0 doelpunten — nooit NaN.
+  assistPercentage: number | null
+}
+
+export interface KwartierTelling {
+  perBak: Record<KwartierBak, number>
+  metMinuut: number // doelpunten met een geldige minuut (= som van perBak)
+  totaal: number // alle vastgelegde doelpunten, ook zonder minuut
+}
+
+export interface TegendoelpuntTelling {
+  perBak: Record<KwartierBak, Record<TegendoelpuntSoort, number>>
+  perSoort: Record<TegendoelpuntSoort, number>
+  metMinuut: number
+  totaal: number
+}
+
+// Een tel-waarde uit een RPC-rij: alleen een eindig geheel getal ≥ 0 telt,
+// al het andere wordt als 0 behandeld.
+function telwaarde(waarde: unknown): number {
+  return typeof waarde === 'number' && Number.isInteger(waarde) && waarde >= 0 ? waarde : 0
+}
+
+function isDoelpuntGetal(waarde: unknown): waarde is number {
+  return typeof waarde === 'number' && Number.isFinite(waarde)
+}
+
+function legeGroep(): ResultaatGroep {
+  return { wedstrijden: 0, win: 0, gelijk: 0, verlies: 0, punten: 0, puntenPerWedstrijd: null, voor: 0, tegen: 0, saldo: 0 }
+}
+
+// Telt één wedstrijd bij een groep op. Geeft false als de wedstrijd geen
+// bruikbare uitslag heeft (dan is er niets geteld).
+function telWedstrijd(groep: ResultaatGroep, rij: Pick<WedstrijdUitslagRij, 'goals_for' | 'goals_against'>): boolean {
+  if (!isDoelpuntGetal(rij.goals_for) || !isDoelpuntGetal(rij.goals_against)) return false
+  const uitkomst = matchResult({ goals_for: rij.goals_for, goals_against: rij.goals_against }) as MatchResult
+  if (uitkomst === 'unknown') return false
+  groep.wedstrijden++
+  if (uitkomst === 'win') groep.win++
+  else if (uitkomst === 'draw') groep.gelijk++
+  else groep.verlies++
+  groep.punten += PUNTEN_PER_UITSLAG[uitkomst]
+  groep.voor += rij.goals_for
+  groep.tegen += rij.goals_against
+  groep.saldo = groep.voor - groep.tegen
+  groep.puntenPerWedstrijd = groep.punten / groep.wedstrijden
+  return true
+}
+
+// Thuis / uit / onbekend / totaal over de wedstrijden met uitslag. Een
+// wedstrijd zonder home_away telt als "onbekend" (V1) en wél in het totaal;
+// hij wordt nooit stil als thuis geteld. Het totale saldo is daardoor gelijk
+// aan doelsaldo() over dezelfde wedstrijden (de KPI "Doelsaldo").
+export function splitsThuisUit(rows: WedstrijdUitslagRij[]): ThuisUitSplitsing {
+  const thuis = legeGroep()
+  const uit = legeGroep()
+  const onbekend = legeGroep()
+  const totaal: ThuisUitTotaal = { ...legeGroep(), cleanSheets: 0, zonderEigenDoelpunt: 0 }
+  for (const rij of rows) {
+    if (!rij || !telWedstrijd(totaal, rij)) continue
+    if (rij.goals_against === 0) totaal.cleanSheets++
+    if (rij.goals_for === 0) totaal.zonderEigenDoelpunt++
+    if (rij.home_away === 'home') telWedstrijd(thuis, rij)
+    else if (rij.home_away === 'away') telWedstrijd(uit, rij)
+    else telWedstrijd(onbekend, rij)
+  }
+  return { thuis, uit, onbekend: onbekend.wedstrijden > 0 ? onbekend : null, totaal }
+}
+
+// Resultaten per formatie, alleen voor wedstrijden met uitslag én opstelling.
+// Een lege of ontbrekende formatie wordt overgeslagen; de ruwe waarde is de
+// groepssleutel, zodat een onbekende vrije-tekstformatie letterlijk blijft
+// staan (AC-4.3). Volgorde: meeste wedstrijden eerst, dan formatie oplopend
+// met </> (deterministisch, onafhankelijk van de locale).
+export function resultatenPerFormatie(rows: WedstrijdUitslagRij[]): FormatieResultaat[] {
+  const groepen = new Map<string, FormatieResultaat>()
+  for (const rij of rows) {
+    if (!rij || typeof rij.formatie !== 'string' || rij.formatie.trim() === '') continue
+    const groep = groepen.get(rij.formatie) ?? { ...legeGroep(), formatie: rij.formatie }
+    if (telWedstrijd(groep, rij)) groepen.set(rij.formatie, groep)
+  }
+  return [...groepen.values()].sort((a, b) => {
+    if (a.wedstrijden !== b.wedstrijden) return b.wedstrijden - a.wedstrijden
+    return a.formatie < b.formatie ? -1 : a.formatie > b.formatie ? 1 : 0
+  })
+}
+
+// Vaste tweede sleutel bij gelijke stand: naam, dan player_id (zelfde regel
+// als snijTopWorst), zodat een refresh de namen niet laat wisselen.
+function opNaamDanId(a: { naam: string; player_id: string }, b: { naam: string; player_id: string }): number {
+  if (a.naam !== b.naam) return a.naam < b.naam ? -1 : 1
+  return a.player_id < b.player_id ? -1 : a.player_id > b.player_id ? 1 : 0
+}
+
+function schoneMomenten(rij: SpelerMomentenRij): SpelerMomentenRij {
+  return {
+    player_id: rij.player_id,
+    naam: rij.naam,
+    gast: rij.gast === true,
+    doelpunten: telwaarde(rij.doelpunten),
+    assists: telwaarde(rij.assists),
+    geel: telwaarde(rij.geel),
+    rood: telwaarde(rij.rood),
+  }
+}
+
+// Topscorers en betrokkenheid (doelpunten + assists). Een speler met alleen
+// assists doet mee; gasten doen mee met `gast: true` (V2). Volgorde:
+// doelpunten aflopend, betrokken aflopend, naam, player_id.
+export function bepaalTopscorers(rows: SpelerMomentenRij[]): Topscorers {
+  const spelers: SpelerBetrokkenheid[] = []
+  let doelpunten = 0
+  let assists = 0
+  for (const ruw of rows) {
+    if (!ruw) continue
+    const rij = schoneMomenten(ruw)
+    doelpunten += rij.doelpunten
+    assists += rij.assists
+    const betrokken = rij.doelpunten + rij.assists
+    if (betrokken > 0) spelers.push({ ...rij, betrokken })
+  }
+  spelers.sort((a, b) => {
+    if (a.doelpunten !== b.doelpunten) return b.doelpunten - a.doelpunten
+    if (a.betrokken !== b.betrokken) return b.betrokken - a.betrokken
+    return opNaamDanId(a, b)
+  })
+  const assistPercentage = doelpunten === 0 ? null : Math.min(100, Math.round((assists / doelpunten) * 100))
+  return { spelers, doelpunten, assists, assistPercentage }
+}
+
+// Spelers met minstens één kaart. Volgorde: totaal aantal kaarten aflopend,
+// dan rood aflopend, naam, player_id (AC-5.3).
+export function kaartenPerSpeler(rows: SpelerMomentenRij[]): SpelerMomentenRij[] {
+  const metKaart: SpelerMomentenRij[] = []
+  for (const ruw of rows) {
+    if (!ruw) continue
+    const rij = schoneMomenten(ruw)
+    if (rij.geel + rij.rood > 0) metKaart.push(rij)
+  }
+  return metKaart.sort((a, b) => {
+    const totaal = (b.geel + b.rood) - (a.geel + a.rood)
+    if (totaal !== 0) return totaal
+    if (a.rood !== b.rood) return b.rood - a.rood
+    return opNaamDanId(a, b)
+  })
+}
+
+function legeBakken<T>(maak: () => T): Record<KwartierBak, T> {
+  const bakken = {} as Record<KwartierBak, T>
+  for (const bak of KWARTIER_BAKKEN) bakken[bak] = maak()
+  return bakken
+}
+
+function legeSoorten(): Record<TegendoelpuntSoort, number> {
+  const soorten = {} as Record<TegendoelpuntSoort, number>
+  for (const soort of TEGENDOELPUNT_SOORTEN) soorten[soort] = 0
+  return soorten
+}
+
+// Eigen doelpunten per kwartier. Alle zeven bakken staan er altijd in (ook
+// bij 0). Een doelpunt zonder (geldige) minuut telt in `totaal` maar niet in
+// een bak — de UI toont dat als "x van y met minuut".
+export function telPerKwartier(rows: DoelpuntMinuutRij[]): KwartierTelling {
+  const perBak = legeBakken(() => 0)
+  let metMinuut = 0
+  let totaal = 0
+  for (const rij of rows) {
+    if (!rij) continue
+    const aantal = telwaarde(rij.aantal)
+    totaal += aantal
+    const bak = kwartierBak(rij.minuut)
+    if (bak === null) continue
+    perBak[bak] += aantal
+    metMinuut += aantal
+  }
+  return { perBak, metMinuut, totaal }
+}
+
+// Tegendoelpunten per kwartier en soort. Een onbekende soort telt nergens mee
+// (ook niet in het totaal); zonder minuut telt wel in totaal en perSoort.
+export function telTegendoelpunten(rows: TegendoelpuntMinuutRij[]): TegendoelpuntTelling {
+  const perBak = legeBakken(legeSoorten)
+  const perSoort = legeSoorten()
+  let metMinuut = 0
+  let totaal = 0
+  for (const rij of rows) {
+    if (!rij || !(TEGENDOELPUNT_SOORTEN as string[]).includes(rij.soort)) continue
+    const aantal = telwaarde(rij.aantal)
+    totaal += aantal
+    perSoort[rij.soort] += aantal
+    const bak = kwartierBak(rij.minuut)
+    if (bak === null) continue
+    perBak[bak][rij.soort] += aantal
+    metMinuut += aantal
+  }
+  return { perBak, perSoort, metMinuut, totaal }
 }

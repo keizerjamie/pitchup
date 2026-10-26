@@ -230,6 +230,7 @@
 .chart-fill-green { fill: var(--chip-green-fg); }
 .chart-fill-red { fill: var(--chip-red-fg); }
 .chart-fill-amber { fill: var(--chip-amber-fg); }
+.chart-fill-blue { fill: var(--panel-blue-fg); }
 .chart-fill-track { fill: var(--track); }
 .chart-grid { stroke: var(--border-soft); }
 .chart-axis { fill: var(--faint); }
