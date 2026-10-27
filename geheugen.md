@@ -4178,3 +4178,40 @@ speelminuten/wissels met nieuwe tabel, nog te bouwen). Ketendocumenten:
   `nulmeting-per-onderdeel` AC20 zijn wisselvallig in de volle suite (los groen); `cyclusweek-correctie` AC1/AC12
   blijven bekend rood.
 - **Open:** rooktest 2a door Jamie; fase 2b (speelminuten/wissels, W8/W9 nog te beslissen); fase 3.
+
+## Feature: Inzichten-metrics fase 2b — speelminuten en wissels (2026-10-27, `0481c6b`, live)
+Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-metrics/fase2b/` (01–07).
+- **Wat:** wedstrijdanalyse kreeg `SpeelminutenSectie` direct NA Beoordelingen (vóór Gebeurtenissen en
+  Tegendoelpunten); /inzichten kreeg `SpeelminutenKaart` half breed direct na `BlessuresPerMaandChart`.
+- **Nieuwe infra:** tabel **`speelminuten`** (team_id/event_id/player_id met FK cascade, `minuten` 0..130,
+  `wissels` 0..99, `created_at` timestamptz, `UNIQUE (event_id, player_id)`) + RPC
+  `inzichten_speelminuten_per_speler` in **`supabase/inzichten-metrics-fase2b.sql`** (derde bestand: de
+  structuurtests van fase 1 en 2a eisen elk exact vier functies). Gedraaid op productie 2026-10-27 via
+  Supabase-MCP (migratie `inzichten_metrics_fase2b`); verificatieblok 2, 22 en 28 geslaagd. `TEAM_TABELLEN` nu
+  vijftien (`speelminuten` na `tegendoelpunten`).
+- **RLS strenger dan ratings:** select `is_team_member`; insert ÉN update `with check` = `can_edit(team_id,
+  'wedstrijd')` + event is wedstrijd van hetzelfde team + speler van hetzelfde team (upsert = insert + update,
+  FK-check negeert RLS); delete alleen `can_edit` (opruimen moet altijd kunnen).
+- **Schrijven:** `app/actions/speelminuten.ts` — `saveSpeelminuten` (upsert op `event_id,player_id`, laatste
+  wint, geen client-id nodig), `deleteSpeelminuten` (snapshot), `herstelSpeelminuten` (overschrijft nooit; no-op
+  als er intussen een rij staat). Toekomstcheck `event.date <= todayLocal()` in action én pagina, niet in RLS
+  (productregel, geen tenantgrens; serverklok-gat is fail-safe). Delete heeft bewust geen aanwezigheid-/active-
+  check (O2).
+- **Besluiten (M1–M8, O1–O4):** per speler totaal minuten + aantal wissels (terugwissel = 2 wissels); geen
+  wedstrijdduur dus geen percentages; invoer alleen voor actief + present (zelfde set als ratings, incl. gasten);
+  geen voorinvulling uit de opstelling; achteraf en zonder uitslag mag, toekomst niet; geen waarschuwingen;
+  wisselveld start zichtbaar op "0", minuten verplicht; rijen van niet-meer-aanwezige/inactieve spelers
+  alleen-lezen maar verwijderbaar met undo; `noValidate` op het formulier zodat de app-melding
+  `speelminutenOngeldig` ook buiten bereik verschijnt (anders toont de browser zijn eigen bubbel). Kaart: y =
+  wedstrijden in het venster met ≥1 rij, `venster` (niet `verleden`), sortering minuten aflopend zonder
+  rangnummers; gasten (label) en inactieven met rij tellen mee. Ratings, vorm en trend bewust ongewijzigd (M8).
+- **Gotchas:** delete-foutstate moet in de ouder (`deleteFouten` per playerId) — een overige rij unmount bij de
+  optimistische delete en komt bij falen terug als nieuw component (validatorbevinding B1). `divide-y` zonder
+  kleur = currentColor in Tailwind v4 → `divide-[var(--border-soft)]`. Verificatieblokken draaien in één
+  transactie: testdata van blok 27 (events jan 1990) is zichtbaar in blok 28 → opzetcheck op de eigen tabel.
+  Ontbreekt een speler in TEAM_B, maak er binnen de transactie tijdelijk één aan, anders slaan de vreemde-speler-
+  cases stil over. R7 (geaccepteerd): 0 aanwezigen → early return verbergt ook de alleen-lezen rijen.
+- **Tests:** `inzichten-metrics-fase2b.acceptance.test.tsx` (134, 3 TZ's × 3 tijdstippen),
+  `inzichten-metrics-fase2b-migratie.acceptance.test.ts`, `app/actions/speelminuten.test.ts`; mutatiecheck 35.
+- **Open:** rooktest 2b door Jamie; fase 3 (belasting in minuten, periodisering-voortgang, invul-discipline, RPE,
+  doelstelling behaald); daarna de conclusielaag (KPI/signalen/rapport) over alle fasen.
