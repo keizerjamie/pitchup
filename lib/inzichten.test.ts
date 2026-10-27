@@ -28,7 +28,22 @@ import {
   type AanwezigheidPerSpelerRij,
   type DoelpuntItem,
   type RatingPerSpelerRij,
+  RATING_TREND_DREMPEL,
+  STIJGER_MIN_BEOORDELINGEN,
+  aandeel,
+  bepaalStijgersDalers,
+  blessuresPerMaand,
+  dekkingPerPositie,
+  maandenInVenster,
+  naastElkaarPerSpeler,
+  verdeelSpeelkansen,
+  type BlessuresPerMaandRij,
+  type RatingVormRij,
+  type SpeelkansenRij,
+  type SpelerPositieRij,
+  type TrainingOpkomstPerSpelerRij,
 } from '@/lib/inzichten'
+import { POSITIONS } from '@/lib/types'
 
 // De W/G/V-uitkomst komt uit de echte matchResult() (lib/match-analysis.mjs);
 // die wordt hier bewust NIET gemockt, zodat deze test breekt zodra de
@@ -1122,6 +1137,359 @@ describe('telTegendoelpunten', () => {
     const rows: TegendoelpuntMinuutRij[] = [{ minuut: 5, soort: 'open_play', aantal: 1 }]
     const kopie = structuredClone(rows)
     telTegendoelpunten(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+// ── Fase 2a: spelers ─────────────────────────────────────────────────
+
+const kans = (over: Partial<SpeelkansenRij> = {}): SpeelkansenRij => ({
+  player_id: 'p1', naam: 'Anna', gast: false, noemer: 4, selectie: 2, basis: 1, ...over,
+})
+
+describe('STIJGER_MIN_BEOORDELINGEN', () => {
+  it('is 8 (W5)', () => {
+    expect(STIJGER_MIN_BEOORDELINGEN).toBe(8)
+  })
+})
+
+describe('aandeel', () => {
+  it('geeft teller/noemer, ongerond en begrensd op 1', () => {
+    expect(aandeel(1, 3)).toBeCloseTo(1 / 3, 10)
+    expect(aandeel(5, 4)).toBe(1)
+    expect(aandeel(0, 4)).toBe(0)
+  })
+
+  it('geeft null bij noemer 0, negatief of niet-eindig — nooit NaN', () => {
+    expect(aandeel(0, 0)).toBeNull()
+    expect(aandeel(1, -1)).toBeNull()
+    expect(aandeel(Number.NaN, 2)).toBeNull()
+    expect(aandeel(1, Number.POSITIVE_INFINITY)).toBeNull()
+  })
+})
+
+describe('verdeelSpeelkansen', () => {
+  it('berekent de aandelen en behoudt de gastvlag', () => {
+    const [r] = verdeelSpeelkansen([kans({ gast: true, noemer: 4, selectie: 3, basis: 2 })])
+    expect(r.selectieAandeel).toBe(0.75)
+    expect(r.basisAandeel).toBe(0.5)
+    expect(r.gast).toBe(true)
+    expect(r.noemer).toBe(4)
+  })
+
+  it('noemer 0 geeft null-aandelen (AC-A8), en die spelers staan achteraan', () => {
+    const r = verdeelSpeelkansen([
+      kans({ player_id: 'a', naam: 'Aad', noemer: 0, selectie: 0, basis: 0 }),
+      kans({ player_id: 'z', naam: 'Zoë', noemer: 5, selectie: 0, basis: 0 }),
+    ])
+    expect(r.map((x) => x.player_id)).toEqual(['z', 'a'])
+    expect(r[1].selectieAandeel).toBeNull()
+    expect(r[1].basisAandeel).toBeNull()
+    expect(r[0].selectieAandeel).toBe(0)
+  })
+
+  it('sorteert op selectie-aandeel, dan basis-aandeel aflopend, dan naam en id (O5)', () => {
+    const r = verdeelSpeelkansen([
+      kans({ player_id: 'p4', naam: 'Bram', noemer: 4, selectie: 2, basis: 1 }),
+      kans({ player_id: 'p3', naam: 'Bram', noemer: 4, selectie: 2, basis: 1 }),
+      kans({ player_id: 'p2', naam: 'Anna', noemer: 4, selectie: 2, basis: 2 }),
+      kans({ player_id: 'p1', naam: 'Cas', noemer: 2, selectie: 2, basis: 0 }),
+      kans({ player_id: 'p5', naam: 'Aad', noemer: 4, selectie: 2, basis: 1 }),
+    ])
+    expect(r.map((x) => x.player_id)).toEqual(['p1', 'p2', 'p5', 'p3', 'p4'])
+  })
+
+  it('begrenst basis > noemer via aandeel en telt ongeldige waarden als 0', () => {
+    const [r] = verdeelSpeelkansen([kans({ noemer: 2, basis: 3, selectie: -1 as number })])
+    expect(r.basisAandeel).toBe(1)
+    expect(r.selectie).toBe(0)
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [kans({ player_id: 'b', naam: 'B' }), kans({ player_id: 'a', naam: 'A', selectie: 4 })]
+    const kopie = structuredClone(rows)
+    verdeelSpeelkansen(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+const vorm = (over: Partial<RatingVormRij> = {}): RatingVormRij => ({
+  player_id: 'p1', naam: 'Anna', aantal: 10, seizoen_gemiddelde: 7, recent_gemiddelde: 7, ...over,
+})
+
+describe('bepaalStijgersDalers', () => {
+  it('gebruikt standaard RATING_TREND_DREMPEL en STIJGER_MIN_BEOORDELINGEN', () => {
+    expect(RATING_TREND_DREMPEL).toBe(0.3)
+    const r = bepaalStijgersDalers([vorm({ aantal: 8, recent_gemiddelde: 7.3 })])
+    expect(r.stijgers).toHaveLength(1)
+  })
+
+  it('scheidt stijgers en dalers en sorteert op grootte (grootste eerst)', () => {
+    const r = bepaalStijgersDalers([
+      vorm({ player_id: 's1', naam: 'S1', recent_gemiddelde: 7.4 }),
+      vorm({ player_id: 's2', naam: 'S2', recent_gemiddelde: 8 }),
+      vorm({ player_id: 'd1', naam: 'D1', recent_gemiddelde: 6.5 }),
+      vorm({ player_id: 'd2', naam: 'D2', recent_gemiddelde: 6.6 }),
+      vorm({ player_id: 'n', naam: 'N', recent_gemiddelde: 7.1 }),
+    ])
+    expect(r.stijgers.map((x) => x.player_id)).toEqual(['s2', 's1'])
+    expect(r.dalers.map((x) => x.player_id)).toEqual(['d1', 'd2'])
+    expect(r.stijgers[0].verschil).toBe(1)
+    expect(r.dalers[0].verschil).toBe(-0.5)
+    expect(r.meegeteld).toBe(5)
+  })
+
+  it('grenzen: 0,30 doet mee, 0,29 niet, −0,30 is een daler; 7,3 − 7,0 telt als 0,3', () => {
+    const r = bepaalStijgersDalers([
+      vorm({ player_id: 'a', naam: 'A', seizoen_gemiddelde: 7.0, recent_gemiddelde: 7.3 }),
+      vorm({ player_id: 'b', naam: 'B', seizoen_gemiddelde: 7.0, recent_gemiddelde: 7.29 }),
+      vorm({ player_id: 'c', naam: 'C', seizoen_gemiddelde: 7.3, recent_gemiddelde: 7.0 }),
+      vorm({ player_id: 'd', naam: 'D', seizoen_gemiddelde: 7.0, recent_gemiddelde: 6.71 }),
+    ])
+    expect(7.3 - 7.0).not.toBe(0.3) // de float-ruis waar het afronden voor is
+    expect(r.stijgers.map((x) => x.player_id)).toEqual(['a'])
+    expect(r.stijgers[0].verschil).toBe(0.3)
+    expect(r.dalers.map((x) => x.player_id)).toEqual(['c'])
+    expect(r.dalers[0].verschil).toBe(-0.3)
+  })
+
+  it('aantal 7 valt af, aantal 8 doet mee (W5); meegeteld telt alleen ≥ minimum', () => {
+    const r = bepaalStijgersDalers([
+      vorm({ player_id: 'zeven', naam: 'Z', aantal: 7, recent_gemiddelde: 9 }),
+      vorm({ player_id: 'acht', naam: 'A', aantal: 8, recent_gemiddelde: 9 }),
+    ])
+    expect(r.stijgers.map((x) => x.player_id)).toEqual(['acht'])
+    expect(r.meegeteld).toBe(1)
+  })
+
+  it('0 spelers boven het minimum: meegeteld 0 en twee lege lijsten', () => {
+    const r = bepaalStijgersDalers([vorm({ aantal: 3, recent_gemiddelde: 9 })])
+    expect(r).toEqual({ stijgers: [], dalers: [], meegeteld: 0 })
+  })
+
+  it('een niet-eindig gemiddelde valt af', () => {
+    const r = bepaalStijgersDalers([
+      vorm({ recent_gemiddelde: Number.NaN }),
+      vorm({ player_id: 'p2', seizoen_gemiddelde: null as unknown as number }),
+    ])
+    expect(r).toEqual({ stijgers: [], dalers: [], meegeteld: 0 })
+  })
+
+  it('gelijke stand: naam, dan id', () => {
+    const r = bepaalStijgersDalers([
+      vorm({ player_id: 'p2', naam: 'Bo', recent_gemiddelde: 8 }),
+      vorm({ player_id: 'p1', naam: 'Bo', recent_gemiddelde: 8 }),
+      vorm({ player_id: 'p3', naam: 'Al', recent_gemiddelde: 8 }),
+    ])
+    expect(r.stijgers.map((x) => x.player_id)).toEqual(['p3', 'p1', 'p2'])
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [vorm({ recent_gemiddelde: 8 }), vorm({ player_id: 'p2', recent_gemiddelde: 6 })]
+    const kopie = structuredClone(rows)
+    bepaalStijgersDalers(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+const speler = (over: Partial<SpelerPositieRij> = {}): SpelerPositieRij => ({
+  id: 'p1', name: 'Anna', position: 'Keeper', secondary_positions: [], injured: false, ...over,
+})
+
+describe('dekkingPerPositie', () => {
+  it('geeft altijd alle 12 posities in de volgorde van POSITIONS, ook zonder spelers', () => {
+    const r = dekkingPerPositie([])
+    expect(r.map((x) => x.positie)).toEqual(POSITIONS)
+    expect(r).toHaveLength(12)
+    expect(r.every((x) => x.spelers.length === 0)).toBe(true)
+  })
+
+  it('telt secundair mee met de vlag; primair staat vóór secundair, elk op naam en id', () => {
+    const r = dekkingPerPositie([
+      speler({ id: 'a', name: 'Aad', position: 'Spits', secondary_positions: ['Linksbuiten'] }),
+      speler({ id: 'z', name: 'Zoë', position: 'Linksbuiten' }),
+      speler({ id: 'b2', name: 'Bas', position: 'Linksbuiten' }),
+      speler({ id: 'b1', name: 'Bas', position: 'Linksbuiten' }),
+    ])
+    const lb = r.find((x) => x.positie === 'Linksbuiten')!
+    expect(lb.spelers).toEqual([
+      { player_id: 'b1', naam: 'Bas', secundair: false },
+      { player_id: 'b2', naam: 'Bas', secundair: false },
+      { player_id: 'z', naam: 'Zoë', secundair: false },
+      { player_id: 'a', naam: 'Aad', secundair: true },
+    ])
+    expect(r.find((x) => x.positie === 'Spits')!.spelers).toEqual([{ player_id: 'a', naam: 'Aad', secundair: false }])
+  })
+
+  it('een geblesseerde speler telt nergens mee (AC-3.2); injured null telt wel', () => {
+    const r = dekkingPerPositie([
+      speler({ id: 'x', injured: true, secondary_positions: ['Spits'] }),
+      speler({ id: 'y', name: 'Yara', injured: null }),
+    ])
+    expect(r.find((x) => x.positie === 'Keeper')!.spelers.map((s) => s.player_id)).toEqual(['y'])
+    expect(r.find((x) => x.positie === 'Spits')!.spelers).toEqual([])
+  })
+
+  it('dezelfde positie primair én secundair telt één keer als primair; dubbele secundaire ook één keer', () => {
+    const r = dekkingPerPositie([
+      speler({ position: 'Spits', secondary_positions: ['Spits', 'Rechtsbuiten', 'Rechtsbuiten'] }),
+    ])
+    expect(r.find((x) => x.positie === 'Spits')!.spelers).toEqual([{ player_id: 'p1', naam: 'Anna', secundair: false }])
+    expect(r.find((x) => x.positie === 'Rechtsbuiten')!.spelers).toHaveLength(1)
+  })
+
+  it('negeert onbekende posities en gebruikt GEEN fallbacks', () => {
+    const r = dekkingPerPositie([
+      speler({ position: 'Libero', secondary_positions: ['Voorstopper', 'Keeper'], injured: false }),
+      speler({ id: 'p2', position: 'Centrale verdediger', secondary_positions: null }),
+    ])
+    const totaal = r.reduce((n, x) => n + x.spelers.length, 0)
+    expect(totaal).toBe(2)
+    expect(r.find((x) => x.positie === 'Keeper')!.spelers[0].secundair).toBe(true)
+    // Een centrale verdediger dekt alleen zijn eigen positie, niet die van de backs.
+    expect(r.find((x) => x.positie === 'Linksachter')!.spelers).toEqual([])
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [speler({ secondary_positions: ['Spits'] }), speler({ id: 'p0', name: 'Aad' })]
+    const kopie = structuredClone(rows)
+    dekkingPerPositie(rows)
+    expect(rows).toEqual(kopie)
+  })
+})
+
+const opk = (over: Partial<TrainingOpkomstPerSpelerRij> = {}): TrainingOpkomstPerSpelerRij => ({
+  player_id: 'p1', naam: 'Anna', gast: false, aanwezig: 3, afwezig: 1, ...over,
+})
+
+describe('naastElkaarPerSpeler', () => {
+  it('voegt drie bronnen per speler samen', () => {
+    const r = naastElkaarPerSpeler({
+      opkomst: [opk({ aanwezig: 3, afwezig: 1 })],
+      speelkansen: [kans({ noemer: 5, selectie: 4 })],
+      ratings: [{ player_id: 'p1', naam: 'Anna', gemiddelde: 7.25, aantal: 4 }],
+    })
+    expect(r).toEqual([
+      {
+        player_id: 'p1', naam: 'Anna', gast: false,
+        opkomst: { aanwezig: 3, totaal: 4, percentage: 75 },
+        selectie: { selectie: 4, noemer: 5 },
+        rating: { gemiddelde: 7.25, aantal: 4 },
+      },
+    ])
+  })
+
+  it('sorteert op naam, dan id — geen rangorde (W4)', () => {
+    const r = naastElkaarPerSpeler({
+      opkomst: [opk({ player_id: 'p9', naam: 'Zoë' }), opk({ player_id: 'p2', naam: 'Bo' })],
+      speelkansen: [kans({ player_id: 'p1', naam: 'Bo' })],
+      ratings: [{ player_id: 'p3', naam: 'Aad', gemiddelde: 6, aantal: 1 }],
+    })
+    expect(r.map((x) => x.player_id)).toEqual(['p3', 'p1', 'p2', 'p9'])
+  })
+
+  it('null bij ontbrekende data: 0/0 opkomst, noemer 0, geen rating; spelers zonder iets vallen weg', () => {
+    const r = naastElkaarPerSpeler({
+      opkomst: [opk({ player_id: 'leeg', aanwezig: 0, afwezig: 0 }), opk({ player_id: 'p1', aanwezig: 0, afwezig: 2 })],
+      speelkansen: [kans({ player_id: 'p1', noemer: 0, selectie: 0 }), kans({ player_id: 'leeg', noemer: 0 })],
+      ratings: [{ player_id: 'leeg', naam: 'Anna', gemiddelde: Number.NaN, aantal: 2 }],
+    })
+    expect(r.map((x) => x.player_id)).toEqual(['p1'])
+    expect(r[0].opkomst).toEqual({ aanwezig: 0, totaal: 2, percentage: 0 })
+    expect(r[0].selectie).toBeNull()
+    expect(r[0].rating).toBeNull()
+  })
+
+  it('gast (O3): alleen het aantal keer aanwezig, nooit een noemer of percentage', () => {
+    const r = naastElkaarPerSpeler({
+      opkomst: [opk({ player_id: 'g', naam: 'Gast', gast: true, aanwezig: 1, afwezig: 29 })],
+      speelkansen: [kans({ player_id: 'g', naam: 'Gast', gast: true, noemer: 3, selectie: 1 })],
+      ratings: [],
+    })
+    expect(r).toHaveLength(1)
+    expect(r[0].gast).toBe(true)
+    expect(r[0].opkomst).toEqual({ aanwezig: 1, totaal: null, percentage: null })
+    expect(r[0].selectie).toEqual({ selectie: 1, noemer: 3 })
+  })
+
+  it('gast met 0 keer aanwezig krijgt geen opkomst (afwezig is de standaard voor gasten)', () => {
+    const r = naastElkaarPerSpeler({
+      opkomst: [opk({ player_id: 'g', gast: true, aanwezig: 0, afwezig: 30 })],
+      speelkansen: [],
+      ratings: [],
+    })
+    expect(r).toEqual([])
+  })
+
+  it('gastvlag uit speelkansen dwingt ook de gast-vorm af in de opkomst', () => {
+    const r = naastElkaarPerSpeler({
+      opkomst: [opk({ player_id: 'g', gast: false, aanwezig: 2, afwezig: 8 })],
+      speelkansen: [kans({ player_id: 'g', gast: true })],
+      ratings: [],
+    })
+    expect(r[0].gast).toBe(true)
+    expect(r[0].opkomst).toEqual({ aanwezig: 2, totaal: null, percentage: null })
+  })
+
+  it('muteert de invoer niet', () => {
+    const invoer = {
+      opkomst: [opk()],
+      speelkansen: [kans()],
+      ratings: [{ player_id: 'p1', naam: 'Anna', gemiddelde: 7, aantal: 1 }] as RatingPerSpelerRij[],
+    }
+    const kopie = structuredClone(invoer)
+    naastElkaarPerSpeler(invoer)
+    expect(invoer).toEqual(kopie)
+  })
+})
+
+describe('maandenInVenster', () => {
+  it('geeft de maanden van start t/m eind', () => {
+    expect(maandenInVenster('2026-08-15', '2026-11-02')).toEqual(['2026-08', '2026-09', '2026-10', '2026-11'])
+    expect(maandenInVenster('2026-10-01', '2026-10-31')).toEqual(['2026-10'])
+  })
+
+  it('over de jaargrens en over februari in een schrikkeljaar', () => {
+    expect(maandenInVenster('2026-12-31', '2027-01-01')).toEqual(['2026-12', '2027-01'])
+    expect(maandenInVenster('2028-01-31', '2028-03-01')).toEqual(['2028-01', '2028-02', '2028-03'])
+    expect(maandenInVenster('2028-02-29', '2028-02-29')).toEqual(['2028-02'])
+  })
+
+  it('end < start of ongeldige strings → []', () => {
+    expect(maandenInVenster('2026-10-01', '2026-09-30')).toEqual([])
+    expect(maandenInVenster('2026-13-01', '2027-01-01')).toEqual([])
+    expect(maandenInVenster('2026-02-30', '2026-03-01')).toEqual([])
+    expect(maandenInVenster('', '2026-03-01')).toEqual([])
+    expect(maandenInVenster('2026-01', '2026-03-01')).toEqual([])
+  })
+})
+
+describe('blessuresPerMaand', () => {
+  const venster = { start: '2026-08-20', end: '2026-11-03' }
+
+  it('maand zonder rij → null ("geen gegevens"), rij met 0 → 0 (AC-5.4)', () => {
+    const rows: BlessuresPerMaandRij[] = [
+      { maand: '2026-08', geblesseerd: 2 },
+      { maand: '2026-10', geblesseerd: 0 },
+    ]
+    expect(blessuresPerMaand(rows, venster)).toEqual([
+      { maand: '2026-08', geblesseerd: 2 },
+      { maand: '2026-09', geblesseerd: null },
+      { maand: '2026-10', geblesseerd: 0 },
+      { maand: '2026-11', geblesseerd: null },
+    ])
+  })
+
+  it('negeert rijen buiten het venster; een ongeldig venster geeft []', () => {
+    expect(blessuresPerMaand([{ maand: '2026-01', geblesseerd: 4 }], { start: '2026-10-01', end: '2026-10-10' }))
+      .toEqual([{ maand: '2026-10', geblesseerd: null }])
+    expect(blessuresPerMaand([{ maand: '2026-10', geblesseerd: 1 }], { start: '2026-10-10', end: '2026-10-01' })).toEqual([])
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows: BlessuresPerMaandRij[] = [{ maand: '2026-09', geblesseerd: 1 }]
+    const kopie = structuredClone(rows)
+    blessuresPerMaand(rows, venster)
     expect(rows).toEqual(kopie)
   })
 })

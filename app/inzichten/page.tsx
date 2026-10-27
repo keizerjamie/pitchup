@@ -38,6 +38,17 @@ import {
   kaartenPerSpeler,
   telPerKwartier,
   telTegendoelpunten,
+  RATING_TREND_VENSTER,
+  verdeelSpeelkansen,
+  bepaalStijgersDalers,
+  dekkingPerPositie,
+  naastElkaarPerSpeler,
+  blessuresPerMaand,
+  type SpeelkansenRij,
+  type RatingVormRij,
+  type TrainingOpkomstPerSpelerRij,
+  type BlessuresPerMaandRij,
+  type SpelerPositieRij,
   type WedstrijdUitslagRij,
   type SpelerMomentenRij,
   type DoelpuntMinuutRij,
@@ -62,6 +73,11 @@ import TopscorersKaart from '@/components/inzichten/TopscorersKaart'
 import GeleRodeKaartenLijst from '@/components/inzichten/GeleRodeKaartenLijst'
 import KwartierChart from '@/components/inzichten/KwartierChart'
 import TegendoelpuntenChart from '@/components/inzichten/TegendoelpuntenChart'
+import SpeelkansenKaart from '@/components/inzichten/SpeelkansenKaart'
+import StijgersDalersKaart from '@/components/inzichten/StijgersDalersKaart'
+import PositiedekkingKaart from '@/components/inzichten/PositiedekkingKaart'
+import OpkomstSelectieRatingKaart from '@/components/inzichten/OpkomstSelectieRatingKaart'
+import BlessuresPerMaandChart from '@/components/inzichten/BlessuresPerMaandChart'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
@@ -133,7 +149,9 @@ export default async function InzichtenPage({
 
   // Geen (geldig) seizoen ingesteld: ÉÉN pagina-brede lege staat, en geen
   // enkele RPC/query wordt uitgevoerd (O-vraag uit de technische brief).
-  if (!venster) {
+  // `venster` is null precies als `seizoen` null is; de dubbele toets laat TS
+  // zien dat `seizoen` hieronder niet null is.
+  if (!seizoen || !venster) {
     return (
       <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
         <PageHeader title={t.insights.pageTitle} subtitle={t.insights.pageSubtitle} />
@@ -172,6 +190,11 @@ export default async function InzichtenPage({
     spelerMomentenResult,
     doelpuntMinutenResult,
     tegendoelpuntenResult,
+    speelkansenResult,
+    ratingVormResult,
+    trainingOpkomstResult,
+    blessuresResult,
+    positiesResult,
   ] = await Promise.all([
     // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
     // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
@@ -221,6 +244,28 @@ export default async function InzichtenPage({
     supabase.rpc('inzichten_speler_momenten', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
     supabase.rpc('inzichten_doelpunten_per_minuut', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
     supabase.rpc('inzichten_tegendoelpunten', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    // Fase 2a, spelers (supabase/inzichten-metrics-fase2.sql). Venster per kaart:
+    // speelkansen, trainingsopkomst en blessures krijgen `verleden` (een selectie
+    // kan nog wijzigen, net als aanwezigheid); de rating-vorm krijgt het HELE
+    // seizoen, ongeacht de periodekiezer (W5). p_team_id komt uit de teamcontext.
+    supabase.rpc('inzichten_speelkansen', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    supabase.rpc('inzichten_rating_vorm_per_speler', {
+      p_team_id: ctx.teamId,
+      p_start: seizoen.start,
+      p_end: seizoen.end,
+      p_recent: RATING_TREND_VENSTER,
+    }),
+    supabase.rpc('inzichten_training_opkomst_per_speler', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    supabase.rpc('inzichten_blessures_per_maand', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    // Positiedekking: momentopname van nu (geen periode), eigen query zodat de
+    // spelerskiezer hierboven ongemoeid blijft en deze kaart een eigen foutvlag heeft.
+    supabase.from('players')
+      .select('id, name, position, secondary_positions, injured')
+      .eq('team_id', ctx.teamId)
+      .eq('active', true)
+      .eq('type', 'regular')
+      .order('name', { ascending: true })
+      .order('id', { ascending: true }),
   ])
 
   // Elke bron faalt onafhankelijk: bij een fout logt de pagina de context en
@@ -257,9 +302,10 @@ export default async function InzichtenPage({
 
   // Top 5 / worst 5: één RPC per onderwerp levert álle spelers, het snijden in
   // twee lijstjes gebeurt hier (lib/inzichten.ts) — geen tweede databaseronde.
-  const ratingTopWorst = topWorstRating(
-    unwrap<RatingPerSpelerRij>('inzichten.ratingPerSpeler', ratingPerSpelerResult),
-  )
+  // Eén keer uitpakken met foutvlag: de rijen voeden de top/worst-lijstjes én
+  // kaart "opkomst, selectie en rating", die bij een fout `bronFout` toont.
+  const ratingPerSpelerBron = unwrapBron<RatingPerSpelerRij>('inzichten.ratingPerSpeler', ratingPerSpelerResult)
+  const ratingTopWorst = topWorstRating(ratingPerSpelerBron.rijen)
   // Eén keer uitpakken: deze rijen voeden zowel de top/worst-lijstjes als het
   // signalenblok. Twee keer unwrap() zou de foutmelding bij een RPC-fout ook
   // twee keer loggen.
@@ -295,6 +341,23 @@ export default async function InzichtenPage({
   const spelerMomenten = unwrapBron<SpelerMomentenRij>('inzichten.spelerMomenten', spelerMomentenResult)
   const doelpuntMinuten = unwrapBron<DoelpuntMinuutRij>('inzichten.doelpuntenPerMinuut', doelpuntMinutenResult)
   const tegendoelpuntRijen = unwrapBron<TegendoelpuntMinuutRij>('inzichten.tegendoelpunten', tegendoelpuntenResult)
+  // Fase 2a: elke bron faalt los (PGRST202 zonder migratie → bronFout per kaart).
+  const speelkansenBron = unwrapBron<SpeelkansenRij>('inzichten.speelkansen', speelkansenResult)
+  const ratingVormBron = unwrapBron<RatingVormRij>('inzichten.ratingVorm', ratingVormResult)
+  const trainingOpkomstBron = unwrapBron<TrainingOpkomstPerSpelerRij>('inzichten.trainingOpkomstPerSpeler', trainingOpkomstResult)
+  const blessuresBron = unwrapBron<BlessuresPerMaandRij>('inzichten.blessuresPerMaand', blessuresResult)
+  const positiesBron = unwrapBron<SpelerPositieRij>('inzichten.posities', positiesResult)
+  const speelkansen = verdeelSpeelkansen(speelkansenBron.rijen)
+  const stijgersDalers = bepaalStijgersDalers(ratingVormBron.rijen)
+  const dekking = dekkingPerPositie(positiesBron.rijen)
+  const naastElkaar = naastElkaarPerSpeler({
+    opkomst: trainingOpkomstBron.rijen,
+    speelkansen: speelkansenBron.rijen,
+    ratings: ratingPerSpelerBron.rijen,
+  })
+  const blessureMaanden = blessuresPerMaand(blessuresBron.rijen, verleden)
+  // Kaart 4 faalt zodra één van zijn drie bronnen faalt.
+  const naastElkaarFout = trainingOpkomstBron.fout || speelkansenBron.fout || ratingPerSpelerBron.fout
   const uitslagenAfgekapt = uitslagen.rijen.length > MAX_SEIZOEN_WEDSTRIJDEN
   const thuisUit = splitsThuisUit(uitslagen.rijen)
   const formaties = resultatenPerFormatie(uitslagen.rijen)
@@ -361,7 +424,14 @@ export default async function InzichtenPage({
     uitslagen.rijen.length === 0 &&
     spelerMomenten.rijen.length === 0 &&
     doelpuntMinuten.rijen.length === 0 &&
-    tegendoelpuntRijen.rijen.length === 0
+    tegendoelpuntRijen.rijen.length === 0 &&
+    // Fase 2a: speelkansen, trainingsopkomst en blessures tellen mee. Stijgers
+    // (volgt het venster niet: bij 4w zou een lege periode anders de volle
+    // pagina tonen) en positiedekking (een spelerslijst is geen registratie)
+    // bewust niet.
+    !speelkansenBron.rijen.some((r) => r.noemer > 0) &&
+    trainingOpkomstBron.rijen.every((r) => r.aanwezig + r.afwezig === 0) &&
+    blessuresBron.rijen.every((r) => r.geblesseerd === 0)
 
   if (geenEnkeleData) {
     // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
@@ -443,6 +513,15 @@ export default async function InzichtenPage({
         <GeleRodeKaartenLijst rijen={kaarten} fout={spelerMomenten.fout} t={t} />
         <KwartierChart telling={kwartieren} fout={doelpuntMinuten.fout} t={t} />
         <TegendoelpuntenChart telling={tegenKwartieren} fout={tegendoelpuntRijen.fout} t={t} />
+        <div className="lg:col-span-2">
+          <SpeelkansenKaart regels={speelkansen} fout={speelkansenBron.fout} t={t} />
+        </div>
+        <StijgersDalersKaart data={stijgersDalers} fout={ratingVormBron.fout} t={t} />
+        <PositiedekkingKaart dekking={dekking} heeftSpelers={positiesBron.rijen.length > 0} fout={positiesBron.fout} t={t} />
+        <div className="lg:col-span-2">
+          <OpkomstSelectieRatingKaart regels={naastElkaar} fout={naastElkaarFout} t={t} />
+        </div>
+        <BlessuresPerMaandChart maanden={blessureMaanden} fout={blessuresBron.fout} t={t} />
       </div>
       </div>
 

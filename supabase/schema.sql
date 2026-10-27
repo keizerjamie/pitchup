@@ -9,6 +9,7 @@
 -- inzichten.sql; zonder dat bestaan de RPC's niet en blijft /inzichten leeg.
 -- Draai ook inzichten-metrics.sql (tabel `tegendoelpunten` + 4 RPC's); die
 -- tabel staat bewust NIET hieronder, om dubbele registratie te voorkomen.
+-- Draai ook inzichten-metrics-fase2.sql (4 lees-RPC's, geen tabellen).
 --
 -- FOREIGN KEY OP team_id — LEES DIT BIJ EEN VERSE INSTALLATIE.
 -- Dit bestand declareert team_id bewust zonder `references`: het draait op een

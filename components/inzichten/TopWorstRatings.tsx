@@ -8,7 +8,7 @@ import InsightCard, { InsightEmpty } from './InsightCard'
 // weergave gebruikt bewust toFixed(1) en niet String(): anders staat een
 // gemiddelde van precies 8 als "8" tussen "8.2" en "7.7", wat in een lijstje
 // leest als een ander soort getal.
-function round1(n: number): number {
+export function round1(n: number): number {
   return Math.round(n * 10) / 10
 }
 

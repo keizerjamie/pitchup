@@ -58,6 +58,9 @@
 --                               en blok 22 de tabel tegendoelpunten; zonder
 --                               inzichten-metrics.sql falen die met
 --                               "relation does not exist".
+--   * blok 27                 — vereist supabase/inzichten-metrics-fase2.sql
+--                               (4 lees-RPC's, geen tabellen); geen assistent
+--                               nodig, maakt zijn eigen testdata in jan. 1990
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -1594,6 +1597,139 @@ begin
   raise notice 'OK blok 26: anon mag de inzichten-metrics-RPC''s niet uitvoeren';
 end $$;
 
+-- ── Blok 27: inzichten-metrics fase 2a (spelers) ─────────────
+-- Vereist supabase/inzichten-metrics-fase2.sql (4 lees-RPC's). Geen assistent
+-- nodig. Maakt binnen deze transactie (de rollback ruimt alles op) in TEAM_A
+-- twee wedstrijden in januari 1990 aan — een maand zonder echte data, zodat
+-- bestaande wedstrijden de noemer niet beïnvloeden — plus drie eigen spelers,
+-- een selectie, een opstelling met het id van een TEAM_B-speler en twee
+-- blessureregistraties.
+--   a. de vier RPC's met p_team_id = TEAM_B geven 0 rijen, en anon mag ze niet;
+--   b. een TEAM_B-speler in lineups.positions van een eigen wedstrijd komt niet
+--      terug uit inzichten_speelkansen(TEAM_A), en een ongeldige string of null
+--      in de JSONB laat de RPC niet falen (geen uuid-cast);
+--   c. een injured-rij van een TEAM_B-speler op een eigen event telt niet mee in
+--      inzichten_blessures_per_maand(TEAM_A);
+--   d. noemerregel: een actieve speler houdt de latere selectiewedstrijd in zijn
+--      noemer (W2), een INACTIEVE stopt bij zijn laatste voorkomen (O2).
+do $$
+declare
+  v_start date := date '1990-01-01';
+  v_end   date := date '1990-01-31';
+  v_m1 uuid; v_m2 uuid; v_actief uuid; v_inactief uuid; v_later uuid; v_vreemd uuid;
+  v_c_gelukt boolean := false;
+  n int; r record;
+begin
+  reset role;
+  if to_regprocedure('public.inzichten_speelkansen(uuid, date, date)') is null
+     or to_regprocedure('public.inzichten_rating_vorm_per_speler(uuid, date, date, int)') is null
+     or to_regprocedure('public.inzichten_training_opkomst_per_speler(uuid, date, date)') is null
+     or to_regprocedure('public.inzichten_blessures_per_maand(uuid, date, date)') is null then
+    raise exception 'INZICHTEN-METRICS FASE 2 ONTBREEKT: draai eerst supabase/inzichten-metrics-fase2.sql';
+  end if;
+  select count(*) into n from events where team_id = 'TEAM_A_UUID' and date between v_start and v_end;
+  if n <> 0 then
+    raise exception 'FOUT IN DE OPZET: TEAM_A heeft al events in januari 1990 — kies in blok 27 een andere testmaand';
+  end if;
+
+  -- Opzet als postgres (buiten RLS).
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'match', v_start)     returning id into v_m1;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'match', v_start + 1) returning id into v_m2;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-27 actief', 'Keeper', true) returning id into v_actief;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-27 inactief', 'Spits', false) returning id into v_inactief;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-27 later', 'Spits', true) returning id into v_later;
+  -- Een speler van TEAM_B: bestaande opzoeken, anders tijdelijk aanmaken.
+  select id into v_vreemd from players where team_id = 'TEAM_B_UUID' order by id limit 1;
+  if v_vreemd is null then
+    insert into players (team_id, name, position, active)
+    values ('TEAM_B_UUID', 'RLS-27 vreemd', 'Keeper', true) returning id into v_vreemd;
+  end if;
+
+  -- Wedstrijd 1: selectie actief + inactief; wedstrijd 2: selectie alleen later.
+  insert into match_squad (team_id, event_id, player_id) values
+    ('TEAM_A_UUID', v_m1, v_actief),
+    ('TEAM_A_UUID', v_m1, v_inactief),
+    ('TEAM_A_UUID', v_m2, v_later);
+  -- Opstelling wedstrijd 1: actief, de TEAM_B-speler, een ongeldige string en null.
+  insert into lineups (team_id, event_id, formation, positions) values (
+    'TEAM_A_UUID', v_m1, '4-3-3',
+    jsonb_build_array(
+      jsonb_build_object('player_id', v_actief::text, 'position_label', 'KP'),
+      jsonb_build_object('player_id', v_vreemd::text, 'position_label', 'SP'),
+      jsonb_build_object('player_id', 'geen-uuid',    'position_label', 'LB'),
+      jsonb_build_object('player_id', null,           'position_label', 'RB')));
+  -- Eigen blessure op wedstrijd 2 (telt wél), en c: een TEAM_B-speler als
+  -- injured op een eigen event met team_id = TEAM_A (mag niet tellen).
+  insert into attendance (team_id, event_id, player_id, status)
+  values ('TEAM_A_UUID', v_m2, v_later, 'injured');
+  begin
+    insert into attendance (team_id, event_id, player_id, status)
+    values ('TEAM_A_UUID', v_m1, v_vreemd, 'injured');
+    v_c_gelukt := true;
+  exception when others then
+    raise notice 'OVERGESLAGEN blok 27c: de vreemde blessurerij liet zich niet invoegen (%)', sqlstate;
+  end;
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_B_UUID') then
+    raise exception 'FOUT IN DE OPZET: OWNER_A is wél lid van TEAM_B — kies een ander TEAM_B';
+  end if;
+
+  -- a. De vier RPC's met een vreemd team-id.
+  select count(*) into n from inzichten_speelkansen('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_speelkansen geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_rating_vorm_per_speler('TEAM_B_UUID', current_date - 400, current_date + 400, 5);
+  if n <> 0 then raise exception 'LEK: inzichten_rating_vorm_per_speler geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_training_opkomst_per_speler('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_training_opkomst_per_speler geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_blessures_per_maand('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_blessures_per_maand geeft % rijen van TEAM_B', n; end if;
+  raise notice 'OK blok 27: de vier fase-2-RPC''s geven 0 rijen voor een vreemd team';
+
+  -- b. De vreemde speler uit de opstelling telt niet mee; de RPC faalt niet op
+  --    'geen-uuid' of null.
+  select count(*) into n from inzichten_speelkansen('TEAM_A_UUID', v_start, v_end) where player_id = v_vreemd;
+  if n <> 0 then raise exception 'LEK: inzichten_speelkansen geeft een TEAM_B-speler uit lineups.positions terug'; end if;
+  select * into r from inzichten_speelkansen('TEAM_A_UUID', v_start, v_end) where player_id = v_actief;
+  if not found or r.noemer <> 2 or r.selectie <> 1 or r.basis <> 1 or r.gast then
+    raise exception 'KAPOT: speelkansen van de actieve testspeler zijn % (verwacht noemer 2, selectie 1, basis 1, geen gast)', r;
+  end if;
+  raise notice 'OK blok 27: een TEAM_B-speler in de opstelling telt niet mee in speelkansen';
+
+  -- d. Noemerregel W2 + O2.
+  select * into r from inzichten_speelkansen('TEAM_A_UUID', v_start, v_end) where player_id = v_inactief;
+  if not found or r.noemer <> 1 or r.selectie <> 1 or r.basis <> 0 then
+    raise exception 'KAPOT (O2): speelkansen van de inactieve testspeler zijn % (verwacht noemer 1 — stopt bij laatste voorkomen)', r;
+  end if;
+  select * into r from inzichten_speelkansen('TEAM_A_UUID', v_start, v_end) where player_id = v_later;
+  if not found or r.noemer <> 1 or r.selectie <> 1 then
+    raise exception 'KAPOT (W2): speelkansen van de latere testspeler zijn % (verwacht noemer 1 — vanaf eerste voorkomen)', r;
+  end if;
+  raise notice 'OK blok 27: noemer vanaf eerste voorkomen, voor een inactieve speler t/m het laatste (O2)';
+
+  -- c. Blessures: alleen de eigen speler telt.
+  select geblesseerd into n from inzichten_blessures_per_maand('TEAM_A_UUID', v_start, v_end) where maand = '1990-01';
+  if n is null then raise exception 'KAPOT: inzichten_blessures_per_maand geeft geen rij voor een maand met wedstrijden'; end if;
+  if n > 1 then raise exception 'LEK: inzichten_blessures_per_maand telt een blessure van een TEAM_B-speler mee (% i.p.v. 1)', n; end if;
+  if n <> 1 then raise exception 'KAPOT: inzichten_blessures_per_maand telt % i.p.v. 1 geblesseerde speler', n; end if;
+  if v_c_gelukt then
+    raise notice 'OK blok 27: een blessure van een TEAM_B-speler op een eigen event telt niet mee';
+  end if;
+
+  reset role;
+  if has_function_privilege('anon', 'public.inzichten_speelkansen(uuid, date, date)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_rating_vorm_per_speler(uuid, date, date, int)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_training_opkomst_per_speler(uuid, date, date)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_blessures_per_maand(uuid, date, date)', 'execute') then
+    raise exception 'LEK: anon mag een fase-2-RPC uitvoeren';
+  end if;
+  raise notice 'OK blok 27: anon mag de fase-2-RPC''s niet uitvoeren';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -1623,7 +1759,8 @@ rollback;
 --
 -- DEKKING PER FASE: fase 3 (verwijderen, verlaten) staat in blok 22 en 23,
 -- fase 4 (persoonlijke oefeningen) in blok 24 (M6) en 25 (M6b), en de
--- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26. Accountverwijdering zelf
+-- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26, fase 2a
+-- (4 speler-RPC's) in blok 27. Accountverwijdering zelf
 -- (auth.admin.deleteUser) is hier niet na te bootsen; de onderdelen ervan
 -- wel: de team-opruiming is blok 22, het opzeggen van een lidmaatschap blok
 -- 23, en de cascade van een verwijderde oefening naar elk trainingsplan blok

@@ -11,8 +11,8 @@
 import { matchResult } from '@/lib/match-analysis.mjs'
 import { isDateString, toUtcMs } from '@/lib/season-dates'
 import { addDays, todayLocal } from '@/lib/utils'
-import { TEGENDOELPUNT_SOORTEN } from '@/lib/types'
-import type { HomeAway, MatchResult, MatchType, TegendoelpuntSoort } from '@/lib/types'
+import { POSITIONS, TEGENDOELPUNT_SOORTEN } from '@/lib/types'
+import type { HomeAway, MatchResult, MatchType, Position, TegendoelpuntSoort } from '@/lib/types'
 
 // Bovengrens op het aantal wedstrijdrijen dat de doelpuntengrafiek ophaalt.
 // Zonder grens bepaalt de (door de gebruiker gekozen) seizoenslengte hoeveel
@@ -1043,4 +1043,354 @@ export function telTegendoelpunten(rows: TegendoelpuntMinuutRij[]): Tegendoelpun
     metMinuut += aantal
   }
   return { perBak, perSoort, metMinuut, totaal }
+}
+
+// ── Inzichten-metrics fase 2a: spelers (supabase/inzichten-metrics-fase2.sql) ──
+// Vier RPC's tellen per speler of per maand in SQL (elk hooguit één rij per
+// speler/maand, geen `limit`); hier gebeuren alleen rangorde, drempels,
+// noemer-null en de maandreeks. Positiedekking komt uit een gewone
+// players-select. Alles puur: de invoer wordt nooit gemuteerd, telwaarden gaan
+// door telwaarde(), gelijke stand via opNaamDanId.
+
+// inzichten_speelkansen — één rij per speler met minstens één voorkomen
+// (selectie, opstelling of aanwezigheid <> 'unknown') t/m p_end, ook als
+// `noemer` 0 is. Gasten en inactieven doen mee (W3); `gast` markeert de gast.
+// `noemer` = wedstrijden MET selectie in het venster vanaf het eerste voorkomen;
+// voor een INACTIEVE speler stopt die bij zijn laatste voorkomen (O2) — dat
+// gebeurt al in SQL, hier staat dus gewoon de juiste noemer.
+// `basis` = in het opgeslagen plan, alleen in noemer-wedstrijden.
+export interface SpeelkansenRij {
+  player_id: string
+  naam: string
+  gast: boolean
+  noemer: number
+  selectie: number
+  basis: number
+}
+
+// inzichten_rating_vorm_per_speler — alleen actieve vaste spelers met ≥1
+// rating in het venster (de pagina geeft het hele seizoen mee, W5).
+// `recent_gemiddelde` = gemiddelde over de laatste p_recent beoordeelde
+// wedstrijden (RATING_TREND_VENSTER).
+export interface RatingVormRij {
+  player_id: string
+  naam: string
+  aantal: number
+  seizoen_gemiddelde: number
+  recent_gemiddelde: number
+}
+
+// inzichten_training_opkomst_per_speler — alleen trainingen (W7), inclusief
+// gasten en inactieven (W3). `afwezig` = absent + injured; unknown telt niet.
+export interface TrainingOpkomstPerSpelerRij {
+  player_id: string
+  naam: string
+  gast: boolean
+  aanwezig: number
+  afwezig: number
+}
+
+// inzichten_blessures_per_maand — één rij per maand MET minstens één training
+// of wedstrijd; `geblesseerd` = verschillende vaste spelers (ook nu-inactieve,
+// geen gasten, O4) met minstens één 'injured'-registratie. 0 = wel events,
+// geen blessure.
+export interface BlessuresPerMaandRij {
+  maand: string // 'YYYY-MM'
+  geblesseerd: number
+}
+
+// Gewone players-select (actief, vast, eigen team) voor positiedekking.
+export interface SpelerPositieRij {
+  id: string
+  name: string
+  position: string
+  secondary_positions: string[] | null
+  injured: boolean | null
+}
+
+// Minimum aantal beoordelingen in het seizoen voordat een speler als stijger
+// of daler kan verschijnen (W5). Daaronder zegt een verschil van 0,3 niets.
+export const STIJGER_MIN_BEOORDELINGEN = 8
+
+// teller ÷ noemer begrensd op 1, ongerond — alleen voor de meterbreedte; de
+// tekst blijft "x van y". null bij een noemer ≤ 0 of een niet-eindige waarde:
+// nooit NaN en nooit een verzonnen 0% (AC-A8).
+export function aandeel(teller: number, noemer: number): number | null {
+  if (!Number.isFinite(teller) || !Number.isFinite(noemer)) return null
+  if (noemer <= 0) return null
+  return Math.min(1, teller / noemer)
+}
+
+export type SpeelkansRegel = SpeelkansenRij & {
+  selectieAandeel: number | null
+  basisAandeel: number | null
+}
+
+// null-aandelen achteraan; anders aflopend.
+function aflopendMetNull(a: number | null, b: number | null): number {
+  if (a === b) return 0
+  if (a === null) return 1
+  if (b === null) return -1
+  return b - a
+}
+
+// Speelkansen per speler met aandelen. Volgorde (O5): spelers met een noemer
+// eerst, dan selectie-aandeel aflopend, basis-aandeel aflopend, naam, id. Geen
+// rangnummers of oordelen — dat is aan de UI (W4).
+export function verdeelSpeelkansen(rows: SpeelkansenRij[]): SpeelkansRegel[] {
+  const regels: SpeelkansRegel[] = []
+  for (const rij of rows) {
+    if (!rij) continue
+    const noemer = telwaarde(rij.noemer)
+    const selectie = telwaarde(rij.selectie)
+    const basis = telwaarde(rij.basis)
+    regels.push({
+      player_id: rij.player_id,
+      naam: rij.naam,
+      gast: rij.gast === true,
+      noemer,
+      selectie,
+      basis,
+      selectieAandeel: aandeel(selectie, noemer),
+      basisAandeel: aandeel(basis, noemer),
+    })
+  }
+  return regels.sort((a, b) => {
+    const metNoemer = Number(b.noemer > 0) - Number(a.noemer > 0)
+    if (metNoemer !== 0) return metNoemer
+    const sel = aflopendMetNull(a.selectieAandeel, b.selectieAandeel)
+    if (sel !== 0) return sel
+    const bas = aflopendMetNull(a.basisAandeel, b.basisAandeel)
+    if (bas !== 0) return bas
+    return opNaamDanId(a, b)
+  })
+}
+
+export type StijgerRegel = RatingVormRij & { verschil: number }
+
+export interface StijgersDalers {
+  stijgers: StijgerRegel[]
+  dalers: StijgerRegel[]
+  // Spelers met ≥ minimum beoordelingen (en eindige gemiddelden): 0 → lege
+  // staat "te weinig", > 0 met twee lege lijsten → "niemand wijkt af".
+  meegeteld: number
+}
+
+// Stijgers en dalers: recent gemiddelde tegenover het seizoensgemiddelde (W5).
+// verschil wordt op 2 decimalen afgerond, zodat float-ruis (7,3 − 7,0 =
+// 0,2999…) niet over de grens van 0,3 valt. Zelfde `>=` als de signalen.
+export function bepaalStijgersDalers(
+  rows: RatingVormRij[],
+  drempel: number = RATING_TREND_DREMPEL,
+  minimum: number = STIJGER_MIN_BEOORDELINGEN,
+): StijgersDalers {
+  const stijgers: StijgerRegel[] = []
+  const dalers: StijgerRegel[] = []
+  let meegeteld = 0
+  for (const rij of rows) {
+    if (!rij) continue
+    const aantal = telwaarde(rij.aantal)
+    if (aantal < minimum) continue
+    if (!Number.isFinite(rij.seizoen_gemiddelde) || !Number.isFinite(rij.recent_gemiddelde)) continue
+    meegeteld++
+    const verschil = Math.round((rij.recent_gemiddelde - rij.seizoen_gemiddelde) * 100) / 100
+    const regel: StijgerRegel = {
+      player_id: rij.player_id,
+      naam: rij.naam,
+      aantal,
+      seizoen_gemiddelde: rij.seizoen_gemiddelde,
+      recent_gemiddelde: rij.recent_gemiddelde,
+      verschil,
+    }
+    if (verschil >= drempel) stijgers.push(regel)
+    else if (verschil <= -drempel) dalers.push(regel)
+  }
+  stijgers.sort((a, b) => (a.verschil !== b.verschil ? b.verschil - a.verschil : opNaamDanId(a, b)))
+  dalers.sort((a, b) => (a.verschil !== b.verschil ? a.verschil - b.verschil : opNaamDanId(a, b)))
+  return { stijgers, dalers, meegeteld }
+}
+
+export interface PositieDekkingSpeler {
+  player_id: string
+  naam: string
+  secundair: boolean
+}
+
+export interface PositieDekking {
+  positie: Position
+  spelers: PositieDekkingSpeler[]
+}
+
+function isPositie(waarde: unknown): waarde is Position {
+  return typeof waarde === 'string' && (POSITIONS as string[]).includes(waarde)
+}
+
+// Fitte spelers per positie (W6), altijd alle posities in de volgorde van
+// POSITIONS. Geblesseerd (injured === true) valt af. Primair telt op
+// `position`, secundair op `secondary_positions`; dezelfde positie primair én
+// secundair telt één keer als primair. Bewust GEEN POSITION_FALLBACKS. Een
+// onbekende positiewaarde wordt genegeerd. Binnen een positie: primair vóór
+// secundair, elk op naam en id. De invoer is al gefilterd op actief + vast.
+export function dekkingPerPositie(spelers: SpelerPositieRij[]): PositieDekking[] {
+  const perPositie = new Map<Position, PositieDekkingSpeler[]>()
+  for (const positie of POSITIONS) perPositie.set(positie, [])
+  for (const speler of spelers) {
+    if (!speler || speler.injured === true) continue
+    const gezien = new Set<Position>()
+    const voegToe = (positie: unknown, secundair: boolean) => {
+      if (!isPositie(positie) || gezien.has(positie)) return
+      gezien.add(positie)
+      perPositie.get(positie)!.push({ player_id: speler.id, naam: speler.name, secundair })
+    }
+    voegToe(speler.position, false)
+    for (const positie of Array.isArray(speler.secondary_positions) ? speler.secondary_positions : []) {
+      voegToe(positie, true)
+    }
+  }
+  return POSITIONS.map((positie) => ({
+    positie,
+    spelers: perPositie.get(positie)!.sort((a, b) =>
+      a.secundair !== b.secundair ? Number(a.secundair) - Number(b.secundair) : opNaamDanId(a, b),
+    ),
+  }))
+}
+
+// Opkomst van een vaste speler: x van y trainingen + percentage.
+export interface OpkomstMetNoemer {
+  aanwezig: number
+  totaal: number
+  percentage: number
+}
+
+// Opkomst van een GAST (O3): alleen "x keer aanwezig". Gasten staan standaard
+// op afwezig voor elke training, dus een noemer of percentage zou een
+// structureel lage opkomst suggereren. totaal en percentage zijn daarom
+// altijd null.
+export interface OpkomstGast {
+  aanwezig: number
+  totaal: null
+  percentage: null
+}
+
+export interface NaastElkaarRegel {
+  player_id: string
+  naam: string
+  gast: boolean
+  // null = geen gegevens. Een gast krijgt altijd de OpkomstGast-vorm
+  // (percentage === null), nooit een noemer.
+  opkomst: OpkomstMetNoemer | OpkomstGast | null
+  // null bij noemer 0.
+  selectie: { selectie: number; noemer: number } | null
+  // null zonder rating (gasten en inactieven hebben er nooit één: de RPC kijkt
+  // alleen naar actieve vaste spelers, AC-4.4).
+  rating: { gemiddelde: number; aantal: number } | null
+}
+
+// Opkomst, selectie en rating per speler naast elkaar (W4): geen rangorde en
+// geen verband — volgorde naam, dan id. Alleen spelers met minstens één
+// niet-null kolom.
+//
+// Opkomst: vaste speler → percentage via berekenAanwezigheidPercentage
+// (null-percentage → opkomst null). Gast → alleen het aantal keer aanwezig
+// (O3), en alleen als dat > 0 is: omdat afwezig de standaard is voor een gast,
+// zegt "0 keer aanwezig" niets en zou het elke gast een regel geven.
+export function naastElkaarPerSpeler({
+  opkomst,
+  speelkansen,
+  ratings,
+}: {
+  opkomst: TrainingOpkomstPerSpelerRij[]
+  speelkansen: SpeelkansenRij[]
+  ratings: RatingPerSpelerRij[]
+}): NaastElkaarRegel[] {
+  const regels = new Map<string, NaastElkaarRegel>()
+  const opkomstTelling = new Map<string, { aanwezig: number; afwezig: number }>()
+  const regel = (player_id: string, naam: string): NaastElkaarRegel => {
+    let r = regels.get(player_id)
+    if (!r) {
+      r = { player_id, naam, gast: false, opkomst: null, selectie: null, rating: null }
+      regels.set(player_id, r)
+    }
+    return r
+  }
+
+  for (const rij of opkomst) {
+    if (!rij) continue
+    const r = regel(rij.player_id, rij.naam)
+    if (rij.gast === true) r.gast = true
+    opkomstTelling.set(rij.player_id, { aanwezig: telwaarde(rij.aanwezig), afwezig: telwaarde(rij.afwezig) })
+  }
+  for (const rij of speelkansen) {
+    if (!rij) continue
+    const r = regel(rij.player_id, rij.naam)
+    if (rij.gast === true) r.gast = true
+    const noemer = telwaarde(rij.noemer)
+    r.selectie = noemer > 0 ? { selectie: Math.min(telwaarde(rij.selectie), noemer), noemer } : null
+  }
+  for (const rij of ratings) {
+    if (!rij) continue
+    const aantal = telwaarde(rij.aantal)
+    if (aantal <= 0 || !Number.isFinite(rij.gemiddelde)) continue
+    regel(rij.player_id, rij.naam).rating = { gemiddelde: rij.gemiddelde, aantal }
+  }
+
+  // Opkomst pas hier, als de gastvlag uit álle bronnen bekend is: een speler
+  // die in één bron als gast staat, krijgt nooit een opkomst met noemer (O3).
+  for (const [player_id, { aanwezig, afwezig }] of opkomstTelling) {
+    const r = regels.get(player_id)!
+    if (r.gast) {
+      r.opkomst = aanwezig > 0 ? { aanwezig, totaal: null, percentage: null } : null
+    } else {
+      const percentage = berekenAanwezigheidPercentage(aanwezig, afwezig)
+      r.opkomst = percentage === null ? null : { aanwezig, totaal: aanwezig + afwezig, percentage }
+    }
+  }
+
+  return [...regels.values()]
+    .filter((r) => r.opkomst !== null || r.selectie !== null || r.rating !== null)
+    .sort(opNaamDanId)
+}
+
+const MAAND_RE = /^(\d{4})-(\d{2})/
+
+// 'YYYY-MM' van de maand van `start` t/m die van `end`. De reeks zelf wordt
+// puur op strings/getallen opgebouwd (geen Date, dus geen tijdzone); alleen de
+// validatie hergebruikt isDateString (lib/season-dates.ts), die in UTC rekent.
+// Ongeldige invoer of end < start → [].
+export function maandenInVenster(start: string, end: string): string[] {
+  if (!isDateString(start) || !isDateString(end) || end < start) return []
+  const [, sj, sm] = start.match(MAAND_RE)!
+  const [, ej, em] = end.match(MAAND_RE)!
+  let jaar = Number(sj)
+  let maand = Number(sm)
+  const eindJaar = Number(ej)
+  const eindMaand = Number(em)
+  const maanden: string[] = []
+  while (jaar < eindJaar || (jaar === eindJaar && maand <= eindMaand)) {
+    maanden.push(`${String(jaar).padStart(4, '0')}-${String(maand).padStart(2, '0')}`)
+    maand++
+    if (maand > 12) {
+      maand = 1
+      jaar++
+    }
+  }
+  return maanden
+}
+
+// Elke maand van het venster, met het aantal verschillende geblesseerde
+// spelers. Een maand zonder rij (geen enkele training of wedstrijd) krijgt
+// null = "geen gegevens" (AC-5.4); een maand met rij krijgt het aantal, ook 0.
+export function blessuresPerMaand(
+  rows: BlessuresPerMaandRij[],
+  venster: Seizoensvenster,
+): { maand: string; geblesseerd: number | null }[] {
+  const perMaand = new Map<string, number>()
+  for (const rij of rows) {
+    if (!rij || typeof rij.maand !== 'string' || perMaand.has(rij.maand)) continue
+    perMaand.set(rij.maand, telwaarde(rij.geblesseerd))
+  }
+  return maandenInVenster(venster.start, venster.end).map((maand) => ({
+    maand,
+    geblesseerd: perMaand.has(maand) ? perMaand.get(maand)! : null,
+  }))
 }

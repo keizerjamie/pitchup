@@ -472,6 +472,7 @@ interface Db {
   match_events: Row[]
   lineups: Row[]
   tegendoelpunten: Row[]
+  match_squad: Row[]
 }
 
 // ── Vier RPC's van supabase/inzichten-metrics.sql ─────────────────────
@@ -570,6 +571,159 @@ function rpcTegendoelpunten(db: Db, args: Row) {
   return Array.from(per.values())
 }
 
+// ── Vier RPC's van supabase/inzichten-metrics-fase2.sql (fase 2a, spelers) ──
+// Zelfde regels als hierboven: p_team_id uit de ARGUMENTEN, team_id-filter op
+// élke gejoinde tabel (ook de players-lookup van lineups.positions), en
+// terugvallen op [] voor ontbrekende tabellen. De SQL zelf blijft ongedekt.
+function spelersVanTeam(db: Db, teamId: string) {
+  return new Map(db.players.filter((p) => p.team_id === teamId).map((p) => [p.id as string, p]))
+}
+
+function rpcSpeelkansen(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const spelers = spelersVanTeam(db, p_team_id)
+  const wedstrijden = new Map(
+    db.events
+      .filter((e) => e.team_id === p_team_id && e.type === 'match' && (e.date as string) <= p_end)
+      .map((e) => [e.id as string, e]),
+  )
+  // selectie: match_squad-rij van dit team met een speler van dit team
+  const selectie = new Set<string>()
+  for (const ms of db.match_squad ?? []) {
+    if (ms.team_id !== p_team_id || !spelers.has(ms.player_id as string)) continue
+    selectie.add(`${ms.event_id}|${ms.player_id}`)
+  }
+  // basis: player_id uit lineups.positions (JSONB, tekstvergelijking) telt alleen
+  // als het een speler van DIT team is
+  const basis = new Set<string>()
+  for (const l of db.lineups ?? []) {
+    if (l.team_id !== p_team_id || !Array.isArray(l.positions)) continue
+    for (const pos of l.positions as Row[]) {
+      const id = pos?.player_id
+      if (typeof id === 'string' && spelers.has(id)) basis.add(`${l.event_id}|${id}`)
+    }
+  }
+  // aanwezigheid: alleen status <> 'unknown'
+  const aanwezig = new Set<string>()
+  for (const a of db.attendance) {
+    if (a.team_id !== p_team_id || a.status === 'unknown' || !spelers.has(a.player_id as string)) continue
+    aanwezig.add(`${a.event_id}|${a.player_id}`)
+  }
+  // eerste en laatste voorkomen per speler (alleen bij wedstrijden t/m p_end)
+  const voorkomen = new Map<string, { eerste: string; laatste: string }>()
+  for (const sleutel of [...selectie, ...basis, ...aanwezig]) {
+    const [eventId, playerId] = sleutel.split('|')
+    const w = wedstrijden.get(eventId)
+    if (!w) continue
+    const datum = w.date as string
+    const cur = voorkomen.get(playerId)
+    if (!cur) voorkomen.set(playerId, { eerste: datum, laatste: datum })
+    else {
+      if (datum < cur.eerste) cur.eerste = datum
+      if (datum > cur.laatste) cur.laatste = datum
+    }
+  }
+  const noemerWedstrijden = [...wedstrijden.values()].filter(
+    (w) => (w.date as string) >= p_start && [...selectie].some((k) => k.startsWith(`${w.id}|`)),
+  )
+  return [...voorkomen.entries()]
+    .map(([playerId, f]) => {
+      const p = spelers.get(playerId)!
+      // O2: een inactieve speler (active === false) telt alleen t/m zijn laatste
+      // voorkomen; active null/undefined telt als actief.
+      const teller = noemerWedstrijden.filter(
+        (nw) => (nw.date as string) >= f.eerste && (p.active !== false || (nw.date as string) <= f.laatste),
+      )
+      return {
+        player_id: playerId,
+        naam: p.name,
+        gast: p.type === 'guest',
+        noemer: teller.length,
+        selectie: teller.filter((nw) => selectie.has(`${nw.id}|${playerId}`)).length,
+        basis: teller.filter((nw) => basis.has(`${nw.id}|${playerId}`)).length,
+      }
+    })
+    .sort((a, b) => String(a.naam).localeCompare(String(b.naam)) || a.player_id.localeCompare(b.player_id))
+}
+
+function rpcRatingVormPerSpeler(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end, p_recent } = args as {
+    p_team_id: string; p_start: string; p_end: string; p_recent: number
+  }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const spelers = spelersVanTeam(db, p_team_id)
+  const perSpeler = new Map<string, { datum: string; eventId: string; rating: number }[]>()
+  for (const r of db.match_ratings) {
+    if (r.team_id !== p_team_id) continue
+    const e = events.get(r.event_id as string)
+    if (!e || e.team_id !== p_team_id || e.type !== 'match' || !inRange(e.date as string, p_start, p_end)) continue
+    const p = spelers.get(r.player_id as string)
+    if (!p || p.active !== true || p.type !== 'regular') continue
+    const lijst = perSpeler.get(p.id as string) ?? []
+    lijst.push({ datum: e.date as string, eventId: e.id as string, rating: r.rating as number })
+    perSpeler.set(p.id as string, lijst)
+  }
+  const gem = (xs: { rating: number }[]) => xs.reduce((a, b) => a + b.rating, 0) / xs.length
+  return [...perSpeler.entries()]
+    .map(([playerId, lijst]) => {
+      // nieuwste eerst: datum aflopend, dan event-id aflopend
+      const nieuwsteEerst = [...lijst].sort((a, b) => b.datum.localeCompare(a.datum) || b.eventId.localeCompare(a.eventId))
+      return {
+        player_id: playerId,
+        naam: spelers.get(playerId)!.name,
+        aantal: lijst.length,
+        seizoen_gemiddelde: gem(lijst),
+        recent_gemiddelde: gem(nieuwsteEerst.slice(0, Math.max(p_recent, 1))),
+      }
+    })
+    .sort((a, b) => String(a.naam).localeCompare(String(b.naam)) || a.player_id.localeCompare(b.player_id))
+}
+
+function rpcTrainingOpkomstPerSpeler(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const spelers = spelersVanTeam(db, p_team_id)
+  const per = new Map<string, { aanwezig: number; afwezig: number }>()
+  for (const a of db.attendance) {
+    if (a.team_id !== p_team_id) continue
+    const e = events.get(a.event_id as string)
+    if (!e || e.team_id !== p_team_id || e.type !== 'training' || !inRange(e.date as string, p_start, p_end)) continue
+    const p = spelers.get(a.player_id as string)
+    if (!p) continue
+    const cur = per.get(p.id as string) ?? { aanwezig: 0, afwezig: 0 }
+    if (a.status === 'present') cur.aanwezig++
+    else if (a.status === 'absent' || a.status === 'injured') cur.afwezig++
+    per.set(p.id as string, cur)
+  }
+  return [...per.entries()]
+    .map(([playerId, v]) => {
+      const p = spelers.get(playerId)!
+      return { player_id: playerId, naam: p.name, gast: p.type === 'guest', ...v }
+    })
+    .sort((a, b) => String(a.naam).localeCompare(String(b.naam)) || a.player_id.localeCompare(b.player_id))
+}
+
+function rpcBlessuresPerMaand(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const spelers = spelersVanTeam(db, p_team_id)
+  const per = new Map<string, Set<string>>()
+  for (const e of db.events) {
+    if (e.team_id !== p_team_id || e.type === 'meting' || !inRange(e.date as string, p_start, p_end)) continue
+    const maand = (e.date as string).slice(0, 7)
+    const set = per.get(maand) ?? new Set<string>()
+    per.set(maand, set)
+    // left join: de team- en statusfilters zitten in de ON-clausule
+    for (const a of db.attendance) {
+      if (a.event_id !== e.id || a.team_id !== p_team_id || a.status !== 'injured') continue
+      const p = spelers.get(a.player_id as string)
+      if (p && p.type === 'regular') set.add(p.id as string)
+    }
+  }
+  return [...per.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([maand, set]) => ({ maand, geblesseerd: set.size }))
+}
+
 const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_aanwezigheid: rpcAanwezigheid,
   inzichten_training_opkomst_per_maand: rpcMaandOpkomst,
@@ -581,6 +735,10 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_speler_momenten: rpcSpelerMomenten,
   inzichten_doelpunten_per_minuut: rpcDoelpuntenPerMinuut,
   inzichten_tegendoelpunten: rpcTegendoelpunten,
+  inzichten_speelkansen: rpcSpeelkansen,
+  inzichten_rating_vorm_per_speler: rpcRatingVormPerSpeler,
+  inzichten_training_opkomst_per_speler: rpcTrainingOpkomstPerSpeler,
+  inzichten_blessures_per_maand: rpcBlessuresPerMaand,
 }
 
 function makeSupabaseMock(opts: {
@@ -602,6 +760,8 @@ function makeSupabaseMock(opts: {
   matchEvents?: Row[]
   lineups?: Row[]
   tegendoelpunten?: Row[]
+  // Bron van inzichten_speelkansen (fase 2a).
+  matchSquad?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const db: Db = {
@@ -621,6 +781,7 @@ function makeSupabaseMock(opts: {
     match_events: opts.matchEvents ?? [],
     lineups: opts.lineups ?? [],
     tegendoelpunten: opts.tegendoelpunten ?? [],
+    match_squad: opts.matchSquad ?? [],
   }
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)
@@ -804,8 +965,17 @@ describe('periodefilter', () => {
   // Startdatum die de RPC's meekregen. Alle zes gebruiken dezelfde p_start,
   // op de aanwezigheids-RPC's na — die knippen daarnaast op gisteren af, maar
   // dat raakt p_end, niet p_start.
+  // inzichten_rating_vorm_per_speler krijgt BEWUST altijd de seizoensstart
+  // (W5: stijgers/dalers volgen de periodekiezer niet) en staat dus buiten deze
+  // lijst; een aparte test hieronder bewaakt dat.
   function rpcStarts(rpcCalls: { name: string; args: unknown }[]): string[] {
-    return [...new Set(rpcCalls.map((c) => String((c.args as { p_start?: unknown }).p_start)))]
+    return [
+      ...new Set(
+        rpcCalls
+          .filter((c) => c.name !== 'inzichten_rating_vorm_per_speler')
+          .map((c) => String((c.args as { p_start?: unknown }).p_start)),
+      ),
+    ]
   }
 
   it('zonder parameter: het volledige seizoensvenster gaat naar de RPC\'s', async () => {
@@ -821,6 +991,15 @@ describe('periodefilter', () => {
   it('?periode=8w knipt de start af op 56 dagen terug', async () => {
     const { rpcCalls } = await renderInzichten({ settings }, '8w')
     expect(rpcStarts(rpcCalls)).toEqual(['2026-08-21'])
+  })
+
+  it('de rating-vorm-RPC krijgt bij 4w en 8w altijd het hele seizoen (W5)', async () => {
+    for (const periode of ['4w', '8w']) {
+      const { rpcCalls, unmount } = await renderInzichten({ settings }, periode)
+      const vorm = rpcCalls.find((c) => c.name === 'inzichten_rating_vorm_per_speler')!
+      expect(vorm.args).toMatchObject({ p_team_id: TEAM, p_start: '2026-07-01', p_end: '2026-12-31', p_recent: 5 })
+      unmount()
+    }
   })
 
   it('een onbekende periode valt terug op het hele seizoen — nooit stilzwijgend een smaller venster', async () => {
