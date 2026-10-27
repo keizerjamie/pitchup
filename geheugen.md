@@ -4136,3 +4136,45 @@ Eerste van 3 fasen (fase 2 spelers, fase 3 training/kwaliteit volgen apart). Ket
   ze tellen niet meer. Verouderde "dertien tabellen"-commentaren in `app/actions/auth.ts`, `app/actions/team.ts`,
   `supabase/team-fk-naar-teams.sql`, `app/actions/team.test.ts`, `team-verwijderen.acceptance.test.tsx`.
   Rooktest met twee echte accounts na live open.
+
+## Feature: Inzichten-metrics fase 2a — spelerskaarten (2026-10-27, `a6b8ea2`, live)
+Tweede deel van de inzichten-metrics (fase 2 is gesplitst: 2a = idee 1–5 zonder migratie van tabellen, 2b =
+speelminuten/wissels met nieuwe tabel, nog te bouwen). Ketendocumenten:
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-metrics/fase2/` (01–07).
+- **Wat:** vijf kaarten onder de fase-1-kaarten, volgorde: `SpeelkansenKaart` (volle breedte),
+  `StijgersDalersKaart`, `PositiedekkingKaart`, `OpkomstSelectieRatingKaart` (volle breedte),
+  `BlessuresPerMaandChart`. KPI-strook, signalen en seizoensrapport nog steeds bewust NIET (na fase 3).
+- **Nieuwe infra:** alleen 4 lees-RPC's in **`supabase/inzichten-metrics-fase2.sql`** (eigen bestand: de
+  structuurtest van fase 1 eist dat `inzichten-metrics.sql` precies vier functies bevat):
+  `inzichten_speelkansen`, `inzichten_rating_vorm_per_speler` (extra param `p_recent`),
+  `inzichten_training_opkomst_per_speler`, `inzichten_blessures_per_maand`. Gedraaid op productie 2026-10-27 via
+  Supabase-MCP (migratie `inzichten_metrics_fase2a`); verificatieblok 27 geslaagd; bodies identiek. Positiedekking
+  is een gewone `.from('players')`-query (aparte query naast de spelerskiezer, eigen foutvlag).
+- **Alles in SQL geaggregeerd** (hooguit één rij per speler of maand), dus geen `limit` en geen afgekapt-melding;
+  pure functies in `lib/inzichten.ts`: `verdeelSpeelkansen`, `bepaalStijgersDalers`, `dekkingPerPositie`,
+  `naastElkaarPerSpeler`, `maandenInVenster`, `blessuresPerMaand`, `aandeel`, `STIJGER_MIN_BEOORDELINGEN = 8`.
+- **Noemer speelkansen (W2/O2/O6):** alleen wedstrijden met ≥1 `match_squad`-rij, per speler vanaf zijn eerste
+  voorkomen (selectie, opstelling of aanwezigheid ≠ `unknown`, ook vóór het venster). Voor een inactieve speler
+  stopt de noemer bij zijn laatste voorkomen (`p.active is distinct from false or nw.date <= f.laatste`; active
+  null = actief). `unknown` telt niet omdat de lazy backfill op de eventpagina die rijen voor alle huidige spelers
+  aanmaakt bij het openen van een oude wedstrijd. Geselecteerd maar afwezig telt als geselecteerd. Basis = het
+  opgeslagen plan (lineup is een plan, geen bewijs; alleen 11-tallen in de bouwer).
+- **JSONB-tenantgrens:** `lineups.positions` → `p.id::text = pos.elem ->> 'player_id'` met `p.team_id = p_team_id`,
+  bewust GEEN `::uuid`-cast (een ongeldige string zou de hele RPC laten falen) en een `jsonb_typeof`-guard.
+- **Overige besluiten:** gasten + inactieven tellen mee in speelkansen en opkomst (label "gast"); stijgers/dalers
+  en positiedekking alleen actieve vaste spelers. Stijgers = laatste 5 beoordelingen vs. seizoensgemiddelde,
+  drempel 0,3 (`>=`, afgerond op 2 decimalen), min. 8, altijd hele seizoen. Positiedekking: alleen
+  `secondary_positions`, geen `POSITION_FALLBACKS`; neutrale tekst, geen alarm; `heeftSpelers`-prop zodat leeg team
+  ≠ "iedereen geblesseerd". Opkomst = alleen trainingen; gasten alleen "x keer aanwezig" zonder noemer (O3), gast 0×
+  → geen regel. Blessures = verschillende vaste spelers (incl. nu-inactief, geen gasten) met `injured` per
+  kalendermaand; maand zonder activiteiten = null ("—"), niet 0. Vensters: speelkansen/opkomst/blessures `verleden`,
+  stijgers `seizoen`, rating-kolom kaart 4 `venster`, positiedekking geen.
+- **Tests:** `inzichten-metrics-fase2.acceptance.test.tsx` (123, ook onder 3 tijdzones),
+  `inzichten-metrics-fase2-migratie.acceptance.test.ts` (teamfilter per CTE/segment, niet per functie — anders
+  maskeert één `p.team_id` een ontbrekende), handlers in `inzichten.acceptance.test.tsx` bootsen O2 na; mutatiecheck
+  55/55 rood.
+- **Gotchas:** verificatieblokken zetten testdata in een maand zonder echte data (januari 1990) zodat functionele
+  controles niet van productiedata afhangen. `TegendoelpuntenSectie.test.tsx` (fase 1) en
+  `nulmeting-per-onderdeel` AC20 zijn wisselvallig in de volle suite (los groen); `cyclusweek-correctie` AC1/AC12
+  blijven bekend rood.
+- **Open:** rooktest 2a door Jamie; fase 2b (speelminuten/wissels, W8/W9 nog te beslissen); fase 3.
