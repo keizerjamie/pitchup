@@ -374,6 +374,8 @@ const HANDLERS: Harness['handlers'] = {
   inzichten_rating_vorm_per_speler: hRatingVorm,
   inzichten_training_opkomst_per_speler: hTrainingOpkomst,
   inzichten_blessures_per_maand: hBlessures,
+  // Fase 2b: dit fase-2a-harnas test die kaart niet; een lege bron volstaat.
+  inzichten_speelminuten_per_speler: () => [],
 }
 const NIEUWE_RPCS = [
   'inzichten_speelkansen',

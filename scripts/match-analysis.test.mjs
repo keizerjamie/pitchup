@@ -15,6 +15,9 @@ import {
   MATCH_EVENT_KINDS,
   TEGENDOELPUNT_SOORTEN,
   isValidTegendoelpuntSoort,
+  MAX_WISSELS,
+  isValidSpeelminuten,
+  isValidWissels,
 } from '../lib/match-analysis.mjs'
 
 test('clampGoals clamps to 0..99 integers', () => {
@@ -78,6 +81,33 @@ test('isValidMinute accepts null or integer 0..130', () => {
   assert.equal(isValidMinute(45.5), false)
   assert.equal(isValidMinute(undefined), false)
   assert.equal(isValidMinute('12'), false)
+})
+
+test('isValidSpeelminuten: verplicht geheel getal 0..130 (fase 2b)', () => {
+  assert.equal(isValidSpeelminuten(0), true, 'ondergrens 0')
+  assert.equal(isValidSpeelminuten(90), true)
+  assert.equal(isValidSpeelminuten(130), true, 'bovengrens 130 = isValidMinute')
+  assert.equal(isValidSpeelminuten(131), false)
+  assert.equal(isValidSpeelminuten(-1), false)
+  assert.equal(isValidSpeelminuten(12.5), false)
+  assert.equal(isValidSpeelminuten('12'), false)
+  assert.equal(isValidSpeelminuten(null), false, 'null is hier niet "geen minuut" maar ongeldig')
+  assert.equal(isValidSpeelminuten(undefined), false)
+  assert.equal(isValidSpeelminuten(NaN), false)
+})
+
+test('isValidWissels: geheel getal 0..MAX_WISSELS (99)', () => {
+  assert.equal(MAX_WISSELS, 99)
+  assert.equal(isValidWissels(0), true)
+  assert.equal(isValidWissels(2), true)
+  assert.equal(isValidWissels(99), true)
+  assert.equal(isValidWissels(100), false)
+  assert.equal(isValidWissels(-1), false)
+  assert.equal(isValidWissels(1.5), false)
+  assert.equal(isValidWissels(null), false)
+  assert.equal(isValidWissels(undefined), false)
+  assert.equal(isValidWissels('2'), false)
+  assert.equal(isValidWissels(NaN), false)
 })
 
 test('goalsSum counts only goal-kind events', () => {

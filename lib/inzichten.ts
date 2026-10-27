@@ -1394,3 +1394,82 @@ export function blessuresPerMaand(
     geblesseerd: perMaand.has(maand) ? perMaand.get(maand)! : null,
   }))
 }
+
+// ── Inzichten-metrics fase 2b: speelminuten (supabase/inzichten-metrics-fase2b.sql) ──
+// inzichten_speelminuten_per_speler telt in SQL per speler (hooguit één rij
+// per speler, geen `limit`); hier gebeuren alleen gemiddelde, meterbreedte en
+// volgorde. Puur: de invoer wordt nooit gemuteerd, telwaarden gaan door
+// telwaarde(), gelijke stand via opNaamDanId.
+
+// Eén rij per speler MET een speelminuten-rij in het venster (ook gast of
+// inactief, M4) plus elke actieve vaste speler zonder rij (`wedstrijden` 0,
+// `minuten`/`wissels` null). `noemer` = wedstrijden in het venster met ≥1 rij
+// (M3), op elke rij gelijk. Geen rijen als er geen enkele zo'n wedstrijd is.
+export interface SpeelminutenRij {
+  player_id: string
+  naam: string
+  gast: boolean
+  wedstrijden: number
+  minuten: number | null
+  wissels: number | null
+  noemer: number
+}
+
+export type SpeelminutenRegel = SpeelminutenRij & {
+  gemiddelde: number | null
+  minutenAandeel: number | null
+}
+
+export interface SpeelminutenVerdeling {
+  regels: SpeelminutenRegel[]
+  noemer: number
+}
+
+// Speelminuten per speler. `noemer` = de grootste noemer uit de rijen; is die
+// 0, dan zijn er geen regels (lege staat AC-K.9). Een speler zonder rij
+// (`wedstrijden` 0) krijgt overal null — "geen gegevens", nooit een verzonnen
+// 0 (AC-K.4); een ingevoerde 0 blijft 0. `gemiddelde` = hele minuten per
+// wedstrijd met minuten (AC-A10). `minutenAandeel` = minuten t.o.v. het
+// hoogste totaal, alleen voor de meterbreedte; null als iedereen 0 heeft.
+// Volgorde (AC-A9, O4): spelers met minuten-wedstrijden eerst, dan minuten
+// aflopend, wedstrijden aflopend, naam, id. Geen rangnummers (W4).
+export function verdeelSpeelminuten(rows: SpeelminutenRij[]): SpeelminutenVerdeling {
+  let noemer = 0
+  for (const rij of rows) {
+    if (rij) noemer = Math.max(noemer, telwaarde(rij.noemer))
+  }
+  if (noemer === 0) return { regels: [], noemer: 0 }
+
+  const schoon: SpeelminutenRij[] = []
+  for (const rij of rows) {
+    if (!rij) continue
+    const wedstrijden = telwaarde(rij.wedstrijden)
+    schoon.push({
+      player_id: rij.player_id,
+      naam: rij.naam,
+      gast: rij.gast === true,
+      wedstrijden,
+      minuten: wedstrijden > 0 ? telwaarde(rij.minuten) : null,
+      wissels: wedstrijden > 0 ? telwaarde(rij.wissels) : null,
+      noemer,
+    })
+  }
+
+  const maxMinuten = schoon.reduce((max, r) => Math.max(max, r.minuten ?? 0), 0)
+  const regels: SpeelminutenRegel[] = schoon.map((r) => ({
+    ...r,
+    gemiddelde: r.minuten !== null && r.wedstrijden > 0 ? Math.round(r.minuten / r.wedstrijden) : null,
+    minutenAandeel: r.minuten !== null ? aandeel(r.minuten, maxMinuten) : null,
+  }))
+
+  regels.sort((a, b) => {
+    const metMinuten = Number(b.wedstrijden > 0) - Number(a.wedstrijden > 0)
+    if (metMinuten !== 0) return metMinuten
+    const min = (b.minuten ?? 0) - (a.minuten ?? 0)
+    if (min !== 0) return min
+    const wed = b.wedstrijden - a.wedstrijden
+    if (wed !== 0) return wed
+    return opNaamDanId(a, b)
+  })
+  return { regels, noemer }
+}

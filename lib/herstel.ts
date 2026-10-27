@@ -50,6 +50,20 @@ export type HerstelTegendoelpunt = {
   createdAt: string | null
 }
 
+// Speelminuten-rij van één speler in één wedstrijd (app/actions/speelminuten.ts).
+// Herstel overschrijft nooit: staat er intussen een rij voor (eventId,
+// playerId), dan wint die (laatste wint).
+export type HerstelSpeelminuten = {
+  soort: 'speelminuten'
+  teamId: string
+  id: string
+  eventId: string
+  playerId: string
+  minuten: number
+  wissels: number
+  createdAt: string | null
+}
+
 export type HerstelAfmeldperiode = {
   soort: 'afmeldperiode'
   teamId: string

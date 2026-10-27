@@ -2,10 +2,11 @@ import { notFound } from 'next/navigation'
 import PageHeader from '@/components/ui/PageHeader'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
-import { Player, MatchRating, MatchEvent, Tegendoelpunt } from '@/lib/types'
+import { Player, MatchRating, MatchEvent, Tegendoelpunt, Speelminuten } from '@/lib/types'
 import MatchAnalysisEditor from '@/components/MatchAnalysisEditor'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
+import { todayLocal } from '@/lib/utils'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -16,18 +17,23 @@ export default async function AnalysisPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: attendance }, { data: ratings }, { data: matchEvents }, { data: teamNameRow }, { data: tegendoelpunten, error: tegendoelpuntenError }] = await Promise.all([
+  const [{ data: event }, { data: attendance }, { data: ratings }, { data: matchEvents }, { data: teamNameRow }, { data: tegendoelpunten, error: tegendoelpuntenError }, { data: speelminutenRijen, error: speelminutenError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_ratings').select('id,event_id,player_id,rating,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_events').select('id,event_id,player_id,kind,minute,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('settings').select('value').eq('team_id', ctx.teamId).eq('key', 'team_name').maybeSingle(),
     supabase.from('tegendoelpunten').select('id,event_id,soort,minute,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
+    supabase.from('speelminuten').select('id,event_id,player_id,minuten,wissels,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
   ])
 
   // Een falende tegendoelpunten-query (bv. migratie nog niet gedraaid) mag de
   // analysepagina niet breken: loggen en met een lege lijst doorgaan.
   if (tegendoelpuntenError) logError('analysis.tegendoelpunten', tegendoelpuntenError)
+
+  // Idem voor speelminuten (migratie fase 2b): de sectie toont dan een melding
+  // in plaats van invoer, de rest van de pagina werkt door (AC-A12).
+  if (speelminutenError) logError('analysis.speelminuten', speelminutenError)
 
   if (!event || event.type !== 'match') notFound()
 
@@ -48,6 +54,32 @@ export default async function AnalysisPage({ params }: Props) {
   const players: Player[] = allPlayers ?? []
   const presentPlayers = players.filter((p) => presentPlayerIds.has(p.id))
 
+  // Speelminuten bestaan pas vanaf de wedstrijddag (M5). Stringvergelijking op
+  // YYYY-MM-DD, zoals de server-actions (fail-safe op een UTC-klok).
+  const wedstrijdGespeeld = typeof event.date === 'string' && event.date <= todayLocal()
+  const speelminuten: Speelminuten[] = speelminutenError ? [] : ((speelminutenRijen ?? []) as Speelminuten[])
+
+  // Namen voor rijen van spelers buiten presentPlayers: eerst de actieve
+  // spelers, de rest (inactieven) met één extra teamgefilterde query.
+  const speelminutenNamen: Record<string, string> = {}
+  const ontbrekend: string[] = []
+  for (const r of speelminuten) {
+    if (presentPlayers.some((p) => p.id === r.player_id)) continue
+    const bekend = players.find((p) => p.id === r.player_id)
+    if (bekend) speelminutenNamen[r.player_id] = bekend.name
+    else ontbrekend.push(r.player_id)
+  }
+  if (ontbrekend.length > 0) {
+    const { data: inactief, error: inactiefError } = await supabase
+      .from('players')
+      .select('id,name')
+      .eq('team_id', ctx.teamId)
+      .in('id', ontbrekend)
+    if (inactiefError) logError('analysis.speelminutenNamen', inactiefError)
+    for (const id of ontbrekend) speelminutenNamen[id] = '—'
+    for (const p of (inactief ?? []) as { id: string; name: string }[]) speelminutenNamen[p.id] = p.name
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <PageHeader backFallback={`/events/${id}`} title={t.analysis.title} subtitle={`${t.lineup.vsLabel} ${event.opponent}`} />
@@ -64,6 +96,10 @@ export default async function AnalysisPage({ params }: Props) {
         initialEvents={(matchEvents ?? []) as MatchEvent[]}
         canEdit={canEdit(ctx, 'wedstrijd')}
         initialTegendoelpunten={tegendoelpuntenError ? [] : ((tegendoelpunten ?? []) as Tegendoelpunt[])}
+        initialSpeelminuten={speelminuten}
+        speelminutenNamen={speelminutenNamen}
+        wedstrijdGespeeld={wedstrijdGespeeld}
+        speelminutenFout={!!speelminutenError}
       />
     </div>
   )

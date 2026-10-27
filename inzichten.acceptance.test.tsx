@@ -473,6 +473,7 @@ interface Db {
   lineups: Row[]
   tegendoelpunten: Row[]
   match_squad: Row[]
+  speelminuten: Row[]
 }
 
 // ── Vier RPC's van supabase/inzichten-metrics.sql ─────────────────────
@@ -724,6 +725,47 @@ function rpcBlessuresPerMaand(db: Db, args: Row) {
     .map(([maand, set]) => ({ maand, geblesseerd: set.size }))
 }
 
+// Fase 2b: bootst inzichten_speelminuten_per_speler na (supabase/
+// inzichten-metrics-fase2b.sql). Teamfilter op speelminuten (sm), events (e),
+// players (pl/p); alleen wedstrijden; de noemer telt wedstrijden met >=1 rij;
+// spelers met een rij doen mee (ook gast/inactief), actieve vaste spelers
+// zonder rij komen erbij met wedstrijden 0; geen rijen bij noemer 0.
+function rpcSpeelminuten(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const events = new Map(db.events.map((e) => [e.id as string, e]))
+  const spelers = spelersVanTeam(db, p_team_id)
+  const rijen = db.speelminuten.filter((sm) => {
+    if (sm.team_id !== p_team_id) return false
+    const e = events.get(sm.event_id as string)
+    return !!e && e.team_id === p_team_id && e.type === 'match' && inRange(e.date as string, p_start, p_end) && spelers.has(sm.player_id as string)
+  })
+  const noemer = new Set(rijen.map((r) => r.event_id as string)).size
+  if (noemer === 0) return []
+  const per = new Map<string, { wedstrijden: number; minuten: number; wissels: number }>()
+  for (const r of rijen) {
+    const cur = per.get(r.player_id as string) ?? { wedstrijden: 0, minuten: 0, wissels: 0 }
+    cur.wedstrijden++
+    cur.minuten += r.minuten as number
+    cur.wissels += r.wissels as number
+    per.set(r.player_id as string, cur)
+  }
+  return [...spelers.values()]
+    .filter((p) => per.has(p.id as string) || (p.active !== false && p.type === 'regular'))
+    .map((p) => {
+      const v = per.get(p.id as string)
+      return {
+        player_id: p.id,
+        naam: p.name,
+        gast: p.type === 'guest',
+        wedstrijden: v?.wedstrijden ?? 0,
+        minuten: v ? v.minuten : null,
+        wissels: v ? v.wissels : null,
+        noemer,
+      }
+    })
+    .sort((a, b) => String(a.naam).localeCompare(String(b.naam)) || String(a.player_id).localeCompare(String(b.player_id)))
+}
+
 const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_aanwezigheid: rpcAanwezigheid,
   inzichten_training_opkomst_per_maand: rpcMaandOpkomst,
@@ -739,6 +781,7 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_rating_vorm_per_speler: rpcRatingVormPerSpeler,
   inzichten_training_opkomst_per_speler: rpcTrainingOpkomstPerSpeler,
   inzichten_blessures_per_maand: rpcBlessuresPerMaand,
+  inzichten_speelminuten_per_speler: rpcSpeelminuten,
 }
 
 function makeSupabaseMock(opts: {
@@ -762,6 +805,8 @@ function makeSupabaseMock(opts: {
   tegendoelpunten?: Row[]
   // Bron van inzichten_speelkansen (fase 2a).
   matchSquad?: Row[]
+  // Bron van inzichten_speelminuten_per_speler (fase 2b).
+  speelminuten?: Row[]
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const db: Db = {
@@ -782,6 +827,7 @@ function makeSupabaseMock(opts: {
     lineups: opts.lineups ?? [],
     tegendoelpunten: opts.tegendoelpunten ?? [],
     match_squad: opts.matchSquad ?? [],
+    speelminuten: opts.speelminuten ?? [],
   }
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)

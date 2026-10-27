@@ -2,9 +2,10 @@
 
 import { useState, useTransition, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Tegendoelpunt, MatchEvent, MatchEventKind, MatchRating, Player, HomeAway, MATCH_EVENT_KINDS, POSITION_ABBREVIATIONS } from '@/lib/types'
+import { Tegendoelpunt, Speelminuten, MatchEvent, MatchEventKind, MatchRating, Player, HomeAway, MATCH_EVENT_KINDS, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { saveMatchResult, saveMatchRating, addMatchEvent, deleteMatchEvent, herstelWedstrijdMoment } from '@/app/actions/match-analysis'
 import TegendoelpuntenSectie from '@/components/TegendoelpuntenSectie'
+import SpeelminutenSectie from '@/components/SpeelminutenSectie'
 import { goalsSum } from '@/lib/match-analysis.mjs'
 import { useDict } from '@/lib/i18n-context'
 import { useToast } from '@/components/ui/Toast'
@@ -36,6 +37,14 @@ interface Props {
   canEdit?: boolean
   // Optioneel (default []), zodat bestaande aanroepers en tests niet breken.
   initialTegendoelpunten?: Tegendoelpunt[]
+  // Fase 2b, allemaal optioneel zodat bestaande aanroepers en tests niet breken.
+  initialSpeelminuten?: Speelminuten[]
+  // Namen van spelers met een speelminuten-rij die niet in presentPlayers zitten.
+  speelminutenNamen?: Record<string, string>
+  // Default false (fail-closed): de server weigert minuten voor een
+  // toekomstige wedstrijd toch al.
+  wedstrijdGespeeld?: boolean
+  speelminutenFout?: boolean
 }
 
 // Colour tokens per event kind. Cards (yellow/red) render as a coloured chip
@@ -43,6 +52,9 @@ interface Props {
 // Stabiele referentie: een nieuwe [] per render zou de prop-naar-state-sync in
 // TegendoelpuntenSectie elke render laten afgaan.
 const EMPTY_TEGENDOELPUNTEN: Tegendoelpunt[] = []
+// Zelfde reden voor de speelminuten-props.
+const EMPTY_SPEELMINUTEN: Speelminuten[] = []
+const EMPTY_SPEELMINUTEN_NAMEN: Record<string, string> = {}
 
 const KIND_COLORS: Record<MatchEventKind, string> = {
   goal: '#16a34a',
@@ -72,6 +84,8 @@ export default function MatchAnalysisEditor({
   eventId, presentPlayers, teamName, opponent, homeAway,
   initialGoalsFor, initialGoalsAgainst, initialRatings, initialEvents,
   canEdit = true, initialTegendoelpunten = EMPTY_TEGENDOELPUNTEN,
+  initialSpeelminuten = EMPTY_SPEELMINUTEN, speelminutenNamen = EMPTY_SPEELMINUTEN_NAMEN,
+  wedstrijdGespeeld = false, speelminutenFout = false,
 }: Props) {
   const t = useDict()
   const router = useRouter()
@@ -346,6 +360,17 @@ export default function MatchAnalysisEditor({
           })}
         </div>
       </section>
+
+      {/* ── Speelminuten en wissels ── */}
+      <SpeelminutenSectie
+        eventId={eventId}
+        spelers={presentPlayers}
+        initialSpeelminuten={initialSpeelminuten}
+        overigeNamen={speelminutenNamen}
+        canEdit={canEdit}
+        wedstrijdGespeeld={wedstrijdGespeeld}
+        bronFout={speelminutenFout}
+      />
 
       {/* ── Events ── */}
       <section className="flex flex-col gap-3">

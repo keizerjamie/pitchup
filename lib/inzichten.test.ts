@@ -1493,3 +1493,107 @@ describe('blessuresPerMaand', () => {
     expect(rows).toEqual(kopie)
   })
 })
+
+// ── Fase 2b: speelminuten ────────────────────────────────────────────
+import { verdeelSpeelminuten, type SpeelminutenRij } from '@/lib/inzichten'
+
+function minutenRij(over: Partial<SpeelminutenRij> = {}): SpeelminutenRij {
+  return { player_id: 'p1', naam: 'Speler', gast: false, wedstrijden: 1, minuten: 60, wissels: 1, noemer: 3, ...over }
+}
+
+describe('verdeelSpeelminuten', () => {
+  it('rondt het gemiddelde af op hele minuten (135/2 → 68)', () => {
+    const { regels, noemer } = verdeelSpeelminuten([minutenRij({ wedstrijden: 2, minuten: 135, wissels: 3, noemer: 2 })])
+    expect(noemer).toBe(2)
+    expect(regels[0].gemiddelde).toBe(68)
+    expect(regels[0].minuten).toBe(135)
+    expect(regels[0].wissels).toBe(3)
+    expect(regels[0].minutenAandeel).toBe(1)
+  })
+
+  it('noemer 0 (of geen rijen) geeft de lege staat: geen regels', () => {
+    expect(verdeelSpeelminuten([])).toEqual({ regels: [], noemer: 0 })
+    expect(verdeelSpeelminuten([minutenRij({ noemer: 0 })])).toEqual({ regels: [], noemer: 0 })
+  })
+
+  it('wedstrijden 0 → minuten, wissels, gemiddelde en aandeel null — nooit 0 of NaN (AC-K.4)', () => {
+    const { regels } = verdeelSpeelminuten([
+      minutenRij({ player_id: 'a', wedstrijden: 2, minuten: 100, noemer: 2 }),
+      minutenRij({ player_id: 'b', wedstrijden: 0, minuten: null, wissels: null, noemer: 2 }),
+    ])
+    const b = regels.find((r) => r.player_id === 'b')!
+    expect(b.wedstrijden).toBe(0)
+    expect(b.minuten).toBeNull()
+    expect(b.wissels).toBeNull()
+    expect(b.gemiddelde).toBeNull()
+    expect(b.minutenAandeel).toBeNull()
+    expect(b.noemer).toBe(2)
+  })
+
+  it('een ingevoerde 0 blijft 0; is iedereens totaal 0, dan geen meter (aandeel null)', () => {
+    const { regels } = verdeelSpeelminuten([minutenRij({ wedstrijden: 1, minuten: 0, wissels: 0, noemer: 1 })])
+    expect(regels[0].minuten).toBe(0)
+    expect(regels[0].wissels).toBe(0)
+    expect(regels[0].gemiddelde).toBe(0)
+    expect(regels[0].minutenAandeel).toBeNull()
+  })
+
+  it('aandeel t.o.v. het hoogste totaal', () => {
+    const { regels } = verdeelSpeelminuten([
+      minutenRij({ player_id: 'a', minuten: 90 }),
+      minutenRij({ player_id: 'b', minuten: 45 }),
+    ])
+    expect(regels.map((r) => r.minutenAandeel)).toEqual([1, 0.5])
+  })
+
+  it('sorteert: met minuten eerst, minuten aflopend, wedstrijden aflopend, naam, id (AC-A9)', () => {
+    const { regels } = verdeelSpeelminuten([
+      minutenRij({ player_id: 'p0', naam: 'Aad', wedstrijden: 0, minuten: null, wissels: null }),
+      minutenRij({ player_id: 'p4', naam: 'Bram', wedstrijden: 2, minuten: 120 }),
+      minutenRij({ player_id: 'p3', naam: 'Bram', wedstrijden: 2, minuten: 120 }),
+      minutenRij({ player_id: 'p2', naam: 'Anna', wedstrijden: 2, minuten: 120 }),
+      minutenRij({ player_id: 'p1', naam: 'Cas', wedstrijden: 3, minuten: 120 }),
+      minutenRij({ player_id: 'p5', naam: 'Zoë', wedstrijden: 1, minuten: 130 }),
+      minutenRij({ player_id: 'p6', naam: 'Ab', wedstrijden: 1, minuten: 0 }),
+    ])
+    expect(regels.map((r) => r.player_id)).toEqual(['p5', 'p1', 'p2', 'p3', 'p4', 'p6', 'p0'])
+  })
+
+  it('behoudt de gastvlag en maakt van iets anders dan true geen gast', () => {
+    const { regels } = verdeelSpeelminuten([
+      minutenRij({ player_id: 'g', gast: true }),
+      minutenRij({ player_id: 'v', gast: 'ja' as unknown as boolean }),
+    ])
+    expect(regels.find((r) => r.player_id === 'g')!.gast).toBe(true)
+    expect(regels.find((r) => r.player_id === 'v')!.gast).toBe(false)
+  })
+
+  it('onbekende of negatieve waarden tellen als 0; noemer = de grootste geldige', () => {
+    const { regels, noemer } = verdeelSpeelminuten([
+      minutenRij({ player_id: 'a', wedstrijden: 2, minuten: -5, wissels: 1.5 as number, noemer: 4 }),
+      minutenRij({ player_id: 'b', wedstrijden: -1, minuten: 50, noemer: -3 }),
+      minutenRij({ player_id: 'c', wedstrijden: Number.NaN, minuten: 50, noemer: Number.NaN }),
+      null as unknown as SpeelminutenRij,
+    ])
+    expect(noemer).toBe(4)
+    expect(regels).toHaveLength(3)
+    const a = regels.find((r) => r.player_id === 'a')!
+    expect(a.minuten).toBe(0)
+    expect(a.wissels).toBe(0)
+    expect(a.gemiddelde).toBe(0)
+    for (const id of ['b', 'c']) {
+      const r = regels.find((x) => x.player_id === id)!
+      expect(r.wedstrijden).toBe(0)
+      expect(r.minuten).toBeNull()
+      expect(r.gemiddelde).toBeNull()
+      expect(r.noemer).toBe(4)
+    }
+  })
+
+  it('muteert de invoer niet', () => {
+    const rows = [minutenRij({ player_id: 'b', naam: 'B', minuten: 10 }), minutenRij({ player_id: 'a', naam: 'A', minuten: 80 })]
+    const kopie = structuredClone(rows)
+    verdeelSpeelminuten(rows)
+    expect(rows).toEqual(kopie)
+  })
+})

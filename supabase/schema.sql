@@ -10,6 +10,8 @@
 -- Draai ook inzichten-metrics.sql (tabel `tegendoelpunten` + 4 RPC's); die
 -- tabel staat bewust NIET hieronder, om dubbele registratie te voorkomen.
 -- Draai ook inzichten-metrics-fase2.sql (4 lees-RPC's, geen tabellen).
+-- Draai ook inzichten-metrics-fase2b.sql (tabel `speelminuten` + 1 RPC); die
+-- tabel staat bewust NIET hieronder.
 --
 -- FOREIGN KEY OP team_id — LEES DIT BIJ EEN VERSE INSTALLATIE.
 -- Dit bestand declareert team_id bewust zonder `references`: het draait op een

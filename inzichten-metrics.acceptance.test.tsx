@@ -287,6 +287,8 @@ const METRICS_HANDLERS: Harness['handlers'] = {
   inzichten_rating_vorm_per_speler: () => [],
   inzichten_training_opkomst_per_speler: () => [],
   inzichten_blessures_per_maand: () => [],
+  // Fase 2b: idem, lege bron volstaat.
+  inzichten_speelminuten_per_speler: () => [],
   inzichten_wedstrijd_uitslagen: (db, args) => {
     const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
     return db.events
@@ -370,7 +372,7 @@ function leegDb(over: Partial<Db> = {}): Db {
       { team_id: TEAM, key: 'season_start', value: '2026-08-01' },
       { team_id: TEAM, key: 'season_end', value: '2027-06-30' },
     ],
-    events: [], players: [], match_events: [], lineups: [], tegendoelpunten: [], match_squad: [],
+    events: [], players: [], match_events: [], lineups: [], tegendoelpunten: [], match_squad: [], speelminuten: [],
     attendance: [], match_ratings: [], training_oefeningen: [],
     ...over,
   }
@@ -1070,6 +1072,7 @@ function analyseDb(over: Partial<Db> = {}): Db {
       active: true, injured: false, type: 'regular', rating: null, created_at: '2026-01-01T00:00:00Z',
     }],
     match_ratings: [], match_events: [],
+    speelminuten: [],
     tegendoelpunten: [],
     ...over,
   }

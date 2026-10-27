@@ -22,6 +22,13 @@ vi.mock('@/app/actions/tegendoelpunten', () => ({
   herstelTegendoelpunt: vi.fn(),
 }))
 
+// En SpeelminutenSectie (fase 2b), met eigen acties.
+vi.mock('@/app/actions/speelminuten', () => ({
+  saveSpeelminuten: vi.fn().mockResolvedValue(undefined),
+  deleteSpeelminuten: vi.fn(),
+  herstelSpeelminuten: vi.fn(),
+}))
+
 const mockRefresh = vi.fn()
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: mockRefresh }),

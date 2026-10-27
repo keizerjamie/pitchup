@@ -387,6 +387,21 @@ export interface Tegendoelpunt {
   created_at: string
 }
 
+// Speelminuten en wissels van één speler in één wedstrijd (tabel
+// `speelminuten`, supabase/inzichten-metrics-fase2b.sql). Eén rij per
+// (event_id, player_id). `minuten` is een geheel getal 0..130
+// (isValidSpeelminuten), `wissels` 0..MAX_WISSELS (isValidWissels) — beide
+// verplicht, geen kloktijden. `created_at` is UTC (timestamptz) en dient alleen
+// het herstel na "Ongedaan maken".
+export interface Speelminuten {
+  id: string
+  event_id: string
+  player_id: string
+  minuten: number
+  wissels: number
+  created_at: string
+}
+
 export interface MatchRating {
   id: string
   event_id: string

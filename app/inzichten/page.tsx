@@ -44,6 +44,8 @@ import {
   dekkingPerPositie,
   naastElkaarPerSpeler,
   blessuresPerMaand,
+  verdeelSpeelminuten,
+  type SpeelminutenRij,
   type SpeelkansenRij,
   type RatingVormRij,
   type TrainingOpkomstPerSpelerRij,
@@ -78,6 +80,7 @@ import StijgersDalersKaart from '@/components/inzichten/StijgersDalersKaart'
 import PositiedekkingKaart from '@/components/inzichten/PositiedekkingKaart'
 import OpkomstSelectieRatingKaart from '@/components/inzichten/OpkomstSelectieRatingKaart'
 import BlessuresPerMaandChart from '@/components/inzichten/BlessuresPerMaandChart'
+import SpeelminutenKaart from '@/components/inzichten/SpeelminutenKaart'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
@@ -195,6 +198,7 @@ export default async function InzichtenPage({
     trainingOpkomstResult,
     blessuresResult,
     positiesResult,
+    speelminutenResult,
   ] = await Promise.all([
     // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
     // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
@@ -266,6 +270,10 @@ export default async function InzichtenPage({
       .eq('type', 'regular')
       .order('name', { ascending: true })
       .order('id', { ascending: true }),
+    // Fase 2b: speelminuten en wissels. `venster`, niet `verleden`: minuten
+    // bestaan pas ná de wedstrijd en een wedstrijd van vandaag telt mee.
+    // Vereist supabase/inzichten-metrics-fase2b.sql.
+    supabase.rpc('inzichten_speelminuten_per_speler', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
   ])
 
   // Elke bron faalt onafhankelijk: bij een fout logt de pagina de context en
@@ -347,6 +355,8 @@ export default async function InzichtenPage({
   const trainingOpkomstBron = unwrapBron<TrainingOpkomstPerSpelerRij>('inzichten.trainingOpkomstPerSpeler', trainingOpkomstResult)
   const blessuresBron = unwrapBron<BlessuresPerMaandRij>('inzichten.blessuresPerMaand', blessuresResult)
   const positiesBron = unwrapBron<SpelerPositieRij>('inzichten.posities', positiesResult)
+  const speelminutenBron = unwrapBron<SpeelminutenRij>('inzichten.speelminuten', speelminutenResult)
+  const speelminuten = verdeelSpeelminuten(speelminutenBron.rijen)
   const speelkansen = verdeelSpeelkansen(speelkansenBron.rijen)
   const stijgersDalers = bepaalStijgersDalers(ratingVormBron.rijen)
   const dekking = dekkingPerPositie(positiesBron.rijen)
@@ -431,7 +441,9 @@ export default async function InzichtenPage({
     // bewust niet.
     !speelkansenBron.rijen.some((r) => r.noemer > 0) &&
     trainingOpkomstBron.rijen.every((r) => r.aanwezig + r.afwezig === 0) &&
-    blessuresBron.rijen.every((r) => r.geblesseerd === 0)
+    blessuresBron.rijen.every((r) => r.geblesseerd === 0) &&
+    // Fase 2b: alleen speelminuten is genoeg voor de gewone pagina.
+    !speelminutenBron.rijen.some((r) => r.wedstrijden > 0)
 
   if (geenEnkeleData) {
     // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
@@ -522,6 +534,7 @@ export default async function InzichtenPage({
           <OpkomstSelectieRatingKaart regels={naastElkaar} fout={naastElkaarFout} t={t} />
         </div>
         <BlessuresPerMaandChart maanden={blessureMaanden} fout={blessuresBron.fout} t={t} />
+        <SpeelminutenKaart data={speelminuten} fout={speelminutenBron.fout} t={t} />
       </div>
       </div>
 

@@ -974,14 +974,14 @@ describe('requestPasswordReset', () => {
 // deleteAccount
 // ────────────────────────────────────────────────
 
-// De veertien teamtabellen in FK-veilige volgorde, gevolgd door de teams-rij
+// De vijftien teamtabellen in FK-veilige volgorde, gevolgd door de teams-rij
 // zelf. `categorie_metingen` staat er bewust bij: die tabel heeft alleen een
 // team_id en cascadet nergens vanaf, dus de nulmetingen per onderdeel bleven
 // vroeger als wees achter. De cascade op `teams` ruimt team_members en
 // team_invites op.
 const TEAM_OPRUIMING = [
   'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
-  'tegendoelpunten', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
+  'tegendoelpunten', 'speelminuten', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
   'categorie_metingen', 'metingen', 'events', 'players', 'settings',
   'teams',
 ]

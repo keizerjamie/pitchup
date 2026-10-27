@@ -61,6 +61,14 @@
 --   * blok 27                 — vereist supabase/inzichten-metrics-fase2.sql
 --                               (4 lees-RPC's, geen tabellen); geen assistent
 --                               nodig, maakt zijn eigen testdata in jan. 1990
+--   * blok 28                 — vereist supabase/inzichten-metrics-fase2b.sql
+--                               (tabel speelminuten + 1 RPC); maakt zijn eigen
+--                               testdata in jan. 1990 en zo nodig binnen de
+--                               transactie een assistent zonder wedstrijdrecht
+--                               LET OP: sinds die migratie noemen ook blok 2
+--                               en blok 22 de tabel speelminuten; zonder
+--                               inzichten-metrics-fase2b.sql falen die met
+--                               "relation does not exist".
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -147,6 +155,8 @@ begin
   if n <> 0 then raise exception 'LEK: niet-lid ziet wedstrijdgebeurtenissen van een vreemd team'; end if;
   select count(*) into n from tegendoelpunten    where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet tegendoelpunten van een vreemd team'; end if;
+  select count(*) into n from speelminuten       where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: niet-lid ziet speelminuten van een vreemd team'; end if;
   select count(*) into n from match_squad        where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet de wedstrijdselectie van een vreemd team'; end if;
   select count(*) into n from task_overrides     where team_id = 'TEAM_B_UUID';
@@ -1077,7 +1087,7 @@ end $$;
 --   a. een assistent (hier met alle zes rechten) en een hoofdtrainer van een
 --      ÁNDER team kunnen een team niet verwijderen — 0 rijen, geen fout;
 --   b. de hoofdtrainer kan exact de deletes van deleteTeam uitvoeren — de
---      veertien tabellen uit TEAM_TABELLEN (lib/team-opruimen.ts) en daarna
+--      vijftien tabellen uit TEAM_TABELLEN (lib/team-opruimen.ts) en daarna
 --      `delete from teams` — zonder fout, ook nu de cascade van M5c overlapt
 --      met de expliciete deletes;
 --   c. daarna staat er niets meer van dat team, maar blijven de oefening van
@@ -1135,7 +1145,7 @@ begin
   -- deleteTeam, uitgevoerd onder de rol van de hoofdtrainer.
   set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
   -- TEAM_TABELLEN
-  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
+  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('delete from public.%I where team_id = $1', v_tabel) using v_team;
   end loop;
 
@@ -1143,7 +1153,7 @@ begin
   -- categorie_metingen heeft GEEN foreign key naar teams en zou anders als
   -- wees achterblijven. Daarom hier al tellen, vóór `delete from teams`.
   reset role;
-  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
+  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('select count(*) from public.%I where team_id = $1', v_tabel) into n using v_team;
     if n <> 0 then
       raise exception 'KAPOT: de hoofdtrainer kon % rij(en) in % van zijn eigen team niet verwijderen (RLS)', n, v_tabel;
@@ -1730,6 +1740,279 @@ begin
   raise notice 'OK blok 27: anon mag de fase-2-RPC''s niet uitvoeren';
 end $$;
 
+-- ── Blok 28: inzichten-metrics fase 2b (speelminuten) ────────
+-- Vereist supabase/inzichten-metrics-fase2b.sql (tabel speelminuten + 1 RPC).
+-- Maakt binnen deze transactie (de rollback ruimt alles op) in TEAM_A drie
+-- wedstrijden en een training aan, plus vijf eigen testspelers en
+-- speelminuten-rijen in januari 1990 — een maand zonder echte speelminuten,
+-- zodat bestaande data de noemer niet beïnvloedt (de events van blok 27 in
+-- dezelfde maand hebben geen speelminuten en tellen dus niet). Een assistent
+-- in TEAM_A zonder wedstrijdrecht wordt zo nodig binnen de transactie
+-- aangemaakt.
+--   a. OWNER_A ziet geen speelminuten van TEAM_B;
+--   b. de RPC met p_team_id = TEAM_B geeft 0 rijen; met TEAM_A over januari
+--      1990 de verwachte waarden (som, wedstrijden, noemer, gast, inactief met
+--      rij doet mee, inactief zonder rij ontbreekt, actief zonder rij = 0/null);
+--   c. ASSISTENT_A zonder wedstrijdrecht: insert 42501, update en delete 0 rijen;
+--   d. OWNER_A met een event_id van TEAM_B: 42501;
+--   e. OWNER_A op een eigen wedstrijd met een player_id van TEAM_B: 42501;
+--   f. een training van het eigen team: 42501;
+--   g. minuten 131 of -1, wissels -1 of 100: 23514;
+--   h. een tweede gewone insert op dezelfde (event, speler): 23505; een upsert
+--      laat precies één rij over met de nieuwe waarde;
+--   i. een update van event_id, player_id of team_id naar TEAM_B: 42501;
+--   j. een testspeler en daarna een testwedstrijd verwijderen neemt hun rijen
+--      mee (cascade);
+--   k. anon mag de RPC niet uitvoeren.
+do $$
+declare
+  v_start date := date '1990-01-01';
+  v_end   date := date '1990-01-31';
+  v_m1 uuid; v_m2 uuid; v_buiten uuid; v_training uuid; v_match_b uuid;
+  v_vast uuid; v_zonder uuid; v_gast uuid; v_inactief_met uuid; v_inactief_zonder uuid;
+  v_vreemd uuid;
+  n int; r record;
+begin
+  reset role;
+  if to_regclass('public.speelminuten') is null
+     or to_regprocedure('public.inzichten_speelminuten_per_speler(uuid, date, date)') is null then
+    raise exception 'INZICHTEN-METRICS FASE 2B ONTBREEKT: draai eerst supabase/inzichten-metrics-fase2b.sql';
+  end if;
+  select count(*) into n
+  from speelminuten sm join events e on e.id = sm.event_id
+  where sm.team_id = 'TEAM_A_UUID' and e.date between v_start and v_end;
+  if n <> 0 then
+    raise exception 'FOUT IN DE OPZET: TEAM_A heeft al speelminuten in januari 1990 — kies in blok 28 een andere testmaand';
+  end if;
+
+  -- Assistent zonder wedstrijdrecht (c): bestaande rij dichtzetten, of
+  -- tijdelijk invoegen (alle mag_* default false).
+  insert into team_members (team_id, user_id, rol)
+  values ('TEAM_A_UUID', 'ASSISTENT_A_UUID', 'assistent')
+  on conflict (team_id, user_id) do update set mag_wedstrijd_bewerken = false
+   where team_members.rol = 'assistent';
+
+  -- Opzet als postgres (buiten RLS).
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'match', v_start + 9)     returning id into v_m1;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'match', v_start + 10)    returning id into v_m2;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'match', date '1990-02-15') returning id into v_buiten;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'training', v_start + 11) returning id into v_training;
+  insert into events (team_id, type, date) values ('TEAM_B_UUID', 'match', v_start + 9)     returning id into v_match_b;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-28 vast', 'Keeper', true) returning id into v_vast;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-28 zonder rij', 'Spits', true) returning id into v_zonder;
+  insert into players (team_id, name, position, active, type)
+  values ('TEAM_A_UUID', 'RLS-28 gast', 'Spits', true, 'guest') returning id into v_gast;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-28 inactief met rij', 'Spits', false) returning id into v_inactief_met;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-28 inactief zonder rij', 'Spits', false) returning id into v_inactief_zonder;
+  -- Een bestaande speler van TEAM_B (e en i); bestaat er geen, dan worden die
+  -- delen overgeslagen.
+  select id into v_vreemd from players where team_id = 'TEAM_B_UUID' order by id limit 1;
+
+  -- vast: 2 wedstrijden in januari (60+75 min, 1+2 wissels) + 1 in februari
+  -- (buiten het venster); gast en inactief-met-rij: elk 1 wedstrijd.
+  insert into speelminuten (team_id, event_id, player_id, minuten, wissels) values
+    ('TEAM_A_UUID', v_m1,     v_vast,         60, 1),
+    ('TEAM_A_UUID', v_m2,     v_vast,         75, 2),
+    ('TEAM_A_UUID', v_buiten, v_vast,         90, 0),
+    ('TEAM_A_UUID', v_m1,     v_gast,         30, 0),
+    ('TEAM_A_UUID', v_m2,     v_inactief_met, 90, 0);
+  if v_vreemd is not null then
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_B_UUID', v_match_b, v_vreemd, 45, 1);
+  end if;
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_B_UUID') then
+    raise exception 'FOUT IN DE OPZET: OWNER_A is wél lid van TEAM_B — kies een ander TEAM_B';
+  end if;
+
+  -- a. Lezen van een vreemd team.
+  select count(*) into n from speelminuten where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet % speelminuten van TEAM_B', n; end if;
+  select count(*) into n from speelminuten where event_id = v_match_b;
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet speelminuten op een wedstrijd van TEAM_B'; end if;
+  raise notice 'OK blok 28: OWNER_A ziet geen speelminuten van TEAM_B';
+
+  -- b. De RPC: vreemd team leeg, eigen team met de verwachte waarden.
+  select count(*) into n from inzichten_speelminuten_per_speler('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_speelminuten_per_speler geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_speelminuten_per_speler('TEAM_B_UUID', v_start, v_end);
+  if n <> 0 then raise exception 'LEK: inzichten_speelminuten_per_speler geeft % rijen van TEAM_B (jan. 1990)', n; end if;
+  if v_vreemd is not null then
+    select count(*) into n from inzichten_speelminuten_per_speler('TEAM_A_UUID', v_start, v_end) where player_id = v_vreemd;
+    if n <> 0 then raise exception 'LEK: inzichten_speelminuten_per_speler(TEAM_A) geeft een TEAM_B-speler terug'; end if;
+  end if;
+  select * into r from inzichten_speelminuten_per_speler('TEAM_A_UUID', v_start, v_end) where player_id = v_vast;
+  if not found or r.wedstrijden <> 2 or r.minuten <> 135 or r.wissels <> 3 or r.noemer <> 2 or r.gast then
+    raise exception 'KAPOT: speelminuten van de vaste testspeler zijn % (verwacht wedstrijden 2, minuten 135, wissels 3, noemer 2, geen gast)', r;
+  end if;
+  select * into r from inzichten_speelminuten_per_speler('TEAM_A_UUID', v_start, v_end) where player_id = v_zonder;
+  if not found or r.wedstrijden <> 0 or r.minuten is not null or r.wissels is not null or r.noemer <> 2 then
+    raise exception 'KAPOT: de actieve speler zonder rij geeft % (verwacht wedstrijden 0, minuten/wissels null, noemer 2)', r;
+  end if;
+  select * into r from inzichten_speelminuten_per_speler('TEAM_A_UUID', v_start, v_end) where player_id = v_gast;
+  if not found or not r.gast or r.wedstrijden <> 1 or r.minuten <> 30 then
+    raise exception 'KAPOT: de gast met een rij geeft % (verwacht gast true, wedstrijden 1, minuten 30)', r;
+  end if;
+  select * into r from inzichten_speelminuten_per_speler('TEAM_A_UUID', v_start, v_end) where player_id = v_inactief_met;
+  if not found or r.wedstrijden <> 1 or r.minuten <> 90 then
+    raise exception 'KAPOT (M4): de inactieve speler met een rij geeft % (verwacht wedstrijden 1, minuten 90)', r;
+  end if;
+  select count(*) into n from inzichten_speelminuten_per_speler('TEAM_A_UUID', v_start, v_end) where player_id = v_inactief_zonder;
+  if n <> 0 then raise exception 'KAPOT: een inactieve speler zonder rij staat in de RPC'; end if;
+  select count(*) into n from inzichten_speelminuten_per_speler('TEAM_A_UUID', date '1989-12-01', date '1989-12-31');
+  if n <> 0 then raise exception 'KAPOT: de RPC geeft % rijen voor een venster zonder speelminuten (verwacht 0, lege staat)', n; end if;
+  raise notice 'OK blok 28: inzichten_speelminuten_per_speler telt per speler, noemer = wedstrijden met minuten, vreemd team leeg';
+
+  -- c. Assistent zonder wedstrijdrecht.
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  if not is_team_member('TEAM_A_UUID') or is_team_owner('TEAM_A_UUID') then
+    raise exception 'FOUT IN DE OPZET: ASSISTENT_A is geen assistent in TEAM_A';
+  end if;
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_m1, v_zonder, 10, 0);
+    raise exception 'LEK: een assistent zonder wedstrijdrecht kon speelminuten vastleggen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 28: insert op speelminuten geweigerd zonder wedstrijdrecht';
+  end;
+  update speelminuten set minuten = 1 where event_id = v_m1 and player_id = v_vast;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een assistent zonder wedstrijdrecht kon speelminuten wijzigen'; end if;
+  delete from speelminuten where event_id = v_m1 and player_id = v_vast;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een assistent zonder wedstrijdrecht kon speelminuten verwijderen'; end if;
+  raise notice 'OK blok 28: update en delete op speelminuten raken 0 rijen zonder wedstrijdrecht';
+
+  -- d. Eigen team_id, maar het event van een ander team.
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_match_b, v_zonder, 10, 0);
+    raise exception 'LEK: OWNER_A kon speelminuten aan een wedstrijd van TEAM_B hangen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 28: een event_id van een ander team wordt geweigerd';
+  end;
+
+  -- e. Eigen wedstrijd, maar een speler van een ander team.
+  if v_vreemd is null then
+    raise notice 'OVERGESLAGEN blok 28e: TEAM_B heeft geen spelers';
+  else
+    begin
+      insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+      values ('TEAM_A_UUID', v_m1, v_vreemd, 10, 0);
+      raise exception 'LEK: OWNER_A kon speelminuten voor een speler van TEAM_B vastleggen';
+    exception when insufficient_privilege then
+      raise notice 'OK blok 28: een player_id van een ander team wordt geweigerd';
+    end;
+  end if;
+
+  -- f. Een training van het eigen team.
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_training, v_zonder, 10, 0);
+    raise exception 'LEK: speelminuten konden aan een training gehangen worden';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 28: een training wordt geweigerd';
+  end;
+
+  -- g. De CHECKs op minuten en wissels.
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_m1, v_zonder, 131, 0);
+    raise exception 'KAPOT: minuten 131 werd geaccepteerd';
+  exception when check_violation then
+    raise notice 'OK blok 28: minuten 131 geeft 23514';
+  end;
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_m1, v_zonder, -1, 0);
+    raise exception 'KAPOT: minuten -1 werd geaccepteerd';
+  exception when check_violation then
+    raise notice 'OK blok 28: minuten -1 geeft 23514';
+  end;
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_m1, v_zonder, 10, -1);
+    raise exception 'KAPOT: wissels -1 werd geaccepteerd';
+  exception when check_violation then
+    raise notice 'OK blok 28: wissels -1 geeft 23514';
+  end;
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_m1, v_zonder, 10, 100);
+    raise exception 'KAPOT: wissels 100 werd geaccepteerd';
+  exception when check_violation then
+    raise notice 'OK blok 28: wissels 100 geeft 23514';
+  end;
+
+  -- h. Eén rij per (event, speler); de upsert van de app laat er één over.
+  insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+  values ('TEAM_A_UUID', v_m1, v_zonder, 10, 0);
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'KAPOT: OWNER_A kon geen speelminuten op een eigen wedstrijd vastleggen'; end if;
+  begin
+    insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+    values ('TEAM_A_UUID', v_m1, v_zonder, 11, 0);
+    raise exception 'KAPOT: een tweede rij voor dezelfde wedstrijd en speler werd geaccepteerd';
+  exception when unique_violation then
+    raise notice 'OK blok 28: een tweede rij voor dezelfde (event, speler) geeft 23505';
+  end;
+  insert into speelminuten (team_id, event_id, player_id, minuten, wissels)
+  values ('TEAM_A_UUID', v_m1, v_zonder, 20, 1)
+  on conflict (event_id, player_id) do update set minuten = excluded.minuten, wissels = excluded.wissels;
+  select count(*) into n from speelminuten where event_id = v_m1 and player_id = v_zonder;
+  if n <> 1 then raise exception 'KAPOT: na de upsert staan er % rijen voor (event, speler)', n; end if;
+  select minuten into n from speelminuten where event_id = v_m1 and player_id = v_zonder;
+  if n <> 20 then raise exception 'KAPOT: de upsert zette minuten op % i.p.v. 20 (laatste wint)', n; end if;
+  raise notice 'OK blok 28: upsert op (event_id, player_id) laat precies één rij over met de nieuwe waarde';
+
+  -- i. Een bestaande rij kan niet naar een ander team verhuizen.
+  begin
+    update speelminuten set event_id = v_match_b where event_id = v_m1 and player_id = v_zonder;
+    raise exception 'LEK: een update kon speelminuten naar een wedstrijd van TEAM_B verplaatsen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 28: een update naar een event_id van TEAM_B wordt geweigerd';
+  end;
+  if v_vreemd is null then
+    raise notice 'OVERGESLAGEN blok 28i (speler): TEAM_B heeft geen spelers';
+  else
+    begin
+      update speelminuten set player_id = v_vreemd where event_id = v_m1 and player_id = v_zonder;
+      raise exception 'LEK: een update kon speelminuten aan een speler van TEAM_B hangen';
+    exception when insufficient_privilege then
+      raise notice 'OK blok 28: een update naar een player_id van TEAM_B wordt geweigerd';
+    end;
+  end if;
+  begin
+    update speelminuten set team_id = 'TEAM_B_UUID' where event_id = v_m1 and player_id = v_zonder;
+    raise exception 'LEK: een update kon speelminuten naar TEAM_B verplaatsen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 28: een update naar team_id TEAM_B wordt geweigerd';
+  end;
+
+  -- j. Cascade (als postgres: de FK werkt los van RLS).
+  reset role;
+  delete from players where id = v_inactief_met;
+  select count(*) into n from speelminuten where player_id = v_inactief_met;
+  if n <> 0 then raise exception 'KAPOT: na het verwijderen van de speler staan er nog % speelminuten-rijen', n; end if;
+  delete from events where id = v_m1;
+  select count(*) into n from speelminuten where event_id = v_m1;
+  if n <> 0 then raise exception 'KAPOT: na het verwijderen van de wedstrijd staan er nog % speelminuten-rijen', n; end if;
+  raise notice 'OK blok 28: speler en wedstrijd verwijderen neemt hun speelminuten mee (cascade)';
+
+  -- k. Geen execute-recht voor anon.
+  if has_function_privilege('anon', 'public.inzichten_speelminuten_per_speler(uuid, date, date)', 'execute') then
+    raise exception 'LEK: anon mag inzichten_speelminuten_per_speler uitvoeren';
+  end if;
+  raise notice 'OK blok 28: anon mag inzichten_speelminuten_per_speler niet uitvoeren';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -1760,7 +2043,8 @@ rollback;
 -- DEKKING PER FASE: fase 3 (verwijderen, verlaten) staat in blok 22 en 23,
 -- fase 4 (persoonlijke oefeningen) in blok 24 (M6) en 25 (M6b), en de
 -- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26, fase 2a
--- (4 speler-RPC's) in blok 27. Accountverwijdering zelf
+-- (4 speler-RPC's) in blok 27, fase 2b (tabel speelminuten + 1 RPC) in blok
+-- 28. Accountverwijdering zelf
 -- (auth.admin.deleteUser) is hier niet na te bootsen; de onderdelen ervan
 -- wel: de team-opruiming is blok 22, het opzeggen van een lidmaatschap blok
 -- 23, en de cascade van een verwijderde oefening naar elk trainingsplan blok

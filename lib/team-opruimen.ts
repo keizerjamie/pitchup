@@ -36,6 +36,7 @@ export const TEAM_TABELLEN = [
   'match_squad',
   'match_events',
   'tegendoelpunten',
+  'speelminuten',
   'match_ratings',
   'lineups',
   'attendance',
@@ -47,7 +48,7 @@ export const TEAM_TABELLEN = [
   'settings',
 ] as const
 
-// Wist alles van één team: het clublogo in Storage, de veertien teamtabellen en
+// Wist alles van één team: het clublogo in Storage, de vijftien teamtabellen en
 // tot slot de teams-rij zelf.
 //
 // `logLabel` is het contextlabel voor de log (bijv. `auth.deleteAccount.team1`
