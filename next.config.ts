@@ -19,8 +19,16 @@ const nextConfig: NextConfig = {
   // blijkt uit de preview-build; schaden doet het niet
   // (node_modules/next/dist/docs/01-app/03-api-reference/05-config/
   // 01-next-config-js/output.md, outputFileTracingIncludes).
+  // Hetzelfde geldt voor playwright-core: lib/coreBundle.js doet
+  // `require(path.join(packageRoot, "browsers.json"))`. Zonder deze regel
+  // faalde elke render op Vercel met "Cannot find module
+  // .../playwright-core/browsers.json" (2026-10-27). Het hele pakket, zodat
+  // een volgend dynamisch pad niet opnieuw ontbreekt.
   outputFileTracingIncludes: {
-    '/api/pdf': ['./node_modules/@sparticuz/chromium/bin/**'],
+    '/api/pdf': [
+      './node_modules/@sparticuz/chromium/bin/**',
+      './node_modules/playwright-core/**',
+    ],
   },
   experimental: {
     serverActions: {
