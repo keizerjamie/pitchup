@@ -81,3 +81,55 @@ export function seasonTrainingDates(
   }
   return { ok: true, dates }
 }
+
+// ── ISO-weken (maandag–zondag) ───────────────────────────────
+// Zelfde regel als de rest van dit bestand: alleen strings en UTC-componenten
+// (toUtcMs/fromUtcMs/weekdayOf), nooit `new Date(str + 'T00:00:00')`,
+// `getDay()` of addDays uit lib/utils.ts (die rekenen lokaal). Zo valt een
+// training in dezelfde week, ongeacht de tijdzone van server of browser — ook
+// rond een zomertijdovergang, want een UTC-dag is altijd precies DAY_MS lang.
+
+// Maandag van de ISO-week waarin `datum` valt ('YYYY-MM-DD'), of null bij een
+// ongeldige datum. Een maandag blijft zichzelf, een zondag gaat naar de maandag
+// ervóór (ISO: de week loopt van maandag t/m zondag).
+export function maandagVanWeek(datum: string): string | null {
+  const ms = toUtcMs(datum)
+  const weekdag = weekdayOf(datum)
+  if (ms === null || weekdag === null) return null
+  const offset = (weekdag + 6) % 7
+  return fromUtcMs(ms - offset * DAY_MS)
+}
+
+// ISO-weeknummer en ISO-jaar van `datum`, of null bij een ongeldige datum. De
+// DONDERDAG van de week bepaalt het jaar: 2024-12-30 hoort bij week 1 van 2025,
+// 2021-01-03 bij week 53 van 2020.
+export function isoWeek(datum: string): { jaar: number; week: number } | null {
+  const maandag = maandagVanWeek(datum)
+  if (maandag === null) return null
+  const donderdagMs = toUtcMs(maandag)! + 3 * DAY_MS
+  const jaar = new Date(donderdagMs).getUTCFullYear()
+  const dagVanJaar = Math.round((donderdagMs - Date.UTC(jaar, 0, 1)) / DAY_MS) + 1
+  return { jaar, week: Math.floor((dagVanJaar - 1) / 7) + 1 }
+}
+
+// Bovengrens op het aantal weken dat wekenInVenster teruggeeft: een seizoen
+// (MAX_SEASON_DAYS) plus een deelweek aan begin en eind.
+export const MAX_WEKEN_IN_VENSTER = Math.ceil(MAX_SEASON_DAYS / 7) + 2
+
+// De maandagen van elke ISO-week die het venster [start, end] (inclusief) raakt,
+// chronologisch: van maandagVanWeek(start) t/m maandagVanWeek(end). De eerste en
+// laatste week kunnen deelweken zijn. [] bij ongeldige invoer of end < start.
+// De lus is begrensd op MAX_WEKEN_IN_VENSTER, zodat een onzinnig lang venster
+// nooit onbegrensd rijen maakt.
+export function wekenInVenster(start: string, end: string): string[] {
+  const startMs = toUtcMs(start)
+  const endMs = toUtcMs(end)
+  if (startMs === null || endMs === null || endMs < startMs) return []
+  const eerste = toUtcMs(maandagVanWeek(start)!)!
+  const laatste = toUtcMs(maandagVanWeek(end)!)!
+  const weken: string[] = []
+  for (let ms = eerste; ms <= laatste && weken.length < MAX_WEKEN_IN_VENSTER; ms += 7 * DAY_MS) {
+    weken.push(fromUtcMs(ms))
+  }
+  return weken
+}

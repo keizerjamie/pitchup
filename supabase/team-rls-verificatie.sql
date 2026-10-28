@@ -69,6 +69,10 @@
 --                               en blok 22 de tabel speelminuten; zonder
 --                               inzichten-metrics-fase2b.sql falen die met
 --                               "relation does not exist".
+--   * blok 29                 — vereist supabase/inzichten-metrics-fase3a.sql
+--                               (2 lees-RPC's, geen tabellen); geen assistent
+--                               nodig, maakt zijn eigen testdata in maart 1990
+--                               (jan. en feb. 1990 zijn al bezet door blok 27/28)
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -2013,6 +2017,216 @@ begin
   raise notice 'OK blok 28: anon mag inzichten_speelminuten_per_speler niet uitvoeren';
 end $$;
 
+-- ── Blok 29: inzichten-metrics fase 3a (training en kwaliteit, alleen lezen) ──
+-- Vereist supabase/inzichten-metrics-fase3a.sql (2 lees-RPC's, geen tabellen).
+-- Geen assistent nodig. Maakt binnen deze transactie (de rollback ruimt alles
+-- op) in TEAM_A testdata in MAART 1990 aan — een maand zonder echte data.
+-- Bewust niet januari of februari: blok 27 en 28 zetten in dezelfde
+-- transactie al events in januari 1990, en blok 28 laat ook een wedstrijd op
+-- 15 februari 1990 staan (v_buiten); die zou elke telling hier vervuilen.
+-- Daarom eerst de opzetcheck op events van TEAM_A in maart 1990.
+-- Testdata: T1 vct (ma 5-3) met K1 (eigen oefening O1, duur 20) en K2 (O2 van
+-- een ANDERE eigenaar, koppeling zonder duur, bibliotheek 15); T2 teamtactisch
+-- (zo 11-3) zonder koppelingen; M1 met uitslag en 1 rating; M2 zonder uitslag
+-- met een eigen task_override 'analysis'. Plus "vreemde" rijen met team_id =
+-- TEAM_B op eigen events: K3 op T1, een override en een moment op M1.
+--   a. beide RPC's met p_team_id = TEAM_B geven 0 rijen;
+--   b. inzichten_training_koppelingen(TEAM_A, maart) = precies K1, K2 en T2
+--      (koppeling_id null), K3 ontbreekt, totaal = 3;
+--   c. K2: de oefening van een andere eigenaar is leesbaar via M6
+--      (oefening_leesbaar, categorie, bibliotheekduur 15) — de RPC filtert
+--      oefeningen bewust NIET op team_id (EIGENAAR-USER);
+--   d. inzichten_invul_discipline(TEAM_A, maart) = 4 rijen met de juiste
+--      tellingen; de TEAM_B-override, -moment en K3 tellen niet;
+--   e. een niet-lid (BUITENSTAANDER, sinds blok 23) krijgt 0 rijen voor TEAM_A;
+--   f. anon mag beide RPC's niet uitvoeren;
+--   g. alleen lezen: beide functies zijn stable en invoker, en na alle calls
+--      zijn de aantallen in events, training_oefeningen en task_overrides
+--      voor TEAM_A ongewijzigd.
+do $$
+declare
+  v_start date := date '1990-03-01';
+  v_end   date := date '1990-03-31';
+  v_t1 uuid; v_t2 uuid; v_m1 uuid; v_m2 uuid; v_speler uuid;
+  v_o1 uuid; v_o2 uuid; v_k1 uuid; v_k2 uuid; v_k3 uuid;
+  v_vreemd_override boolean := false; v_vreemd_moment boolean := false;
+  v_events_voor int; v_koppelingen_voor int; v_overrides_voor int;
+  v_events_na int; v_koppelingen_na int; v_overrides_na int;
+  n int; r record;
+begin
+  reset role;
+  if to_regprocedure('public.inzichten_training_koppelingen(uuid, date, date)') is null
+     or to_regprocedure('public.inzichten_invul_discipline(uuid, date, date)') is null then
+    raise exception 'INZICHTEN-METRICS FASE 3A ONTBREEKT: draai eerst supabase/inzichten-metrics-fase3a.sql';
+  end if;
+  select count(*) into n from events where team_id = 'TEAM_A_UUID' and date between v_start and v_end;
+  if n <> 0 then
+    raise exception 'FOUT IN DE OPZET: TEAM_A heeft al events in maart 1990 — kies in blok 29 een andere testmaand';
+  end if;
+
+  -- Opzet als postgres (buiten RLS).
+  insert into events (team_id, type, date, trainingstype, doelstelling)
+  values ('TEAM_A_UUID', 'training', date '1990-03-05', 'vct', 'RLS-29 doel') returning id into v_t1;
+  insert into events (team_id, type, date, trainingstype)
+  values ('TEAM_A_UUID', 'training', date '1990-03-11', 'teamtactisch') returning id into v_t2;
+  insert into events (team_id, type, date, goals_for, goals_against, doelstelling)
+  values ('TEAM_A_UUID', 'match', date '1990-03-03', 2, 1, 'RLS-29 geen trainingsdoel') returning id into v_m1;
+  insert into events (team_id, type, date)
+  values ('TEAM_A_UUID', 'match', date '1990-03-04') returning id into v_m2;
+  insert into players (team_id, name, position, active)
+  values ('TEAM_A_UUID', 'RLS-29 speler', 'Keeper', true) returning id into v_speler;
+  insert into match_ratings (team_id, event_id, player_id, rating) values ('TEAM_A_UUID', v_m1, v_speler, 7);
+  insert into task_overrides (team_id, event_id, task_type) values ('TEAM_A_UUID', v_m2, 'analysis');
+  -- O1 = eigen oefening van OWNER_A; O2 = van een andere eigenaar (oefeningen.team_id
+  -- is de eigenaar-user en heeft geen FK, supabase/oefeningen-persoonlijk.sql).
+  insert into oefeningen (team_id, naam, categorie, duur_min)
+  values ('OWNER_A_UUID', 'RLS-29 eigen', 'positiespel', 10) returning id into v_o1;
+  insert into oefeningen (team_id, naam, categorie, duur_min)
+  values (gen_random_uuid(), 'RLS-29 teamgenoot', 'partijen_klein', 15) returning id into v_o2;
+  insert into training_oefeningen (team_id, event_id, oefening_id, volgorde, duur_min)
+  values ('TEAM_A_UUID', v_t1, v_o1, 1, 20) returning id into v_k1;
+  insert into training_oefeningen (team_id, event_id, oefening_id, volgorde, duur_min)
+  values ('TEAM_A_UUID', v_t1, v_o2, 2, null) returning id into v_k2;
+  -- Vreemde rijen: team_id = TEAM_B op een event van TEAM_A.
+  begin
+    insert into training_oefeningen (team_id, event_id, oefening_id, volgorde, duur_min)
+    values ('TEAM_B_UUID', v_t1, v_o1, 3, 45) returning id into v_k3;
+  exception when others then
+    v_k3 := null;
+    raise notice 'OVERGESLAGEN blok 29 (K3): de vreemde koppeling liet zich niet invoegen (%)', sqlstate;
+  end;
+  begin
+    insert into task_overrides (team_id, event_id, task_type) values ('TEAM_B_UUID', v_m1, 'analysis');
+    v_vreemd_override := true;
+  exception when others then
+    raise notice 'OVERGESLAGEN blok 29 (override): de vreemde override liet zich niet invoegen (%)', sqlstate;
+  end;
+  begin
+    insert into match_events (team_id, event_id, player_id, kind) values ('TEAM_B_UUID', v_m1, v_speler, 'goal');
+    v_vreemd_moment := true;
+  exception when others then
+    raise notice 'OVERGESLAGEN blok 29 (moment): het vreemde moment liet zich niet invoegen (%)', sqlstate;
+  end;
+
+  -- g (voor): aantallen als postgres, vóór de RPC-calls.
+  select count(*) into v_events_voor from events where team_id = 'TEAM_A_UUID';
+  select count(*) into v_koppelingen_voor from training_oefeningen where team_id = 'TEAM_A_UUID';
+  select count(*) into v_overrides_voor from task_overrides where team_id = 'TEAM_A_UUID';
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_B_UUID') then
+    raise exception 'FOUT IN DE OPZET: OWNER_A is wél lid van TEAM_B — kies een ander TEAM_B';
+  end if;
+
+  -- a. Beide RPC's met een vreemd team-id.
+  select count(*) into n from inzichten_training_koppelingen('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_training_koppelingen geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_training_koppelingen('TEAM_B_UUID', v_start, v_end);
+  if n <> 0 then raise exception 'LEK: inzichten_training_koppelingen geeft % rijen van TEAM_B (maart 1990)', n; end if;
+  select count(*) into n from inzichten_invul_discipline('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_invul_discipline geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_invul_discipline('TEAM_B_UUID', v_start, v_end);
+  if n <> 0 then raise exception 'LEK: inzichten_invul_discipline geeft % rijen van TEAM_B (maart 1990)', n; end if;
+  raise notice 'OK blok 29: beide fase-3a-RPC''s geven 0 rijen voor een vreemd team';
+
+  -- b. Trainingen + koppelingen van TEAM_A.
+  if v_k3 is not null then
+    select count(*) into n from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end) where koppeling_id = v_k3;
+    if n <> 0 then raise exception 'LEK: een koppeling van TEAM_B telt mee in inzichten_training_koppelingen(TEAM_A)'; end if;
+  end if;
+  select count(*) into n from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end);
+  if n <> 3 then raise exception 'KAPOT: inzichten_training_koppelingen(TEAM_A, maart 1990) geeft % rijen (verwacht 3: K1, K2 en T2 zonder koppeling)', n; end if;
+  select count(*) into n from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end) where totaal <> 3;
+  if n <> 0 then raise exception 'KAPOT: totaal is niet 3 op % rijen (count(*) over () vóór de limit)', n; end if;
+  select * into r from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end) where event_id = v_t2;
+  if not found or r.koppeling_id is not null or r.trainingstype <> 'teamtactisch' or r.oefening_leesbaar then
+    raise exception 'KAPOT: de training zonder koppeling geeft % (verwacht één rij, koppeling_id null, teamtactisch)', r;
+  end if;
+  select * into r from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end) where koppeling_id = v_k1;
+  if not found or r.koppeling_duur_min <> 20 or r.oefening_duur_min <> 10 or r.categorie <> 'positiespel'
+     or not r.oefening_leesbaar or r.datum <> date '1990-03-05' or r.trainingstype <> 'vct' then
+    raise exception 'KAPOT: K1 geeft % (verwacht duur 20, bibliotheek 10, positiespel, leesbaar, vct op 5-3)', r;
+  end if;
+  raise notice 'OK blok 29: inzichten_training_koppelingen geeft eigen koppelingen + training zonder koppeling, geen vreemde';
+
+  -- c. De oefening van een andere eigenaar (M6), via de koppeling van TEAM_A.
+  select * into r from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end) where koppeling_id = v_k2;
+  if not found or not r.oefening_leesbaar or r.categorie is null
+     or r.koppeling_duur_min is not null or r.oefening_duur_min is distinct from 15 then
+    raise exception 'KAPOT: oefening van teamgenoot niet leesbaar — staat M6 er nog? (%)', r;
+  end if;
+  raise notice 'OK blok 29: de oefening van een andere eigenaar is leesbaar (geen oefeningen.team_id-filter)';
+
+  -- d. Invul-discipline van TEAM_A.
+  select count(*) into n from inzichten_invul_discipline('TEAM_A_UUID', v_start, v_end);
+  if n <> 4 then raise exception 'KAPOT: inzichten_invul_discipline(TEAM_A, maart 1990) geeft % rijen (verwacht 4)', n; end if;
+  select * into r from inzichten_invul_discipline('TEAM_A_UUID', v_start, v_end) where event_id = v_m1;
+  if not found then raise exception 'KAPOT: M1 ontbreekt in inzichten_invul_discipline(TEAM_A)'; end if;
+  if v_vreemd_override and r.handmatig then
+    raise exception 'LEK: een task_override van TEAM_B telt mee als handmatig afgevinkt';
+  end if;
+  if v_vreemd_moment and r.aantal_momenten <> 0 then
+    raise exception 'LEK: een wedstrijdmoment van TEAM_B telt mee (% momenten)', r.aantal_momenten;
+  end if;
+  if r.soort <> 'match' or r.aantal_ratings <> 1 or r.handmatig or r.goals_for <> 2 or r.goals_against <> 1
+     or r.doelstelling is not null or r.totaal <> 4 then
+    raise exception 'KAPOT: M1 geeft % (verwacht match, 1 rating, niet handmatig, 2-1, geen doelstelling, totaal 4)', r;
+  end if;
+  select * into r from inzichten_invul_discipline('TEAM_A_UUID', v_start, v_end) where event_id = v_m2;
+  if not found or not r.handmatig or r.goals_for is not null or r.aantal_ratings <> 0 then
+    raise exception 'KAPOT: M2 geeft % (verwacht handmatig afgevinkt, geen uitslag, 0 ratings)', r;
+  end if;
+  select * into r from inzichten_invul_discipline('TEAM_A_UUID', v_start, v_end) where event_id = v_t1;
+  if not found then raise exception 'KAPOT: T1 ontbreekt in inzichten_invul_discipline(TEAM_A)'; end if;
+  if v_k3 is not null and r.aantal_oefeningen > 2 then
+    raise exception 'LEK: een koppeling van TEAM_B telt mee in aantal_oefeningen (%)', r.aantal_oefeningen;
+  end if;
+  if r.soort <> 'training' or r.aantal_oefeningen <> 2 or r.doelstelling is distinct from 'RLS-29 doel' or r.handmatig then
+    raise exception 'KAPOT: T1 geeft % (verwacht training, 2 oefeningen, doelstelling, niet handmatig)', r;
+  end if;
+  select * into r from inzichten_invul_discipline('TEAM_A_UUID', v_start, v_end) where event_id = v_t2;
+  if not found or r.aantal_oefeningen <> 0 or r.doelstelling is not null then
+    raise exception 'KAPOT: T2 geeft % (verwacht 0 oefeningen, geen doelstelling)', r;
+  end if;
+  raise notice 'OK blok 29: inzichten_invul_discipline telt alleen rijen van TEAM_A, handmatig = override van het eigen type';
+
+  -- e. Een niet-lid van TEAM_A.
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_A_UUID') then
+    raise notice 'OVERGESLAGEN blok 29e: BUITENSTAANDER is (weer) lid van TEAM_A';
+  else
+    select count(*) into n from inzichten_training_koppelingen('TEAM_A_UUID', v_start, v_end);
+    if n <> 0 then raise exception 'LEK: een niet-lid krijgt % rijen uit inzichten_training_koppelingen(TEAM_A)', n; end if;
+    select count(*) into n from inzichten_invul_discipline('TEAM_A_UUID', v_start, v_end);
+    if n <> 0 then raise exception 'LEK: een niet-lid krijgt % rijen uit inzichten_invul_discipline(TEAM_A)', n; end if;
+    raise notice 'OK blok 29: een niet-lid krijgt 0 rijen voor TEAM_A';
+  end if;
+
+  -- f. Geen execute-recht voor anon.
+  reset role;
+  if has_function_privilege('anon', 'public.inzichten_training_koppelingen(uuid, date, date)', 'execute')
+     or has_function_privilege('anon', 'public.inzichten_invul_discipline(uuid, date, date)', 'execute') then
+    raise exception 'LEK: anon mag een fase-3a-RPC uitvoeren';
+  end if;
+  raise notice 'OK blok 29: anon mag de fase-3a-RPC''s niet uitvoeren';
+
+  -- g. Alleen lezen.
+  select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+   where ns.nspname = 'public'
+     and p.proname in ('inzichten_training_koppelingen', 'inzichten_invul_discipline')
+     and p.provolatile = 's' and not p.prosecdef;
+  if n <> 2 then raise exception 'KAPOT: de fase-3a-RPC''s zijn niet allebei stable en security invoker (% van 2)', n; end if;
+  select count(*) into v_events_na from events where team_id = 'TEAM_A_UUID';
+  select count(*) into v_koppelingen_na from training_oefeningen where team_id = 'TEAM_A_UUID';
+  select count(*) into v_overrides_na from task_overrides where team_id = 'TEAM_A_UUID';
+  if v_events_na <> v_events_voor or v_koppelingen_na <> v_koppelingen_voor or v_overrides_na <> v_overrides_voor then
+    raise exception 'KAPOT: de fase-3a-RPC''s hebben geschreven (events %→%, koppelingen %→%, overrides %→%)',
+      v_events_voor, v_events_na, v_koppelingen_voor, v_koppelingen_na, v_overrides_voor, v_overrides_na;
+  end if;
+  raise notice 'OK blok 29: de fase-3a-RPC''s schrijven niets (alleen lezen)';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -2044,7 +2258,8 @@ rollback;
 -- fase 4 (persoonlijke oefeningen) in blok 24 (M6) en 25 (M6b), en de
 -- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26, fase 2a
 -- (4 speler-RPC's) in blok 27, fase 2b (tabel speelminuten + 1 RPC) in blok
--- 28. Accountverwijdering zelf
+-- 28, fase 3a (2 lees-RPC's: trainingskoppelingen en invul-discipline) in blok
+-- 29. Accountverwijdering zelf
 -- (auth.admin.deleteUser) is hier niet na te bootsen; de onderdelen ervan
 -- wel: de team-opruiming is blok 22, het opzeggen van een lidmaatschap blok
 -- 23, en de cascade van een verwijderde oefening naar elk trainingsplan blok

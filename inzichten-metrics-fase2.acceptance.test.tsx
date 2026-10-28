@@ -376,6 +376,9 @@ const HANDLERS: Harness['handlers'] = {
   inzichten_blessures_per_maand: hBlessures,
   // Fase 2b: dit fase-2a-harnas test die kaart niet; een lege bron volstaat.
   inzichten_speelminuten_per_speler: () => [],
+  // Fase 3a: dit bestand test de nieuwe kaarten niet; lege bronnen.
+  inzichten_training_koppelingen: () => [],
+  inzichten_invul_discipline: () => [],
 }
 const NIEUWE_RPCS = [
   'inzichten_speelkansen',
@@ -424,6 +427,8 @@ function leegDb(over: Partial<Db> = {}): Db {
     ],
     events: [], players: [], match_events: [], lineups: [], tegendoelpunten: [], match_squad: [],
     attendance: [], match_ratings: [], training_oefeningen: [],
+    // Fase 3a: de metingen-query van de pagina (leeg = geen metingen).
+    categorie_metingen: [],
     ...over,
   }
 }

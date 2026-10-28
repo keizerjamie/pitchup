@@ -311,6 +311,9 @@ const HANDLERS: Harness['handlers'] = {
   inzichten_doelpunten_per_minuut: () => [],
   inzichten_tegendoelpunten: () => [],
   inzichten_speelminuten_per_speler: hSpeelminuten,
+  // Fase 3a: dit bestand test de nieuwe kaarten niet; lege bronnen.
+  inzichten_training_koppelingen: () => [],
+  inzichten_invul_discipline: () => [],
 }
 
 function setup(db: Db, over: Partial<Harness> = {}): Harness {
@@ -399,6 +402,8 @@ function leegDb(over: Partial<Db> = {}): Db {
     ],
     events: [], players: [], match_events: [], lineups: [], tegendoelpunten: [], match_squad: [], speelminuten: [],
     attendance: [], match_ratings: [], training_oefeningen: [],
+    // Fase 3a: de metingen-query van de pagina (leeg = geen metingen).
+    categorie_metingen: [],
     ...over,
   }
 }
@@ -499,11 +504,13 @@ const zonderKaart = (container: HTMLElement, titel: string): string => {
 }
 
 describe('AC-A1 — fase-1- en fase-2a-kaarten ongewijzigd; nieuwe kaart eronder', () => {
-  it('AC-A1: de speelminutenkaart staat als laatste, direct na "Blessures per maand", in hetzelfde raster en half breed (O3)', async () => {
+  it('AC-A1: de speelminutenkaart staat direct na "Blessures per maand" (laatste kaart van fase 2b; fase 3a komt daarna), in hetzelfde raster en half breed (O3)', async () => {
     await renderInzichten(hoofdDb())
     const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(koppen.at(-1)).toBe(i.speelminutenTitle)
-    expect(koppen.at(-2)).toBe(i.blessuresTitle)
+    // Fase 3a voegt drie kaarten toe NA de speelminuten.
+    expect(koppen.at(-4)).toBe(i.speelminutenTitle)
+    expect(koppen.at(-5)).toBe(i.blessuresTitle)
+    expect(koppen.slice(-3)).toEqual([i.belastingTitle, i.periodiseringTitle, i.disciplineTitle])
     expect(koppen.filter((t) => t === i.speelminutenTitle)).toHaveLength(1)
     const bless = kaart(i.blessuresTitle)
     expect(SMK().previousElementSibling).toBe(bless)

@@ -289,6 +289,9 @@ const METRICS_HANDLERS: Harness['handlers'] = {
   inzichten_blessures_per_maand: () => [],
   // Fase 2b: idem, lege bron volstaat.
   inzichten_speelminuten_per_speler: () => [],
+  // Fase 3a: dit bestand test de nieuwe kaarten niet; lege bronnen.
+  inzichten_training_koppelingen: () => [],
+  inzichten_invul_discipline: () => [],
   inzichten_wedstrijd_uitslagen: (db, args) => {
     const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
     return db.events
@@ -374,6 +377,8 @@ function leegDb(over: Partial<Db> = {}): Db {
     ],
     events: [], players: [], match_events: [], lineups: [], tegendoelpunten: [], match_squad: [], speelminuten: [],
     attendance: [], match_ratings: [], training_oefeningen: [],
+    // Fase 3a: de metingen-query van de pagina (leeg = geen metingen).
+    categorie_metingen: [],
     ...over,
   }
 }

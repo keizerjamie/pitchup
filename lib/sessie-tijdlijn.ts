@@ -1,4 +1,4 @@
-import type { ParallelBlok } from '@/lib/parallel-groep'
+import type { BlokLid, ParallelBlok } from '@/lib/parallel-groep'
 
 // Rekent een trainingsplan om naar een tijdlijn: hoe lang duurt de sessie, en
 // hoe laat begint elk blok.
@@ -81,7 +81,13 @@ export function effectieveDuurMin(lid: {
 // mee (een oefening zonder ingevulde duur maakt het blok niet nul minuten).
 // De duur per lid komt uit effectieveDuurMin, zodat de tijdlijn dezelfde
 // koppeling-duur-met-fallback gebruikt als kaart en print.
-export function blokDuur(blok: ParallelBlok): number | null {
+//
+// Generiek in het ledentype (minimale vorm: BlokLid + DuurLid), zodat de
+// inzichten-belasting (lib/inzichten.ts) exact deze regel aanroept in plaats
+// van hem na te bouwen. Bestaande aanroepers infereren TrainingOefeningWithData.
+type DuurLid = Parameters<typeof effectieveDuurMin>[0]
+
+export function blokDuur<T extends BlokLid & DuurLid>(blok: ParallelBlok<T>): number | null {
   const duren = blok.leden.map(effectieveDuurMin).filter((d): d is number => d !== null)
   if (duren.length === 0) return null
   return Math.max(...duren)
@@ -112,7 +118,7 @@ export function minutenNaarTijd(minuten: number): string | null {
 // Bouwt de tijdlijn. `startTijd` is de starttijd van het event ('HH:MM' of
 // null); zonder starttijd blijven alle kloktijden null maar worden de duren
 // wél opgeteld — het totaal is ook zonder klok bruikbaar.
-export function berekenTijdlijn(blokken: ParallelBlok[], startTijd: string | null): Tijdlijn {
+export function berekenTijdlijn<T extends BlokLid & DuurLid>(blokken: ParallelBlok<T>[], startTijd: string | null): Tijdlijn {
   const startMinuten = tijdNaarMinuten(startTijd)
 
   let cursor: number | null = 0

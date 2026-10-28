@@ -1,5 +1,5 @@
 import { isUuid } from '@/lib/authz'
-import type { OefeningTeam, ParallelSpelers, TrainingOefeningWithData } from '@/lib/types'
+import type { OefeningTeam, ParallelSpelers, TrainingOefening, TrainingOefeningWithData } from '@/lib/types'
 
 // Gedeelde, framework-agnostische logica voor PARALLELLE oefeningen binnen één
 // training: oefeningen die naast elkaar draaien en samen één blok in het
@@ -26,7 +26,14 @@ import type { OefeningTeam, ParallelSpelers, TrainingOefeningWithData } from '@/
 // blijven afgeleide velden die de leesgrens toevoegt (bv. `bezetting`,
 // TrainingOefeningMetBezetting in lib/oefening-bezetting.ts) behouden in plaats
 // van uit het type te vallen. Bestaande aanroepen wijzigen niet.
-export interface ParallelBlok<T extends TrainingOefeningWithData = TrainingOefeningWithData> {
+//
+// De constraint is de minimale ledenvorm (BlokLid): alleen de velden waarop
+// blokkenVanKoppelingen groepeert en sorteert. Zo kan ook een leesbron met
+// alleen die kolommen (de inzichten-RPC in lib/inzichten.ts) dezelfde
+// blokregel gebruiken zonder cast; de default blijft het plannertype.
+export type BlokLid = Pick<TrainingOefening, 'id' | 'volgorde' | 'created_at' | 'parallel_groep_id'>
+
+export interface ParallelBlok<T extends BlokLid = TrainingOefeningWithData> {
   // Stabiele React-key: 'g:<groepId>' voor een groep, 'k:<koppelingId>' voor een
   // losse koppeling.
   key: string
@@ -47,7 +54,7 @@ function blokSleutel(rij: { id: string; parallel_groep_id?: string | null }): st
 // teruggegeven (groepId: null). Dat dekt het weeskind dat kan ontstaan als een
 // bibliotheek-oefening hard verwijderd wordt en de koppelrij via FK CASCADE
 // verdwijnt zonder dat de groepsopruiming van de server actions langskomt.
-export function blokkenVanKoppelingen<T extends TrainingOefeningWithData>(
+export function blokkenVanKoppelingen<T extends BlokLid>(
   koppelingen: T[],
 ): ParallelBlok<T>[] {
   const gesorteerd = sorteerKoppelingen(koppelingen)
@@ -84,7 +91,7 @@ export function blokkenVanKoppelingen<T extends TrainingOefeningWithData>(
 
 // Deterministische sortering: volgorde → created_at → id. Leden van één groep
 // delen hun `volgorde`, dus created_at/id bepalen de volgorde binnen een blok.
-function sorteerKoppelingen<T extends TrainingOefeningWithData>(koppelingen: T[]): T[] {
+function sorteerKoppelingen<T extends BlokLid>(koppelingen: T[]): T[] {
   return [...koppelingen].sort(
     (a, b) =>
       (a.volgorde ?? 0) - (b.volgorde ?? 0) ||

@@ -8,11 +8,29 @@
 // pagina over een heel seizoen kijkt; hier blijft alleen het rekenwerk over dat
 // op de al samengevatte rijen slaat.
 
-import { matchResult } from '@/lib/match-analysis.mjs'
-import { isDateString, toUtcMs } from '@/lib/season-dates'
+import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
+import { hasTrainingPlanDone } from '@/lib/todos.mjs'
+import { fromUtcMs, isDateString, isoWeek, maandagVanWeek, toUtcMs, wekenInVenster } from '@/lib/season-dates'
 import { addDays, todayLocal } from '@/lib/utils'
-import { POSITIONS, TEGENDOELPUNT_SOORTEN } from '@/lib/types'
-import type { HomeAway, MatchResult, MatchType, Position, TegendoelpuntSoort } from '@/lib/types'
+import { blokkenVanKoppelingen } from '@/lib/parallel-groep'
+import { berekenTijdlijn, effectieveDuurMin } from '@/lib/sessie-tijdlijn'
+import { actueleMetingen, computeCurrentSteps } from '@/lib/periodization'
+import {
+  MEETBARE_CATEGORIES,
+  PERIODIZATION_CATEGORIES,
+  POSITIONS,
+  TEGENDOELPUNT_SOORTEN,
+  berekenStap,
+} from '@/lib/types'
+import type {
+  CategorieMeting,
+  HomeAway,
+  MatchResult,
+  MatchType,
+  OefeningCategorie,
+  Position,
+  TegendoelpuntSoort,
+} from '@/lib/types'
 
 // Bovengrens op het aantal wedstrijdrijen dat de doelpuntengrafiek ophaalt.
 // Zonder grens bepaalt de (door de gebruiker gekozen) seizoenslengte hoeveel
@@ -1472,4 +1490,538 @@ export function verdeelSpeelminuten(rows: SpeelminutenRij[]): SpeelminutenVerdel
     return opNaamDanId(a, b)
   })
   return { regels, noemer }
+}
+
+// ── Inzichten-metrics fase 3a: training en kwaliteit (supabase/inzichten-metrics-fase3a.sql) ──
+// De twee RPC's filteren en joinen alleen per team en leveren RUWE rijen (één
+// per koppeling of per event). Alle regels draaien hier, met de bestaande
+// functies in plaats van een nabouw:
+// - duur: effectieveDuurMin, parallel = langste (blokDuur via berekenTijdlijn),
+//   groep met < 2 leden = los blok (blokkenVanKoppelingen);
+// - stap: actueleMetingen + berekenStap + computeCurrentSteps;
+// - discipline: analyseBestaat, matchResult en hasTrainingPlanDone.
+// Puur: de invoer wordt nooit gemuteerd, nooit NaN.
+
+// Bovengrens op het aantal rijen per fase-3a-RPC. De SQL vraagt `limit 901`
+// (= MAX_FASE3_RIJEN + 1) en geeft per rij `totaal` = count(*) over () vóór de
+// limit mee; de structuurtest bindt die twee getallen aan elkaar.
+export const MAX_FASE3_RIJEN = 900 // SQL: limit 901
+
+// inzichten_training_koppelingen — één rij per koppeling; een training zonder
+// koppeling geeft één rij met koppeling_id null. oefening_leesbaar = false als
+// de (left) join op oefeningen niets opleverde (geen leesrecht): dan zijn
+// oefening_duur_min en categorie null.
+export interface TrainingKoppelingRij {
+  event_id: string
+  datum: string
+  trainingstype: string
+  koppeling_id: string | null
+  volgorde: number | null
+  aangemaakt: string | null
+  parallel_groep_id: string | null
+  koppeling_duur_min: number | null
+  oefening_duur_min: number | null
+  categorie: string | null
+  stap_override: number | null
+  oefening_leesbaar: boolean
+  totaal: number
+}
+
+// inzichten_invul_discipline — één rij per gespeelde wedstrijd of training met
+// ruwe tellingen. `handmatig` = er staat een task_override van het
+// bijbehorende type ('analysis' bij een wedstrijd, 'training_plan' bij een
+// training). `doelstelling` alleen bij trainingen.
+export interface InvulDisciplineRij {
+  event_id: string
+  soort: string
+  datum: string
+  goals_for: number | null
+  goals_against: number | null
+  doelstelling: string | null
+  aantal_ratings: number
+  aantal_momenten: number
+  aantal_oefeningen: number
+  handmatig: boolean
+  totaal: number
+}
+
+// Is de RPC-uitkomst afgekapt? Meer dan MAX_FASE3_RIJEN rijen (de SQL-limit
+// van 901 is geraakt), óf `totaal` is groter dan wat er binnenkwam (een lagere
+// PostgREST max-rows heeft afgekapt). In beide gevallen toont de kaart een
+// melding in plaats van gedeeltelijke cijfers (AC-A12).
+export function isAfgekapt(rijen: { totaal: number }[]): boolean {
+  if (!Array.isArray(rijen)) return false
+  return rijen.length > MAX_FASE3_RIJEN || rijen.some((r) => telwaarde(r?.totaal) > rijen.length)
+}
+
+const DAG_MS = 86_400_000
+const CATEGORIE_SLEUTELS = new Set<string>(PERIODIZATION_CATEGORIES.map((c) => c.key))
+const MEETBAAR = new Set<string>(MEETBARE_CATEGORIES)
+
+function isCategorie(waarde: unknown): waarde is OefeningCategorie {
+  return typeof waarde === 'string' && CATEGORIE_SLEUTELS.has(waarde)
+}
+
+function legeCategorieTelling(): Record<OefeningCategorie, number> {
+  const telling = {} as Record<OefeningCategorie, number>
+  for (const c of PERIODIZATION_CATEGORIES) telling[c.key] = 0
+  return telling
+}
+
+function eindigOfNull(waarde: unknown): number | null {
+  return typeof waarde === 'number' && Number.isFinite(waarde) ? waarde : null
+}
+
+// Bruikbare koppelingsrij: een event-id en een echte kalenderdatum.
+function isBruikbareRij(rij: TrainingKoppelingRij | null | undefined): rij is TrainingKoppelingRij {
+  return !!rij && typeof rij.event_id === 'string' && isDateString(rij.datum)
+}
+
+function isGeldigVenster(venster: Seizoensvenster | null | undefined): venster is Seizoensvenster {
+  return !!venster && isGeldigSeizoensvenster(venster.start, venster.end)
+}
+
+// Deterministische volgorde van koppelingen binnen één training: dezelfde als
+// sorteerKoppelingen in lib/parallel-groep.ts (volgorde → aangemaakt → id).
+function opKoppelingsvolgorde(a: TrainingKoppelingRij, b: TrainingKoppelingRij): number {
+  return (
+    (eindigOfNull(a.volgorde) ?? 0) - (eindigOfNull(b.volgorde) ?? 0) ||
+    String(a.aangemaakt ?? '').localeCompare(String(b.aangemaakt ?? '')) ||
+    (String(a.koppeling_id) < String(b.koppeling_id) ? -1 : String(a.koppeling_id) > String(b.koppeling_id) ? 1 : 0)
+  )
+}
+
+// ── Belasting in minuten per categorie per week ───────────────────────
+
+export interface BelastingWeek {
+  // Maandag van de ISO-week ('YYYY-MM-DD'); weken lopen maandag–zondag.
+  maandag: string
+  isoJaar: number
+  isoWeek: number
+  // De week begint vóór resp. eindigt ná het venster: een deelweek.
+  deelweekBegin: boolean
+  deelweekEind: boolean
+  trainingen: number
+  trainingenZonderOefeningen: number
+  // Minuten per categorie; elke oefening telt met haar EIGEN duur, ook binnen
+  // een parallelle groep (Q2). null = geen enkele training in deze week ("geen
+  // gegevens"); een week met trainingen geeft per categorie 0 of meer (B.6).
+  perCategorie: Record<OefeningCategorie, number> | null
+  // Som van berekenTijdlijn(...).totaalMin per training: het planner-totaal
+  // (parallel = langste, genest additief). null = geen trainingen.
+  trainingstotaalMin: number | null
+  // Blokken zonder duur (ontbreken dus in trainingstotaalMin).
+  blokkenZonderDuur: number
+  // Koppelingen met een bekende categorie maar zonder duur (B.4).
+  oefeningenZonderDuur: number
+  // Koppelingen zonder leesbare categorie: hun minuten tellen wél in het
+  // trainingstotaal (net als de planner), niet in een categorie.
+  oefeningenOnbekend: number
+  // trainingstotaalMin t.o.v. het hoogste weektotaal, alleen voor de
+  // staafhoogte. null bij geen trainingen of als elk totaal 0 is.
+  totaalAandeel: number | null
+}
+
+export interface BelastingOverzicht {
+  weken: BelastingWeek[]
+  afgekapt: boolean
+  // Er is minstens één training in het venster (ook zonder oefeningen).
+  heeftTrainingen: boolean
+  // Er is minstens één koppeling met een duur (AC-A5: alleen ingeplande
+  // trainingen zonder invoer gelden niet als data).
+  heeftMinuten: boolean
+  totaalPerCategorie: Record<OefeningCategorie, number>
+}
+
+// Lid in de vorm die blokkenVanKoppelingen én effectieveDuurMin verwachten.
+// volgorde null → 0 en aangemaakt null → '' is precies wat sorteerKoppelingen
+// zelf al doet (`?? 0` resp. `String(x ?? '')`). Een niet-leesbare oefening
+// krijgt `oefeningen: null`: dan telt alleen de eigen duur van de koppeling.
+function belastingLid(rij: TrainingKoppelingRij) {
+  return {
+    id: String(rij.koppeling_id),
+    volgorde: eindigOfNull(rij.volgorde) ?? 0,
+    created_at: typeof rij.aangemaakt === 'string' ? rij.aangemaakt : '',
+    parallel_groep_id: typeof rij.parallel_groep_id === 'string' ? rij.parallel_groep_id : null,
+    // Ruw doorgeven (alleen undefined → null): effectieveDuurMin beslist zelf,
+    // zodat ook een onbruikbare waarde precies zo uitvalt als in de planner
+    // (geen eigen duur ≠ ongeldige eigen duur: alleen NULL valt terug).
+    duur_min: rij.koppeling_duur_min ?? null,
+    oefeningen: rij.oefening_leesbaar === true ? { duur_min: rij.oefening_duur_min ?? null } : null,
+  }
+}
+
+interface TrainingGroep {
+  eventId: string
+  datum: string
+  koppelingen: TrainingKoppelingRij[]
+}
+
+// Groepeert bruikbare rijen per training (event_id), in invoervolgorde.
+function groepeerPerTraining(rijen: TrainingKoppelingRij[], filter: (r: TrainingKoppelingRij) => boolean): TrainingGroep[] {
+  const perEvent = new Map<string, TrainingGroep>()
+  for (const rij of Array.isArray(rijen) ? rijen : []) {
+    if (!isBruikbareRij(rij) || !filter(rij)) continue
+    let groep = perEvent.get(rij.event_id)
+    if (!groep) {
+      groep = { eventId: rij.event_id, datum: rij.datum, koppelingen: [] }
+      perEvent.set(rij.event_id, groep)
+    }
+    if (typeof rij.koppeling_id === 'string') groep.koppelingen.push(rij)
+  }
+  return [...perEvent.values()]
+}
+
+// Trainingsminuten per categorie per ISO-week over `venster` (Q2/Q5/Q6). Weken
+// chronologisch (O1), elke week van het venster aanwezig, ook zonder training.
+export function belastingPerWeek(rijen: TrainingKoppelingRij[], venster: Seizoensvenster): BelastingOverzicht {
+  const afgekapt = isAfgekapt(rijen)
+  const totaalPerCategorie = legeCategorieTelling()
+  if (!isGeldigVenster(venster)) {
+    return { weken: [], afgekapt, heeftTrainingen: false, heeftMinuten: false, totaalPerCategorie }
+  }
+
+  const trainingen = groepeerPerTraining(rijen, (r) => r.datum >= venster.start && r.datum <= venster.end)
+  const heeftTrainingen = trainingen.length > 0
+  const heeftMinuten = trainingen.some((t) => t.koppelingen.some((k) => effectieveDuurMin(belastingLid(k)) !== null))
+  // Afgekapt: geen gedeeltelijke cijfers (de nieuwste week kan ontbreken).
+  if (afgekapt) return { weken: [], afgekapt, heeftTrainingen, heeftMinuten, totaalPerCategorie }
+
+  const weken: BelastingWeek[] = wekenInVenster(venster.start, venster.end).map((maandag) => {
+    const iso = isoWeek(maandag)!
+    const zondag = fromUtcMs(toUtcMs(maandag)! + 6 * DAG_MS)
+    return {
+      maandag,
+      isoJaar: iso.jaar,
+      isoWeek: iso.week,
+      deelweekBegin: maandag < venster.start,
+      deelweekEind: zondag > venster.end,
+      trainingen: 0,
+      trainingenZonderOefeningen: 0,
+      perCategorie: null,
+      trainingstotaalMin: null,
+      blokkenZonderDuur: 0,
+      oefeningenZonderDuur: 0,
+      oefeningenOnbekend: 0,
+      totaalAandeel: null,
+    }
+  })
+  const perMaandag = new Map(weken.map((w) => [w.maandag, w]))
+
+  for (const training of trainingen) {
+    const week = perMaandag.get(maandagVanWeek(training.datum) ?? '')
+    if (!week) continue
+    week.trainingen++
+    week.perCategorie ??= legeCategorieTelling()
+    week.trainingstotaalMin ??= 0
+    if (training.koppelingen.length === 0) {
+      week.trainingenZonderOefeningen++
+      continue
+    }
+    const leden = training.koppelingen.map(belastingLid)
+    // Het planner-totaal: exact dezelfde aanroep als TrainingPlanEditor.
+    const tijdlijn = berekenTijdlijn(blokkenVanKoppelingen(leden), null)
+    week.trainingstotaalMin += tijdlijn.totaalMin
+    week.blokkenZonderDuur += tijdlijn.blokkenZonderDuur
+
+    training.koppelingen.forEach((rij, i) => {
+      const categorie = rij.oefening_leesbaar === true ? rij.categorie : null
+      if (!isCategorie(categorie)) {
+        week.oefeningenOnbekend++
+        return
+      }
+      const duur = effectieveDuurMin(leden[i])
+      if (duur === null) {
+        week.oefeningenZonderDuur++
+        return
+      }
+      week.perCategorie![categorie] += duur
+      totaalPerCategorie[categorie] += duur
+    })
+  }
+
+  const maxWeektotaal = weken.reduce((max, w) => Math.max(max, w.trainingstotaalMin ?? 0), 0)
+  for (const week of weken) {
+    week.totaalAandeel = week.trainingstotaalMin === null ? null : aandeel(week.trainingstotaalMin, maxWeektotaal)
+  }
+  return { weken, afgekapt, heeftTrainingen, heeftMinuten, totaalPerCategorie }
+}
+
+// ── Periodisering: voortgang per meetbaar onderdeel ───────────────────
+
+export interface StapPunt {
+  datum: string
+  stap: number
+  bron: 'meting' | 'training'
+  // Training met een handmatige stap_override.
+  handmatig: boolean
+  // Het event bij een trainingspunt, null bij een meetpunt.
+  eventId: string | null
+}
+
+export interface OnderdeelVoortgang {
+  key: OefeningCategorie
+  maxStap: number
+  gemeten: boolean
+  // Eerste meting OOIT van dit onderdeel (Q3).
+  nulmeting: { datum: string; stap: number } | null
+  // Stand t/m gisteren (O3): computeCurrentSteps met de meting die vandaag
+  // geldt (exclusief) en de VCT-trainingen t/m gisteren. Niet geclampt.
+  huidig: { stap: number } | null
+  // huidig − nulmeting, in stappen (geen %); kan negatief zijn.
+  verschil: number | null
+  // Precies één meting en nog geen enkel trainingspunt (P.4).
+  geenVoortgang: boolean
+  // Punten binnen `weergave`, op datum; op dezelfde datum eerst de training
+  // (die gebruikte nog de vorige meting), dan de meting.
+  punten: StapPunt[]
+  // Aantal trainingspunten in `punten`.
+  trainingen: number
+}
+
+export interface PeriodiseringVoortgang {
+  onderdelen: OnderdeelVoortgang[]
+  afgekapt: boolean
+  // Koppelingen in VCT-trainingen zonder leesbare oefening: tellen niet mee
+  // in de stap-telling, en dat wordt zichtbaar gemeld (nooit stil weg).
+  onbekend: number
+  // B1: de weergave is leeg omdat het seizoen nog niet begonnen is (gisteren
+  // ligt vóór de seizoensstart). Gemeten onderdelen hebben dan wél nulmeting,
+  // huidig en verschil, maar geen punten. periodiseringVoortgang vult dit veld
+  // altijd; optioneel getypeerd zodat bestaande letterlijke fixtures geldig
+  // blijven.
+  seizoenNogNietBegonnen?: boolean
+}
+
+interface VctTraining {
+  eventId: string
+  datum: string
+  // Per meetbaar onderdeel: de override van deze training (eerste niet-null in
+  // koppelingsvolgorde), of null.
+  perCategorie: Map<string, number | null>
+}
+
+function ongemetenOnderdeel(key: OefeningCategorie, maxStap: number): OnderdeelVoortgang {
+  return {
+    key,
+    maxStap,
+    gemeten: false,
+    nulmeting: null,
+    huidig: null,
+    verschil: null,
+    geenVoortgang: false,
+    punten: [],
+    trainingen: 0,
+  }
+}
+
+// Reconstructie van de periodiseringsstap door de tijd (P.1–P.8, Q3).
+// `rijen` = inzichten_training_koppelingen vanaf de vroegste meting t/m het
+// einde van `weergave`; `metingen` = categorie_metingen van het team;
+// `weergave` = verledenSeizoensVenster (hele seizoen t/m gisteren); `vandaag`
+// = todayLocal(). Alleen VCT-trainingen (P.7). Per training T op datum d en
+// onderdeel c: m = actueleMetingen(metingen, d)[c] (exclusief, zoals de
+// planner), k = aantal eerdere VCT-trainingen met c, datum > m.datum en < d
+// (dezelfde dag telt niet), stap = override ?? berekenStap(m.stap, k).
+export function periodiseringVoortgang(
+  rijen: TrainingKoppelingRij[],
+  metingen: CategorieMeting[],
+  weergave: Seizoensvenster,
+  vandaag: string,
+): PeriodiseringVoortgang {
+  const meetbaar = PERIODIZATION_CATEGORIES.filter((c) => c.hasMeting)
+  if (isAfgekapt(rijen)) return { onderdelen: [], afgekapt: true, onbekend: 0, seizoenNogNietBegonnen: false }
+  // B1: twee echte datums met end < start = verledenSeizoensVenster van een
+  // seizoen dat nog moet beginnen. Dan wel de stand per gemeten onderdeel,
+  // maar geen enkel punt (er is nog geen seizoen om te tonen).
+  const nogNietBegonnen =
+    !!weergave && isDateString(weergave.start) && isDateString(weergave.end) && weergave.end < weergave.start
+  if (!isDateString(vandaag) || (!nogNietBegonnen && !isGeldigVenster(weergave))) {
+    return {
+      onderdelen: meetbaar.map((c) => ongemetenOnderdeel(c.key, c.maxStap)),
+      afgekapt: false,
+      onbekend: 0,
+      seizoenNogNietBegonnen: false,
+    }
+  }
+  // Bij nogNietBegonnen is dit voor elke datum onwaar: punten blijven leeg.
+  const inWeergave = (datum: string) => datum >= weergave.start && datum <= weergave.end
+  // Nooit iets van vandaag of later, en niets na het einde van de weergave.
+  const telt = (datum: string) => datum < vandaag && datum <= weergave.end
+
+  const schoneMetingen = (Array.isArray(metingen) ? metingen : []).filter(
+    (m): m is CategorieMeting =>
+      !!m && MEETBAAR.has(m.categorie) && isDateString(m.datum) && telt(m.datum) && eindigOfNull(m.stap) !== null,
+  )
+
+  let onbekend = 0
+  const trainingen: VctTraining[] = []
+  for (const groep of groepeerPerTraining(rijen, (r) => r.trainingstype === 'vct' && telt(r.datum))) {
+    const perCategorie = new Map<string, number | null>()
+    for (const rij of [...groep.koppelingen].sort(opKoppelingsvolgorde)) {
+      if (rij.oefening_leesbaar !== true) {
+        onbekend++
+        continue
+      }
+      if (typeof rij.categorie !== 'string' || !MEETBAAR.has(rij.categorie)) continue
+      const override = eindigOfNull(rij.stap_override)
+      if (!perCategorie.has(rij.categorie) || (perCategorie.get(rij.categorie) === null && override !== null)) {
+        perCategorie.set(rij.categorie, override)
+      }
+    }
+    trainingen.push({ eventId: groep.eventId, datum: groep.datum, perCategorie })
+  }
+  trainingen.sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0))
+
+  // Huidige stand t/m gisteren (O3): de meting die vandaag (exclusief) geldt,
+  // plus de VCT-trainingen strikt ná die meting en vóór vandaag.
+  const actueelNu = actueleMetingen(schoneMetingen, vandaag)
+  const occurrencesNu: Record<string, number> = {}
+  for (const c of meetbaar) {
+    const m = actueelNu[c.key]
+    if (!m) continue
+    occurrencesNu[c.key] = trainingen.filter((t) => t.perCategorie.has(c.key) && t.datum > m.datum).length
+  }
+  const huidigeStappen = computeCurrentSteps(actueelNu, occurrencesNu)
+
+  const onderdelen = meetbaar.map((c): OnderdeelVoortgang => {
+    const eigenMetingen = schoneMetingen
+      .filter((m) => m.categorie === c.key)
+      .sort((a, b) => (a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    if (eigenMetingen.length === 0) return ongemetenOnderdeel(c.key, c.maxStap)
+
+    const metC = trainingen.filter((t) => t.perCategorie.has(c.key))
+    const trainingPunten: StapPunt[] = []
+    let trainingPuntenTotaal = 0
+    for (const t of metC) {
+      const m = actueleMetingen(eigenMetingen, t.datum)[c.key]
+      // Vóór de eerste meting: geen verzonnen stap (P.6).
+      if (!m) continue
+      const k = metC.filter((eerder) => eerder.datum > m.datum && eerder.datum < t.datum).length
+      const override = t.perCategorie.get(c.key) ?? null
+      trainingPuntenTotaal++
+      if (!inWeergave(t.datum)) continue
+      trainingPunten.push({
+        datum: t.datum,
+        stap: override ?? berekenStap(m.stap, k),
+        bron: 'training',
+        handmatig: override !== null,
+        eventId: t.eventId,
+      })
+    }
+    const meetPunten: StapPunt[] = eigenMetingen
+      .filter((m) => inWeergave(m.datum))
+      .map((m) => ({ datum: m.datum, stap: m.stap, bron: 'meting', handmatig: false, eventId: null }))
+    // Stabiele sortering op datum; per datum eerst de trainingen (al op event_id
+    // gesorteerd), dan de meting.
+    const punten = [...trainingPunten, ...meetPunten].sort((a, b) =>
+      a.datum < b.datum ? -1 : a.datum > b.datum ? 1 : (a.bron === 'training' ? 0 : 1) - (b.bron === 'training' ? 0 : 1),
+    )
+
+    const eerste = eigenMetingen[0]
+    const huidigeStap = huidigeStappen[c.key]
+    const huidig = typeof huidigeStap === 'number' ? { stap: huidigeStap } : null
+    return {
+      key: c.key,
+      maxStap: c.maxStap,
+      gemeten: true,
+      nulmeting: { datum: eerste.datum, stap: eerste.stap },
+      huidig,
+      verschil: huidig ? huidig.stap - eerste.stap : null,
+      geenVoortgang: eigenMetingen.length === 1 && trainingPuntenTotaal === 0,
+      punten,
+      trainingen: trainingPunten.length,
+    }
+  })
+
+  return { onderdelen, afgekapt: false, onbekend, seizoenNogNietBegonnen: nogNietBegonnen }
+}
+
+// B2: ondergrens (p_start) voor de periodiserings-RPC. Per gemeten onderdeel
+// de meting die op de eerste seizoensdag gold — de laatste met datum STRIKT
+// vóór de seizoensstart, precies wat actueleMetingen(metingen, seizoenStart)
+// voor een training op die dag gebruikt — of, zonder zo'n meting, de eerste
+// meting van dat onderdeel. De ondergrens is het minimum daarvan; dat is per
+// constructie ≥ de vroegste meting. Elke k-telling voor een training in het
+// seizoen (en voor `huidig`) telt alleen trainingen ná zo'n meting, dus de
+// reconstructie is identiek aan die vanaf de vroegste meting, terwijl de bron
+// niet meegroeit over seizoenen.
+// Waarom strikt vóór en niet ≤: bij een meting precies op de seizoensstart
+// gebruikt een training op die dag nog de vorige meting, en die k telt
+// trainingen vanaf díe datum. null = geen bruikbare meting of ongeldige start
+// (dan geen RPC-aanroep).
+export function periodiseringOndergrens(metingen: CategorieMeting[], seizoenStart: string): string | null {
+  if (!isDateString(seizoenStart)) return null
+  const perCategorie = new Map<string, { eerste: string; laatsteVoorStart: string | null }>()
+  for (const m of Array.isArray(metingen) ? metingen : []) {
+    if (!m || !MEETBAAR.has(m.categorie) || !isDateString(m.datum) || eindigOfNull(m.stap) === null) continue
+    const huidig = perCategorie.get(m.categorie) ?? { eerste: m.datum, laatsteVoorStart: null }
+    if (m.datum < huidig.eerste) huidig.eerste = m.datum
+    if (m.datum < seizoenStart && (huidig.laatsteVoorStart === null || m.datum > huidig.laatsteVoorStart)) {
+      huidig.laatsteVoorStart = m.datum
+    }
+    perCategorie.set(m.categorie, huidig)
+  }
+  let ondergrens: string | null = null
+  for (const { eerste, laatsteVoorStart } of perCategorie.values()) {
+    const anker = laatsteVoorStart ?? eerste
+    if (ondergrens === null || anker < ondergrens) ondergrens = anker
+  }
+  return ondergrens
+}
+
+// ── Invul-discipline ──────────────────────────────────────────────────
+
+export interface InvulDiscipline {
+  wedstrijden: number
+  // analyseBestaat (de to-do-regel van het dashboard, Q4).
+  metAnalyse: number
+  // matchResult !== 'unknown': beide doelpuntvelden ingevuld.
+  metUitslag: number
+  // Handmatig afgevinkt ZONDER automatisch ingevuld (O4); telt nooit als
+  // ingevuld.
+  analyseHandmatig: number
+  trainingen: number
+  // hasTrainingPlanDone (doelstelling of ≥1 oefening).
+  metPlan: number
+  planHandmatig: number
+  afgekapt: boolean
+}
+
+// Hoe volledig wedstrijden en trainingen zijn ingevuld (D.1–D.7). De regels
+// zijn die van het dashboard (app/page.tsx), niet nagebouwd. Een ander `soort`
+// dan 'match'/'training' wordt genegeerd. Bij afgekapt blijven de tellingen
+// gevuld met wat er binnenkwam; de kaart toont dan alleen de melding.
+export function telInvulDiscipline(rijen: InvulDisciplineRij[]): InvulDiscipline {
+  const uitkomst: InvulDiscipline = {
+    wedstrijden: 0,
+    metAnalyse: 0,
+    metUitslag: 0,
+    analyseHandmatig: 0,
+    trainingen: 0,
+    metPlan: 0,
+    planHandmatig: 0,
+    afgekapt: isAfgekapt(rijen),
+  }
+  for (const rij of Array.isArray(rijen) ? rijen : []) {
+    if (!rij) continue
+    if (rij.soort === 'match') {
+      uitkomst.wedstrijden++
+      const auto = analyseBestaat({
+        goals_for: rij.goals_for,
+        goals_against: rij.goals_against,
+        ratingCount: telwaarde(rij.aantal_ratings),
+        eventCount: telwaarde(rij.aantal_momenten),
+      })
+      if (auto) uitkomst.metAnalyse++
+      if (matchResult({ goals_for: rij.goals_for, goals_against: rij.goals_against }) !== 'unknown') uitkomst.metUitslag++
+      if (rij.handmatig === true && !auto) uitkomst.analyseHandmatig++
+    } else if (rij.soort === 'training') {
+      uitkomst.trainingen++
+      const auto = hasTrainingPlanDone(rij.doelstelling, telwaarde(rij.aantal_oefeningen))
+      if (auto) uitkomst.metPlan++
+      if (rij.handmatig === true && !auto) uitkomst.planHandmatig++
+    }
+  }
+  return uitkomst
 }

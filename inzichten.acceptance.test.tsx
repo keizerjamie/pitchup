@@ -474,6 +474,11 @@ interface Db {
   tegendoelpunten: Row[]
   match_squad: Row[]
   speelminuten: Row[]
+  // Fase 3a: bronnen van inzichten_training_koppelingen en
+  // inzichten_invul_discipline, plus de metingen-query van de pagina.
+  training_oefeningen: Row[]
+  task_overrides: Row[]
+  categorie_metingen: Row[]
 }
 
 // ── Vier RPC's van supabase/inzichten-metrics.sql ─────────────────────
@@ -766,6 +771,88 @@ function rpcSpeelminuten(db: Db, args: Row) {
     .sort((a, b) => String(a.naam).localeCompare(String(b.naam)) || String(a.player_id).localeCompare(String(b.player_id)))
 }
 
+// ── Twee RPC's van supabase/inzichten-metrics-fase3a.sql (fase 3a) ───
+// Zelfde regels als hierboven: p_team_id uit de ARGUMENTEN en een team_id-filter
+// op élke gejoinde tabel (e, k, r, me, tov). BEWUSTE UITZONDERING: de oefening
+// (`k.oefeningen`) wordt NIET op team gefilterd — oefeningen.team_id is de
+// eigenaar-user, geen teams.id; de leesbaarheid volgt de RLS. Is `oefeningen`
+// null of ontbreekt het, dan is de oefening niet leesbaar (oefening_leesbaar =
+// false, oefening_duur_min/categorie null). Rekenwerk zit niet in de handler.
+// limit 901 + totaal = count(*) over () vóór de limit.
+const MAX_FASE3_RPC = 901 // = MAX_FASE3_RIJEN + 1 (limit 901 in de SQL)
+
+function rpcTrainingKoppelingen(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const trainingen = db.events
+    .filter((e) => e.team_id === p_team_id && e.type === 'training' && inRange(e.date as string, p_start, p_end))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+  const rijen: Row[] = []
+  for (const e of trainingen) {
+    // left join: het team-filter van de koppeling zit in de ON-clausule, zodat
+    // een training zonder (eigen) koppeling nog steeds één rij oplevert.
+    const koppelingen = db.training_oefeningen
+      .filter((k) => k.event_id === e.id && k.team_id === p_team_id)
+      .sort(
+        (a, b) =>
+          ((a.volgorde as number | undefined) ?? 0) - ((b.volgorde as number | undefined) ?? 0) ||
+          String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')),
+      )
+    if (koppelingen.length === 0) {
+      rijen.push({
+        event_id: e.id, datum: e.date, trainingstype: e.trainingstype,
+        koppeling_id: null, volgorde: null, aangemaakt: null, parallel_groep_id: null,
+        koppeling_duur_min: null, oefening_duur_min: null, categorie: null, stap_override: null,
+        oefening_leesbaar: false,
+      })
+      continue
+    }
+    koppelingen.forEach((k, n) => {
+      const oef = (k.oefeningen as Row | null | undefined) ?? null
+      rijen.push({
+        event_id: e.id, datum: e.date, trainingstype: e.trainingstype,
+        koppeling_id: (k.id as string | undefined) ?? `k-${e.id}-${n}`,
+        volgorde: (k.volgorde as number | undefined) ?? n,
+        aangemaakt: (k.created_at as string | undefined) ?? null,
+        parallel_groep_id: (k.parallel_groep_id as string | undefined) ?? null,
+        koppeling_duur_min: (k.duur_min as number | null | undefined) ?? null,
+        oefening_duur_min: oef ? ((oef.duur_min as number | null | undefined) ?? null) : null,
+        categorie: oef ? ((oef.categorie as string | null | undefined) ?? null) : null,
+        stap_override: (k.stap_override as number | null | undefined) ?? null,
+        oefening_leesbaar: oef !== null,
+      })
+    })
+  }
+  return rijen.slice(0, MAX_FASE3_RPC).map((r) => ({ ...r, totaal: rijen.length }))
+}
+
+function rpcInvulDiscipline(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const rijen = db.events
+    .filter(
+      (e) =>
+        e.team_id === p_team_id && (e.type === 'match' || e.type === 'training') &&
+        inRange(e.date as string, p_start, p_end),
+    )
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+    .map((e) => ({
+      event_id: e.id,
+      soort: e.type,
+      datum: e.date,
+      goals_for: (e.goals_for as number | null | undefined) ?? null,
+      goals_against: (e.goals_against as number | null | undefined) ?? null,
+      doelstelling: e.type === 'training' ? ((e.doelstelling as string | null | undefined) ?? null) : null,
+      aantal_ratings: db.match_ratings.filter((r) => r.event_id === e.id && r.team_id === p_team_id).length,
+      aantal_momenten: db.match_events.filter((me) => me.event_id === e.id && me.team_id === p_team_id).length,
+      aantal_oefeningen: db.training_oefeningen.filter((k) => k.event_id === e.id && k.team_id === p_team_id).length,
+      handmatig: db.task_overrides.some(
+        (tov) =>
+          tov.event_id === e.id && tov.team_id === p_team_id &&
+          tov.task_type === (e.type === 'match' ? 'analysis' : 'training_plan'),
+      ),
+    }))
+  return rijen.slice(0, MAX_FASE3_RPC).map((r) => ({ ...r, totaal: rijen.length }))
+}
+
 const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_aanwezigheid: rpcAanwezigheid,
   inzichten_training_opkomst_per_maand: rpcMaandOpkomst,
@@ -782,6 +869,8 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_training_opkomst_per_speler: rpcTrainingOpkomstPerSpeler,
   inzichten_blessures_per_maand: rpcBlessuresPerMaand,
   inzichten_speelminuten_per_speler: rpcSpeelminuten,
+  inzichten_training_koppelingen: rpcTrainingKoppelingen,
+  inzichten_invul_discipline: rpcInvulDiscipline,
 }
 
 function makeSupabaseMock(opts: {
@@ -807,6 +896,11 @@ function makeSupabaseMock(opts: {
   matchSquad?: Row[]
   // Bron van inzichten_speelminuten_per_speler (fase 2b).
   speelminuten?: Row[]
+  // Fase 3a: bronnen van de twee nieuwe RPC's en de metingen-query.
+  taskOverrides?: Row[]
+  categorieMetingen?: Row[]
+  // Laat een niet-RPC-tabelquery falen: { tabelnaam: foutobject }.
+  selectErrors?: Record<string, unknown>
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const db: Db = {
@@ -828,11 +922,15 @@ function makeSupabaseMock(opts: {
     tegendoelpunten: opts.tegendoelpunten ?? [],
     match_squad: opts.matchSquad ?? [],
     speelminuten: opts.speelminuten ?? [],
+    training_oefeningen: opts.trainingOefeningen ?? [],
+    task_overrides: opts.taskOverrides ?? [],
+    categorie_metingen: opts.categorieMetingen ?? [],
   }
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)
   const settingsFactory = tableFactory(opts.settings ?? [])
   const trainingOefeningenFactory = tableFactory(opts.trainingOefeningen ?? [])
+  const metingenFactory = tableFactory(db.categorie_metingen, () => opts.selectErrors?.categorie_metingen ?? null)
   const rpcCalls: { name: string; args: unknown }[] = []
   // AC14: bewijst dat een client-side filterwissel geen nieuwe `.from(...)`
   // -aanroep doet — zonder dit zou "geen page-reload/nieuwe fetch" alleen op
@@ -850,6 +948,7 @@ function makeSupabaseMock(opts: {
       if (table === 'players') return playersFactory()
       if (table === 'settings') return settingsFactory()
       if (table === 'training_oefeningen') return trainingOefeningenFactory()
+      if (table === 'categorie_metingen') return metingenFactory()
       throw new Error(`Onverwachte tabel in test: "${table}"`)
     },
     rpc: (name: string, args: Row) => {
@@ -2721,6 +2820,8 @@ describe('inzichten-metrics — zes nieuwe kaarten', () => {
     const titels = Array.from(container.querySelectorAll('h2')).map((h) => h.textContent)
     const volgorde = [
       i.inhoudTitle, i.thuisUitTitle, i.formatieTitle, i.topscorersTitle, i.kaartenTitle, i.kwartierTitle, i.tegenTitle,
+      // Fase 3a: na de speelminuten (de laatste kaart van fase 2b).
+      i.speelminutenTitle, i.belastingTitle, i.periodiseringTitle, i.disciplineTitle,
     ]
     expect(titels.filter((t) => volgorde.includes(t as string))).toEqual(volgorde)
   })

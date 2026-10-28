@@ -45,6 +45,12 @@ import {
   naastElkaarPerSpeler,
   blessuresPerMaand,
   verdeelSpeelminuten,
+  belastingPerWeek,
+  periodiseringVoortgang,
+  telInvulDiscipline,
+  periodiseringOndergrens,
+  type TrainingKoppelingRij,
+  type InvulDisciplineRij,
   type SpeelminutenRij,
   type SpeelkansenRij,
   type RatingVormRij,
@@ -56,6 +62,7 @@ import {
   type DoelpuntMinuutRij,
   type TegendoelpuntMinuutRij,
 } from '@/lib/inzichten'
+import type { CategorieMeting } from '@/lib/types'
 import type { FormStripItem } from '@/components/dashboard/FormStrip'
 import AanwezigheidChart from '@/components/inzichten/AanwezigheidChart'
 import OpkomstPerMaandChart from '@/components/inzichten/OpkomstPerMaandChart'
@@ -81,6 +88,9 @@ import PositiedekkingKaart from '@/components/inzichten/PositiedekkingKaart'
 import OpkomstSelectieRatingKaart from '@/components/inzichten/OpkomstSelectieRatingKaart'
 import BlessuresPerMaandChart from '@/components/inzichten/BlessuresPerMaandChart'
 import SpeelminutenKaart from '@/components/inzichten/SpeelminutenKaart'
+import BelastingKaart from '@/components/inzichten/BelastingKaart'
+import PeriodiseringVoortgangKaart from '@/components/inzichten/PeriodiseringVoortgangKaart'
+import InvulDisciplineKaart from '@/components/inzichten/InvulDisciplineKaart'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
@@ -199,6 +209,9 @@ export default async function InzichtenPage({
     blessuresResult,
     positiesResult,
     speelminutenResult,
+    belastingResult,
+    disciplineResult,
+    metingenResult,
   ] = await Promise.all([
     // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
     // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
@@ -274,6 +287,19 @@ export default async function InzichtenPage({
     // bestaan pas ná de wedstrijd en een wedstrijd van vandaag telt mee.
     // Vereist supabase/inzichten-metrics-fase2b.sql.
     supabase.rpc('inzichten_speelminuten_per_speler', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),
+    // Fase 3a, training en kwaliteit (supabase/inzichten-metrics-fase3a.sql).
+    // Belasting en invul-discipline krijgen `verleden`: een nog niet gehouden
+    // training of wedstrijd telt nergens mee. p_team_id komt uit de
+    // teamcontext. De periodisering heeft een eigen, tweede aanroep hieronder.
+    supabase.rpc('inzichten_training_koppelingen', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    supabase.rpc('inzichten_invul_discipline', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    // Alle metingen van het team: de nulmeting is de eerste meting OOIT, ook
+    // van vóór het seizoen.
+    supabase.from('categorie_metingen')
+      .select('id, team_id, categorie, datum, stap, notes, created_at')
+      .eq('team_id', ctx.teamId)
+      .order('datum')
+      .order('id'),
   ])
 
   // Elke bron faalt onafhankelijk: bij een fout logt de pagina de context en
@@ -387,12 +413,43 @@ export default async function InzichtenPage({
   //
   // De grenzen zijn EXCLUSIEF (zie countCategoryOccurrences), dus een dag naar
   // buiten om het venster inclusief te maken.
-  const inhoudTellingen = await countCategoryOccurrences(
-    supabase,
-    ctx.teamId,
-    addDays(verleden.start, -1),
-    addDays(verleden.end, 1),
-  )
+  //
+  // De periodiseringskaart (fase 3a) hangt van de metingen af: hij toont altijd
+  // het hele seizoen t/m gisteren (ongeacht de periodekiezer) en moet de
+  // trainingen tellen vanaf de eigen meetdatum, ook als die vóór de
+  // seizoensstart ligt. Een meting in de toekomst telt niet. Zonder meting
+  // (of met alleen toekomstige metingen) is er geen RPC-call nodig.
+  const metingenBron = unwrapBron<CategorieMeting>('inzichten.metingen', metingenResult)
+  const seizoenVerleden = verledenSeizoensVenster(seizoen, today)
+  const metingenTotGisteren = metingenBron.rijen.filter((m) => m.datum <= seizoenVerleden.end)
+  // Ondergrens van de bron: per onderdeel de meting die bij de seizoensstart
+  // gold (zo blijft k identiek aan getTrainingLog en groeit de bron niet mee
+  // over seizoenen). Aan periodiseringVoortgang gaan wél alle metingen t/m
+  // gisteren.
+  const periodiseringStart = periodiseringOndergrens(metingenTotGisteren, seizoen.start)
+  const [inhoudTellingen, periodiseringResult] = await Promise.all([
+    countCategoryOccurrences(supabase, ctx.teamId, addDays(verleden.start, -1), addDays(verleden.end, 1)),
+    periodiseringStart === null || periodiseringStart > seizoenVerleden.end
+      ? Promise.resolve(null)
+      : supabase.rpc('inzichten_training_koppelingen', {
+          p_team_id: ctx.teamId,
+          p_start: periodiseringStart,
+          p_end: seizoenVerleden.end,
+        }),
+  ])
+
+  // Fase 3a: elke bron faalt los (PGRST202 zonder migratie → bronFout per kaart).
+  // De periodiseringsbron faalt ook als de metingen falen.
+  const belastingBron = unwrapBron<TrainingKoppelingRij>('inzichten.belasting', belastingResult)
+  const disciplineBron = unwrapBron<InvulDisciplineRij>('inzichten.discipline', disciplineResult)
+  const periodiseringBron: { rijen: TrainingKoppelingRij[]; fout: boolean } = metingenBron.fout
+    ? { rijen: [], fout: true }
+    : periodiseringResult === null
+      ? { rijen: [], fout: false }
+      : unwrapBron<TrainingKoppelingRij>('inzichten.periodiseringKoppelingen', periodiseringResult)
+  const belasting = belastingPerWeek(belastingBron.rijen, verleden)
+  const voortgang = periodiseringVoortgang(periodiseringBron.rijen, metingenTotGisteren, seizoenVerleden, today)
+  const discipline = telInvulDiscipline(disciplineBron.rijen)
 
   // Conclusie-laag. Alles hieronder rekent op de rijen die hierboven al zijn
   // opgehaald — geen extra query, geen extra RPC.
@@ -443,7 +500,14 @@ export default async function InzichtenPage({
     trainingOpkomstBron.rijen.every((r) => r.aanwezig + r.afwezig === 0) &&
     blessuresBron.rijen.every((r) => r.geblesseerd === 0) &&
     // Fase 2b: alleen speelminuten is genoeg voor de gewone pagina.
-    !speelminutenBron.rijen.some((r) => r.wedstrijden > 0)
+    !speelminutenBron.rijen.some((r) => r.wedstrijden > 0) &&
+    // Fase 3a: een belasting met minstens één koppeling met een duur, een
+    // meting, of een ingevulde analyse/uitslag/plan is genoeg. Alleen ingeplande
+    // trainingen zonder enige invoer gelden bewust NIET als data: anders
+    // verdwijnt de lege staat bij elk team met een gegenereerd seizoen.
+    !belasting.heeftMinuten &&
+    metingenBron.rijen.length === 0 &&
+    discipline.metAnalyse + discipline.metUitslag + discipline.metPlan === 0
 
   if (geenEnkeleData) {
     // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
@@ -535,6 +599,11 @@ export default async function InzichtenPage({
         </div>
         <BlessuresPerMaandChart maanden={blessureMaanden} fout={blessuresBron.fout} t={t} />
         <SpeelminutenKaart data={speelminuten} fout={speelminutenBron.fout} t={t} />
+        <div className="lg:col-span-2">
+          <BelastingKaart data={belasting} fout={belastingBron.fout} t={t} />
+        </div>
+        <PeriodiseringVoortgangKaart data={voortgang} fout={periodiseringBron.fout} t={t} />
+        <InvulDisciplineKaart data={discipline} fout={disciplineBron.fout} t={t} />
       </div>
       </div>
 
