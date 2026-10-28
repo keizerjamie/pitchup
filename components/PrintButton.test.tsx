@@ -5,6 +5,9 @@ import { nl } from '@/messages/nl'
 import PrintButton from '@/components/PrintButton'
 import { volgOpslag } from '@/lib/opslag-wachtrij'
 
+const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148'
+const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15'
+
 describe('PrintButton', () => {
   // Expliciete signatuur: vitest 4 typeert een generieke vi.fn() als
   // Procedure | Constructable, wat niet op window.print past.
@@ -63,11 +66,14 @@ describe('PrintButton', () => {
     beforeEach(() => {
       writeText = vi.fn<(tekst: string) => Promise<void>>().mockResolvedValue(undefined)
       Object.defineProperty(window.navigator, 'standalone', { value: true, configurable: true })
+      // standalone telt alleen op een iOS-toestel (een Dock-app op macOS zet het ook).
+      Object.defineProperty(window.navigator, 'userAgent', { value: IPHONE_UA, configurable: true })
       Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true })
     })
 
     afterEach(() => {
       delete (window.navigator as Navigator & { standalone?: boolean }).standalone
+      Reflect.deleteProperty(window.navigator, 'userAgent')
       Reflect.deleteProperty(window.navigator, 'clipboard')
     })
 
@@ -100,6 +106,34 @@ describe('PrintButton', () => {
       fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
       fireEvent.pointerDown(document.body)
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('Safari-webapp in het Dock op een MacBook (standalone, Mac-UA, geen touch, canShare): gewoon window.print()', () => {
+      Object.defineProperty(window.navigator, 'userAgent', { value: MAC_UA, configurable: true })
+      Object.defineProperty(window.navigator, 'maxTouchPoints', { value: 0, configurable: true })
+      Object.defineProperty(window.navigator, 'canShare', { value: () => true, configurable: true })
+      try {
+        renderButton()
+        fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+        expect(printSpy).toHaveBeenCalledTimes(1)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      } finally {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints')
+        Reflect.deleteProperty(window.navigator, 'canShare')
+      }
+    })
+
+    it('iPad in de beginscherm-app (meldt zich als Mac, wel touchpunten), zonder canShare: linkmelding', () => {
+      Object.defineProperty(window.navigator, 'userAgent', { value: MAC_UA, configurable: true })
+      Object.defineProperty(window.navigator, 'maxTouchPoints', { value: 5, configurable: true })
+      try {
+        renderButton()
+        fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+        expect(printSpy).not.toHaveBeenCalled()
+        expect(screen.getByRole('dialog')).toHaveTextContent(nl.trainingPlan.printStandaloneHint)
+      } finally {
+        Reflect.deleteProperty(window.navigator, 'maxTouchPoints')
+      }
     })
 
     it('navigator.standalone === false (Safari zelf): gewoon window.print(), geen melding', () => {

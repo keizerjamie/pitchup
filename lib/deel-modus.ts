@@ -25,16 +25,26 @@ export function bepaalDeelModus(env: DeelOmgeving): DeelModus {
   return 'afdrukken'
 }
 
-// iOS voert window.print() niet uit in de beginscherm-app. `navigator.standalone`
-// bestaat alleen op iOS, dus een geïnstalleerde app op Android/desktop blijft printen.
+// iOS voert window.print() niet uit in de beginscherm-app. Let op:
+// `navigator.standalone` is óók true in een Safari-webapp in het Dock op macOS
+// (gemeld 2026-10-28: MacBook kreeg "Delen" zonder printoptie). Daarom telt
+// standalone alleen op een iOS-/iPadOS-toestel; Android/desktop blijven printen.
 export function isIosBeginschermApp(): boolean {
-  return (navigator as Navigator & { standalone?: boolean }).standalone === true
+  return (navigator as Navigator & { standalone?: boolean }).standalone === true && isIosToestel()
+}
+
+// iPadOS meldt zich als Mac, maar heeft (anders dan een MacBook) een touchscherm.
+function isIpadAlsMac(): boolean {
+  return navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)
+}
+
+function isIosToestel(): boolean {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || isIpadAlsMac()
 }
 
 function isTouchToestel(): boolean {
   if (typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches) return true
-  // iPadOS meldt zich als Mac, maar heeft een touchscherm.
-  return navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)
+  return isIpadAlsMac()
 }
 
 function kanBestandDelen(): boolean {

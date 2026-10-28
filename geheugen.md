@@ -4030,9 +4030,21 @@ Via de feature-factory. Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer-
 - **Bestandsnaam:** `lib/pdf-bestandsnaam.ts`; eventdatum (kale YYYY-MM-DD) of `todayLocal()`.
 - **Tests:** `delen-als-pdf.acceptance.test.tsx` (jsdom) + `delen-als-pdf-route.acceptance.test.ts`
   (node). `npm run test:all` stopt na rode vitest (`&&`) → `test:node` apart draaien.
-- **Open:** iPhone-test (deelmenu, WhatsApp, Bestanden, tweestaps, vergelijking met desktop-afdruk);
-  bevestigen dat Vercel Deployment Protection (standard, geen eigen domein) de server-render niet
-  blokkeert; Vercel-plan vs. `memory 2048`; functieduur/geheugen in de logs.
+- **Livegang-lessen (2026-10-27/28):**
+  1. `playwright-core` laadt `browsers.json` via een dynamisch pad → ontbrak in de functiebundel
+     ("Cannot find module …/browsers.json"). Fix `199d86d`: hele `playwright-core/**` in
+     `outputFileTracingIncludes`.
+  2. In Vercel stonden alleen `NEXT_PUBLIC_SUPABASE_URL`/`_ANON_KEY`; `NEXT_PUBLIC_SITE_URL` en
+     `SUPABASE_SERVICE_ROLE_KEY` ontbraken (dus ook herstelmail, uitnodigingslinks, inlog-rate-limit en
+     teamleden-e-mails waren stuk). Gezet op 2026-10-28 (site-url `https://pitchup-jet.vercel.app`,
+     service-role = Supabase "secret key", sensitive, alleen production). Na elke env-wijziging redeployen.
+  3. `navigator.standalone` is óók true in een Safari-webapp in het Dock op macOS → MacBook kreeg
+     "Delen" (macOS-deelmenu heeft geen print/download). `isIosBeginschermApp` eist nu een iOS-toestel
+     (iPhone/iPad/iPod-UA of Macintosh met `maxTouchPoints > 1`).
+  - Pitchup draait op Vercel **Hobby**: runtime-logs blijven 1 uur bewaard; vraag Jamie snel te melden.
+- **Bevestigd 2026-10-28:** Delen werkt op de iPhone (beginscherm-app).
+- **Open:** Dock-app op de MacBook na de fix bevestigen (drukt `window.print()` daar af?); Supabase
+  Site URL op het productiedomein zetten (door Jamie).
 
 ## Feature: Vijf UX-details uit de reel (2026-10-26, `072db45` via merge `11eadb4`, live)
 Via de feature-factory, gebouwd in een tijdelijke worktree (`ux-details`) omdat "delen als PDF" nog

@@ -297,6 +297,9 @@ function zetToestel(o: { touch?: boolean; standalone?: boolean; canShare?: boole
     })),
   })
   Object.defineProperty(window.navigator, 'standalone', { value: standalone, configurable: true })
+  // standalone telt alleen op een iOS-toestel (een Dock-app op macOS zet het ook).
+  if (standalone) Object.defineProperty(window.navigator, 'userAgent', { value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148', configurable: true })
+  else Reflect.deleteProperty(window.navigator, 'userAgent')
   if (canShare) Object.defineProperty(window.navigator, 'canShare', { value: () => true, configurable: true })
   else Reflect.deleteProperty(window.navigator, 'canShare')
 }
