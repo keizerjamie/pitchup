@@ -4215,3 +4215,48 @@ Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-met
   `inzichten-metrics-fase2b-migratie.acceptance.test.ts`, `app/actions/speelminuten.test.ts`; mutatiecheck 35.
 - **Open:** rooktest 2b door Jamie; fase 3 (belasting in minuten, periodisering-voortgang, invul-discipline, RPE,
   doelstelling behaald); daarna de conclusielaag (KPI/signalen/rapport) over alle fasen.
+
+## Feature: Inzichten-metrics fase 3a — training en kwaliteit (2026-10-28, `75f7bd7`, live)
+Fase 3 is gesplitst: 3a (lezen, deze), 3b (RPE + doelstelling behaald, nieuwe invoer) en daarna de conclusielaag
+(KPI/signalen/rapport over alle fasen). Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-metrics/fase3/` (01–08).
+- **Wat:** drie kaarten na `SpeelminutenKaart`: `BelastingKaart` (volle breedte), `PeriodiseringVoortgangKaart` en
+  `InvulDisciplineKaart` (half breed naast elkaar). `TrainingsinhoudChart` (aantal per training) blijft ernaast staan.
+- **Infra:** alleen 2 lees-RPC's in **`supabase/inzichten-metrics-fase3a.sql`**: `inzichten_training_koppelingen`
+  (één rij per koppeling, training zonder koppeling = één rij met null) en `inzichten_invul_discipline` (ruwe
+  tellingen per gespeelde wedstrijd/training). Beide `limit 901` + `totaal = count(*) over ()` → `isAfgekapt`.
+  Gedraaid op productie 2026-10-27 (migratie `inzichten_metrics_fase3a`); verificatieblok 29 (maart 1990) geslaagd.
+- **Bewuste tenant-uitzondering:** `oefeningen` wordt NIET op `team_id` gefilterd — `oefeningen.team_id` is de
+  EIGENAAR-USER, geen teams.id. Grens = `k.team_id = p_team_id` + RLS op oefeningen (M6: zichtbaar via gekoppeld
+  plan). Onleesbaar → `oefening_leesbaar = false`, zichtbaar geteld, nooit stil weg. Staat in SQL-commentaar,
+  structuurtest en blok 29.
+- **Rekenwerk in TS met de bestaande functies, geen SQL-duplicaat:** belasting via `effectieveDuurMin` +
+  `berekenTijdlijn(blokkenVanKoppelingen(…))` (trainingstotaal = planner, parallel = langste; per categorie elke
+  oefening met eigen duur, dus som kan > totaal; genest additief; teamtactisch telt mee); periodisering via
+  `actueleMetingen` (exclusief) + `berekenStap` + `computeCurrentSteps` (alleen VCT, nulmeting = eerste ooit, geen
+  clamp, geen cyclusweek-naleving); discipline via `analyseBestaat` + `hasTrainingPlanDone` (consistent met dashboard;
+  `task_overrides` telt NIET als ingevuld, apart getoond, alleen zonder automatisch ingevuld). Aanwezigheid niet
+  gemeten: geen enkel team heeft `default_attendance` ≠ `present`. Pariteitstests tegen `berekenTijdlijn` en
+  `getTrainingLog`.
+- **Typeverruiming (alleen typen)** in `lib/parallel-groep.ts` (`BlokLid`) en `lib/sessie-tijdlijn.ts` (`DuurLid`):
+  generics verruimd zodat de inzichten-leesbron de planner-regel zonder cast aanroept; bodies byte-gelijk.
+- **ISO-week:** `maandagVanWeek`, `isoWeek`, `wekenInVenster`, `MAX_WEKEN_IN_VENSTER` in `lib/season-dates.ts`,
+  alleen strings/UTC (`toUtcMs`/`weekdayOf`); weeksleutel = maandagdatum; deelweken gemarkeerd.
+- **Vensters:** belasting en discipline `verleden` (gekozen periode t/m gisteren); periodisering altijd het hele
+  seizoen t/m gisteren.
+- **Validatie-fixes (B1/B2):** vóór de seizoensstart (`verledenSeizoensVenster` geeft `end < start`) toont de
+  periodiseringskaart de stand (nulmeting/huidig/verschil, preseason telt mee zoals het dashboard) met de regel
+  `seizoenNogNietBegonnen`, geen staplijn. De periodiserings-RPC begint bij `periodiseringOndergrens(metingen,
+  seizoen.start)` = min over onderdelen van de laatste meting **strikt vóór** de seizoensstart (anders eerste meting)
+  — "≤" breekt de pariteit omdat `actueleMetingen` exclusief rekent. Zo groeit de bron niet mee over seizoenen; eigen
+  afgekapt-tekst `periodiseringAfgekapt` (geen "kies een kortere periode").
+- **Gotchas:** `oefeningen(*)` niet selecteren (diagram tot 64 KB) — expliciete kolommen. Iconen `fitness_center` en
+  `checklist` zitten niet in de gesubsette font → `assignment`/`check_circle`. Verificatieblokken: blok 28 laat
+  1990-02-15 staan → volgende vrije testmaand april 1990. Een structuurtest die "Blok N tot rollback" snijdt neemt
+  latere blokken mee. Duurwaarden ruw aan `effectieveDuurMin` geven (alleen NULL valt terug op de bibliotheek).
+- **Bewust gelaten (K1–K3):** theoretische stille afkappingen (`wekenInVenster` > 800 dagen, metingenquery > 1000
+  rijen), kleine duplicaat `dagMs` in de kaart, commentaar-positie in `sessie-tijdlijn.ts`. 89 koppelingen zonder eigen
+  duur volgen de huidige bibliotheekduur (momentopname, vermeld in de kaart).
+- **Tests:** `inzichten-metrics-fase3a.acceptance.test.tsx` (141, 3 TZ × 3 tijdstippen, jaarwisseling, schrikkeljaar),
+  `inzichten-metrics-fase3a-migratie.acceptance.test.ts`, uitbreidingen in `lib/inzichten.test.ts` en
+  `lib/season-dates.test.ts`.
+- **Open:** rooktest 3a door Jamie; fase 3b (RPE + doelstelling behaald); daarna de conclusielaag.
