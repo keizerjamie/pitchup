@@ -4304,4 +4304,4 @@ Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-met
   Acceptatietest fase 3b zet `vi.setConfig({ testTimeout: 30000 })` tegen timeouts onder load.
 - **Tests:** `inzichten-metrics-fase3b.acceptance.test.tsx` (174), `inzichten-metrics-fase3b-migratie.acceptance.test.ts`,
   `app/actions/training-evaluatie.test.ts` (79), component- en lib-tests.
-- **Open:** rooktest 3b door Jamie; daarna de conclusielaag (KPI-strook, signalen, seizoensrapport).
+- **Rooktest 3b geslaagd** (Jamie, 2026-10-29). Open: de conclusielaag (KPI-strook, signalen, seizoensrapport).
