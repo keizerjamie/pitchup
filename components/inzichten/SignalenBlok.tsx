@@ -10,7 +10,7 @@ import { vulSignaalIn } from '@/lib/signaal-tekst'
 // Volledig regelgebaseerd (lib/inzichten.ts: bepaalSignalen) — geen model,
 // geen externe aanroep, dus altijd dezelfde uitkomst bij dezelfde data.
 //
-// Het blok rendert niets bij nul signalen: de aanroeper hoeft daar niet zelf
+// Het blok rendert niets bij nul signalen (tenzij `onvolledig`): de aanroeper hoeft daar niet zelf
 // op te controleren, maar krijgt dan ook geen lege kaart met "geen
 // bijzonderheden" — dat is een regel tekst die niets toevoegt.
 
@@ -20,11 +20,21 @@ const TOON_STIJL: Record<SignaalToon, { bg: string; teken: string }> = {
   goed: { bg: 'var(--brand-accent)', teken: '↑' },
 }
 
-export default function SignalenBlok({ signalen, t }: { signalen: Signaal[]; t: Dict }) {
-  if (signalen.length === 0) return null
+export default function SignalenBlok({
+  signalen,
+  onvolledig = false,
+  t,
+}: {
+  signalen: Signaal[]
+  // Een deel van de signalen kon niet worden berekend (falende of afgekapte
+  // bron). Dan blijft het blok ook bij nul signalen staan, met alleen de melding.
+  onvolledig?: boolean
+  t: Dict
+}) {
+  if (signalen.length === 0 && !onvolledig) return null
 
   return (
-    <div className="surface-card overflow-hidden">
+    <div data-conclusielaag="signalen" className="surface-card overflow-hidden">
       <div className="px-5 py-3.5 flex items-baseline justify-between gap-3" style={{ borderBottom: '1px solid var(--border-soft)' }}>
         {/* whitespace-nowrap: "Wat valt op" brak op mobiel over twee regels
             naast de ondertitel (designronde 3). */}
@@ -62,6 +72,15 @@ export default function SignalenBlok({ signalen, t }: { signalen: Signaal[]; t: 
           )
         })}
       </ul>
+      {onvolledig && (
+        // Meta-melding, geen signaal: geen badge, geen statuskleur, geen alert.
+        <p
+          className="px-5 py-3 text-[12px] font-semibold text-faint"
+          style={signalen.length > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}
+        >
+          {t.insights.signalenOnvolledig}
+        </p>
+      )}
     </div>
   )
 }

@@ -655,9 +655,14 @@ describe('AC-A1 — nieuwe spelerskaarten onder de fase-1-kaarten, de rest ongew
     expect([vol(T.speel), vol(T.stijg), vol(T.dekking), vol(T.naast), vol(T.bless)]).toEqual([true, false, false, true, false])
   })
 
-  it('AC-A1: alles buiten de vijf nieuwe kaarten (fase-1-kaarten, KPI-strook, signalen, periodefilter, rapport) is identiek met en zonder fase-2a-bronnen', async () => {
+  it('AC-A1: alles buiten de vijf nieuwe kaarten (fase-1-kaarten, periodefilter, rapport) is identiek met en zonder fase-2a-bronnen', async () => {
     const strip = (root: HTMLElement) => {
       const klon = root.cloneNode(true) as HTMLElement
+      // De conclusielaag (KPI-strook en signalen, op het scherm en in het rapport) is bewust uitgesloten.
+      klon.querySelectorAll('[data-conclusielaag]').forEach((el) => el.remove())
+      klon.querySelectorAll('[data-print-only] .rapport-sectie').forEach((sectie) => {
+        if (sectie.querySelector('.rapport-sectiekop')?.textContent === nl.insights.signalenTitle) sectie.remove()
+      })
       for (const t of NIEUWE_TITELS) {
         const h = [...klon.querySelectorAll('h2')].find((x) => x.textContent === t)
         h?.closest('.surface-card')?.remove()
@@ -1013,7 +1018,7 @@ describe('AC-A10 — alleen aantallen/verhoudingen; geen KPI, signaal, advies, a
     }
   })
 
-  it('AC-A10: er komen geen nieuwe KPI-/signaal-/rapport-elementen bij (identiek met en zonder fase-2a-bronnen — zie AC-A1 — en geen extra knoppen in het kaartengebied)', async () => {
+  it('AC-A10: het kaartengebied krijgt geen extra knoppen (identiek aantal met en zonder fase-2a-bronnen)', async () => {
     const met = await renderInzichten(hoofdDb())
     const knoppen = [...kaart(T.speel).parentElement!.parentElement!.querySelectorAll('button')].length
     met.unmount()

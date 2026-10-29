@@ -496,8 +496,18 @@ function kaartRijen(k: HTMLElement): KaartRij[] {
 }
 const dekking = (x: number, y: number, t: Dict = nl) => fmt(t.insights.minutenDekking, { x, y })
 const G = i.geenGegevens
+// De conclusielaag (KPI-strook en signalen) krijgt eigen tests; deze vergelijking
+// gaat alleen over de kaarten. Op het scherm draagt de laag [data-conclusielaag],
+// in het print-blok is het de .rapport-sectie met de signalen-kop.
+const sluitConclusielaagUit = (klon: HTMLElement): void => {
+  klon.querySelectorAll('[data-conclusielaag]').forEach((el) => el.remove())
+  klon.querySelectorAll('[data-print-only] .rapport-sectie').forEach((sectie) => {
+    if (sectie.querySelector('.rapport-sectiekop')?.textContent === nl.insights.signalenTitle) sectie.remove()
+  })
+}
 const zonderKaart = (container: HTMLElement, titel: string): string => {
   const kopie = container.cloneNode(true) as HTMLElement
+  sluitConclusielaagUit(kopie)
   const h2 = [...kopie.querySelectorAll('h2')].find((h) => h.textContent === titel)
   h2?.closest('.surface-card')?.remove()
   // recharts telt zijn eigen DOM-id's op per render (clip-paden, _r_N_); dat is geen inhoud.

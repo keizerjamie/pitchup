@@ -639,8 +639,18 @@ function onderdeel(sleutel: string, k: HTMLElement = PER()): OnderdeelRij {
 const tekstenMet = (k: HTMLElement, tekst: string) => [...k.querySelectorAll('*')].filter((el) => el.children.length === 0 && el.textContent === tekst)
 const calls = (h: Harness, name: string) => h.rpcCalls.filter((c) => c.name === name)
 
+// De conclusielaag (KPI-strook en signalen) krijgt eigen tests; deze vergelijking
+// gaat alleen over de kaarten. Op het scherm draagt de laag [data-conclusielaag],
+// in het print-blok is het de .rapport-sectie met de signalen-kop.
+const sluitConclusielaagUit = (klon: HTMLElement): void => {
+  klon.querySelectorAll('[data-conclusielaag]').forEach((el) => el.remove())
+  klon.querySelectorAll('[data-print-only] .rapport-sectie').forEach((sectie) => {
+    if (sectie.querySelector('.rapport-sectiekop')?.textContent === nl.insights.signalenTitle) sectie.remove()
+  })
+}
 function zonderKaarten(container: HTMLElement, titels: string[]): string {
   const kopie = container.cloneNode(true) as HTMLElement
+  sluitConclusielaagUit(kopie)
   for (const titel of titels) {
     const h2 = [...kopie.querySelectorAll('h2')].find((x) => x.textContent === titel)
     h2?.closest('.surface-card')?.remove()

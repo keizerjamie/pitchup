@@ -23,7 +23,16 @@ export function vulSignaalIn(t: Dict, signaal: Signaal): string {
     // 'YYYY-MM' (taalonafhankelijk, zoals alles in lib/inzichten.ts), hier
     // wordt dat pas een leesbaar maandlabel — met exact dezelfde notatie als
     // de grafiek op het scherm.
-    const zichtbaar = sleutel === 'maand' ? maandLabel(String(waarde), t.browserLocale) : String(waarde)
+    //
+    // `positie` idem: bepaalSignalen levert de kale Position-waarde, hier wordt
+    // die vertaald via t.players.positions — dezelfde vertaling als de
+    // PositiedekkingKaart, met de kale waarde als terugval.
+    const zichtbaar =
+      sleutel === 'maand'
+        ? maandLabel(String(waarde), t.browserLocale)
+        : sleutel === 'positie'
+          ? (t.players.positions[String(waarde)] ?? String(waarde))
+          : String(waarde)
     tekst = tekst.split(`{${sleutel}}`).join(zichtbaar)
   }
   return tekst

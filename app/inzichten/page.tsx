@@ -18,8 +18,10 @@ import {
   topWorstAanwezigheid,
   laatsteMaandTrend,
   teamRatingTrend,
-  doelsaldo,
   bepaalSignalen,
+  signaalBronnenOnvolledig,
+  trainingenPerMaand,
+  type SignaalInvoer,
   periodeVenster,
   isPeriode,
   PERIODE_STANDAARD,
@@ -338,12 +340,17 @@ export default async function InzichtenPage({
     return { rijen: result.data ?? [], fout: false }
   }
 
-  const aanwezigheidRij: AanwezigheidRij | null =
-    unwrap<AanwezigheidRij>('inzichten.aanwezigheid', aanwezigheidResult)[0] ?? null
+  // De vier KPI-/signaalbronnen gebruiken unwrapBron: een falende bron moet de
+  // tegel `bronFout` laten tonen en het bijbehorende signaal overslaan, niet
+  // stilletjes als "geen data" tellen.
+  const aanwezigheidBron = unwrapBron<AanwezigheidRij>('inzichten.aanwezigheid', aanwezigheidResult)
+  const aanwezigheidRij: AanwezigheidRij | null = aanwezigheidBron.rijen[0] ?? null
 
-  const maandOpkomst = toMaandOpkomst(unwrap<MaandOpkomstRij>('inzichten.maandOpkomst', maandOpkomstResult))
+  const maandOpkomstBron = unwrapBron<MaandOpkomstRij>('inzichten.maandOpkomst', maandOpkomstResult)
+  const maandOpkomst = toMaandOpkomst(maandOpkomstBron.rijen)
 
-  const teamRating: TeamRatingRij[] = unwrap<TeamRatingRij>('inzichten.teamRating', teamRatingResult)
+  const teamRatingBron = unwrapBron<TeamRatingRij>('inzichten.teamRating', teamRatingResult)
+  const teamRating: TeamRatingRij[] = teamRatingBron.rijen
 
   // Top 5 / worst 5: één RPC per onderwerp levert álle spelers, het snijden in
   // twee lijstjes gebeurt hier (lib/inzichten.ts) — geen tweede databaseronde.
@@ -354,11 +361,11 @@ export default async function InzichtenPage({
   // Eén keer uitpakken: deze rijen voeden zowel de top/worst-lijstjes als het
   // signalenblok. Twee keer unwrap() zou de foutmelding bij een RPC-fout ook
   // twee keer loggen.
-  const aanwezigheidPerSpeler = unwrap<AanwezigheidPerSpelerRij>(
+  const aanwezigheidPerSpelerBron = unwrapBron<AanwezigheidPerSpelerRij>(
     'inzichten.aanwezigheidPerSpeler',
     aanwezigheidPerSpelerResult,
   )
-  const aanwezigheidTopWorst = topWorstAanwezigheid(aanwezigheidPerSpeler)
+  const aanwezigheidTopWorst = topWorstAanwezigheid(aanwezigheidPerSpelerBron.rijen)
 
   const vormRows = unwrap<{ id: string; goals_for: number | null; goals_against: number | null }>(
     'inzichten.vorm',
@@ -469,16 +476,43 @@ export default async function InzichtenPage({
   // opgehaald — geen extra query, geen extra RPC.
   const opkomstTrend = laatsteMaandTrend(maandOpkomst)
   const ratingTrend = teamRatingTrend(teamRating)
-  const saldo = doelsaldo(doelpunten)
-  const signalen = bepaalSignalen({
+  // Aantal trainingen per maand voor het opkomstminimum; onbekend (null) bij
+  // een falende of afgekapte evaluatiebron.
+  const trainingTelling = evaluatieBron.fout ? null : trainingenPerMaand(evaluatieBron.rijen)
+  const signaalInvoer: SignaalInvoer = {
     maanden: maandOpkomst,
-    aanwezigheidPerSpeler,
+    trainingenPerMaand: trainingTelling,
+    aanwezigheidPerSpeler: aanwezigheidPerSpelerBron.rijen,
     teamRating,
-    doelpunten,
-  })
+    // Het Doelsaldo komt uit thuisUit.totaal (één bron voor kaart, KPI en
+    // signaal). De events-query `doelpuntenResult` blijft staan voor
+    // DoelpuntenChart en geenEnkeleData.
+    saldo: thuisUit.totaal,
+    uitslagenAfgekapt,
+    stijgersDalers,
+    dekking,
+    posities: positiesBron.rijen,
+    heeftSpelers: positiesBron.rijen.length > 0,
+    bronFout: {
+      maandOpkomst: maandOpkomstBron.fout,
+      trainingTelling: evaluatieBron.fout,
+      aanwezigheidPerSpeler: aanwezigheidPerSpelerBron.fout,
+      teamRating: teamRatingBron.fout,
+      uitslagen: uitslagen.fout,
+      ratingVorm: ratingVormBron.fout,
+      posities: positiesBron.fout,
+    },
+  }
+  const signalen = bepaalSignalen(signaalInvoer)
+  const signalenOnvolledig = signaalBronnenOnvolledig(signaalInvoer)
+  // Rapport-Doelsaldo: het rapport kent in deel 1 nog geen foutmelding per
+  // tegel. Bij een fout of afgekapte bron geen gedeeltelijk cijfer maar
+  // wedstrijden: 0, zodat het rapport "—" toont.
+  const rapportSaldo =
+    uitslagen.fout || uitslagenAfgekapt ? { ...thuisUit.totaal, wedstrijden: 0 } : thuisUit.totaal
 
   // Seizoen staat ingesteld, maar er is nog geen enkele registratie: dan is
-  // elke kaart leeg en zegt de KPI-strook vier keer "—". Eén uitleg met een
+  // elke kaart leeg en zegt de KPI-strook zes keer "—". Eén uitleg met een
   // volgende stap is dan bruikbaarder dan zeven lege vakken. Alle bronnen
   // moeten leeg zijn — één ingevulde uitslag is al genoeg om de gewone pagina
   // te tonen.
@@ -572,7 +606,7 @@ export default async function InzichtenPage({
 
       <PeriodeFilter actief={periode} t={t} />
 
-      {/* Conclusie eerst, detail daarna. De vier cijfers en de signalen staan
+      {/* Conclusie eerst, detail daarna. De zes cijfers en de signalen staan
           bewust bóven de grafieken: wie de pagina opent wil weten hoe het
           ervoor staat, niet meteen zes grafieken tegelijk lezen. */}
       <KpiStrip
@@ -580,11 +614,19 @@ export default async function InzichtenPage({
         maanden={maandOpkomst}
         aanwezigheidPercentage={aanwezigheidData?.percentage ?? null}
         rating={ratingTrend}
-        saldo={saldo}
+        resultaat={thuisUit.totaal}
+        uitslagenAfgekapt={uitslagenAfgekapt}
+        periodeLabel={periodeLabel}
+        fout={{
+          maandOpkomst: maandOpkomstBron.fout,
+          aanwezigheid: aanwezigheidBron.fout,
+          teamRating: teamRatingBron.fout,
+          uitslagen: uitslagen.fout,
+        }}
         t={t}
       />
 
-      <SignalenBlok signalen={signalen} t={t} />
+      <SignalenBlok signalen={signalen} onvolledig={signalenOnvolledig} t={t} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* De vorm-strook staat boven de detailgrafieken en over de volle
@@ -641,7 +683,7 @@ export default async function InzichtenPage({
         maanden={maandOpkomst}
         aanwezigheidPercentage={aanwezigheidData?.percentage ?? null}
         rating={ratingTrend}
-        saldo={saldo}
+        saldo={rapportSaldo}
         signalen={signalen}
         ratingTopWorst={ratingTopWorst}
         aanwezigheidTopWorst={aanwezigheidTopWorst}

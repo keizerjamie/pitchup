@@ -571,7 +571,14 @@ import {
   doelsaldo,
   laatsteMaandTrend,
   teamRatingTrend,
+  SPELER_MIN_REGISTRATIES,
+  OPKOMST_MIN_TRAININGEN,
+  trainingenPerMaand,
+  positiesZonderFitteSpeler,
+  signaalBronnenOnvolledig,
+  type Doelsaldo,
   type MaandOpkomst,
+  type SignaalBronFout,
   type SignaalInvoer,
   type TeamRatingRij,
 } from '@/lib/inzichten'
@@ -626,6 +633,16 @@ describe('teamRatingTrend', () => {
     expect(trend?.delta).toBeCloseTo(1, 5)
   })
 
+  it('delta is afgerond op 2 decimalen: 7,0 → 7,3 is exact 0,3, geen 0,2999… (AC20)', () => {
+    const op = (eerst: number, daarna: number) => [
+      ...[eerst, eerst, eerst, eerst, eerst].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g)),
+      ...[daarna, daarna, daarna, daarna, daarna].map((g, i) => trendRatingRij(`2026-02-0${i + 1}`, g)),
+    ]
+    expect(teamRatingTrend(op(7.0, 7.3))?.delta).toBe(0.3)
+    expect(teamRatingTrend(op(7.3, 7.0))?.delta).toBe(-0.3)
+    expect(teamRatingTrend(op(7.0, 7.29))?.delta).toBe(0.29)
+  })
+
   it('te weinig wedstrijden voor twee volle vensters → gemiddelde wel, delta null', () => {
     const rows = [6, 7, 8].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g))
     const trend = teamRatingTrend(rows)
@@ -657,11 +674,77 @@ describe('doelsaldo', () => {
 })
 
 describe('bepaalSignalen', () => {
-  const leeg: SignaalInvoer = { maanden: [], aanwezigheidPerSpeler: [], teamRating: [], doelpunten: [] }
+  const geenFout: SignaalBronFout = {
+    maandOpkomst: false,
+    trainingTelling: false,
+    aanwezigheidPerSpeler: false,
+    teamRating: false,
+    uitslagen: false,
+    ratingVorm: false,
+    posities: false,
+  }
+  const leeg: SignaalInvoer = {
+    maanden: [],
+    trainingenPerMaand: {},
+    aanwezigheidPerSpeler: [],
+    teamRating: [],
+    saldo: { voor: 0, tegen: 0, saldo: 0, wedstrijden: 0 },
+    uitslagenAfgekapt: false,
+    stijgersDalers: { stijgers: [], dalers: [], meegeteld: 0 },
+    dekking: [],
+    posities: [],
+    heeftSpelers: false,
+    bronFout: geenFout,
+  }
+
+  const saldoVan = (wedstrijden: number, voor: number, tegen: number): Doelsaldo => ({
+    voor, tegen, saldo: voor - tegen, wedstrijden,
+  })
+  const vormRij = (id: string, naam: string, aantal: number, seizoen: number, recent: number): RatingVormRij => ({
+    player_id: id, naam, aantal, seizoen_gemiddelde: seizoen, recent_gemiddelde: recent,
+  })
+  const posRij = (id: string, name: string, position: string, secondary: string[] = [], injured = false): SpelerPositieRij => ({
+    id, name, position, secondary_positions: secondary, injured,
+  })
+  // Zoals de pagina: dekking en heeftSpelers komen uit dezelfde rijen.
+  const metPosities = (rijen: SpelerPositieRij[]) => ({
+    posities: rijen,
+    dekking: dekkingPerPositie(rijen),
+    heeftSpelers: rijen.length > 0,
+  })
+  const ratingReeks = (eerst: number, daarna: number) => [
+    ...Array.from({ length: RATING_TREND_VENSTER }, (_, i) => trendRatingRij(`2026-01-0${i + 1}`, eerst)),
+    ...Array.from({ length: RATING_TREND_VENSTER }, (_, i) => trendRatingRij(`2026-02-0${i + 1}`, daarna)),
+  ]
+  const ids = (invoer: SignaalInvoer) => bepaalSignalen(invoer).map((s) => s.id)
+
+  // Elke let-op-regel vuurt (plus nul zorg en nul complimenten).
+  const allesLetop: SignaalInvoer = {
+    ...leeg,
+    maanden: [trendMaand('2026-02', 7, 3)], // 70%
+    trainingenPerMaand: { '2026-02': OPKOMST_MIN_TRAININGEN },
+    teamRating: ratingReeks(8, 6),
+    saldo: saldoVan(5, 2, 8),
+    stijgersDalers: bepaalStijgersDalers([vormRij('d1', 'Daan', 8, 7.0, 6.5), vormRij('d2', 'Eva', 8, 7.0, 6.6)]),
+    ...metPosities([posRij('k1', 'Kees', 'Keeper', [], true), posRij('s1', 'Sam', 'Spits')]),
+  }
+  // Elk compliment vuurt.
+  const allesGoed: SignaalInvoer = {
+    ...leeg,
+    maanden: [trendMaand('2026-02', 9, 1)], // 90%
+    trainingenPerMaand: { '2026-02': OPKOMST_MIN_TRAININGEN },
+    teamRating: ratingReeks(6, 8),
+    saldo: saldoVan(5, 9, 2),
+    stijgersDalers: bepaalStijgersDalers([vormRij('s1', 'Sara', 8, 7.0, 7.5)]),
+    ...metPosities([posRij('s1', 'Sam', 'Spits')]),
+  }
 
   it('zonder enige data: geen signalen (het blok hoort dan helemaal weg te blijven)', () => {
     expect(bepaalSignalen(leeg)).toEqual([])
+    expect(signaalBronnenOnvolledig(leeg)).toBe(false)
   })
+
+  // ── Regel 1: wegblijvers ──
 
   it('een speler onder de zorgdrempel levert een zorg-signaal met naam en aantal', () => {
     const signalen = bepaalSignalen({
@@ -685,21 +768,89 @@ describe('bepaalSignalen', () => {
     expect(signalen).toEqual([])
   })
 
+  it(`wegblijver vanaf precies ${SPELER_MIN_REGISTRATIES} registraties (1 van 4 = 25%)`, () => {
+    expect(SPELER_MIN_REGISTRATIES).toBe(4)
+    const signalen = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Wim', aanwezig: 1, afwezig: 3 }],
+    })
+    expect(signalen.map((s) => s.id)).toEqual(['spelers-onder-drempel'])
+  })
+
+  it('3 registraties is te weinig, ook bij 0%', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Wim', aanwezig: 0, afwezig: 3 }],
+    })
+    expect(signalen).toEqual([])
+  })
+
+  it('bij twee wegblijvers telt alleen wie het minimum haalt mee in aantal en naam', () => {
+    const [signaal] = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [
+        { player_id: 'p1', naam: 'Aad', aanwezig: 0, afwezig: 3 }, // te weinig
+        { player_id: 'p2', naam: 'Bas', aanwezig: 1, afwezig: 4 }, // 20%
+      ],
+    })
+    expect(signaal.tekstSleutel).toBe('signaalSpelerWegblijver')
+    expect(signaal.waarden).toMatchObject({ aantal: 1, naam: 'Bas' })
+  })
+
+  // ── Regel 2: opkomst ──
+
   it('opkomst onder de norm levert een let-op; precies op de norm juist een compliment', () => {
-    const onder = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 8, 2)] }) // 80%
+    const drie = { '2026-02': 3 }
+    const onder = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 8, 2)], trainingenPerMaand: drie }) // 80%
     expect(onder[0].toon).toBe('letop')
     expect(onder[0].waarden.doel).toBe(OPKOMST_DOEL)
 
-    const op = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 85, 15)] }) // exact 85%
+    const op = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 85, 15)], trainingenPerMaand: drie }) // exact 85%
     expect(op[0].toon).toBe('goed')
     expect(op[0].tekstSleutel).toBe('signaalOpkomstBovenDoel')
   })
 
   it('opkomst onder de norm én gedaald gebruikt de dalingsvariant met het aantal punten', () => {
-    const signalen = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-01', 8, 2), trendMaand('2026-02', 6, 4)] })
+    const signalen = bepaalSignalen({
+      ...leeg,
+      maanden: [trendMaand('2026-01', 8, 2), trendMaand('2026-02', 6, 4)],
+      trainingenPerMaand: { '2026-01': 3, '2026-02': 3 },
+    })
     expect(signalen[0].tekstSleutel).toBe('signaalOpkomstOnderDoelDaling')
     expect(signalen[0].waarden.daling).toBe(20)
   })
+
+  it(`opkomst vanaf precies ${OPKOMST_MIN_TRAININGEN} trainingen in de laatste maand`, () => {
+    expect(OPKOMST_MIN_TRAININGEN).toBe(3)
+    const signalen = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 5, 5)], trainingenPerMaand: { '2026-02': 3 } })
+    expect(signalen.map((s) => s.id)).toEqual(['opkomst-onder-doel'])
+  })
+
+  it('2 trainingen: geen let-op en geen compliment, ook niet bij 100% (AC23)', () => {
+    const twee = { '2026-02': 2 }
+    expect(bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 5, 5)], trainingenPerMaand: twee })).toEqual([])
+    expect(bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 10, 0)], trainingenPerMaand: twee })).toEqual([])
+  })
+
+  it('het minimum geldt voor de laatste maand, niet voor een eerdere maand of een ontbrekende telling', () => {
+    const maanden = [trendMaand('2026-01', 9, 1), trendMaand('2026-02', 9, 1)]
+    expect(bepaalSignalen({ ...leeg, maanden, trainingenPerMaand: { '2026-01': 10, '2026-02': 2 } })).toEqual([])
+    expect(bepaalSignalen({ ...leeg, maanden, trainingenPerMaand: { '2026-01': 10 } })).toEqual([])
+  })
+
+  it('opkomst precies 85% met precies 3 trainingen → compliment', () => {
+    const [signaal] = bepaalSignalen({ ...leeg, maanden: [trendMaand('2026-02', 17, 3)], trainingenPerMaand: { '2026-02': 3 } })
+    expect(signaal.id).toBe('opkomst-boven-doel')
+    expect(signaal.toon).toBe('goed')
+  })
+
+  it('trainingenPerMaand null → geen opkomstsignaal, wel onvolledig', () => {
+    const invoer = { ...leeg, maanden: [trendMaand('2026-02', 9, 1)], trainingenPerMaand: null }
+    expect(bepaalSignalen(invoer)).toEqual([])
+    expect(signaalBronnenOnvolledig(invoer)).toBe(true)
+  })
+
+  // ── Regel 3 en 4 ──
 
   it('een ratingverschil onder de ruisdrempel levert geen signaal op', () => {
     const rows = [
@@ -709,35 +860,349 @@ describe('bepaalSignalen', () => {
     expect(bepaalSignalen({ ...leeg, teamRating: rows })).toEqual([])
   })
 
-  it('doelsaldo telt pas mee vanaf genoeg wedstrijden', () => {
-    const weinig = Array.from({ length: RATING_TREND_VENSTER - 1 }, (_, i) => trendWedstrijd(`w${i}`, 3, 0))
-    expect(bepaalSignalen({ ...leeg, doelpunten: weinig })).toEqual([])
+  it('ratingverschil van exact 0,3 geeft een signaal (beide kanten op); 0,29 niet (AC20)', () => {
+    const stijging = bepaalSignalen({ ...leeg, teamRating: ratingReeks(7.0, 7.3) })
+    expect(stijging.map((s) => [s.id, s.waarden.verschil])).toEqual([['rating-stijging', 0.3]])
+    const daling = bepaalSignalen({ ...leeg, teamRating: ratingReeks(7.3, 7.0) })
+    expect(daling.map((s) => [s.id, s.waarden.verschil])).toEqual([['rating-daling', 0.3]])
+    expect(bepaalSignalen({ ...leeg, teamRating: ratingReeks(7.0, 7.29) })).toEqual([])
+    expect(bepaalSignalen({ ...leeg, teamRating: ratingReeks(7.29, 7.0) })).toEqual([])
+  })
 
-    const genoeg = Array.from({ length: RATING_TREND_VENSTER }, (_, i) => trendWedstrijd(`w${i}`, 3, 0))
-    const signalen = bepaalSignalen({ ...leeg, doelpunten: genoeg })
+  it('doelsaldo telt pas mee vanaf genoeg wedstrijden', () => {
+    expect(bepaalSignalen({ ...leeg, saldo: saldoVan(RATING_TREND_VENSTER - 1, 12, 0) })).toEqual([])
+
+    const signalen = bepaalSignalen({ ...leeg, saldo: saldoVan(RATING_TREND_VENSTER, 15, 0) })
     expect(signalen[0].tekstSleutel).toBe('signaalDoelsaldoPositief')
+    expect(signalen[0].waarden).toEqual({ saldo: 15, voor: 15, tegen: 0, wedstrijden: RATING_TREND_VENSTER })
+  })
+
+  it('uitslagen afgekapt → geen doelsaldo-signaal, wel onvolledig (O4)', () => {
+    const invoer = { ...leeg, saldo: saldoVan(10, 20, 5), uitslagenAfgekapt: true }
+    expect(bepaalSignalen(invoer)).toEqual([])
+    expect(signaalBronnenOnvolledig(invoer)).toBe(true)
+  })
+
+  // ── Regel 5: stijgers en dalers ──
+
+  it('één stijger → speler-stijger met toon goed, enkelvoudsleutel en waarden in vaste volgorde', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      stijgersDalers: bepaalStijgersDalers([vormRij('p1', 'Sara', 8, 7.0, 7.4)]),
+    })
+    expect(signalen).toHaveLength(1)
+    expect(signalen[0]).toEqual({
+      id: 'speler-stijger',
+      toon: 'goed',
+      tekstSleutel: 'signaalSpelerStijger',
+      waarden: { aantal: 1, venster: RATING_TREND_VENSTER, verschil: '0.4', naam: 'Sara' },
+    })
+    expect(Object.keys(signalen[0].waarden)).toEqual(['aantal', 'venster', 'verschil', 'naam'])
+  })
+
+  it('twee dalers → meervoudsleutel, aantal 2 en de naam van de sterkste daler', () => {
+    const [signaal] = bepaalSignalen({
+      ...leeg,
+      stijgersDalers: bepaalStijgersDalers([vormRij('p1', 'Anne', 9, 7.0, 6.6), vormRij('p2', 'Bert', 9, 7.0, 6.2)]),
+    })
+    expect(signaal.id).toBe('speler-daler')
+    expect(signaal.toon).toBe('letop')
+    expect(signaal.tekstSleutel).toBe('signaalSpelersDalers')
+    expect(signaal.waarden).toEqual({ aantal: 2, venster: RATING_TREND_VENSTER, verschil: '0.8', naam: 'Bert' })
+  })
+
+  it('stijger precies +0,3 en daler precies −0,3 zijn aanwezig; 7 beoordelingen is te weinig', () => {
+    const grens = bepaalSignalen({
+      ...leeg,
+      stijgersDalers: bepaalStijgersDalers([vormRij('p1', 'Op', 8, 7.0, 7.3), vormRij('p2', 'Neer', 8, 7.0, 6.7)]),
+    })
+    expect(grens.map((s) => s.id)).toEqual(['speler-daler', 'speler-stijger'])
+    expect(grens.map((s) => s.waarden.verschil)).toEqual(['0.3', '0.3'])
+
+    const teWeinig = bepaalSignalen({
+      ...leeg,
+      stijgersDalers: bepaalStijgersDalers([
+        vormRij('p1', 'Op', STIJGER_MIN_BEOORDELINGEN - 1, 7.0, 8.0),
+        vormRij('p2', 'Neer', STIJGER_MIN_BEOORDELINGEN - 1, 7.0, 6.0),
+      ]),
+    })
+    expect(teWeinig).toEqual([])
+  })
+
+  // ── Regel 6: positie zonder fitte speler ──
+
+  it('één bezette positie zonder fitte speler → positie in de waarden', () => {
+    const [signaal, ...rest] = bepaalSignalen({
+      ...leeg,
+      ...metPosities([posRij('k1', 'Kees', 'Keeper', [], true), posRij('s1', 'Sam', 'Spits')]),
+    })
+    expect(rest).toEqual([])
+    expect(signaal).toEqual({
+      id: 'positie-zonder-fit',
+      toon: 'letop',
+      tekstSleutel: 'signaalPositieZonderFit',
+      waarden: { positie: 'Keeper' },
+    })
+  })
+
+  it('iedereen geblesseerd → precies één signaal met meervoudsleutel en aantal, nooit een opsomming', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      ...metPosities([
+        posRij('k1', 'Kees', 'Keeper', [], true),
+        posRij('s1', 'Sam', 'Spits', ['Linksbuiten'], true),
+      ]),
+    })
+    expect(signalen).toEqual([
+      { id: 'positie-zonder-fit', toon: 'letop', tekstSleutel: 'signaalPositiesZonderFit', waarden: { aantal: 3 } },
+    ])
+  })
+
+  it('heeftSpelers false → geen positiesignaal, ook als de rijen anders iets zouden opleveren', () => {
+    const rijen = [posRij('k1', 'Kees', 'Keeper', [], true)]
+    expect(bepaalSignalen({ ...leeg, posities: rijen, dekking: dekkingPerPositie(rijen), heeftSpelers: false })).toEqual([])
+    expect(bepaalSignalen({ ...leeg, ...metPosities([]) })).toEqual([])
+  })
+
+  it('een team dat posities niet bezet krijgt daarvoor geen signaal (O3, variant b)', () => {
+    // 11 van de 12 posities zijn leeg, maar niemand speelt daar: geen signaal.
+    expect(bepaalSignalen({ ...leeg, ...metPosities([posRij('k1', 'Kees', 'Keeper')]) })).toEqual([])
+  })
+
+  // ── Volgorde, maximum en verdringing ──
+
+  it('vaste volgorde: zorg → let-op (opkomst, rating, doelsaldo, daler, positie) → goed (opkomst, rating, doelsaldo, stijger)', () => {
+    // MAX_SIGNALEN = 3 knipt af; door de vroegere bronnen één voor één uit te
+    // zetten schuift het venster langs de hele volgorde.
+    expect(ids(allesLetop)).toEqual(['opkomst-onder-doel', 'rating-daling', 'doelsaldo-negatief'])
+    expect(ids({ ...allesLetop, bronFout: { ...geenFout, maandOpkomst: true } }))
+      .toEqual(['rating-daling', 'doelsaldo-negatief', 'speler-daler'])
+    expect(ids({ ...allesLetop, bronFout: { ...geenFout, maandOpkomst: true, teamRating: true } }))
+      .toEqual(['doelsaldo-negatief', 'speler-daler', 'positie-zonder-fit'])
+
+    expect(ids(allesGoed)).toEqual(['opkomst-boven-doel', 'rating-stijging', 'doelsaldo-positief'])
+    expect(ids({ ...allesGoed, bronFout: { ...geenFout, maandOpkomst: true } }))
+      .toEqual(['rating-stijging', 'doelsaldo-positief', 'speler-stijger'])
+
+    // Let-op staat altijd vóór goed, ook als de goed-regel eerder in de lijst
+    // staat (stijger en daler komen uit dezelfde regel).
+    expect(ids({
+      ...leeg,
+      stijgersDalers: bepaalStijgersDalers([vormRij('s1', 'Sara', 8, 7.0, 7.5), vormRij('d1', 'Daan', 8, 7.0, 6.5)]),
+      ...metPosities([posRij('k1', 'Kees', 'Keeper', [], true), posRij('s2', 'Sam', 'Spits')]),
+    })).toEqual(['speler-daler', 'positie-zonder-fit', 'speler-stijger'])
+
+    // Een zorgsignaal gaat overal voor.
+    expect(ids({ ...allesLetop, aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Wim', aanwezig: 1, afwezig: 9 }] }))
+      .toEqual(['spelers-onder-drempel', 'opkomst-onder-doel', 'rating-daling'])
   })
 
   it('een zorgsignaal verdringt een compliment, nooit andersom, en het blok blijft op MAX_SIGNALEN', () => {
     const signalen = bepaalSignalen({
-      // 3 wegblijvers, opkomst boven de norm, ratingstijging, positief saldo:
-      // meer treffers dan MAX_SIGNALEN.
-      maanden: [trendMaand('2026-02', 95, 5)],
+      ...allesGoed,
       aanwezigheidPerSpeler: [
         { player_id: 'p1', naam: 'A', aanwezig: 1, afwezig: 9 },
         { player_id: 'p2', naam: 'B', aanwezig: 2, afwezig: 8 },
       ],
-      teamRating: [
-        ...[6, 6, 6, 6, 6].map((g, i) => trendRatingRij(`2026-01-0${i + 1}`, g)),
-        ...[8, 8, 8, 8, 8].map((g, i) => trendRatingRij(`2026-02-0${i + 1}`, g)),
-      ],
-      doelpunten: Array.from({ length: 6 }, (_, i) => trendWedstrijd(`w${i}`, 3, 0)),
     })
     expect(signalen).toHaveLength(MAX_SIGNALEN)
     expect(signalen[0].toon).toBe('zorg')
-    // Het positieve doelsaldo is het laatste compliment in de vaste volgorde
-    // en valt daarmee als eerste af.
+    // Het positieve doelsaldo en de stijger zijn de laatste complimenten in de
+    // vaste volgorde en vallen daarmee als eerste af.
     expect(signalen.map((s) => s.id)).not.toContain('doelsaldo-positief')
+    expect(signalen.map((s) => s.id)).not.toContain('speler-stijger')
+  })
+
+  it('speler tegelijk wegblijver en daler: beide signalen verschijnen (O6)', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Daan', aanwezig: 1, afwezig: 4 }],
+      stijgersDalers: bepaalStijgersDalers([vormRij('p1', 'Daan', 8, 7.0, 6.4)]),
+    })
+    expect(signalen.map((s) => [s.id, s.waarden.naam])).toEqual([
+      ['spelers-onder-drempel', 'Daan'],
+      ['speler-daler', 'Daan'],
+    ])
+  })
+
+  it('gebruikerstekst (naam) is altijd de laatste sleutel bij wegblijver, stijger en daler', () => {
+    const signalen = bepaalSignalen({
+      ...leeg,
+      aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Wim', aanwezig: 1, afwezig: 4 }],
+      stijgersDalers: bepaalStijgersDalers([vormRij('s1', 'Sara', 8, 7.0, 7.5), vormRij('d1', 'Daan', 8, 7.0, 6.5)]),
+    })
+    expect(signalen.map((s) => s.id)).toEqual(['spelers-onder-drempel', 'speler-daler', 'speler-stijger'])
+    for (const s of signalen) expect(Object.keys(s.waarden).at(-1)).toBe('naam')
+  })
+
+  // ── Falende bronnen (AC16) ──
+
+  const perBron: [keyof SignaalBronFout, string[]][] = [
+    ['maandOpkomst', ['opkomst-onder-doel', 'opkomst-boven-doel']],
+    ['trainingTelling', ['opkomst-onder-doel', 'opkomst-boven-doel']],
+    ['aanwezigheidPerSpeler', ['spelers-onder-drempel']],
+    ['teamRating', ['rating-daling', 'rating-stijging']],
+    ['uitslagen', ['doelsaldo-negatief', 'doelsaldo-positief']],
+    ['ratingVorm', ['speler-daler', 'speler-stijger']],
+    ['posities', ['positie-zonder-fit']],
+  ]
+  // Per bron alleen díe bron gevuld, zodat MAX_SIGNALEN niets wegknipt.
+  const alleenBron = (vlag: keyof SignaalBronFout, basis: SignaalInvoer): SignaalInvoer => {
+    switch (vlag) {
+      case 'maandOpkomst':
+      case 'trainingTelling':
+        return { ...leeg, maanden: basis.maanden, trainingenPerMaand: basis.trainingenPerMaand }
+      case 'aanwezigheidPerSpeler':
+        return { ...leeg, aanwezigheidPerSpeler: [{ player_id: 'p1', naam: 'Wim', aanwezig: 1, afwezig: 9 }] }
+      case 'teamRating':
+        return { ...leeg, teamRating: basis.teamRating }
+      case 'uitslagen':
+        return { ...leeg, saldo: basis.saldo }
+      case 'ratingVorm':
+        return { ...leeg, stijgersDalers: basis.stijgersDalers }
+      case 'posities':
+        return { ...leeg, posities: allesLetop.posities, dekking: allesLetop.dekking, heeftSpelers: true }
+    }
+  }
+
+  it.each(perBron)('bron %s faalt → bijbehorend signaal weg en onvolledig', (vlag, bronIds) => {
+    for (const basis of [allesLetop, allesGoed]) {
+      const invoer = alleenBron(vlag, basis)
+      // Zonder fout vuurt de regel echt (anders bewijst de test niets).
+      expect(ids(invoer).some((id) => bronIds.includes(id))).toBe(true)
+      expect(signaalBronnenOnvolledig(invoer)).toBe(false)
+
+      const metFout = { ...invoer, bronFout: { ...geenFout, [vlag]: true } }
+      expect(bepaalSignalen(metFout)).toEqual([])
+      expect(signaalBronnenOnvolledig(metFout)).toBe(true)
+    }
+  })
+
+  it('een falende bron levert nooit een compliment op, ook niet als andere bronnen goed zijn', () => {
+    const allesFout: SignaalBronFout = {
+      maandOpkomst: true, trainingTelling: true, aanwezigheidPerSpeler: true,
+      teamRating: true, uitslagen: true, ratingVorm: true, posities: true,
+    }
+    expect(bepaalSignalen({ ...allesGoed, bronFout: allesFout })).toEqual([])
+    expect(bepaalSignalen({ ...allesLetop, bronFout: allesFout })).toEqual([])
+    // Alleen de opkomstbron faalt: de overige complimenten blijven, het
+    // opkomstcompliment niet.
+    const signalen = bepaalSignalen({ ...allesGoed, bronFout: { ...geenFout, maandOpkomst: true } })
+    expect(signalen.map((s) => s.id)).not.toContain('opkomst-boven-doel')
+  })
+})
+
+describe('signaalBronnenOnvolledig', () => {
+  const leeg: SignaalInvoer = {
+    maanden: [],
+    trainingenPerMaand: {},
+    aanwezigheidPerSpeler: [],
+    teamRating: [],
+    saldo: { voor: 0, tegen: 0, saldo: 0, wedstrijden: 0 },
+    uitslagenAfgekapt: false,
+    stijgersDalers: { stijgers: [], dalers: [], meegeteld: 0 },
+    dekking: [],
+    posities: [],
+    heeftSpelers: false,
+    bronFout: {
+      maandOpkomst: false, trainingTelling: false, aanwezigheidPerSpeler: false,
+      teamRating: false, uitslagen: false, ratingVorm: false, posities: false,
+    },
+  }
+
+  it('onwaar zonder fouten; waar bij elke afzonderlijke vlag, een onbekende telling of afgekapte uitslagen', () => {
+    expect(signaalBronnenOnvolledig(leeg)).toBe(false)
+    for (const vlag of Object.keys(leeg.bronFout) as (keyof SignaalBronFout)[]) {
+      expect(signaalBronnenOnvolledig({ ...leeg, bronFout: { ...leeg.bronFout, [vlag]: true } })).toBe(true)
+    }
+    expect(signaalBronnenOnvolledig({ ...leeg, trainingenPerMaand: null })).toBe(true)
+    expect(signaalBronnenOnvolledig({ ...leeg, uitslagenAfgekapt: true })).toBe(true)
+  })
+})
+
+describe('trainingenPerMaand', () => {
+  const ev = (event_id: string, datum: string, totaal = 0): TrainingEvaluatieRij => ({
+    event_id, datum, doelstelling: null, rpe: null, oordeel: null, totaal,
+  })
+  // Zoals de RPC: `totaal` = count(*) over () = aantal rijen.
+  const metTotaal = (rijen: TrainingEvaluatieRij[]) => rijen.map((r) => ({ ...r, totaal: rijen.length }))
+
+  it('telt unieke trainingen per maand', () => {
+    const rijen = metTotaal([ev('e1', '2026-02-03'), ev('e1', '2026-02-03'), ev('e2', '2026-02-10'), ev('e3', '2026-03-01')])
+    expect(trainingenPerMaand(rijen)).toEqual({ '2026-02': 2, '2026-03': 1 })
+  })
+
+  it('grens op de maandwissel: 31 januari en 1 februari vallen in twee maanden', () => {
+    expect(trainingenPerMaand(metTotaal([ev('e1', '2026-01-31'), ev('e2', '2026-02-01')])))
+      .toEqual({ '2026-01': 1, '2026-02': 1 })
+  })
+
+  it('lege bron → lege telling (niet null: de bron is bekend, er waren gewoon geen trainingen)', () => {
+    expect(trainingenPerMaand([])).toEqual({})
+  })
+
+  it('null bij een afgekapte bron (isAfgekapt): meer dan MAX_FASE3_RIJEN rijen of totaal > rijen', () => {
+    const veel = Array.from({ length: MAX_FASE3_RIJEN + 1 }, (_, i) => ev(`e${i}`, '2026-02-01', MAX_FASE3_RIJEN + 1))
+    expect(trainingenPerMaand(veel)).toBeNull()
+    expect(trainingenPerMaand([ev('e1', '2026-02-01', 5)])).toBeNull()
+  })
+
+  it('onbruikbare rijen (geen event_id, geen geldige datum, null) tellen niet mee', () => {
+    const rijen = [
+      ev('', '2026-02-01', 4),
+      ev('e1', 'kapot', 4),
+      null as unknown as TrainingEvaluatieRij,
+      ev('e2', '2026-02-02', 4),
+    ]
+    expect(trainingenPerMaand(rijen)).toEqual({ '2026-02': 1 })
+  })
+
+  it('muteert de invoer niet', () => {
+    const rijen = metTotaal([ev('e1', '2026-02-03')])
+    const kopie = structuredClone(rijen)
+    trainingenPerMaand(rijen)
+    expect(rijen).toEqual(kopie)
+  })
+})
+
+describe('positiesZonderFitteSpeler (O3, variant b)', () => {
+  const posRij = (id: string, name: string, position: string, secondary: string[] | null = [], injured: boolean | null = false): SpelerPositieRij => ({
+    id, name, position, secondary_positions: secondary, injured,
+  })
+  const open = (rijen: SpelerPositieRij[]) => positiesZonderFitteSpeler(dekkingPerPositie(rijen), rijen)
+
+  it('alleen posities die iemand als eerste of tweede positie heeft, en waar niemand fit is', () => {
+    expect(open([posRij('k1', 'Kees', 'Keeper', [], true), posRij('s1', 'Sam', 'Spits')])).toEqual(['Keeper'])
+  })
+
+  it('een tweede positie telt als bezet; een fitte speler met die tweede positie dekt hem', () => {
+    // Linksbuiten is alleen tweede positie van een geblesseerde speler → open.
+    expect(open([posRij('s1', 'Sam', 'Spits', ['Linksbuiten'], true), posRij('s2', 'Sjors', 'Spits')])).toEqual(['Linksbuiten'])
+    // Keeper is geblesseerd, maar een fitte veldspeler heeft Keeper als tweede positie → gedekt.
+    expect(open([posRij('k1', 'Kees', 'Keeper', [], true), posRij('v1', 'Vera', 'Linksachter', ['Keeper'])])).toEqual([])
+  })
+
+  it('posities die niemand speelt tellen niet, ook al zijn ze leeg', () => {
+    expect(open([posRij('k1', 'Kees', 'Keeper')])).toEqual([])
+    expect(open([])).toEqual([])
+  })
+
+  it('iedereen geblesseerd → alle bezette posities, in de volgorde van POSITIONS', () => {
+    const rijen = [posRij('s1', 'Sam', 'Spits', ['Linksbuiten'], true), posRij('k1', 'Kees', 'Keeper', null, true)]
+    expect(open(rijen)).toEqual(['Keeper', 'Linksbuiten', 'Spits'])
+    expect(open(rijen)).toEqual(POSITIONS.filter((p) => ['Keeper', 'Linksbuiten', 'Spits'].includes(p)))
+  })
+
+  it('een onbekende positiewaarde wordt genegeerd, net als in dekkingPerPositie', () => {
+    expect(open([posRij('x1', 'Xander', 'Libero', ['Vleugelverdediger'], true)])).toEqual([])
+  })
+
+  it('muteert de invoer niet', () => {
+    const rijen = [posRij('k1', 'Kees', 'Keeper', ['Spits'], true)]
+    const dekking = dekkingPerPositie(rijen)
+    const kopie = structuredClone({ rijen, dekking })
+    positiesZonderFitteSpeler(dekking, rijen)
+    expect({ rijen, dekking }).toEqual(kopie)
   })
 })
 

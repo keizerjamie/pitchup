@@ -413,6 +413,16 @@ export const RATING_TREND_VENSTER = 5
 // gemiddelde al met een tiende.
 export const RATING_TREND_DREMPEL = 0.3
 
+// Minimum aantal registraties (aanwezig + afwezig) voordat een speler als
+// wegblijver kan verschijnen (C11). Eén gemiste training zonder verdere
+// registraties is 0%, maar zegt niets over structureel wegblijven.
+export const SPELER_MIN_REGISTRATIES = 4
+
+// Minimum aantal gehouden trainingen in de laatste maand voordat de opkomst
+// een let-op of compliment oplevert (C12). Twee trainingen aan het begin van
+// een lopende maand geven een kunstmatig hoog of laag percentage.
+export const OPKOMST_MIN_TRAININGEN = 3
+
 export interface MaandTrend {
   maand: string // 'YYYY-MM'
   percentage: number
@@ -469,7 +479,11 @@ export function teamRatingTrend(
     const recent = rows.slice(-breedte)
     const daarvoor = rows.slice(-breedte * 2, -breedte)
     const gem = (deel: TeamRatingRij[]) => deel.reduce((som, r) => som + r.gemiddelde, 0) / deel.length
-    delta = gem(recent) - gem(daarvoor)
+    // Afgerond op 2 decimalen, zelfde idioom als bepaalStijgersDalers: zonder
+    // afronding geeft 5× 7,0 tegen 5× 7,3 een delta van 0,2999… en valt een
+    // verschil van exact 0,3 onder RATING_TREND_DREMPEL (AC20). Hier en niet in
+    // bepaalSignalen, zodat de KPI-strook en het signaal dezelfde delta lezen.
+    delta = Math.round((gem(recent) - gem(daarvoor)) * 100) / 100
   }
   return { gemiddelde, aantal: rows.length, delta }
 }
@@ -513,11 +527,115 @@ export interface Signaal {
   waarden: Record<string, string | number>
 }
 
+// Per signaalbron: faalde de bron (RPC- of queryfout)? Een falende bron levert
+// nooit een signaal op — ook geen compliment — en maakt het blok "onvolledig"
+// (signaalBronnenOnvolledig). Alle vlaggen zijn verplicht, zodat de pagina er
+// geen kan vergeten.
+export interface SignaalBronFout {
+  maandOpkomst: boolean
+  // De bron van trainingenPerMaand (inzichten_training_evaluaties).
+  trainingTelling: boolean
+  aanwezigheidPerSpeler: boolean
+  teamRating: boolean
+  uitslagen: boolean
+  ratingVorm: boolean
+  posities: boolean
+}
+
 export interface SignaalInvoer {
   maanden: MaandOpkomst[]
+  // Gehouden trainingen per 'YYYY-MM' (trainingenPerMaand). null = onbekend:
+  // de bron faalde of is afgekapt. Dan vervalt het opkomstsignaal.
+  trainingenPerMaand: Record<string, number> | null
   aanwezigheidPerSpeler: AanwezigheidPerSpelerRij[]
   teamRating: TeamRatingRij[]
-  doelpunten: DoelpuntItem[]
+  // Totaal over alle uitslagen: dezelfde bron als de Thuis/uit-kaart en de
+  // KPI Doelsaldo (ThuisUitTotaal is structureel een Doelsaldo).
+  saldo: Doelsaldo
+  uitslagenAfgekapt: boolean
+  stijgersDalers: StijgersDalers
+  dekking: PositieDekking[]
+  // De rijen waaruit `dekking` is berekend: nodig om te weten welke posities
+  // het team überhaupt bezet (positiesZonderFitteSpeler).
+  posities: SpelerPositieRij[]
+  // Heeft het team actieve vaste spelers? Onderscheidt een leeg team van
+  // "iedereen geblesseerd", net als de positiedekkingskaart.
+  heeftSpelers: boolean
+  bronFout: SignaalBronFout
+}
+
+// Aantal gehouden trainingen per maand ('YYYY-MM'), geteld als unieke
+// event_id's uit inzichten_training_evaluaties (één rij per training in het
+// venster `verleden`, dus hetzelfde venster als de maandopkomst).
+//
+// Telt gehouden trainingen, ook trainingen zonder registratie — iets ruimer
+// dan "trainingen met registratie", maar zonder extra RPC (O2).
+//
+// Tijdzone: alleen `datum.slice(0, 7)` op de kale 'YYYY-MM-DD'-string, geen
+// Date-parse, dus onafhankelijk van server- of toesteltijdzone.
+//
+// null bij een afgekapte bron (isAfgekapt): een gedeeltelijke telling zou het
+// minimum stilzwijgend verkeerd toetsen. Onbruikbare rijen (geen event_id of
+// geen geldige datum) tellen niet mee, zoals bij evaluatiesPerWeek.
+export function trainingenPerMaand(rijen: TrainingEvaluatieRij[]): Record<string, number> | null {
+  const lijst = Array.isArray(rijen) ? rijen : []
+  if (isAfgekapt(lijst)) return null
+  const perMaand = new Map<string, Set<string>>()
+  for (const rij of lijst) {
+    if (!isBruikbareEvaluatie(rij)) continue
+    const maand = rij.datum.slice(0, 7)
+    let events = perMaand.get(maand)
+    if (!events) {
+      events = new Set<string>()
+      perMaand.set(maand, events)
+    }
+    events.add(rij.event_id)
+  }
+  const telling: Record<string, number> = {}
+  for (const [maand, events] of perMaand) telling[maand] = events.size
+  return telling
+}
+
+// Posities waarvoor nu geen fitte speler is, beperkt tot posities die het team
+// bezet (O3, variant b): minstens één speler uit `posities` (actief, vast,
+// eigen team) heeft de positie als eerste positie (`position`) of als tweede
+// positie (`secondary_positions`), maar niemand daarvan is fit.
+//
+// Zonder die afbakening stond het signaal bij vrijwel elk team permanent aan,
+// want niet elk team vult alle 12 posities. Volgorde = die van `dekking`
+// (POSITIONS). Een onbekende positiewaarde wordt genegeerd, net als in
+// dekkingPerPositie.
+export function positiesZonderFitteSpeler(dekking: PositieDekking[], posities: SpelerPositieRij[]): Position[] {
+  const bezet = new Set<Position>()
+  for (const speler of Array.isArray(posities) ? posities : []) {
+    if (!speler) continue
+    if (isPositie(speler.position)) bezet.add(speler.position)
+    for (const positie of Array.isArray(speler.secondary_positions) ? speler.secondary_positions : []) {
+      if (isPositie(positie)) bezet.add(positie)
+    }
+  }
+  return (Array.isArray(dekking) ? dekking : [])
+    .filter((d) => d && bezet.has(d.positie) && d.spelers.length === 0)
+    .map((d) => d.positie)
+}
+
+// Is een deel van de signalen niet berekend? Waar zodra één signaalbron faalde,
+// de trainingstelling onbekend is (fout of afgekapt), of de uitslagen zijn
+// afgekapt (O4). Het blok toont dan een melding, ook bij nul signalen: anders
+// is een overgeslagen signaal onzichtbaar.
+export function signaalBronnenOnvolledig(invoer: SignaalInvoer): boolean {
+  const fout = invoer.bronFout
+  return (
+    fout.maandOpkomst ||
+    fout.trainingTelling ||
+    fout.aanwezigheidPerSpeler ||
+    fout.teamRating ||
+    fout.uitslagen ||
+    fout.ratingVorm ||
+    fout.posities ||
+    invoer.trainingenPerMaand === null ||
+    invoer.uitslagenAfgekapt
+  )
 }
 
 // Bouwt de "wat valt op"-signalen op uit dezelfde rijen die de grafieken al
@@ -529,92 +647,172 @@ export interface SignaalInvoer {
 // een zorgsignaal verdringt altijd een compliment en nooit andersom. Bij nul
 // treffers geeft dit een lege lijst terug en hoort de aanroeper het hele blok
 // weg te laten in plaats van "geen bijzonderheden" te tonen — dat laatste is
-// een regel tekst die niets toevoegt.
+// een regel tekst die niets toevoegt (tenzij signaalBronnenOnvolledig waar is).
+//
+// Binnen een toon geldt de volgorde van de regels hieronder:
+//   let-op: opkomst-onder → rating-daling → doelsaldo-negatief → speler-daler
+//           → positie-zonder-fit
+//   goed:   opkomst-boven → rating-stijging → doelsaldo-positief → speler-stijger
+//
+// Een falende bron (invoer.bronFout) slaat precies de regel op die bron over.
+//
+// Gebruikerstekst (spelersnamen) staat altijd als LAATSTE sleutel in `waarden`:
+// vulSignaalIn vult in de volgorde van Object.entries, dus een naam met
+// "{drempel}" erin wordt dan niet nogmaals vervangen.
 export function bepaalSignalen(invoer: SignaalInvoer): Signaal[] {
   const zorg: Signaal[] = []
   const letop: Signaal[] = []
   const goed: Signaal[] = []
+  const fout = invoer.bronFout
 
   // 1. Spelers die structureel wegblijven. Staat vooraan omdat dit het enige
-  //    signaal is dat over individuele spelers gaat en dus direct tot een
-  //    gesprek leidt.
-  const wegblijvers = invoer.aanwezigheidPerSpeler.filter((rij) => {
-    const percentage = berekenAanwezigheidPercentage(rij.aanwezig, rij.afwezig)
-    return percentage !== null && percentage < SPELER_ZORGDREMPEL
-  })
-  if (wegblijvers.length > 0) {
-    zorg.push({
-      id: 'spelers-onder-drempel',
-      toon: 'zorg',
-      tekstSleutel: wegblijvers.length === 1 ? 'signaalSpelerWegblijver' : 'signaalSpelersWegblijvers',
-      waarden: { aantal: wegblijvers.length, drempel: SPELER_ZORGDREMPEL, naam: wegblijvers[0].naam },
+  //    zorgsignaal is en over individuele spelers gaat, dus direct tot een
+  //    gesprek leidt. Pas vanaf SPELER_MIN_REGISTRATIES registraties.
+  if (!fout.aanwezigheidPerSpeler) {
+    const wegblijvers = invoer.aanwezigheidPerSpeler.filter((rij) => {
+      if (rij.aanwezig + rij.afwezig < SPELER_MIN_REGISTRATIES) return false
+      const percentage = berekenAanwezigheidPercentage(rij.aanwezig, rij.afwezig)
+      return percentage !== null && percentage < SPELER_ZORGDREMPEL
     })
+    if (wegblijvers.length > 0) {
+      zorg.push({
+        id: 'spelers-onder-drempel',
+        toon: 'zorg',
+        tekstSleutel: wegblijvers.length === 1 ? 'signaalSpelerWegblijver' : 'signaalSpelersWegblijvers',
+        waarden: { aantal: wegblijvers.length, drempel: SPELER_ZORGDREMPEL, naam: wegblijvers[0].naam },
+      })
+    }
   }
 
   // 2. Trainingsopkomst tegen de norm. Onder de norm is een let-op; erboven
-  //    een compliment (dat pas getoond wordt als er ruimte over is).
-  const trend = laatsteMaandTrend(invoer.maanden)
-  if (trend) {
-    if (trend.percentage < OPKOMST_DOEL) {
-      letop.push({
-        id: 'opkomst-onder-doel',
-        toon: 'letop',
-        tekstSleutel: trend.delta !== null && trend.delta < 0 ? 'signaalOpkomstOnderDoelDaling' : 'signaalOpkomstOnderDoel',
-        waarden: {
-          doel: OPKOMST_DOEL,
-          percentage: trend.percentage,
-          maand: trend.maand,
-          daling: trend.delta !== null ? Math.abs(trend.delta) : 0,
-        },
-      })
-    } else {
-      goed.push({
-        id: 'opkomst-boven-doel',
-        toon: 'goed',
-        tekstSleutel: 'signaalOpkomstBovenDoel',
-        waarden: { doel: OPKOMST_DOEL, percentage: trend.percentage, maand: trend.maand },
-      })
+  //    een compliment (dat pas getoond wordt als er ruimte over is). Alleen
+  //    als de laatste maand minstens OPKOMST_MIN_TRAININGEN trainingen had —
+  //    en dus nooit als die telling onbekend is.
+  const telling = invoer.trainingenPerMaand
+  if (!fout.maandOpkomst && !fout.trainingTelling && telling !== null) {
+    const trend = laatsteMaandTrend(invoer.maanden)
+    if (trend && (telling[trend.maand] ?? 0) >= OPKOMST_MIN_TRAININGEN) {
+      if (trend.percentage < OPKOMST_DOEL) {
+        letop.push({
+          id: 'opkomst-onder-doel',
+          toon: 'letop',
+          tekstSleutel: trend.delta !== null && trend.delta < 0 ? 'signaalOpkomstOnderDoelDaling' : 'signaalOpkomstOnderDoel',
+          waarden: {
+            doel: OPKOMST_DOEL,
+            percentage: trend.percentage,
+            maand: trend.maand,
+            daling: trend.delta !== null ? Math.abs(trend.delta) : 0,
+          },
+        })
+      } else {
+        goed.push({
+          id: 'opkomst-boven-doel',
+          toon: 'goed',
+          tekstSleutel: 'signaalOpkomstBovenDoel',
+          waarden: { doel: OPKOMST_DOEL, percentage: trend.percentage, maand: trend.maand },
+        })
+      }
     }
   }
 
   // 3. Ratingtrend, alleen bij een verschil dat boven de ruisdrempel uitkomt.
-  const rating = teamRatingTrend(invoer.teamRating)
-  if (rating && rating.delta !== null && Math.abs(rating.delta) >= RATING_TREND_DREMPEL) {
-    const verschil = Math.round(Math.abs(rating.delta) * 10) / 10
-    if (rating.delta > 0) {
-      goed.push({
-        id: 'rating-stijging',
-        toon: 'goed',
-        tekstSleutel: 'signaalRatingStijging',
-        waarden: { verschil, venster: RATING_TREND_VENSTER },
-      })
-    } else {
-      letop.push({
-        id: 'rating-daling',
-        toon: 'letop',
-        tekstSleutel: 'signaalRatingDaling',
-        waarden: { verschil, venster: RATING_TREND_VENSTER },
-      })
+  if (!fout.teamRating) {
+    const rating = teamRatingTrend(invoer.teamRating)
+    if (rating && rating.delta !== null && Math.abs(rating.delta) >= RATING_TREND_DREMPEL) {
+      const verschil = Math.round(Math.abs(rating.delta) * 10) / 10
+      if (rating.delta > 0) {
+        goed.push({
+          id: 'rating-stijging',
+          toon: 'goed',
+          tekstSleutel: 'signaalRatingStijging',
+          waarden: { verschil, venster: RATING_TREND_VENSTER },
+        })
+      } else {
+        letop.push({
+          id: 'rating-daling',
+          toon: 'letop',
+          tekstSleutel: 'signaalRatingDaling',
+          waarden: { verschil, venster: RATING_TREND_VENSTER },
+        })
+      }
     }
   }
 
   // 4. Doelsaldo. Alleen vermeldenswaard als er genoeg wedstrijden zijn om er
-  //    iets over te zeggen — bij twee wedstrijden zegt een saldo niets.
-  const saldo = doelsaldo(invoer.doelpunten)
-  if (saldo.wedstrijden >= RATING_TREND_VENSTER) {
-    if (saldo.saldo < 0) {
+  //    iets over te zeggen — bij twee wedstrijden zegt een saldo niets. Bij
+  //    afgekapte uitslagen is het saldo onvolledig en vervalt het signaal.
+  if (!fout.uitslagen && !invoer.uitslagenAfgekapt) {
+    const saldo = invoer.saldo
+    if (saldo.wedstrijden >= RATING_TREND_VENSTER) {
+      if (saldo.saldo < 0) {
+        letop.push({
+          id: 'doelsaldo-negatief',
+          toon: 'letop',
+          tekstSleutel: 'signaalDoelsaldoNegatief',
+          waarden: { voor: saldo.voor, tegen: saldo.tegen, wedstrijden: saldo.wedstrijden },
+        })
+      } else if (saldo.saldo > 0) {
+        goed.push({
+          id: 'doelsaldo-positief',
+          toon: 'goed',
+          tekstSleutel: 'signaalDoelsaldoPositief',
+          waarden: { saldo: saldo.saldo, voor: saldo.voor, tegen: saldo.tegen, wedstrijden: saldo.wedstrijden },
+        })
+      }
+    }
+  }
+
+  // 5. Stijgers en dalers in vorm. Drempel en minimum aantal beoordelingen
+  //    zitten al in bepaalStijgersDalers; de lijsten zijn daar op sterkte
+  //    gesorteerd, dus [0] is de sterkste. `verschil` in dezelfde notatie als
+  //    de StijgersDalersKaart (één decimaal, zonder teken).
+  if (!fout.ratingVorm) {
+    const { stijgers, dalers } = invoer.stijgersDalers
+    if (dalers.length > 0) {
       letop.push({
-        id: 'doelsaldo-negatief',
+        id: 'speler-daler',
         toon: 'letop',
-        tekstSleutel: 'signaalDoelsaldoNegatief',
-        waarden: { voor: saldo.voor, tegen: saldo.tegen, wedstrijden: saldo.wedstrijden },
+        tekstSleutel: dalers.length === 1 ? 'signaalSpelerDaler' : 'signaalSpelersDalers',
+        waarden: {
+          aantal: dalers.length,
+          venster: RATING_TREND_VENSTER,
+          verschil: Math.abs(dalers[0].verschil).toFixed(1),
+          naam: dalers[0].naam,
+        },
       })
-    } else if (saldo.saldo > 0) {
+    }
+    if (stijgers.length > 0) {
       goed.push({
-        id: 'doelsaldo-positief',
+        id: 'speler-stijger',
         toon: 'goed',
-        tekstSleutel: 'signaalDoelsaldoPositief',
-        waarden: { saldo: saldo.saldo, voor: saldo.voor, tegen: saldo.tegen, wedstrijden: saldo.wedstrijden },
+        tekstSleutel: stijgers.length === 1 ? 'signaalSpelerStijger' : 'signaalSpelersStijgers',
+        waarden: {
+          aantal: stijgers.length,
+          venster: RATING_TREND_VENSTER,
+          verschil: Math.abs(stijgers[0].verschil).toFixed(1),
+          naam: stijgers[0].naam,
+        },
+      })
+    }
+  }
+
+  // 6. Bezette positie zonder fitte speler (positiesZonderFitteSpeler). Eén
+  //    positie wordt genoemd; bij meer alleen het aantal, nooit een opsomming.
+  if (!fout.posities && invoer.heeftSpelers) {
+    const open = positiesZonderFitteSpeler(invoer.dekking, invoer.posities)
+    if (open.length === 1) {
+      letop.push({
+        id: 'positie-zonder-fit',
+        toon: 'letop',
+        tekstSleutel: 'signaalPositieZonderFit',
+        waarden: { positie: open[0] },
+      })
+    } else if (open.length > 1) {
+      letop.push({
+        id: 'positie-zonder-fit',
+        toon: 'letop',
+        tekstSleutel: 'signaalPositiesZonderFit',
+        waarden: { aantal: open.length },
       })
     }
   }
