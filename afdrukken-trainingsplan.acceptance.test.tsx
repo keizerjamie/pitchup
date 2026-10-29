@@ -5,7 +5,7 @@
 //
 // ── AC → test-mapping ──
 //   AC1  → describe('AC1 — afdrukknop naast de titel op de pagina')
-//   AC2  → describe('AC2 — klik roept window.print() precies één keer aan')
+//   AC2  → describe('AC2 — klik start de export (PDF in nieuw tabblad) precies één keer')
 //          + edge case dubbelklik in datzelfde blok
 //   AC3  → describe('AC3 — cyclusweek-suggestie en periodiseringstatus niet op de afdruk')
 //   AC4  → describe('AC4 — teamindeling: bediening verborgen, namen zichtbaar')
@@ -380,6 +380,17 @@ function stubPrint() {
   return printSpy
 }
 
+// Sinds 2026-10-29 drukt de knop op de computer niet meer zelf af: hij opent
+// synchroon een nieuw tabblad en zet daar de server-PDF in (zelfde opmaak als
+// op de telefoon). De PDF-flow zelf staat in delen-als-pdf.acceptance.test.tsx
+// (AC14); hier hangt de fetch bewust.
+function stubExport() {
+  const open = vi.fn(() => null)
+  Object.defineProperty(window, 'open', { value: open, writable: true, configurable: true })
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+  return open
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // AC1 — bovenaan de pagina, naast de titel/kop, staat een afdrukknop
 // ═══════════════════════════════════════════════════════════════════════
@@ -401,34 +412,45 @@ describe('AC1 — afdrukknop naast de titel op de pagina', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC2 — klik roept window.print() precies één keer aan; geen navigatie/reload
+// AC2 — klik start de export precies één keer; geen navigatie/reload.
+// (Oorspronkelijk window.print(); sinds 2026-10-29 de server-PDF in een nieuw
+// tabblad, op Jamies verzoek: de telefoon-PDF zag er beter uit.)
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC2 — klik roept window.print() precies één keer aan', () => {
-  it('roept window.print() exact 1× aan, geen navigatie (locatie blijft ongewijzigd)', async () => {
+describe('AC2 — klik start de export (PDF in nieuw tabblad) precies één keer', () => {
+  it('opent exact 1× een tabblad, geen window.print(), geen navigatie, geen server action', async () => {
     const printSpy = stubPrint()
-    await renderPage()
-    const before = window.location.href
-    fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(printSpy).toHaveBeenCalledTimes(1)
-    expect(window.location.href).toBe(before)
-    // Geen enkele server action (data-mutatie / paginaherlading via server)
-    // werd door de klik getriggerd — het is puur window.print().
-    for (const fn of Object.values(trainingPlanActions)) {
-      expect(fn as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
+    const open = stubExport()
+    try {
+      await renderPage()
+      const before = window.location.href
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(open).toHaveBeenCalledWith('', '_blank')
+      expect(printSpy).not.toHaveBeenCalled()
+      expect(window.location.href).toBe(before)
+      for (const fn of Object.values(trainingPlanActions)) {
+        expect(fn as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
+      }
+    } finally {
+      vi.unstubAllGlobals()
     }
   })
 
-  it('edge case: dubbelklik roept window.print() precies 2× aan (bewust geen eigen guard)', () => {
-    const printSpy = stubPrint()
-    render(
-      <DictProvider dict={nl}>
-        <PrintButton pdf={{ doel: 'trainingsplan', eventId: 'e1', datum: '2026-10-28' }} />
-      </DictProvider>,
-    )
-    const button = screen.getByRole('button', { name: nl.trainingPlan.print })
-    fireEvent.click(button)
-    fireEvent.click(button)
-    expect(printSpy).toHaveBeenCalledTimes(2)
+  it('edge case: dubbelklik tijdens het maken opent maar één tabblad', () => {
+    const open = stubExport()
+    try {
+      render(
+        <DictProvider dict={nl}>
+          <PrintButton pdf={{ doel: 'trainingsplan', eventId: 'e1', datum: '2026-10-28' }} />
+        </DictProvider>,
+      )
+      const button = screen.getByRole('button', { name: nl.trainingPlan.print })
+      fireEvent.click(button)
+      fireEvent.click(button)
+      expect(open).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 
@@ -838,10 +860,15 @@ describe('AC10 — geen nieuwe data-ophaling/route, bestaande toegang ongewijzig
 
   it('de afdrukknop zelf triggert geen enkele server action (geen eigen data-ophaling)', async () => {
     stubPrint()
-    await renderPage({ oefeningenKoppelingen: [makeKoppeling()] })
-    fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    for (const fn of Object.values(trainingPlanActions)) {
-      expect(fn as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
+    stubExport()
+    try {
+      await renderPage({ oefeningenKoppelingen: [makeKoppeling()] })
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      for (const fn of Object.values(trainingPlanActions)) {
+        expect(fn as ReturnType<typeof vi.fn>).not.toHaveBeenCalled()
+      }
+    } finally {
+      vi.unstubAllGlobals()
     }
   })
 })

@@ -310,6 +310,18 @@ function stubPrint() {
   return spy
 }
 
+// Computer: de knop opent synchroon een leeg tabblad en zet daar na de fetch de
+// blob-URL van de server-PDF in. jsdom kent createObjectURL niet, dus stubben.
+type NepTabblad = { closed: boolean; close: ReturnType<typeof vi.fn>; location: { href: string } }
+function stubTabblad(o: { geblokkeerd?: boolean } = {}) {
+  const tab: NepTabblad = { closed: false, close: vi.fn(), location: { href: '' } }
+  const open = vi.fn(() => (o.geblokkeerd ? null : tab))
+  Object.defineProperty(window, 'open', { value: open, writable: true, configurable: true })
+  Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:pitchup-pdf'), writable: true, configurable: true })
+  Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), writable: true, configurable: true })
+  return { open, tab }
+}
+
 const deelKnop = () => screen.getByRole('button', { name: nl.trainingPlan.share })
 
 // Wat navigator.share() ontving: precies één PDF-bestand, zonder title/text.
@@ -526,13 +538,17 @@ describe('AC8 — toestel kan geen bestanden delen: fallback, nooit stil falen',
     expect(share).not.toHaveBeenCalled()
   })
 
-  it('touch-toestel zonder canShare (niet-beginscherm): window.print()', () => {
+  it('touch-toestel zonder canShare (niet-beginscherm): server-PDF in een nieuw tabblad', async () => {
     zetToestel({ touch: true, standalone: false, canShare: false })
     const print = stubPrint()
+    const { open, tab } = stubTabblad()
     renderSquadEditor()
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(print).toHaveBeenCalledTimes(1)
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledWith('', '_blank')
+    await waitFor(() => expect(tab.location.href).toBe('blob:pitchup-pdf'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(print).not.toHaveBeenCalled()
+    expect(share).not.toHaveBeenCalled()
   })
 
   it('share() faalt met een onverwachte fout: zichtbare vaste melding (niet stil)', async () => {
@@ -747,38 +763,99 @@ describe('AC13 — delen is een leesactie, veilig herhaalbaar', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// AC14 — desktop blijft window.print()
+// AC14 — desktop: "Afdrukken" opent dezelfde server-PDF in een nieuw tabblad
+// (besluit Jamie 2026-10-29: telefoon-PDF is mooier dan de browserafdruk)
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC14 — desktop: knop "Afdrukken" met window.print(), geen PDF-verzoek', () => {
+describe('AC14 — desktop: knop "Afdrukken" opent de server-PDF in een nieuw tabblad', () => {
   beforeEach(() => zetToestel({ touch: false, standalone: false, canShare: false }))
 
-  it('trainingsplan (echte pagina)', async () => {
+  it('trainingsplan (echte pagina): tabblad synchroon open, daarna de PDF erin; geen window.print/share', async () => {
     const print = stubPrint()
+    const { open, tab } = stubTabblad()
     await renderTrainingPage()
     expect(screen.queryByRole('button', { name: nl.trainingPlan.share })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(print).toHaveBeenCalledTimes(1)
-    expect(fetchMock).not.toHaveBeenCalled()
+    // Synchroon in de klik, anders blokkeert de popup-blokker het tabblad.
+    expect(open).toHaveBeenCalledWith('', '_blank')
+    await waitFor(() => expect(tab.location.href).toBe('blob:pitchup-pdf'))
+    expect(fetchPad()).toBe('/api/pdf')
+    expect(fetchParams().get('doel')).toBe('trainingsplan')
+    const bestand = (URL.createObjectURL as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as File
+    expect(bestand.type).toBe('application/pdf')
+    expect(bestand.name).toBe('Trainingsplan 28-10-2026.pdf')
+    expect(print).not.toHaveBeenCalled()
     expect(share).not.toHaveBeenCalled()
+    expect(tab.close).not.toHaveBeenCalled()
   })
 
   it('inzichten (echte pagina)', async () => {
-    const print = stubPrint()
+    const { tab } = stubTabblad()
     await renderInzichtenPage()
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(print).toHaveBeenCalledTimes(1)
-    expect(fetchMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(tab.location.href).toBe('blob:pitchup-pdf'))
+    expect(fetchParams().get('doel')).toBe('inzichten')
   })
 
-  it('aanwezigheid en selectie', () => {
-    const print = stubPrint()
+  it('aanwezigheid en selectie', async () => {
+    const { tab } = stubTabblad()
     renderAanwezigheid({ soort: 'data', periode: 'seizoen', rijen: [OVERZICHT_RIJ] })
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(print).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(fetchParams().get('doel')).toBe('aanwezigheid')
+    await waitFor(() => expect(tab.location.href).toBe('blob:pitchup-pdf'))
+    tab.location.href = ''
     renderSquadEditor()
     fireEvent.click(screen.getAllByRole('button', { name: nl.trainingPlan.print })[1])
-    expect(print).toHaveBeenCalledTimes(2)
-    expect(fetchMock).not.toHaveBeenCalled()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(new URL(fetchMock.mock.calls[1][0], 'http://localhost').searchParams.get('doel')).toBe('selectie')
+    await waitFor(() => expect(tab.location.href).toBe('blob:pitchup-pdf'))
+  })
+
+  it('tabblad geblokkeerd: de PDF wordt gedownload met de juiste bestandsnaam', async () => {
+    stubTabblad({ geblokkeerd: true })
+    const klik = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      await renderTrainingPage()
+      fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+      await waitFor(() => expect(klik).toHaveBeenCalledTimes(1))
+      const a = klik.mock.contexts[0] as HTMLAnchorElement
+      expect(a.download).toBe('Trainingsplan 28-10-2026.pdf')
+      expect(a.getAttribute('href')).toBe('blob:pitchup-pdf')
+    } finally {
+      klik.mockRestore()
+    }
+  })
+
+  it('PDF mislukt: leeg tabblad dicht en de vaste foutmelding, geen ruwe tekst', async () => {
+    const { tab } = stubTabblad()
+    fetchMock.mockResolvedValue({ ok: false, status: 500, type: 'basic', headers: new Headers({ 'content-type': 'application/json' }), blob: async () => new Blob(['{"fout":"pdf_mislukt"}']) } as unknown as Response)
+    await renderTrainingPage()
+    fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(nl.trainingPlan.shareFailed)
+    expect(tab.close).toHaveBeenCalledTimes(1)
+    expect(document.body.textContent).not.toContain('pdf_mislukt')
+  })
+
+  it('sessie verlopen (opaqueredirect): leeg tabblad dicht en naar /login', async () => {
+    const { tab } = stubTabblad()
+    const assign = vi.fn()
+    vi.spyOn(window, 'location', 'get').mockReturnValue({ ...window.location, assign } as unknown as Location)
+    fetchMock.mockResolvedValue({ ok: false, status: 0, type: 'opaqueredirect', headers: new Headers() } as unknown as Response)
+    await renderTrainingPage()
+    fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/login'))
+    expect(tab.close).toHaveBeenCalledTimes(1)
+  })
+
+  it('dubbelklik tijdens het maken: één tabblad en één PDF-verzoek', async () => {
+    const { open, tab } = stubTabblad()
+    await renderTrainingPage()
+    const knop = screen.getByRole('button', { name: nl.trainingPlan.print })
+    fireEvent.click(knop)
+    fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.shareBusy }))
+    await waitFor(() => expect(tab.location.href).toBe('blob:pitchup-pdf'))
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('desktop MET canShare (bv. Safari/Chrome op Mac): blijft "Afdrukken"', () => {

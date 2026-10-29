@@ -789,13 +789,16 @@ describe('Story-AC8 (aanvullend) — thuis/uit-label IS aanwezig (bewuste wijzig
 // (gesimuleerde) export — geen "bevriezen" van de selectie
 // ═══════════════════════════════════════════════════════════════════════
 describe('Story-AC9 (aanvullend) — geen bevriezing van de selectie na exporteren', () => {
-  it('na een klik op de exportknop (window.print) blijven alle toggle-knoppen doodgewoon bruikbaar en verandert een nieuwe klik de selectie/print-blok opnieuw', () => {
-    const printSpy = vi.fn()
-    Object.defineProperty(window, 'print', { value: printSpy, writable: true, configurable: true })
+  it('na een klik op de exportknop (PDF in nieuw tabblad) blijven alle toggle-knoppen doodgewoon bruikbaar en verandert een nieuwe klik de selectie/print-blok opnieuw', () => {
+    // Export op de computer opent synchroon een tabblad en haalt daarna de
+    // server-PDF op (sinds 2026-10-29); de fetch hangt hier bewust.
+    const open = vi.fn(() => null)
+    Object.defineProperty(window, 'open', { value: open, writable: true, configurable: true })
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
 
     const { container } = renderEditor({ initialSelectedIds: ['p1'] })
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(printSpy).toHaveBeenCalledTimes(1)
+    expect(open).toHaveBeenCalledTimes(1)
 
     // Direct na "export": de toggle is nog gewoon te bedienen (geen freeze) —
     // een tweede speler (p2, nog niet geselecteerd) toevoegen werkt gewoon.
@@ -806,6 +809,7 @@ describe('Story-AC9 (aanvullend) — geen bevriezing van de selectie na exporter
     const block = getPrintBlock(container)
     const items = within(block).getAllByRole('listitem').map((li) => li.textContent)
     expect(items).toEqual(['Wout Willems', 'Zeger Zeeman'])
+    vi.unstubAllGlobals()
   })
 })
 

@@ -4002,7 +4002,14 @@ Via de feature-factory. Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer-
   `eventId` + `datum`, aanwezigheid/inzichten met `periode`). Modus via `lib/deel-modus.ts`
   (`useSyncExternalStore`, server-snapshot `afdrukken`): `delen` = touch-toestel of iOS-standalone én
   `canShare({files:[pdf]})`; `link` = iOS-standalone zonder canShare (oude melding als noodroute);
-  anders `afdrukken` (`window.print()`). jsdom heeft `matches:false` → bestaande tests zien `afdrukken`.
+  anders `afdrukken`. jsdom heeft `matches:false` → bestaande tests zien `afdrukken`.
+- **`afdrukken` = server-PDF in een nieuw tabblad (sinds 2026-10-29, Jamies keuze):** de telefoon-PDF zag er
+  beter uit dan de browserafdruk op de laptop (eigen vensterbreedte/printinstellingen). `maakEnOpen` opent
+  synchroon in de klik `window.open('', '_blank')` (na de fetch blokkeert de popup-blokker), haalt via
+  `haalPdf()` dezelfde `/api/pdf` op en zet `tab.location.href` op een blob-URL (60 s bewaard). Tabblad
+  geblokkeerd → download via `<a download>`. Fout → tabblad dicht + `shareFailed`; 401/opaqueredirect →
+  tabblad dicht + `/login`. `window.print()` wordt door de knop niet meer aangeroepen; Cmd+P op de pagina
+  werkt nog met de print-CSS. Geen nieuwe i18n-sleutels (hergebruikt `shareBusy`/`shareFailed`).
 - **Server:** `GET /api/pdf?doel=&id=|periode=&tz=` (`app/api/pdf/route.ts`, `runtime nodejs`,
   `maxDuration 60`). Volgorde: `parsePdfParams` → `requireTeamContext` → `assertOwn*Event` (vóór Chromium)
   → `getSiteUrl()` (nooit Host/Origin) → slot (`lib/pdf/gelijktijdig.ts`, max 2 per instance, anders 429
@@ -4043,8 +4050,8 @@ Via de feature-factory. Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer-
      (iPhone/iPad/iPod-UA of Macintosh met `maxTouchPoints > 1`).
   - Pitchup draait op Vercel **Hobby**: runtime-logs blijven 1 uur bewaard; vraag Jamie snel te melden.
 - **Bevestigd 2026-10-28:** Delen werkt op de iPhone (beginscherm-app).
-- **Open:** Dock-app op de MacBook na de fix bevestigen (drukt `window.print()` daar af?); Supabase
-  Site URL op het productiedomein zetten (door Jamie).
+- **Open:** op de MacBook (Dock-app én Safari) bevestigen dat het nieuwe tabblad met de PDF opent;
+  Supabase Site URL op het productiedomein zetten (door Jamie).
 
 ## Feature: Vijf UX-details uit de reel (2026-10-26, `072db45` via merge `11eadb4`, live)
 Via de feature-factory, gebouwd in een tijdelijke worktree (`ux-details`) omdat "delen als PDF" nog

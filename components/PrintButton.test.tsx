@@ -12,14 +12,22 @@ describe('PrintButton', () => {
   // Expliciete signatuur: vitest 4 typeert een generieke vi.fn() als
   // Procedure | Constructable, wat niet op window.print past.
   let printSpy: ReturnType<typeof vi.fn<() => void>>
+  // Op de computer opent de knop (sinds 2026-10-29) synchroon een tabblad en
+  // haalt daarna de server-PDF op; hier hangt die fetch, behalve waar een
+  // describe hem zelf stubt.
+  let openSpy: ReturnType<typeof vi.fn<() => Window | null>>
 
   beforeEach(() => {
     printSpy = vi.fn<() => void>()
     window.print = printSpy
+    openSpy = vi.fn<() => Window | null>(() => null)
+    Object.defineProperty(window, 'open', { value: openSpy, writable: true, configurable: true })
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   function renderButton() {
@@ -35,10 +43,12 @@ describe('PrintButton', () => {
     expect(screen.getByRole('button', { name: nl.trainingPlan.print })).toBeInTheDocument()
   })
 
-  it('roept window.print() precies één keer aan bij een klik, zonder navigatie', () => {
+  it('computer: een klik opent precies één nieuw tabblad voor de PDF, geen window.print()', () => {
     renderButton()
     fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-    expect(printSpy).toHaveBeenCalledTimes(1)
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    expect(openSpy).toHaveBeenCalledWith('', '_blank')
+    expect(printSpy).not.toHaveBeenCalled()
   })
 
   it('is een knop van type "button" (geen submit, geen link/navigatie)', () => {
@@ -108,14 +118,14 @@ describe('PrintButton', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
-    it('Safari-webapp in het Dock op een MacBook (standalone, Mac-UA, geen touch, canShare): gewoon window.print()', () => {
+    it('Safari-webapp in het Dock op een MacBook (standalone, Mac-UA, geen touch, canShare): "Afdrukken" (PDF in nieuw tabblad), geen deelmenu', () => {
       Object.defineProperty(window.navigator, 'userAgent', { value: MAC_UA, configurable: true })
       Object.defineProperty(window.navigator, 'maxTouchPoints', { value: 0, configurable: true })
       Object.defineProperty(window.navigator, 'canShare', { value: () => true, configurable: true })
       try {
         renderButton()
         fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-        expect(printSpy).toHaveBeenCalledTimes(1)
+        expect(openSpy).toHaveBeenCalledTimes(1)
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       } finally {
         Reflect.deleteProperty(window.navigator, 'maxTouchPoints')
@@ -136,11 +146,11 @@ describe('PrintButton', () => {
       }
     })
 
-    it('navigator.standalone === false (Safari zelf): gewoon window.print(), geen melding', () => {
+    it('navigator.standalone === false (Safari zelf): "Afdrukken" (PDF in nieuw tabblad), geen melding', () => {
       Object.defineProperty(window.navigator, 'standalone', { value: false, configurable: true })
       renderButton()
       fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.print }))
-      expect(printSpy).toHaveBeenCalledTimes(1)
+      expect(openSpy).toHaveBeenCalledTimes(1)
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
   })

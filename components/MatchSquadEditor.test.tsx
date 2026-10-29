@@ -74,6 +74,16 @@ function stubPrint() {
   return printSpy
 }
 
+// Export op de computer (sinds 2026-10-29): de knop opent synchroon een nieuw
+// tabblad en haalt daarna de server-PDF op. Hier alleen het startsignaal; de
+// PDF-flow zelf staat in delen-als-pdf.acceptance.test.tsx (AC14).
+function stubExport() {
+  const open = vi.fn(() => null)
+  Object.defineProperty(window, 'open', { value: open, writable: true, configurable: true })
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+  return open
+}
+
 // De toggle-actie loopt via een React 19 async-transition (startTransition
 // met een promise): isPending blijft true totdat die promise settelt. Klikken
 // wrappen we daarom in act(async) zodat de microtask vóór de volgende
@@ -232,12 +242,18 @@ describe('exportknop', () => {
 
   it('wordt bruikbaar zodra er minstens 1 speler geselecteerd is', async () => {
     const printSpy = stubPrint()
-    renderEditor()
-    await clickToggle(`${nl.matchSquad.toggleLabel}: Piet Peters`)
-    const printButton = screen.getByRole('button', { name: nl.trainingPlan.print })
-    expect(printButton).not.toBeDisabled()
-    fireEvent.click(printButton)
-    expect(printSpy).toHaveBeenCalledTimes(1)
+    const open = stubExport()
+    try {
+      renderEditor()
+      await clickToggle(`${nl.matchSquad.toggleLabel}: Piet Peters`)
+      const printButton = screen.getByRole('button', { name: nl.trainingPlan.print })
+      expect(printButton).not.toBeDisabled()
+      fireEvent.click(printButton)
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(printSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
     expect(screen.queryByText(nl.matchSquad.emptyExportHint)).not.toBeInTheDocument()
   })
 })
