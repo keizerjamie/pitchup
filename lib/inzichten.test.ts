@@ -2444,3 +2444,361 @@ describe('pariteit: reconstructie vanaf periodiseringOndergrens = vanaf de vroeg
     expect(fout.stap).toBe(berekenStap(5, 2))
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════
+// Inzichten-metrics fase 3b — duur per training, sRPE, oordeel, discipline
+// ═══════════════════════════════════════════════════════════════════════
+import {
+  evaluatiesPerWeek,
+  telEvaluatieDiscipline,
+  trainingDuurPerEvent,
+  type TrainingEvaluatieRij,
+} from '@/lib/inzichten'
+
+// Eén rij van inzichten_training_evaluaties (één per training, left join).
+function eRij(eventId: string, datum: string, extra: Partial<TrainingEvaluatieRij> = {}): TrainingEvaluatieRij {
+  return { event_id: eventId, datum, doelstelling: null, rpe: null, oordeel: null, totaal: 0, ...extra }
+}
+function eTotaal(rijen: TrainingEvaluatieRij[]): TrainingEvaluatieRij[] {
+  return rijen.map((r) => ({ ...r, totaal: rijen.length }))
+}
+// Training met één koppeling van `min` minuten (eigen duur).
+const duurRij = (eventId: string, datum: string, min: number | null) => kRij(eventId, datum, { koppeling_duur_min: min })
+
+describe('trainingDuurPerEvent', () => {
+  it('parallel 20/30 → 30 (langste); genest additief; een koppeling 0 geeft geen duur', () => {
+    const duur = trainingDuurPerEvent(metTotaal([
+      kRij('par', '2026-10-06', { volgorde: 1, parallel_groep_id: 'g1', koppeling_duur_min: 20 }),
+      kRij('par', '2026-10-06', { volgorde: 1, parallel_groep_id: 'g1', koppeling_duur_min: 30 }),
+      kRij('gen', '2026-10-07', { koppeling_duur_min: 30 }),
+      kRij('gen', '2026-10-07', { koppeling_duur_min: 10 }),
+      kRij('nul', '2026-10-08', { koppeling_duur_min: 0 }),
+    ]))
+    expect(duur.get('par')).toEqual({ totaalMin: 30, blokkenZonderDuur: 0, heeftKoppelingen: true })
+    expect(duur.get('gen')).toEqual({ totaalMin: 40, blokkenZonderDuur: 0, heeftKoppelingen: true })
+    expect(duur.get('nul')).toEqual({ totaalMin: 0, blokkenZonderDuur: 1, heeftKoppelingen: true })
+  })
+
+  it('een training zonder koppeling → {0, 0, false}; onbruikbare rijen ontbreken', () => {
+    const duur = trainingDuurPerEvent(metTotaal([
+      legeTraining('leeg', '2026-10-06'),
+      kRij('kapot', 'geen-datum', { koppeling_duur_min: 30 }),
+    ]))
+    expect(duur.get('leeg')).toEqual({ totaalMin: 0, blokkenZonderDuur: 0, heeftKoppelingen: false })
+    expect(duur.has('kapot')).toBe(false)
+    expect(trainingDuurPerEvent(null as unknown as TrainingKoppelingRij[]).size).toBe(0)
+  })
+
+  it('pariteit 1: per event gelijk aan berekenTijdlijn(blokkenVanKoppelingen(fx), null) van de planner', () => {
+    // Zelfde volledige fixture als "pariteit belasting ↔ berekenTijdlijn":
+    // parallel, genest, weeskind, 0, NULL en niet-leesbaar.
+    const fx: TrainingOefeningWithData[] = [
+      koppeling('k1', 1, oefening('o1', 'warming_up', 15)),
+      koppeling('k2', 2, oefening('o2', 'partijen_klein', 20), { parallel_groep_id: 'g1', duur_min: 20 }),
+      koppeling('k3', 2, oefening('o3', 'positiespel', 10), { parallel_groep_id: 'g1', duur_min: 30 }),
+      koppeling('k4', 3, oefening('o4', 'pass_trap', 12), { genest_in: 'k1', duur_min: 10 }),
+      koppeling('k5', 4, oefening('o5', 'sprints_veel_rust', 8), { parallel_groep_id: 'wees' }),
+      koppeling('k6', 5, oefening('o6', 'overig', 25), { duur_min: 0 }),
+      koppeling('k7', 6, null, { duur_min: 7 }),
+      koppeling('k8', 7, oefening('o8', 'steigerungs', null)),
+    ]
+    const planner = berekenTijdlijn(blokkenVanKoppelingen(fx), null)
+    const tweede = fx.slice(0, 3).map((k) => ({ ...k, event_id: 'ev-2' }))
+    const planner2 = berekenTijdlijn(blokkenVanKoppelingen(tweede), null)
+    const rijen = metTotaal([
+      ...[...fx].reverse().map((k) => alsRpcRij(k, '2026-10-06')),
+      ...tweede.map((k) => alsRpcRij(k, '2026-10-08')),
+    ])
+    const duur = trainingDuurPerEvent(rijen)
+    expect(duur.get('ev-1')).toEqual({ totaalMin: planner.totaalMin, blokkenZonderDuur: planner.blokkenZonderDuur, heeftKoppelingen: true })
+    expect(duur.get('ev-2')).toEqual({ totaalMin: planner2.totaalMin, blokkenZonderDuur: planner2.blokkenZonderDuur, heeftKoppelingen: true })
+    expect(planner.totaalMin).toBe(70)
+  })
+
+  it('pariteit 2: de som per week is gelijk aan belastingPerWeek(...).weken[i].trainingstotaalMin', () => {
+    const rijen = metTotaal([
+      kRij('a', '2026-10-05', { volgorde: 1, parallel_groep_id: 'g1', koppeling_duur_min: 20 }),
+      kRij('a', '2026-10-05', { volgorde: 1, parallel_groep_id: 'g1', koppeling_duur_min: 45 }),
+      kRij('a', '2026-10-05', { volgorde: 2 }), // NULL → bibliotheek 15
+      kRij('b', '2026-10-11', { koppeling_duur_min: 0 }),
+      kRij('b', '2026-10-11', { koppeling_duur_min: 12, oefening_leesbaar: false, categorie: null, oefening_duur_min: null }),
+      legeTraining('c', '2026-10-13'),
+      kRij('d', '2026-10-14', { koppeling_duur_min: 60 }),
+      kRij('d', '2026-10-14', { koppeling_duur_min: 30, parallel_groep_id: 'wees' }),
+      kRij('e', '2026-09-30', { koppeling_duur_min: 25 }),
+    ])
+    const duur = trainingDuurPerEvent(rijen)
+    const datumVan = new Map(rijen.map((r) => [r.event_id, r.datum]))
+    const belasting = belastingPerWeek(rijen, OKT)
+    for (const w of belasting.weken) {
+      const zondag = new Date(Date.parse(`${w.maandag}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10)
+      // belastingPerWeek filtert op het venster; trainingDuurPerEvent bewust niet.
+      const van = w.maandag < OKT.start ? OKT.start : w.maandag
+      const tot = zondag > OKT.end ? OKT.end : zondag
+      const ids = [...duur.keys()].filter((id) => datumVan.get(id)! >= van && datumVan.get(id)! <= tot)
+      const som = ids.reduce((s, id) => s + duur.get(id)!.totaalMin, 0)
+      const blokken = ids.reduce((s, id) => s + duur.get(id)!.blokkenZonderDuur, 0)
+      expect(w.trainingstotaalMin ?? 0, w.maandag).toBe(som)
+      expect(w.blokkenZonderDuur, w.maandag).toBe(blokken)
+    }
+    expect(duur.get('a')!.totaalMin).toBe(60)
+    expect(duur.get('e')!.totaalMin).toBe(25) // buiten het venster, wel een duur
+  })
+})
+
+describe('evaluatiesPerWeek', () => {
+  const week = (o: ReturnType<typeof evaluatiesPerWeek>, maandag: string) => o.weken.find((w) => w.maandag === maandag)!
+
+  it('K.1: RPE 6 × 60 + RPE 4 × 30 in één week = 480 AU', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 6 }), eRij('t2', '2026-10-08', { rpe: 4 })]),
+      metTotaal([duurRij('t1', '2026-10-06', 60), duurRij('t2', '2026-10-08', 30)]),
+      OKT,
+    )
+    const w = week(o, '2026-10-05')
+    expect(w).toMatchObject({ trainingen: 2, metRpe: 2, zonderDuur: 0, onvolledigeDuur: 0, srpe: 480, srpeAandeel: 1 })
+    expect(o.heeftTrainingen).toBe(true)
+    expect(o.heeftInvoer).toBe(true)
+  })
+
+  it('R9: de duur is het planner-totaal (parallel = langste), niet de som van de leden', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 5 })]),
+      metTotaal([
+        kRij('t1', '2026-10-06', { volgorde: 1, parallel_groep_id: 'g1', koppeling_duur_min: 20 }),
+        kRij('t1', '2026-10-06', { volgorde: 1, parallel_groep_id: 'g1', koppeling_duur_min: 30 }),
+      ]),
+      OKT,
+    )
+    expect(week(o, '2026-10-05').srpe).toBe(150)
+  })
+
+  it('K.2: een training zonder RPE telt niet mee, ook niet als 0; metRpe telt alleen geldige', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 6 }), eRij('t2', '2026-10-07'), eRij('t3', '2026-10-08', { rpe: 12 })]),
+      metTotaal([duurRij('t1', '2026-10-06', 60), duurRij('t2', '2026-10-07', 60), duurRij('t3', '2026-10-08', 60)]),
+      OKT,
+    )
+    expect(week(o, '2026-10-05')).toMatchObject({ trainingen: 3, metRpe: 1, zonderDuur: 0, srpe: 360 })
+  })
+
+  it('K.3: RPE met duur 0 of zonder koppeling → zonderDuur +1 en telt niet als 0', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([
+        eRij('t1', '2026-10-06', { rpe: 6 }),
+        eRij('t2', '2026-10-07', { rpe: 7 }),
+        eRij('t3', '2026-10-08', { rpe: 8 }),
+        eRij('t4', '2026-10-13', { rpe: 3 }),
+      ]),
+      metTotaal([duurRij('t1', '2026-10-06', 0), legeTraining('t2', '2026-10-07'), duurRij('t4', '2026-10-13', 0)]),
+      OKT,
+    )
+    expect(week(o, '2026-10-05')).toMatchObject({ trainingen: 3, metRpe: 3, zonderDuur: 3, srpe: null, srpeAandeel: null })
+    expect(week(o, '2026-10-12')).toMatchObject({ metRpe: 1, zonderDuur: 1, srpe: null })
+    expect(o.totaal.zonderDuur).toBe(4)
+  })
+
+  it('blokken zonder duur → onvolledigeDuur +1 (voetnoot *), de rest telt wel', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 5 })]),
+      metTotaal([duurRij('t1', '2026-10-06', 40), duurRij('t1', '2026-10-06', 0)]),
+      OKT,
+    )
+    expect(week(o, '2026-10-05')).toMatchObject({ srpe: 200, onvolledigeDuur: 1, zonderDuur: 0 })
+  })
+
+  it('K.4: week zonder trainingen → srpe null en alle aantallen 0; trainingen zonder RPE → srpe null met trainingen > 0', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 6 }), eRij('t2', '2026-10-13')]),
+      metTotaal([duurRij('t1', '2026-10-06', 60), duurRij('t2', '2026-10-13', 60)]),
+      OKT,
+    )
+    expect(week(o, '2026-10-19')).toEqual({
+      maandag: '2026-10-19', isoJaar: 2026, isoWeek: 43, deelweekBegin: false, deelweekEind: false,
+      trainingen: 0, metRpe: 0, zonderDuur: 0, onvolledigeDuur: 0, srpe: null, srpeAandeel: null,
+      ja: 0, deels: 0, nee: 0, metDoelstelling: 0, metDoelstellingZonderOordeel: 0,
+    })
+    expect(week(o, '2026-10-12')).toMatchObject({ trainingen: 1, metRpe: 0, srpe: null, srpeAandeel: null })
+  })
+
+  it('srpeAandeel is relatief aan de hoogste week', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 10 }), eRij('t2', '2026-10-13', { rpe: 5 })]),
+      metTotaal([duurRij('t1', '2026-10-06', 60), duurRij('t2', '2026-10-13', 60)]),
+      OKT,
+    )
+    expect(week(o, '2026-10-05').srpeAandeel).toBe(1)
+    expect(week(o, '2026-10-12').srpeAandeel).toBe(0.5)
+  })
+
+  it('K.6/O1: ja/deels/nee geteld; een oordeel bij een inmiddels lege doelstelling telt wél, maar niet in metDoelstelling', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([
+        eRij('t1', '2026-10-06', { doelstelling: 'doel', oordeel: 'ja' }),
+        eRij('t2', '2026-10-07', { doelstelling: 'doel', oordeel: 'deels' }),
+        eRij('t3', '2026-10-08', { doelstelling: 'doel', oordeel: 'nee' }),
+        eRij('t4', '2026-10-09', { doelstelling: null, oordeel: 'ja' }),
+        eRij('t5', '2026-10-10', { doelstelling: '   ', oordeel: 'nee' }),
+      ]),
+      [],
+      OKT,
+    )
+    expect(week(o, '2026-10-05')).toMatchObject({ ja: 2, deels: 1, nee: 2, metDoelstelling: 3, metDoelstellingZonderOordeel: 0 })
+    expect(o.heeftInvoer).toBe(true)
+  })
+
+  it('K.7: doelstelling zonder oordeel → metDoelstellingZonderOordeel +1, nooit nee; ongeldig oordeel genegeerd', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([
+        eRij('t1', '2026-10-06', { doelstelling: 'doel' }),
+        eRij('t2', '2026-10-07', { doelstelling: 'doel', oordeel: 'misschien' }),
+        eRij('t3', '2026-10-08', { doelstelling: '  ' }),
+        eRij('t4', '2026-10-09', { oordeel: 'Ja' }),
+      ]),
+      [],
+      OKT,
+    )
+    expect(week(o, '2026-10-05')).toMatchObject({ ja: 0, deels: 0, nee: 0, metDoelstelling: 2, metDoelstellingZonderOordeel: 2 })
+    expect(o.heeftInvoer).toBe(false)
+  })
+
+  it('totaal = som van de weken (periode-aantallen)', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([
+        eRij('t1', '2026-10-02', { rpe: 6, doelstelling: 'd', oordeel: 'ja' }),
+        eRij('t2', '2026-10-06', { rpe: 4, doelstelling: 'd' }),
+        eRij('t3', '2026-10-13', { oordeel: 'nee' }),
+        eRij('t4', '2026-10-26', { rpe: 9 }),
+      ]),
+      metTotaal([duurRij('t1', '2026-10-02', 60), duurRij('t2', '2026-10-06', 0), duurRij('t4', '2026-10-26', 30)]),
+      OKT,
+    )
+    expect(o.totaal).toEqual({
+      trainingen: 4, metRpe: 3, zonderDuur: 1, onvolledigeDuur: 0, ja: 1, deels: 0, nee: 1, metDoelstelling: 2, metDoelstellingZonderOordeel: 1,
+    })
+  })
+
+  it('A12: afgekaptEvaluaties → weken [] en een leeg totaal; heeftInvoer blijft bekend', () => {
+    const veel = Array.from({ length: 901 }, (_, i) => eRij(`t${i}`, '2026-10-06', { rpe: 5, totaal: 901 }))
+    const o = evaluatiesPerWeek(veel, [], OKT)
+    expect(o).toMatchObject({ afgekaptEvaluaties: true, afgekaptDuur: false, weken: [], heeftTrainingen: true, heeftInvoer: true })
+    expect(o.totaal.trainingen).toBe(0)
+    // totaal > length: een lagere PostgREST max-rows kapte af.
+    expect(evaluatiesPerWeek([eRij('t1', '2026-10-06', { totaal: 2 })], [], OKT).afgekaptEvaluaties).toBe(true)
+  })
+
+  it('A12: afgekaptDuur → oordeel-aantallen gevuld, srpe overal null', () => {
+    const koppelingen = Array.from({ length: 901 }, () => ({ ...duurRij('t1', '2026-10-06', 60), totaal: 901 }))
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('t1', '2026-10-06', { rpe: 6, doelstelling: 'd', oordeel: 'deels' })]),
+      koppelingen,
+      OKT,
+    )
+    expect(o.afgekaptDuur).toBe(true)
+    expect(o.afgekaptEvaluaties).toBe(false)
+    expect(o.weken).toHaveLength(5)
+    expect(week(o, '2026-10-05')).toMatchObject({ trainingen: 1, metRpe: 1, deels: 1, metDoelstelling: 1, srpe: null, srpeAandeel: null })
+    expect(o.weken.every((w) => w.srpe === null && w.srpeAandeel === null)).toBe(true)
+  })
+
+  it('weken chronologisch, deelweekvlaggen zoals belastingPerWeek', () => {
+    const o = evaluatiesPerWeek([], [], OKT)
+    const b = belastingPerWeek([], OKT)
+    expect(o.weken.map((w) => w.maandag)).toEqual(['2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26'])
+    expect(o.weken.map((w) => [w.maandag, w.isoJaar, w.isoWeek, w.deelweekBegin, w.deelweekEind])).toEqual(
+      b.weken.map((w) => [w.maandag, w.isoJaar, w.isoWeek, w.deelweekBegin, w.deelweekEind]),
+    )
+    expect(o.heeftTrainingen).toBe(false)
+    expect(o.heeftInvoer).toBe(false)
+  })
+
+  it('A10: zondag hoort bij de week ervoor, maandag begint een nieuwe week', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('zo', '2026-10-11', { rpe: 2 }), eRij('ma', '2026-10-12', { rpe: 3 })]),
+      metTotaal([duurRij('zo', '2026-10-11', 10), duurRij('ma', '2026-10-12', 10)]),
+      OKT,
+    )
+    expect(week(o, '2026-10-05').srpe).toBe(20)
+    expect(week(o, '2026-10-12').srpe).toBe(30)
+  })
+
+  it('A10: jaarwisseling — zo 3 jan. 2027 valt in ISO-week 53 van 2026, ma 4 jan. in week 1 van 2027', () => {
+    const venster = { start: '2026-12-21', end: '2027-01-10' }
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('zo', '2027-01-03', { rpe: 4 }), eRij('ma', '2027-01-04', { rpe: 5 })]),
+      metTotaal([duurRij('zo', '2027-01-03', 10), duurRij('ma', '2027-01-04', 10)]),
+      venster,
+    )
+    expect(week(o, '2026-12-28')).toMatchObject({ isoJaar: 2026, isoWeek: 53, trainingen: 1, srpe: 40 })
+    expect(week(o, '2027-01-04')).toMatchObject({ isoJaar: 2027, isoWeek: 1, trainingen: 1, srpe: 50 })
+  })
+
+  it('A10: schrikkeljaar — 29 feb. 2028 valt in de week van ma 28 feb.', () => {
+    const o = evaluatiesPerWeek(
+      eTotaal([eRij('s', '2028-02-29', { rpe: 7 })]),
+      metTotaal([duurRij('s', '2028-02-29', 10)]),
+      { start: '2028-02-21', end: '2028-03-05' },
+    )
+    expect(week(o, '2028-02-28')).toMatchObject({ trainingen: 1, srpe: 70 })
+    expect(week(o, '2028-02-21').trainingen).toBe(0)
+  })
+
+  it('rijen buiten het venster of met een ongeldige datum/id worden genegeerd; invoer niet gemuteerd; nooit NaN', () => {
+    const evaluaties = eTotaal([
+      eRij('voor', '2026-09-30', { rpe: 5 }),
+      eRij('na', '2026-10-27', { rpe: 5 }),
+      eRij('kapot', '2026-13-01', { rpe: 5 }),
+      eRij('', '2026-10-06', { rpe: 5 }),
+      eRij('ok', '2026-10-06', { rpe: 5, oordeel: 'ja' }),
+      null as unknown as TrainingEvaluatieRij,
+    ])
+    const koppelingen = metTotaal([duurRij('ok', '2026-10-06', 30), duurRij('voor', '2026-09-30', 30)])
+    const kopieE = JSON.stringify(evaluaties)
+    const kopieK = JSON.stringify(koppelingen)
+    const o = evaluatiesPerWeek(evaluaties.filter(Boolean), koppelingen, OKT)
+    expect(JSON.stringify(evaluaties)).toBe(kopieE)
+    expect(JSON.stringify(koppelingen)).toBe(kopieK)
+    expect(o.totaal).toMatchObject({ trainingen: 1, metRpe: 1, ja: 1 })
+    expect(week(o, '2026-10-05').srpe).toBe(150)
+    expect(JSON.stringify(o)).not.toMatch(/NaN|null,"srpeAandeel":NaN/)
+    for (const w of o.weken) {
+      for (const [k, v] of Object.entries(w)) if (typeof v === 'number') expect(Number.isFinite(v), k).toBe(true)
+    }
+  })
+
+  it('ongeldig venster → weken []; geen array → lege uitkomst', () => {
+    expect(evaluatiesPerWeek([eRij('t1', '2026-10-06', { rpe: 5 })], [], { start: '2026-10-26', end: '2026-10-01' }).weken).toEqual([])
+    expect(evaluatiesPerWeek([], [], { start: 'x', end: 'y' })).toMatchObject({ weken: [], heeftTrainingen: false, heeftInvoer: false })
+    const o = evaluatiesPerWeek(null as unknown as TrainingEvaluatieRij[], null as unknown as TrainingKoppelingRij[], OKT)
+    expect(o).toMatchObject({ afgekaptEvaluaties: false, afgekaptDuur: false, heeftTrainingen: false })
+    expect(o.weken).toHaveLength(5)
+  })
+})
+
+describe('telEvaluatieDiscipline', () => {
+  it('D.1/D.2: noemers = alle trainingen resp. trainingen met doelstelling; oordeel zonder doelstelling telt niet in D.2', () => {
+    expect(telEvaluatieDiscipline([
+      eRij('t1', '2026-10-06', { rpe: 6, doelstelling: 'doel', oordeel: 'ja' }),
+      eRij('t2', '2026-10-07', { doelstelling: 'doel' }),
+      eRij('t3', '2026-10-08', { rpe: 3, oordeel: 'nee' }),
+      eRij('t4', '2026-10-09', { rpe: 11, doelstelling: '   ', oordeel: 'deels' }),
+      eRij('t5', '2026-10-10', { doelstelling: 'doel', oordeel: 'misschien' }),
+    ])).toEqual({ trainingen: 5, metRpe: 2, metDoelstelling: 3, metOordeelBijDoelstelling: 1, afgekapt: false })
+  })
+
+  it('leeg → alles 0; afgekapt → afgekapt true met de tellingen van wat binnenkwam', () => {
+    expect(telEvaluatieDiscipline([])).toEqual({ trainingen: 0, metRpe: 0, metDoelstelling: 0, metOordeelBijDoelstelling: 0, afgekapt: false })
+    expect(telEvaluatieDiscipline([eRij('t1', '2026-10-06', { rpe: 4, totaal: 3 })])).toMatchObject({ afgekapt: true, trainingen: 1, metRpe: 1 })
+    expect(telEvaluatieDiscipline(Array.from({ length: 901 }, (_, i) => eRij(`t${i}`, '2026-10-06', { totaal: 901 }))).afgekapt).toBe(true)
+  })
+
+  it('trainingen is gelijk aan telInvulDiscipline(...).trainingen op dezelfde events', () => {
+    const datums = ['2026-10-02', '2026-10-06', '2026-10-13', '2026-10-20']
+    const evaluaties = datums.map((d, i) => eRij(`t${i}`, d, { doelstelling: i % 2 ? 'doel' : null }))
+    const discipline = [
+      ...datums.map((d, i) => dRij('training', { event_id: `t${i}`, datum: d, doelstelling: i % 2 ? 'doel' : null })),
+      dRij('match', { datum: '2026-10-04' }),
+    ]
+    expect(telEvaluatieDiscipline(evaluaties).trainingen).toBe(telInvulDiscipline(discipline).trainingen)
+  })
+})

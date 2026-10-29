@@ -379,6 +379,7 @@ const HANDLERS: Harness['handlers'] = {
   // Fase 3a: dit bestand test de nieuwe kaarten niet; lege bronnen.
   inzichten_training_koppelingen: () => [],
   inzichten_invul_discipline: () => [],
+  inzichten_training_evaluaties: () => [],
 }
 const NIEUWE_RPCS = [
   'inzichten_speelkansen',

@@ -68,10 +68,10 @@ afterEach(() => {
 })
 
 describe('TEAM_TABELLEN', () => {
-  it('bevat de vijftien teamtabellen in FK-veilige volgorde', () => {
+  it('bevat de zestien teamtabellen in FK-veilige volgorde', () => {
     expect([...TEAM_TABELLEN]).toEqual([
       'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
-      'tegendoelpunten', 'speelminuten', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
+      'tegendoelpunten', 'speelminuten', 'training_evaluaties', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
       'categorie_metingen', 'metingen', 'events', 'players', 'settings',
     ])
   })
@@ -92,7 +92,7 @@ describe('TEAM_TABELLEN', () => {
   // hangen aan events, events en players komen daarna, settings als laatste.
   it('wist de tabellen die aan events en players hangen vóór events en players zelf', () => {
     const pos = (t: string) => TEAM_TABELLEN.indexOf(t as (typeof TEAM_TABELLEN)[number])
-    for (const kind of ['training_oefeningen', 'match_squad', 'match_events', 'tegendoelpunten', 'speelminuten', 'match_ratings', 'lineups', 'attendance', 'absence_periods']) {
+    for (const kind of ['training_oefeningen', 'match_squad', 'match_events', 'tegendoelpunten', 'speelminuten', 'training_evaluaties', 'match_ratings', 'lineups', 'attendance', 'absence_periods']) {
       expect(pos(kind), kind).toBeLessThan(pos('events'))
       expect(pos(kind), kind).toBeLessThan(pos('players'))
     }
@@ -100,7 +100,7 @@ describe('TEAM_TABELLEN', () => {
 })
 
 describe('ruimTeamOp', () => {
-  it('verwijdert eerst het logo, dan de vijftien tabellen en als laatste de teams-rij', async () => {
+  it('verwijdert eerst het logo, dan de zestien tabellen en als laatste de teams-rij', async () => {
     const m = makeSupabase()
     await ruimTeamOp(m.supabase, TEAM, 'test.label')
 

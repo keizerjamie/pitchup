@@ -48,9 +48,12 @@ import {
   belastingPerWeek,
   periodiseringVoortgang,
   telInvulDiscipline,
+  evaluatiesPerWeek,
+  telEvaluatieDiscipline,
   periodiseringOndergrens,
   type TrainingKoppelingRij,
   type InvulDisciplineRij,
+  type TrainingEvaluatieRij,
   type SpeelminutenRij,
   type SpeelkansenRij,
   type RatingVormRij,
@@ -91,6 +94,8 @@ import SpeelminutenKaart from '@/components/inzichten/SpeelminutenKaart'
 import BelastingKaart from '@/components/inzichten/BelastingKaart'
 import PeriodiseringVoortgangKaart from '@/components/inzichten/PeriodiseringVoortgangKaart'
 import InvulDisciplineKaart from '@/components/inzichten/InvulDisciplineKaart'
+import SrpeKaart from '@/components/inzichten/SrpeKaart'
+import DoelstellingOordeelKaart from '@/components/inzichten/DoelstellingOordeelKaart'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
@@ -211,6 +216,7 @@ export default async function InzichtenPage({
     speelminutenResult,
     belastingResult,
     disciplineResult,
+    evaluatieResult,
     metingenResult,
   ] = await Promise.all([
     // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
@@ -293,6 +299,11 @@ export default async function InzichtenPage({
     // teamcontext. De periodisering heeft een eigen, tweede aanroep hieronder.
     supabase.rpc('inzichten_training_koppelingen', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
     supabase.rpc('inzichten_invul_discipline', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
+    // Fase 3b: RPE en doelstelling-oordeel per training
+    // (supabase/inzichten-metrics-fase3b.sql). `verleden`, zoals belasting en
+    // discipline: invoer van vandaag verschijnt hier morgen. De duur voor sRPE
+    // komt uit de bestaande belastingbron hierboven, geen extra call.
+    supabase.rpc('inzichten_training_evaluaties', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
     // Alle metingen van het team: de nulmeting is de eerste meting OOIT, ook
     // van vóór het seizoen.
     supabase.from('categorie_metingen')
@@ -442,6 +453,7 @@ export default async function InzichtenPage({
   // De periodiseringsbron faalt ook als de metingen falen.
   const belastingBron = unwrapBron<TrainingKoppelingRij>('inzichten.belasting', belastingResult)
   const disciplineBron = unwrapBron<InvulDisciplineRij>('inzichten.discipline', disciplineResult)
+  const evaluatieBron = unwrapBron<TrainingEvaluatieRij>('inzichten.evaluaties', evaluatieResult)
   const periodiseringBron: { rijen: TrainingKoppelingRij[]; fout: boolean } = metingenBron.fout
     ? { rijen: [], fout: true }
     : periodiseringResult === null
@@ -450,6 +462,8 @@ export default async function InzichtenPage({
   const belasting = belastingPerWeek(belastingBron.rijen, verleden)
   const voortgang = periodiseringVoortgang(periodiseringBron.rijen, metingenTotGisteren, seizoenVerleden, today)
   const discipline = telInvulDiscipline(disciplineBron.rijen)
+  const evaluaties = evaluatiesPerWeek(evaluatieBron.rijen, belastingBron.rijen, verleden)
+  const evaluatieDiscipline = telEvaluatieDiscipline(evaluatieBron.rijen)
 
   // Conclusie-laag. Alles hieronder rekent op de rijen die hierboven al zijn
   // opgehaald — geen extra query, geen extra RPC.
@@ -507,7 +521,10 @@ export default async function InzichtenPage({
     // verdwijnt de lege staat bij elk team met een gegenereerd seizoen.
     !belasting.heeftMinuten &&
     metingenBron.rijen.length === 0 &&
-    discipline.metAnalyse + discipline.metUitslag + discipline.metPlan === 0
+    discipline.metAnalyse + discipline.metUitslag + discipline.metPlan === 0 &&
+    // Fase 3b: één geldige RPE of één oordeel is genoeg voor de gewone pagina;
+    // alleen ingeplande trainingen zonder invoer houden de lege staat.
+    !evaluaties.heeftInvoer
 
   if (geenEnkeleData) {
     // Twee verschillende lege staten, en het verschil is wezenlijk. Bij het
@@ -603,7 +620,14 @@ export default async function InzichtenPage({
           <BelastingKaart data={belasting} fout={belastingBron.fout} t={t} />
         </div>
         <PeriodiseringVoortgangKaart data={voortgang} fout={periodiseringBron.fout} t={t} />
-        <InvulDisciplineKaart data={discipline} fout={disciplineBron.fout} t={t} />
+        <InvulDisciplineKaart
+          data={discipline}
+          fout={disciplineBron.fout}
+          evaluatie={{ data: evaluatieDiscipline, fout: evaluatieBron.fout }}
+          t={t}
+        />
+        <SrpeKaart data={evaluaties} fout={evaluatieBron.fout || belastingBron.fout} t={t} />
+        <DoelstellingOordeelKaart data={evaluaties} fout={evaluatieBron.fout} t={t} />
       </div>
       </div>
 

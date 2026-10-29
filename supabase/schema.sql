@@ -13,6 +13,8 @@
 -- Draai ook inzichten-metrics-fase2b.sql (tabel `speelminuten` + 1 RPC); die
 -- tabel staat bewust NIET hieronder.
 -- Draai ook inzichten-metrics-fase3a.sql (2 lees-RPC's, geen tabellen).
+-- Draai ook inzichten-metrics-fase3b.sql (tabel `training_evaluaties` + 1 RPC);
+-- die tabel staat bewust NIET hieronder.
 --
 -- FOREIGN KEY OP team_id — LEES DIT BIJ EEN VERSE INSTALLATIE.
 -- Dit bestand declareert team_id bewust zonder `references`: het draait op een

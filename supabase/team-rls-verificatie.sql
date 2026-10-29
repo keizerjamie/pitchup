@@ -73,6 +73,16 @@
 --                               (2 lees-RPC's, geen tabellen); geen assistent
 --                               nodig, maakt zijn eigen testdata in maart 1990
 --                               (jan. en feb. 1990 zijn al bezet door blok 27/28)
+--   * blok 30                 — vereist supabase/inzichten-metrics-fase3b.sql
+--                               (tabel training_evaluaties + 1 RPC); maakt zijn
+--                               eigen testdata in april 1990 (jan.–maart 1990
+--                               zijn al bezet door blok 27/28/29) en zo nodig
+--                               binnen de transactie een assistent zonder
+--                               trainingsrecht (wel Spelers en Aanwezigheid)
+--                               LET OP: sinds die migratie noemen ook blok 2
+--                               en blok 22 de tabel training_evaluaties; zonder
+--                               inzichten-metrics-fase3b.sql falen die met
+--                               "relation does not exist".
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -161,6 +171,8 @@ begin
   if n <> 0 then raise exception 'LEK: niet-lid ziet tegendoelpunten van een vreemd team'; end if;
   select count(*) into n from speelminuten       where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet speelminuten van een vreemd team'; end if;
+  select count(*) into n from training_evaluaties where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: niet-lid ziet trainingsevaluaties van een vreemd team'; end if;
   select count(*) into n from match_squad        where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet de wedstrijdselectie van een vreemd team'; end if;
   select count(*) into n from task_overrides     where team_id = 'TEAM_B_UUID';
@@ -1091,7 +1103,7 @@ end $$;
 --   a. een assistent (hier met alle zes rechten) en een hoofdtrainer van een
 --      ÁNDER team kunnen een team niet verwijderen — 0 rijen, geen fout;
 --   b. de hoofdtrainer kan exact de deletes van deleteTeam uitvoeren — de
---      vijftien tabellen uit TEAM_TABELLEN (lib/team-opruimen.ts) en daarna
+--      zestien tabellen uit TEAM_TABELLEN (lib/team-opruimen.ts) en daarna
 --      `delete from teams` — zonder fout, ook nu de cascade van M5c overlapt
 --      met de expliciete deletes;
 --   c. daarna staat er niets meer van dat team, maar blijven de oefening van
@@ -1149,7 +1161,7 @@ begin
   -- deleteTeam, uitgevoerd onder de rol van de hoofdtrainer.
   set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
   -- TEAM_TABELLEN
-  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
+  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','training_evaluaties','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('delete from public.%I where team_id = $1', v_tabel) using v_team;
   end loop;
 
@@ -1157,7 +1169,7 @@ begin
   -- categorie_metingen heeft GEEN foreign key naar teams en zou anders als
   -- wees achterblijven. Daarom hier al tellen, vóór `delete from teams`.
   reset role;
-  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
+  foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','training_evaluaties','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('select count(*) from public.%I where team_id = $1', v_tabel) into n using v_team;
     if n <> 0 then
       raise exception 'KAPOT: de hoofdtrainer kon % rij(en) in % van zijn eigen team niet verwijderen (RLS)', n, v_tabel;
@@ -2227,6 +2239,278 @@ begin
   raise notice 'OK blok 29: de fase-3a-RPC''s schrijven niets (alleen lezen)';
 end $$;
 
+-- ── Blok 30: inzichten-metrics fase 3b (RPE en doelstelling-oordeel) ──
+-- Vereist supabase/inzichten-metrics-fase3b.sql (tabel training_evaluaties + 1
+-- RPC). Maakt binnen deze transactie (de rollback ruimt alles op) in TEAM_A
+-- testdata in APRIL 1990 aan — een maand zonder echte data. Bewust niet
+-- januari t/m maart: blok 27, 28 en 29 zetten in dezelfde transactie al events
+-- in januari en maart 1990, en blok 28 laat een wedstrijd op 15 februari 1990
+-- staan. Daarom eerst de opzetcheck op events van TEAM_A in april 1990.
+-- ASSISTENT_A krijgt (of houdt) Spelers- en Aanwezigheidsrecht ZONDER
+-- Trainingsrecht: zo is bewezen dat die rechten niet genoeg zijn (R4).
+-- Testdata: T1 training (ma 2-4, doelstelling 'RLS-30 doel'), T2 training
+-- (zo 8-4, geen doelstelling), T3 training (ma 9-4), M1 wedstrijd (3-4) en TB
+-- een training van TEAM_B (2-4). Evaluaties: T1 (rpe 6, 'ja'), T3 (rpe 4,
+-- oordeel null) en TB (rpe 9) met team_id TEAM_B.
+--   a. OWNER_A ziet geen evaluaties van TEAM_B (op team_id en op event_id TB);
+--   b. de RPC met p_team_id = TEAM_B geeft 0 rijen; met TEAM_A over april
+--      precies T1, T2 en T3 (totaal 3, T2 zonder evaluatie = null), M1 en TB
+--      ontbreken;
+--   c. ASSISTENT_A (spelers en aanwezigheid aan, training uit): insert 42501,
+--      update en delete 0 rijen;
+--   d. OWNER_A met een event_id van TEAM_B: 42501;
+--   e. OWNER_A op de eigen wedstrijd M1: 42501;
+--   f. rpe 0 of 11, oordeel 'misschien': 23514 (bewust gevangen op sqlstate
+--      '23514', niet op de conditienaam: de structuurtests van blok 28 en 29
+--      tellen die naam in hun stuk tot de rollback, en dat omvat dit blok);
+--   g. een tweede gewone insert op T1: 23505;
+--   h. een RPE-upsert laat het oordeel staan en een oordeel-upsert de RPE
+--      (R.9); wissen = kolom op null laat de andere waarde staan; herstel
+--      met `is null` overschrijft nooit;
+--   i. een update van event_id naar TB of M1, of van team_id naar TEAM_B: 42501;
+--   j. T3 verwijderen neemt zijn rij mee (cascade);
+--   k. een niet-lid (BUITENSTAANDER, sinds blok 23) krijgt 0 rijen;
+--   l. anon mag de RPC niet uitvoeren; de functie is stable en invoker; RLS
+--      staat aan met precies 4 policies.
+do $$
+declare
+  v_start date := date '1990-04-01';
+  v_end   date := date '1990-04-30';
+  v_t1 uuid; v_t2 uuid; v_t3 uuid; v_m1 uuid; v_tb uuid;
+  n int; r record;
+begin
+  reset role;
+  if to_regclass('public.training_evaluaties') is null
+     or to_regprocedure('public.inzichten_training_evaluaties(uuid, date, date)') is null then
+    raise exception 'INZICHTEN-METRICS FASE 3B ONTBREEKT: draai eerst supabase/inzichten-metrics-fase3b.sql';
+  end if;
+  select count(*) into n from events where team_id = 'TEAM_A_UUID' and date between v_start and v_end;
+  if n <> 0 then
+    raise exception 'FOUT IN DE OPZET: TEAM_A heeft al events in april 1990 — kies in blok 30 een andere testmaand';
+  end if;
+
+  -- Assistent met Spelers- en Aanwezigheidsrecht, zonder Trainingsrecht (c):
+  -- bestaande rij bijwerken, of tijdelijk invoegen.
+  insert into team_members (team_id, user_id, rol, mag_spelers_bewerken, mag_aanwezigheid_bewerken, mag_training_bewerken)
+  values ('TEAM_A_UUID', 'ASSISTENT_A_UUID', 'assistent', true, true, false)
+  on conflict (team_id, user_id) do update
+    set mag_training_bewerken = false, mag_spelers_bewerken = true, mag_aanwezigheid_bewerken = true
+   where team_members.rol = 'assistent';
+
+  -- Opzet als postgres (buiten RLS).
+  insert into events (team_id, type, date, doelstelling)
+  values ('TEAM_A_UUID', 'training', date '1990-04-02', 'RLS-30 doel') returning id into v_t1;
+  insert into events (team_id, type, date)
+  values ('TEAM_A_UUID', 'training', date '1990-04-08') returning id into v_t2;
+  insert into events (team_id, type, date)
+  values ('TEAM_A_UUID', 'training', date '1990-04-09') returning id into v_t3;
+  insert into events (team_id, type, date)
+  values ('TEAM_A_UUID', 'match', date '1990-04-03') returning id into v_m1;
+  insert into events (team_id, type, date)
+  values ('TEAM_B_UUID', 'training', date '1990-04-02') returning id into v_tb;
+  insert into training_evaluaties (team_id, event_id, rpe, oordeel) values
+    ('TEAM_A_UUID', v_t1, 6, 'ja'),
+    ('TEAM_A_UUID', v_t3, 4, null),
+    ('TEAM_B_UUID', v_tb, 9, null);
+
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_B_UUID') then
+    raise exception 'FOUT IN DE OPZET: OWNER_A is wél lid van TEAM_B — kies een ander TEAM_B';
+  end if;
+
+  -- a. Lezen van een vreemd team.
+  select count(*) into n from training_evaluaties where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet % trainingsevaluaties van TEAM_B', n; end if;
+  select count(*) into n from training_evaluaties where event_id = v_tb;
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet een trainingsevaluatie op een training van TEAM_B'; end if;
+  raise notice 'OK blok 30: OWNER_A ziet geen trainingsevaluaties van TEAM_B';
+
+  -- b. De RPC: vreemd team leeg, eigen team precies T1, T2 en T3.
+  select count(*) into n from inzichten_training_evaluaties('TEAM_B_UUID', current_date - 400, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_training_evaluaties geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_training_evaluaties('TEAM_B_UUID', v_start, v_end);
+  if n <> 0 then raise exception 'LEK: inzichten_training_evaluaties geeft % rijen van TEAM_B (april 1990)', n; end if;
+  select count(*) into n from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end) where event_id = v_tb;
+  if n <> 0 then raise exception 'LEK: een training van TEAM_B staat in inzichten_training_evaluaties(TEAM_A)'; end if;
+  select count(*) into n from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end) where event_id = v_m1;
+  if n <> 0 then raise exception 'KAPOT: een wedstrijd staat in inzichten_training_evaluaties (alleen trainingen)'; end if;
+  select count(*) into n from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end);
+  if n <> 3 then raise exception 'KAPOT: inzichten_training_evaluaties(TEAM_A, april 1990) geeft % rijen (verwacht 3: T1, T2 en T3)', n; end if;
+  select count(*) into n from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end) where totaal <> 3;
+  if n <> 0 then raise exception 'KAPOT: totaal is niet 3 op % rijen (count(*) over () vóór de limit)', n; end if;
+  select * into r from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end) where event_id = v_t1;
+  if not found or r.rpe is distinct from 6 or r.oordeel is distinct from 'ja' or r.doelstelling is null
+     or r.datum <> date '1990-04-02' then
+    raise exception 'KAPOT: T1 geeft % (verwacht rpe 6, oordeel ja, een doelstelling, 2-4)', r;
+  end if;
+  select * into r from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end) where event_id = v_t2;
+  if not found or r.rpe is not null or r.oordeel is not null then
+    raise exception 'KAPOT: T2 zonder evaluatie geeft % (verwacht één rij met rpe en oordeel null)', r;
+  end if;
+  select * into r from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end) where event_id = v_t3;
+  if not found or r.rpe is distinct from 4 or r.oordeel is not null then
+    raise exception 'KAPOT: T3 geeft % (verwacht rpe 4, oordeel null)', r;
+  end if;
+  raise notice 'OK blok 30: inzichten_training_evaluaties geeft één rij per eigen training, geen wedstrijd en niets van TEAM_B';
+
+  -- c. Assistent met Spelers en Aanwezigheid, zonder Training.
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  if not is_team_member('TEAM_A_UUID') or is_team_owner('TEAM_A_UUID') then
+    raise exception 'FOUT IN DE OPZET: ASSISTENT_A is geen assistent in TEAM_A';
+  end if;
+  if not (can_edit('TEAM_A_UUID', 'spelers') and can_edit('TEAM_A_UUID', 'aanwezigheid'))
+     or can_edit('TEAM_A_UUID', 'training') then
+    raise exception 'FOUT IN DE OPZET: ASSISTENT_A heeft niet precies Spelers en Aanwezigheid zonder Training';
+  end if;
+  begin
+    insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_t2, 5);
+    raise exception 'LEK: een assistent zonder trainingsrecht kon een RPE vastleggen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 30: insert op training_evaluaties geweigerd zonder trainingsrecht (ook met Spelers en Aanwezigheid)';
+  end;
+  update training_evaluaties set rpe = 1 where event_id = v_t1;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een assistent zonder trainingsrecht kon een trainingsevaluatie wijzigen'; end if;
+  delete from training_evaluaties where event_id = v_t1;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een assistent zonder trainingsrecht kon een trainingsevaluatie verwijderen'; end if;
+  raise notice 'OK blok 30: update en delete op training_evaluaties raken 0 rijen zonder trainingsrecht';
+
+  -- d. Eigen team_id, maar een training van een ander team.
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  begin
+    insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_tb, 5);
+    raise exception 'LEK: OWNER_A kon een evaluatie aan een training van TEAM_B hangen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 30: een event_id van een ander team wordt geweigerd';
+  end;
+
+  -- e. Een wedstrijd van het eigen team.
+  begin
+    insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_m1, 5);
+    raise exception 'LEK: een RPE kon aan een wedstrijd gehangen worden';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 30: een wedstrijd wordt geweigerd';
+  end;
+
+  -- f. De CHECKs op rpe en oordeel (op de eigen training T2, zonder rij).
+  begin
+    insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_t2, 0);
+    raise exception 'KAPOT: rpe 0 werd geaccepteerd';
+  exception when sqlstate '23514' then
+    raise notice 'OK blok 30: rpe 0 geeft 23514';
+  end;
+  begin
+    insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_t2, 11);
+    raise exception 'KAPOT: rpe 11 werd geaccepteerd';
+  exception when sqlstate '23514' then
+    raise notice 'OK blok 30: rpe 11 geeft 23514';
+  end;
+  begin
+    insert into training_evaluaties (team_id, event_id, oordeel) values ('TEAM_A_UUID', v_t2, 'misschien');
+    raise exception 'KAPOT: oordeel misschien werd geaccepteerd';
+  exception when sqlstate '23514' then
+    raise notice 'OK blok 30: oordeel misschien geeft 23514';
+  end;
+
+  -- g. Eén rij per training.
+  begin
+    insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_t1, 7);
+    raise exception 'KAPOT: een tweede rij voor dezelfde training werd geaccepteerd';
+  exception when unique_violation then
+    raise notice 'OK blok 30: een tweede rij voor dezelfde training geeft 23505';
+  end;
+
+  -- h. Elke kolom los (R.9): de upserts van de app sturen alleen hun eigen kolom.
+  insert into training_evaluaties (team_id, event_id, rpe) values ('TEAM_A_UUID', v_t1, 8)
+  on conflict (event_id) do update set rpe = excluded.rpe;
+  select count(*) into n from training_evaluaties where event_id = v_t1;
+  if n <> 1 then raise exception 'KAPOT: na de RPE-upsert staan er % rijen voor T1', n; end if;
+  select * into r from training_evaluaties where event_id = v_t1;
+  if r.rpe is distinct from 8 or r.oordeel is distinct from 'ja' then
+    raise exception 'KAPOT (R.9): de RPE-upsert op T1 gaf rpe % en oordeel % (verwacht 8 en ja)', r.rpe, r.oordeel;
+  end if;
+  insert into training_evaluaties (team_id, event_id, oordeel) values ('TEAM_A_UUID', v_t3, 'nee')
+  on conflict (event_id) do update set oordeel = excluded.oordeel;
+  select * into r from training_evaluaties where event_id = v_t3;
+  if r.rpe is distinct from 4 or r.oordeel is distinct from 'nee' then
+    raise exception 'KAPOT (R.9): de oordeel-upsert op T3 gaf rpe % en oordeel % (verwacht 4 en nee)', r.rpe, r.oordeel;
+  end if;
+  -- Wissen zoals wisTrainingRpe: alleen de kolom op null, de rij en het oordeel blijven.
+  update training_evaluaties set rpe = null where event_id = v_t1 and team_id = 'TEAM_A_UUID' and rpe = 8;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'KAPOT: OWNER_A kon de RPE van T1 niet wissen (% rijen)', n; end if;
+  select * into r from training_evaluaties where event_id = v_t1;
+  if not found or r.rpe is not null or r.oordeel is distinct from 'ja' then
+    raise exception 'KAPOT: wissen van de RPE raakte ook het oordeel of de rij (%)', r;
+  end if;
+  -- Herstel zoals herstelTrainingRpe: alleen als de kolom nog leeg is.
+  update training_evaluaties set rpe = 6 where event_id = v_t1 and team_id = 'TEAM_A_UUID' and rpe is null;
+  get diagnostics n = row_count;
+  if n <> 1 then raise exception 'KAPOT: het herstel van de RPE van T1 raakte % rijen (verwacht 1)', n; end if;
+  update training_evaluaties set rpe = 2 where event_id = v_t1 and team_id = 'TEAM_A_UUID' and rpe is null;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'KAPOT: een herstel overschreef een bestaande RPE'; end if;
+  raise notice 'OK blok 30: rpe en oordeel worden los geschreven, gewist en hersteld (R.9)';
+
+  -- i. Een bestaande rij kan niet naar een ander team, of naar een wedstrijd.
+  begin
+    update training_evaluaties set event_id = v_tb where event_id = v_t1;
+    raise exception 'LEK: een update kon een evaluatie naar een training van TEAM_B verplaatsen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 30: een update naar een event_id van TEAM_B wordt geweigerd';
+  end;
+  begin
+    update training_evaluaties set event_id = v_m1 where event_id = v_t1;
+    raise exception 'LEK: een update kon een evaluatie naar een wedstrijd verplaatsen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 30: een update naar een wedstrijd wordt geweigerd';
+  end;
+  begin
+    update training_evaluaties set team_id = 'TEAM_B_UUID' where event_id = v_t1;
+    raise exception 'LEK: een update kon een evaluatie naar TEAM_B verplaatsen';
+  exception when insufficient_privilege then
+    raise notice 'OK blok 30: een update naar team_id TEAM_B wordt geweigerd';
+  end;
+
+  -- j. Cascade (als postgres: de FK werkt los van RLS).
+  reset role;
+  delete from events where id = v_t3;
+  select count(*) into n from training_evaluaties where event_id = v_t3;
+  if n <> 0 then raise exception 'KAPOT: na het verwijderen van de training staan er nog % evaluatie-rijen', n; end if;
+  raise notice 'OK blok 30: een training verwijderen neemt zijn evaluatie mee (cascade)';
+
+  -- k. Een niet-lid van TEAM_A.
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_A_UUID') then
+    raise notice 'OVERGESLAGEN blok 30k: BUITENSTAANDER is (weer) lid van TEAM_A';
+  else
+    select count(*) into n from inzichten_training_evaluaties('TEAM_A_UUID', v_start, v_end);
+    if n <> 0 then raise exception 'LEK: een niet-lid krijgt % rijen uit inzichten_training_evaluaties(TEAM_A)', n; end if;
+    select count(*) into n from training_evaluaties where team_id = 'TEAM_A_UUID';
+    if n <> 0 then raise exception 'LEK: een niet-lid ziet % trainingsevaluaties van TEAM_A', n; end if;
+    raise notice 'OK blok 30: een niet-lid krijgt 0 rijen voor TEAM_A';
+  end if;
+
+  -- l. Rechten en vorm.
+  reset role;
+  if has_function_privilege('anon', 'public.inzichten_training_evaluaties(uuid, date, date)', 'execute') then
+    raise exception 'LEK: anon mag inzichten_training_evaluaties uitvoeren';
+  end if;
+  select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+   where ns.nspname = 'public' and p.proname = 'inzichten_training_evaluaties'
+     and p.provolatile = 's' and not p.prosecdef;
+  if n <> 1 then raise exception 'KAPOT: inzichten_training_evaluaties is niet stable en security invoker'; end if;
+  if not (select relrowsecurity from pg_class where oid = 'public.training_evaluaties'::regclass) then
+    raise exception 'LEK: RLS staat uit op training_evaluaties';
+  end if;
+  select count(*) into n from pg_policies where schemaname = 'public' and tablename = 'training_evaluaties';
+  if n <> 4 then raise exception 'KAPOT: training_evaluaties heeft % policies (verwacht 4)', n; end if;
+  raise notice 'OK blok 30: anon mag de RPC niet uitvoeren; stable, invoker, RLS aan met 4 policies';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -2259,7 +2543,7 @@ rollback;
 -- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26, fase 2a
 -- (4 speler-RPC's) in blok 27, fase 2b (tabel speelminuten + 1 RPC) in blok
 -- 28, fase 3a (2 lees-RPC's: trainingskoppelingen en invul-discipline) in blok
--- 29. Accountverwijdering zelf
+-- 29, fase 3b (tabel training_evaluaties + 1 RPC) in blok 30. Accountverwijdering zelf
 -- (auth.admin.deleteUser) is hier niet na te bootsen; de onderdelen ervan
 -- wel: de team-opruiming is blok 22, het opzeggen van een lidmaatschap blok
 -- 23, en de cascade van een verwijderde oefening naar elk trainingsplan blok

@@ -292,6 +292,7 @@ const METRICS_HANDLERS: Harness['handlers'] = {
   // Fase 3a: dit bestand test de nieuwe kaarten niet; lege bronnen.
   inzichten_training_koppelingen: () => [],
   inzichten_invul_discipline: () => [],
+  inzichten_training_evaluaties: () => [],
   inzichten_wedstrijd_uitslagen: (db, args) => {
     const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
     return db.events

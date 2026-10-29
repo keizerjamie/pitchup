@@ -288,6 +288,7 @@ const MET_DATA: Harness['handlers'] = {
   inzichten_speelminuten_per_speler: () => [],
   inzichten_training_koppelingen: hKoppelingen,
   inzichten_invul_discipline: hDiscipline,
+  inzichten_training_evaluaties: () => [],
 }
 const LEEG: Harness['handlers'] = {
   ...MET_DATA,
@@ -655,8 +656,8 @@ describe('AC-A1 — kaarten onder de fase-2b-kaarten in vaste volgorde; bestaand
   it('AC-A1: laatste drie kaarten zijn belasting, periodisering, discipline; direct na de speelminutenkaart; belasting volle breedte, de andere twee half breed naast elkaar', async () => {
     await renderInzichten(belastingDb())
     const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
-    expect(koppen.slice(-3)).toEqual([i.belastingTitle, i.periodiseringTitle, i.disciplineTitle])
-    expect(koppen.at(-4)).toBe(i.speelminutenTitle)
+    expect(koppen.slice(-5, -2)).toEqual([i.belastingTitle, i.periodiseringTitle, i.disciplineTitle])  // fase 3b voegt daarna sRPE en oordeel toe
+    expect(koppen.at(-6)).toBe(i.speelminutenTitle)
     for (const t of NIEUWE_TITELS) expect(koppen.filter((x) => x === t)).toHaveLength(1)
     const smk = kaart(i.speelminutenTitle)
     expect(smk.nextElementSibling).toBe(BEL().parentElement) // wrapper om belasting
@@ -783,9 +784,9 @@ describe('AC-A4 — één falende bron: rest werkt, de falende kaart meldt algem
     expect(within(BEL()).getByText(i.bronFout)).toBeInTheDocument()
     expect(within(PER()).getByText(i.bronFout)).toBeInTheDocument()
     expect(within(DIS()).queryByText(i.bronFout)).toBeNull()
-    expect(DIS().querySelectorAll('dt')).toHaveLength(3)
+    expect(DIS().querySelectorAll('dt')).toHaveLength(5) // 3 maten van 3a + 2 van 3b
     expect(within(kaart(i.blessuresTitle)).queryByText(i.bronFout)).toBeNull()
-    expect(screen.getAllByText(i.bronFout)).toHaveLength(2)
+    expect(screen.getAllByText(i.bronFout)).toHaveLength(3) // belasting, periodisering en sRPE (duurbron)
     expect(container.textContent).not.toMatch(/RAW_DETAIL|PGRST202|inzichten_training_koppelingen/)
   })
 
@@ -817,7 +818,7 @@ describe('AC-A4 — één falende bron: rest werkt, de falende kaart meldt algem
       over: { rpcErrors: { inzichten_training_koppelingen: PGRST202, inzichten_invul_discipline: PGRST202 } },
     })
     for (const k of [BEL(), PER(), DIS()]) expect(within(k).getByText(i.bronFout)).toBeInTheDocument()
-    expect(screen.getAllByText(i.bronFout)).toHaveLength(3)
+    expect(screen.getAllByText(i.bronFout)).toHaveLength(4) // + sRPE (duurbron)
     expect(screen.getByRole('heading', { level: 2, name: i.blessuresTitle })).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/RAW_DETAIL|PGRST202/)
   })
@@ -1624,7 +1625,7 @@ describe('AC-D — invul-discipline', () => {
   it('AC-D.1 / AC-D.2 / AC-D.3: "x van y" voor analyse (5 van 8), uitslag (2 van 8) en trainingsplan (3 van 6); vandaag, toekomst en een ander eventtype tellen niet in de noemer', async () => {
     await renderInzichten(disciplineDb())
     const k = DIS()
-    const dts = [...k.querySelectorAll('dt')].map((dt) => dt.textContent)
+    const dts = [...k.querySelectorAll('dt')].slice(0, 3).map((dt) => dt.textContent)
     expect(dts).toEqual([
       fmt(i.disciplineAnalyse, { x: 5, y: 8 }),
       fmt(i.disciplineUitslag, { x: 2, y: 8 }),
@@ -1674,14 +1675,14 @@ describe('AC-D — invul-discipline', () => {
   it('AC-D.4 / Q4: de kaart meldt altijd waarom aanwezigheid ontbreekt en toont geen aanwezigheidsmaat', async () => {
     await renderInzichten(disciplineDb())
     expect(within(DIS()).getByText(i.disciplineAanwezigheid)).toBeInTheDocument()
-    expect(DIS().querySelectorAll('dt')).toHaveLength(3)
+    expect(DIS().querySelectorAll('dt')).toHaveLength(5) // 3 maten van 3a + 2 van 3b
   })
 
   it('AC-D.5: noemer 0 -> "geen gespeelde wedstrijden" per wedstrijdmaat, de trainingsmaat blijft; zonder trainingen omgekeerd', async () => {
     const alleenTrainingen = disciplineDb()
     alleenTrainingen.events = alleenTrainingen.events.filter((e) => e.type === 'training')
     await renderInzichten(alleenTrainingen)
-    expect([...DIS().querySelectorAll('dt')].map((x) => x.textContent)).toEqual([
+    expect([...DIS().querySelectorAll('dt')].slice(0, 3).map((x) => x.textContent)).toEqual([
       i.disciplineGeenWedstrijden, i.disciplineGeenWedstrijden, fmt(i.disciplinePlan, { x: 3, y: 6 }),
     ])
     expect(DIS().textContent).toContain(i.disciplineAanwezigheid)
@@ -1689,7 +1690,7 @@ describe('AC-D — invul-discipline', () => {
     const alleenWedstrijden = disciplineDb()
     alleenWedstrijden.events = alleenWedstrijden.events.filter((e) => e.type === 'match')
     await renderInzichten(alleenWedstrijden)
-    expect([...DIS().querySelectorAll('dt')].map((x) => x.textContent)).toEqual([
+    expect([...DIS().querySelectorAll('dt')].slice(0, 3).map((x) => x.textContent)).toEqual([
       fmt(i.disciplineAnalyse, { x: 5, y: 8 }), fmt(i.disciplineUitslag, { x: 2, y: 8 }), i.disciplineGeenTrainingen,
     ])
     expect(DIS().textContent).not.toMatch(/NaN|Infinity/)
@@ -1714,7 +1715,7 @@ describe('AC-D — invul-discipline', () => {
     expect(calls(h, 'inzichten_invul_discipline')[0].args).toEqual({ p_team_id: TEAM, p_start: '2026-09-18', p_end: '2026-10-14' })
     // wedstrijden 19-9 (M3), 26-9 (M4), 3-10 (M5), 10-10 (M6), 12-10 (M10) = 5; analyse M3, M5 = 2; uitslag M5 = 1; handmatig M4 = 1
     // trainingen 24-9 (T5), 14-10 (T7) = 2; plan 0 (T5 heeft alleen een override van het verkeerde type)
-    expect([...DIS().querySelectorAll('dt')].map((x) => x.textContent)).toEqual([
+    expect([...DIS().querySelectorAll('dt')].slice(0, 3).map((x) => x.textContent)).toEqual([
       fmt(i.disciplineAnalyse, { x: 2, y: 5 }), fmt(i.disciplineUitslag, { x: 1, y: 5 }), fmt(i.disciplinePlan, { x: 0, y: 2 }),
     ])
     expect(tekstenMet(DIS(), fmt(i.disciplineHandmatig, { n: 1 }))).toHaveLength(1)

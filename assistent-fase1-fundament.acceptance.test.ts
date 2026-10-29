@@ -1191,14 +1191,14 @@ describe('deleteAccount — fase-1-deel van de opruiming', () => {
     return { admin: { auth: { admin: { deleteUser } } }, deleteUser }
   }
 
-  // Per eigen team: de vijftien teamtabellen in FK-veilige volgorde, afgesloten
+  // Per eigen team: de zestien teamtabellen in FK-veilige volgorde, afgesloten
   // met de teams-rij (waarvan de cascade team_members en team_invites
   // opruimt). `oefeningen` volgt pas ná álle teams: dat is persoonlijk bezit
   // (team_id = eigenaar-user) en de FK-cascade daarvan raakt koppelingen in
   // trainingsplannen van ANDERE teams.
   const TEAM_OPRUIMING = [
     'training_oefeningen', 'task_overrides', 'match_squad', 'match_events',
-    'tegendoelpunten', 'speelminuten', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
+    'tegendoelpunten', 'speelminuten', 'training_evaluaties', 'match_ratings', 'lineups', 'attendance', 'absence_periods',
     'categorie_metingen', 'metingen', 'events', 'players', 'settings',
     'teams',
   ]
@@ -1396,6 +1396,7 @@ describe('AC45 — RLS-laag: niet netjes in vitest te dekken', () => {
     expect(inhoud.indexOf('Blok 25')).toBeLessThan(inhoud.search(/^rollback;/m))
     expect(inhoud.indexOf('Blok 26')).toBeLessThan(inhoud.search(/^rollback;/m))
     expect(inhoud.indexOf('Blok 28')).toBeLessThan(inhoud.search(/^rollback;/m))
+    expect(inhoud.indexOf('Blok 30')).toBeLessThan(inhoud.search(/^rollback;/m))
 
     // De vervaltermijn wordt UITSLUITEND in de database beoordeeld; blok 14
     // legt beide randen vast.

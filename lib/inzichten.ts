@@ -15,6 +15,7 @@ import { addDays, todayLocal } from '@/lib/utils'
 import { blokkenVanKoppelingen } from '@/lib/parallel-groep'
 import { berekenTijdlijn, effectieveDuurMin } from '@/lib/sessie-tijdlijn'
 import { actueleMetingen, computeCurrentSteps } from '@/lib/periodization'
+import { heeftDoelstelling, isTrainingOordeel, isValidRpe } from '@/lib/training-evaluatie'
 import {
   MEETBARE_CATEGORIES,
   PERIODIZATION_CATEGORIES,
@@ -2021,6 +2022,239 @@ export function telInvulDiscipline(rijen: InvulDisciplineRij[]): InvulDiscipline
       const auto = hasTrainingPlanDone(rij.doelstelling, telwaarde(rij.aantal_oefeningen))
       if (auto) uitkomst.metPlan++
       if (rij.handmatig === true && !auto) uitkomst.planHandmatig++
+    }
+  }
+  return uitkomst
+}
+
+// ── Fase 3b: RPE, sRPE en doelstelling-oordeel ────────────────────────
+// Bron: inzichten_training_evaluaties (supabase/inzichten-metrics-fase3b.sql),
+// venster `verleden` (t/m gisteren, zoals belasting en discipline). De duur
+// per training komt uit de BESTAANDE 3a-bron inzichten_training_koppelingen,
+// met precies de aanroep van belastingPerWeek (planner-totaal, parallel =
+// langste): geen extra RPC en geen SQL-duplicaat van de duurregel (R9).
+// belastingPerWeek, telInvulDiscipline en InvulDiscipline hierboven blijven
+// bewust ongewijzigd (A15, D.4).
+
+// inzichten_training_evaluaties — één rij per training in het venster (left
+// join): rpe en oordeel zijn null zolang ze niet zijn ingevuld.
+export interface TrainingEvaluatieRij {
+  event_id: string
+  datum: string
+  doelstelling: string | null
+  rpe: number | null
+  oordeel: string | null
+  totaal: number
+}
+
+// Geplande duur van één training: het planner-totaal uit berekenTijdlijn.
+// heeftKoppelingen = false → de training heeft geen trainingsplan-blokken.
+export interface TrainingDuur {
+  totaalMin: number
+  blokkenZonderDuur: number
+  heeftKoppelingen: boolean
+}
+
+// Duur per training (event_id), op basis van dezelfde groepering, leden en
+// tijdlijnaanroep als belastingPerWeek: de som per week hiervan is dus altijd
+// gelijk aan BelastingWeek.trainingstotaalMin (pariteitstest). Geen
+// vensterfilter: de aanroeper beslist welke trainingen meetellen.
+export function trainingDuurPerEvent(rijen: TrainingKoppelingRij[]): Map<string, TrainingDuur> {
+  const duur = new Map<string, TrainingDuur>()
+  for (const training of groepeerPerTraining(rijen, () => true)) {
+    if (training.koppelingen.length === 0) {
+      duur.set(training.eventId, { totaalMin: 0, blokkenZonderDuur: 0, heeftKoppelingen: false })
+      continue
+    }
+    const tijdlijn = berekenTijdlijn(blokkenVanKoppelingen(training.koppelingen.map(belastingLid)), null)
+    duur.set(training.eventId, {
+      totaalMin: tijdlijn.totaalMin,
+      blokkenZonderDuur: tijdlijn.blokkenZonderDuur,
+      heeftKoppelingen: true,
+    })
+  }
+  return duur
+}
+
+export interface EvaluatieWeek {
+  // Maandag van de ISO-week ('YYYY-MM-DD'); weken lopen maandag–zondag.
+  maandag: string
+  isoJaar: number
+  isoWeek: number
+  deelweekBegin: boolean
+  deelweekEind: boolean
+  trainingen: number
+  // Trainingen met een geldige RPE (isValidRpe).
+  metRpe: number
+  // Trainingen MET RPE maar zonder berekenbare duur: tellen niet mee in srpe,
+  // ook niet als 0 (K.3).
+  zonderDuur: number
+  // Meegetelde trainingen waarvan de duur blokken zonder duur mist (voetnoot *).
+  onvolledigeDuur: number
+  // Σ RPE × geplande duur in AU. null = geen enkele berekenbare training in
+  // deze week ("geen gegevens", K.4), of de duurbron is afgekapt.
+  srpe: number | null
+  // srpe t.o.v. de hoogste week, alleen voor de staafhoogte.
+  srpeAandeel: number | null
+  // Geldige oordelen, ongeacht de huidige doelstelling (R5.1, besluit O1).
+  ja: number
+  deels: number
+  nee: number
+  // Trainingen met een niet-lege doelstelling (heeftDoelstelling).
+  metDoelstelling: number
+  // Daarvan zonder geldig oordeel; telt nooit als nee (K.7).
+  metDoelstellingZonderOordeel: number
+}
+
+export interface EvaluatieOverzicht {
+  weken: EvaluatieWeek[]
+  afgekaptEvaluaties: boolean
+  afgekaptDuur: boolean
+  // Er is minstens één training in het venster.
+  heeftTrainingen: boolean
+  // Minstens één geldige RPE of geldig oordeel in het venster (AC-A5).
+  heeftInvoer: boolean
+  totaal: Omit<
+    EvaluatieWeek,
+    'maandag' | 'isoJaar' | 'isoWeek' | 'deelweekBegin' | 'deelweekEind' | 'srpeAandeel' | 'srpe'
+  >
+}
+
+type EvaluatieTotaal = EvaluatieOverzicht['totaal']
+
+function legeEvaluatieTotaal(): EvaluatieTotaal {
+  return {
+    trainingen: 0,
+    metRpe: 0,
+    zonderDuur: 0,
+    onvolledigeDuur: 0,
+    ja: 0,
+    deels: 0,
+    nee: 0,
+    metDoelstelling: 0,
+    metDoelstellingZonderOordeel: 0,
+  }
+}
+
+// Bruikbare evaluatierij: een niet-leeg event-id en een echte kalenderdatum.
+function isBruikbareEvaluatie(rij: TrainingEvaluatieRij | null | undefined): rij is TrainingEvaluatieRij {
+  return !!rij && typeof rij.event_id === 'string' && rij.event_id !== '' && isDateString(rij.datum)
+}
+
+// sRPE per ISO-week en oordeel-aantallen per week en periode (K.1–K.7). Weken
+// chronologisch, elke week van het venster aanwezig, ook zonder training.
+// Puur: de invoer wordt nooit gemuteerd, nooit NaN.
+export function evaluatiesPerWeek(
+  evaluaties: TrainingEvaluatieRij[],
+  koppelingen: TrainingKoppelingRij[],
+  venster: Seizoensvenster,
+): EvaluatieOverzicht {
+  const afgekaptEvaluaties = isAfgekapt(evaluaties)
+  const afgekaptDuur = isAfgekapt(koppelingen)
+  const totaal = legeEvaluatieTotaal()
+  if (!isGeldigVenster(venster)) {
+    return { weken: [], afgekaptEvaluaties, afgekaptDuur, heeftTrainingen: false, heeftInvoer: false, totaal }
+  }
+
+  const rijen = (Array.isArray(evaluaties) ? evaluaties : []).filter(
+    (r) => isBruikbareEvaluatie(r) && r.datum >= venster.start && r.datum <= venster.end,
+  )
+  const heeftTrainingen = rijen.length > 0
+  const heeftInvoer = rijen.some((r) => isValidRpe(r.rpe) || isTrainingOordeel(r.oordeel))
+  // Afgekapt: geen gedeeltelijke cijfers (de nieuwste week kan ontbreken).
+  if (afgekaptEvaluaties) return { weken: [], afgekaptEvaluaties, afgekaptDuur, heeftTrainingen, heeftInvoer, totaal }
+
+  // Bij een afgekapte duurbron blijven de oordeel-aantallen kloppen, maar is
+  // geen enkele sRPE te vertrouwen: alle srpe-velden blijven null.
+  const duur = afgekaptDuur ? null : trainingDuurPerEvent(koppelingen)
+
+  const weken: EvaluatieWeek[] = wekenInVenster(venster.start, venster.end).map((maandag) => {
+    const iso = isoWeek(maandag)!
+    const zondag = fromUtcMs(toUtcMs(maandag)! + 6 * DAG_MS)
+    return {
+      maandag,
+      isoJaar: iso.jaar,
+      isoWeek: iso.week,
+      deelweekBegin: maandag < venster.start,
+      deelweekEind: zondag > venster.end,
+      trainingen: 0,
+      metRpe: 0,
+      zonderDuur: 0,
+      onvolledigeDuur: 0,
+      srpe: null,
+      srpeAandeel: null,
+      ja: 0,
+      deels: 0,
+      nee: 0,
+      metDoelstelling: 0,
+      metDoelstellingZonderOordeel: 0,
+    }
+  })
+  const perMaandag = new Map(weken.map((w) => [w.maandag, w]))
+
+  for (const rij of rijen) {
+    const week = perMaandag.get(maandagVanWeek(rij.datum) ?? '')
+    if (!week) continue
+    week.trainingen++
+
+    if (isValidRpe(rij.rpe)) {
+      week.metRpe++
+      if (duur) {
+        const d = duur.get(rij.event_id)
+        if (!d || !(d.totaalMin > 0)) {
+          week.zonderDuur++
+        } else {
+          week.srpe = (week.srpe ?? 0) + rij.rpe * d.totaalMin
+          if (d.blokkenZonderDuur > 0) week.onvolledigeDuur++
+        }
+      }
+    }
+
+    const oordeel = isTrainingOordeel(rij.oordeel) ? rij.oordeel : null
+    if (oordeel) week[oordeel]++
+    if (heeftDoelstelling(rij.doelstelling)) {
+      week.metDoelstelling++
+      if (!oordeel) week.metDoelstellingZonderOordeel++
+    }
+  }
+
+  const maxWeekSrpe = weken.reduce((max, w) => Math.max(max, w.srpe ?? 0), 0)
+  for (const week of weken) {
+    week.srpeAandeel = week.srpe === null ? null : aandeel(week.srpe, maxWeekSrpe)
+    for (const sleutel of Object.keys(totaal) as (keyof EvaluatieTotaal)[]) totaal[sleutel] += week[sleutel]
+  }
+  return { weken, afgekaptEvaluaties, afgekaptDuur, heeftTrainingen, heeftInvoer, totaal }
+}
+
+// Uitbreiding van de invul-discipline (D.1/D.2). Een eigen functie naast
+// telInvulDiscipline, zodat de 3a-maten en hun type byte-gelijk blijven (D.4).
+// Noemer D.1 = trainingen; noemer D.2 = trainingen met een niet-lege
+// doelstelling (R5.3).
+export interface EvaluatieDiscipline {
+  trainingen: number
+  metRpe: number
+  metDoelstelling: number
+  metOordeelBijDoelstelling: number
+  afgekapt: boolean
+}
+
+// Bij afgekapt blijven de tellingen gevuld met wat er binnenkwam; de kaart
+// toont dan alleen de melding (zelfde regel als telInvulDiscipline).
+export function telEvaluatieDiscipline(rijen: TrainingEvaluatieRij[]): EvaluatieDiscipline {
+  const uitkomst: EvaluatieDiscipline = {
+    trainingen: 0,
+    metRpe: 0,
+    metDoelstelling: 0,
+    metOordeelBijDoelstelling: 0,
+    afgekapt: isAfgekapt(rijen),
+  }
+  for (const rij of Array.isArray(rijen) ? rijen : []) {
+    if (!rij) continue
+    uitkomst.trainingen++
+    if (isValidRpe(rij.rpe)) uitkomst.metRpe++
+    if (heeftDoelstelling(rij.doelstelling)) {
+      uitkomst.metDoelstelling++
+      if (isTrainingOordeel(rij.oordeel)) uitkomst.metOordeelBijDoelstelling++
     }
   }
   return uitkomst

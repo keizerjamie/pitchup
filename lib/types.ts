@@ -402,6 +402,20 @@ export interface Speelminuten {
   created_at: string
 }
 
+// Oordeel van de trainer of de doelstelling van een training is behaald
+// (tabel `training_evaluaties`, supabase/inzichten-metrics-fase3b.sql). De
+// runtime-lijst en validatie staan in lib/training-evaluatie.ts
+// (TRAINING_OORDELEN, isTrainingOordeel).
+export type TrainingOordeel = 'ja' | 'deels' | 'nee'
+
+// RPE en oordeel van één training. Eén rij per training; beide waarden zijn
+// los te schrijven en los te wissen, dus elk kan null zijn ("niet ingevuld").
+// `rpe` is een geheel getal RPE_MIN..RPE_MAX (isValidRpe).
+export interface TrainingEvaluatie {
+  rpe: number | null
+  oordeel: TrainingOordeel | null
+}
+
 export interface MatchRating {
   id: string
   event_id: string

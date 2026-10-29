@@ -479,6 +479,8 @@ interface Db {
   training_oefeningen: Row[]
   task_overrides: Row[]
   categorie_metingen: Row[]
+  // Fase 3b: bron van inzichten_training_evaluaties.
+  training_evaluaties: Row[]
 }
 
 // ── Vier RPC's van supabase/inzichten-metrics.sql ─────────────────────
@@ -853,6 +855,28 @@ function rpcInvulDiscipline(db: Db, args: Row) {
   return rijen.slice(0, MAX_FASE3_RPC).map((r) => ({ ...r, totaal: rijen.length }))
 }
 
+// RPC fase 3b `inzichten_training_evaluaties`: één rij per training in het
+// venster (`from events e left join training_evaluaties te on te.event_id = e.id
+// and te.team_id = p_team_id`); teamfilter op e (where) én te (in de ON, zodat
+// een evaluatie van een ander team op dit event_id nooit lekt).
+function rpcTrainingEvaluaties(db: Db, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const rijen = db.events
+    .filter((e) => e.team_id === p_team_id && e.type === 'training' && inRange(e.date as string, p_start, p_end))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.id).localeCompare(String(b.id)))
+    .map((e) => {
+      const te = db.training_evaluaties.find((x) => x.event_id === e.id && x.team_id === p_team_id)
+      return {
+        event_id: e.id,
+        datum: e.date,
+        doelstelling: (e.doelstelling as string | null | undefined) ?? null,
+        rpe: (te?.rpe as number | null | undefined) ?? null,
+        oordeel: (te?.oordeel as string | null | undefined) ?? null,
+      }
+    })
+  return rijen.slice(0, MAX_FASE3_RPC).map((r) => ({ ...r, totaal: rijen.length }))
+}
+
 const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_aanwezigheid: rpcAanwezigheid,
   inzichten_training_opkomst_per_maand: rpcMaandOpkomst,
@@ -871,6 +895,7 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_speelminuten_per_speler: rpcSpeelminuten,
   inzichten_training_koppelingen: rpcTrainingKoppelingen,
   inzichten_invul_discipline: rpcInvulDiscipline,
+  inzichten_training_evaluaties: rpcTrainingEvaluaties,
 }
 
 function makeSupabaseMock(opts: {
@@ -898,6 +923,8 @@ function makeSupabaseMock(opts: {
   speelminuten?: Row[]
   // Fase 3a: bronnen van de twee nieuwe RPC's en de metingen-query.
   taskOverrides?: Row[]
+  // Fase 3b: bron van inzichten_training_evaluaties.
+  trainingEvaluaties?: Row[]
   categorieMetingen?: Row[]
   // Laat een niet-RPC-tabelquery falen: { tabelnaam: foutobject }.
   selectErrors?: Record<string, unknown>
@@ -925,6 +952,7 @@ function makeSupabaseMock(opts: {
     training_oefeningen: opts.trainingOefeningen ?? [],
     task_overrides: opts.taskOverrides ?? [],
     categorie_metingen: opts.categorieMetingen ?? [],
+    training_evaluaties: opts.trainingEvaluaties ?? [],
   }
   const eventsFactory = tableFactory(db.events, () => opts.eventsError ?? null)
   const playersFactory = tableFactory(db.players)
@@ -2822,6 +2850,8 @@ describe('inzichten-metrics — zes nieuwe kaarten', () => {
       i.inhoudTitle, i.thuisUitTitle, i.formatieTitle, i.topscorersTitle, i.kaartenTitle, i.kwartierTitle, i.tegenTitle,
       // Fase 3a: na de speelminuten (de laatste kaart van fase 2b).
       i.speelminutenTitle, i.belastingTitle, i.periodiseringTitle, i.disciplineTitle,
+      // Fase 3b: daarna sRPE en oordeel.
+      i.srpeTitle, i.oordeelTitle,
     ]
     expect(titels.filter((t) => volgorde.includes(t as string))).toEqual(volgorde)
   })

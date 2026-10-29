@@ -14,7 +14,7 @@
 // de types dus hier vandaan, nooit via app/actions/*.
 
 import { isUuid } from '@/lib/authz'
-import type { MatchEventKind, TegendoelpuntSoort } from '@/lib/types'
+import type { MatchEventKind, TegendoelpuntSoort, TrainingOordeel } from '@/lib/types'
 
 export type HerstelMeting = {
   soort: 'nulmeting'
@@ -62,6 +62,24 @@ export type HerstelSpeelminuten = {
   minuten: number
   wissels: number
   createdAt: string | null
+}
+
+// RPE resp. oordeel van één training (app/actions/training-evaluatie.ts).
+// Wissen zet alleen die ene kolom op null (de rij en de andere waarde blijven
+// staan), dus de snapshot heeft geen id of created_at nodig. Herstel
+// overschrijft nooit: staat er intussen een waarde, dan wint die.
+export type HerstelTrainingRpe = {
+  soort: 'training_rpe'
+  teamId: string
+  eventId: string
+  rpe: number
+}
+
+export type HerstelTrainingOordeel = {
+  soort: 'training_oordeel'
+  teamId: string
+  eventId: string
+  oordeel: TrainingOordeel
 }
 
 export type HerstelAfmeldperiode = {

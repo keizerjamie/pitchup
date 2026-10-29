@@ -5,6 +5,7 @@ import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { Player, AttendanceStatus } from '@/lib/types'
 import { formatDateLong, formatTime, todayLocal } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
+import TrainingEvaluatieSectie from '@/components/TrainingEvaluatieSectie'
 import MetingEditor from '@/components/MetingEditor'
 import PageHeader from '@/components/ui/PageHeader'
 import { LinkButton } from '@/components/ui/Button'
@@ -15,7 +16,9 @@ import { getDict } from '@/lib/i18n'
 import { analyseBestaat as computeAnalyseBestaat } from '@/lib/match-analysis.mjs'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
-import { genericError } from '@/lib/errors'
+import { genericError, logError } from '@/lib/errors'
+import { isTrainingOordeel, isValidRpe } from '@/lib/training-evaluatie'
+import type { TrainingEvaluatie } from '@/lib/types'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -26,7 +29,7 @@ export default async function EventDetailPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }] = await Promise.all([
+  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }, { data: evaluatieRij, error: evaluatieError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('players').select('*').eq('team_id', ctx.teamId).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', ctx.teamId),
@@ -36,6 +39,10 @@ export default async function EventDetailPage({ params }: Props) {
     supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_squad').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
+    // Fase 3b: RPE en oordeel van de training. Loopt voor elk eventtype (geen
+    // extra roundtrip) maar wordt alleen gebruikt en gelogd bij een training.
+    // Vereist supabase/inzichten-metrics-fase3b.sql.
+    supabase.from('training_evaluaties').select('rpe, oordeel').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
   ])
 
   if (!event) notFound()
@@ -163,6 +170,19 @@ export default async function EventDetailPage({ params }: Props) {
     for (const row of backfillRows) attendanceMap.set(row.player_id, row.status)
   }
 
+  // Een falende evaluatiequery (bv. zonder migratie) laat de pagina werken; alleen
+  // de nieuwe sectie meldt het (A13). Gelezen waarden worden gevalideerd.
+  let evaluatieFout = false
+  if (isTraining && evaluatieError) {
+    logError('eventDetail.evaluatie', evaluatieError)
+    evaluatieFout = true
+  }
+  const evaluatie: TrainingEvaluatie = {
+    rpe: isValidRpe(evaluatieRij?.rpe) ? evaluatieRij.rpe : null,
+    oordeel: isTrainingOordeel(evaluatieRij?.oordeel) ? evaluatieRij.oordeel : null,
+  }
+  const trainingGehouden = typeof event.date === 'string' && event.date <= todayLocal()
+
   const initialStatuses = Object.fromEntries(attendanceMap) as Record<string, AttendanceStatus>
   const title = isMatch && event.opponent ? `vs ${event.opponent}` : t.event.training
 
@@ -221,6 +241,18 @@ export default async function EventDetailPage({ params }: Props) {
               <div className="text-[11px] font-extrabold uppercase tracking-wider text-faint mb-1">{t.event.notes}</div>
               <div className="text-[14px] text-muted">{event.notes}</div>
             </div>
+          )}
+          {/* Na de training: RPE en doelstelling-oordeel (fase 3b), onderaan de
+              linkerkolom; op mobiel dus vóór de aanwezigheidslijst. */}
+          {isTraining && (
+            <TrainingEvaluatieSectie
+              eventId={id}
+              initial={evaluatie}
+              doelstelling={typeof event.doelstelling === 'string' ? event.doelstelling : null}
+              canEdit={canEdit(ctx, 'training')}
+              trainingGehouden={trainingGehouden}
+              bronFout={evaluatieFout}
+            />
           )}
         </div>
         <div className="min-w-0">
