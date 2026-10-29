@@ -4305,3 +4305,36 @@ Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-met
 - **Tests:** `inzichten-metrics-fase3b.acceptance.test.tsx` (174), `inzichten-metrics-fase3b-migratie.acceptance.test.ts`,
   `app/actions/training-evaluatie.test.ts` (79), component- en lib-tests.
 - **Rooktest 3b geslaagd** (Jamie, 2026-10-29). Open: de conclusielaag (KPI-strook, signalen, seizoensrapport).
+
+## Feature: Inzichten conclusielaag deel 1 — KPI-strook en signalen (2026-10-29, `35538f9`, live)
+Conclusielaag = KPI-strook, signalen en seizoensrapport gebruiken de metrics van fase 1–3b (besluit V6 hield ze tot
+dan ongewijzigd). Gesplitst: deel 1 (strook + signalen, deze), deel 2 (rapport). Ketendocumenten:
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-metrics/conclusielaag/` (00–08).
+- **KPI-strook** (`components/inzichten/KpiStrip.tsx`): zes tegels in vaste volgorde (opkomst, totale aanwezigheid,
+  rating, doelsaldo, punten per wedstrijd, clean sheets), `grid-cols-2 lg:grid-cols-3`, `data-kpi` per tegel en
+  `data-conclusielaag="kpi"`. Vensterlabel per tegel als zuster van de kopregel (DOM-contract van de
+  Doelsaldo-pariteitstest: label → kopregel → tegel). Bronfout/afgekapt vervangen het cijfer (fout vóór afgekapt),
+  nooit "—"/0. Nieuwe tegels neutraal (geen norm). Label "Totale aanwezigheid": "Aanwezigheid" botst met de kaarttitel.
+- **Bronnen:** de vier KPI-/signaalbronnen nu via `unwrapBron`. Doelsaldo, punten en clean sheets uit `thuisUit.totaal`
+  (zelfde fout- en afgekapt-vlag als de Thuis/uit-kaart); de oude `events`-query (`doelpuntenResult`) blijft voor
+  `DoelpuntenChart` en `geenEnkeleData`. Aantal queries ongewijzigd: 18 `.rpc(` + 5 `.from(` in de pagina.
+- **Signalen** (`bepaalSignalen`, nieuw `SignaalInvoer` met `bronFout` per bron): nieuw `speler-daler`/`speler-stijger`
+  (uit `bepaalStijgersDalers`, sterkste naam, altijd hele seizoen) en `positie-zonder-fit` (alleen posities die een
+  actieve vaste speler als `position` of in `secondary_positions` heeft, alleen bij `heeftSpelers`). Minima:
+  `SPELER_MIN_REGISTRATIES = 4`, `OPKOMST_MIN_TRAININGEN = 3` (telling via `trainingenPerMaand` uit de bron
+  `inzichten_training_evaluaties` — gehouden trainingen, iets ruimer dan "met registratie"). Falende of afgekapte bron
+  → signaal overgeslagen + `signaalBronnenOnvolledig` → melding `signalenOnvolledig` in `SignalenBlok` (ook bij 0
+  signalen). `MAX_SIGNALEN` blijft 3; `positie` wordt vertaald in `vulSignaalIn`.
+- **Ratingdelta afgerond** in `teamRatingTrend` (2 decimalen, zoals `bepaalStijgersDalers`): 0,3 werkt weer als grens,
+  maar de praktische grens ligt nu rond 0,295; ruis rond 0 toont neutraal "0.0".
+- **Rapport (deel 1):** neemt de nieuwe signalen en het label automatisch mee; het doelsaldo toont "—" bij fout of
+  afgekapt (`rapportSaldo` met `wedstrijden: 0`). Zes tegels, secties en foutmeldingen in het rapport = deel 2.
+- **Gotchas:** `Signaal.tekstSleutel` is `string` met terugval op de kale sleutelnaam — een ontbrekende messages-sleutel
+  geeft géén typecheckfout, alleen `lib/signaal-tekst.test.ts` vangt het. Een verplicht nieuw veld in een lib-contract
+  maakt de suite rood tot de pagina mee is (verwacht bij gesplitste bouwers). V6-tests sluiten via
+  `sluitConclusielaagUit` `[data-conclusielaag]` en de signalen-rapportsectie uit; de rest wordt nog steeds vergeleken.
+- **Bekend gat (C20):** `todayLocal()` leest de serverklok; er is geen `TZ` ingesteld gevonden. Op een UTC-server
+  verschuift "gisteren" tussen ca. 00:00 en 01:00/02:00 NL-tijd. Bewust niet opgelost.
+- **Tests:** `inzichten-conclusielaag.acceptance.test.tsx` (146), `KpiStrip.test.tsx`, `SignalenBlok.test.tsx`,
+  `lib/signaal-tekst.test.ts`, uitbreidingen `lib/inzichten.test.ts`. Nieuwe flake gezien: `inzichten-metrics` AC-6.7.
+- **Open:** rooktest deel 1 door Jamie; daarna deel 2 (seizoensrapport).
