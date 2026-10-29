@@ -4278,4 +4278,30 @@ Fase 3 is gesplitst: 3a (lezen, deze), 3b (RPE + doelstelling behaald, nieuwe in
 - **Tests:** `inzichten-metrics-fase3a.acceptance.test.tsx` (141, 3 TZ × 3 tijdstippen, jaarwisseling, schrikkeljaar),
   `inzichten-metrics-fase3a-migratie.acceptance.test.ts`, uitbreidingen in `lib/inzichten.test.ts` en
   `lib/season-dates.test.ts`.
-- **Open:** rooktest 3a door Jamie; fase 3b (RPE + doelstelling behaald); daarna de conclusielaag.
+- **Rooktest 3a geslaagd** (Jamie, 2026-10-28).
+
+## Feature: Inzichten-metrics fase 3b — RPE en doelstelling behaald (2026-10-29, `f5e0644`, live)
+Ketendocumenten: `~/.claude/projects/-Users-jamiekeizer--claude/ff-inzichten-metrics/fase3b/` (01–08).
+- **Wat:** `components/TrainingEvaluatieSectie.tsx` onderaan de linkerkolom van een training (na de notities): RPE
+  1–10 (ankers 1/3/5/7/10) en oordeel ja/deels/nee met de doelstellingstekst als context; invoer vanaf de
+  trainingsdag, wissen met undo-toast. Op /inzichten `SrpeKaart` (sRPE = RPE × plannerduur per ISO-week, AU) en
+  `DoelstellingOordeelKaart`; `InvulDisciplineKaart` kreeg optionele prop `evaluatie` (zonder prop identiek).
+- **Infra:** nieuwe tabel **`training_evaluaties`** (één rij per event, `event_id` unique, `rpe` 1..10 en `oordeel`
+  ja/deels/nee beide nullable) + lees-RPC `inzichten_training_evaluaties` in **`supabase/inzichten-metrics-fase3b.sql`**.
+  RLS: select `is_team_member`; insert/update `can_edit(team_id,'training')` + exists-check event van hetzelfde team
+  en type training; delete alleen op recht. Gedraaid op productie 2026-10-28; verificatieblok 30 (april 1990) +
+  blok 2/22 geslaagd. Opgenomen in `TEAM_TABELLEN` (nu zestien) na `speelminuten`.
+- **Actions** (`app/actions/training-evaluatie.ts`): save/wis/herstel per kolom (`rpe`, `oordeel`). Upsert schrijft
+  alleen de eigen kolom (RPE wist oordeel niet); wissen = conditionele update naar null; herstel met
+  `.is(kolom, null)` overschrijft nooit. Toekomstcheck `event.date <= todayLocal()` in action + pagina, niet in RLS.
+- **Doelstellingsregels:** nieuw oordeel alleen bij niet-lege (getrimde) doelstelling (`heeftDoelstelling`); een
+  bestaand oordeel blijft staan als de tekst wijzigt of gewist wordt, telt dan mee en is alleen-lezen met wisknop.
+  **Herstel via undo eist géén doelstelling** (validator-B1: brief §2D.4 sprak story R5.1/R8 tegen; story wint).
+- **Rekenwerk:** `trainingDuurPerEvent`, `evaluatiesPerWeek`, `telEvaluatieDiscipline` in `lib/inzichten.ts`;
+  duur = plannerregel uit fase 3a (pariteit met `berekenTijdlijn`/belastingkaart). Venster `verleden`.
+- **Gotchas:** in verificatieblokken `sqlstate '23514'` i.p.v. `check_violation`; volgende vrije testmaand mei 1990.
+  `event.evaluatieOpslaanFout` mag niet woordelijk gelijk zijn aan `analysis.speelminutenOpslaanFout` (2b-uniciteitstest).
+  Acceptatietest fase 3b zet `vi.setConfig({ testTimeout: 30000 })` tegen timeouts onder load.
+- **Tests:** `inzichten-metrics-fase3b.acceptance.test.tsx` (174), `inzichten-metrics-fase3b-migratie.acceptance.test.ts`,
+  `app/actions/training-evaluatie.test.ts` (79), component- en lib-tests.
+- **Open:** rooktest 3b door Jamie; daarna de conclusielaag (KPI-strook, signalen, seizoensrapport).
