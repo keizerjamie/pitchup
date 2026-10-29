@@ -4337,4 +4337,4 @@ dan ongewijzigd). Gesplitst: deel 1 (strook + signalen, deze), deel 2 (rapport).
   verschuift "gisteren" tussen ca. 00:00 en 01:00/02:00 NL-tijd. Bewust niet opgelost.
 - **Tests:** `inzichten-conclusielaag.acceptance.test.tsx` (146), `KpiStrip.test.tsx`, `SignalenBlok.test.tsx`,
   `lib/signaal-tekst.test.ts`, uitbreidingen `lib/inzichten.test.ts`. Nieuwe flake gezien: `inzichten-metrics` AC-6.7.
-- **Open:** rooktest deel 1 door Jamie; daarna deel 2 (seizoensrapport).
+- **Rooktest deel 1 geslaagd** (Jamie, 2026-10-29). Open: deel 2 (seizoensrapport).
