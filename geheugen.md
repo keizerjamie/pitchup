@@ -4329,6 +4329,7 @@ dan ongewijzigd). Gesplitst: deel 1 (strook + signalen, deze), deel 2 (rapport).
   maar de praktische grens ligt nu rond 0,295; ruis rond 0 toont neutraal "0.0".
 - **Rapport (deel 1):** neemt de nieuwe signalen en het label automatisch mee; het doelsaldo toont "—" bij fout of
   afgekapt (`rapportSaldo` met `wedstrijden: 0`). Zes tegels, secties en foutmeldingen in het rapport = deel 2.
+  *(Verouderd sinds deel 2: `rapportSaldo` is weg, zie hieronder.)*
 - **Gotchas:** `Signaal.tekstSleutel` is `string` met terugval op de kale sleutelnaam — een ontbrekende messages-sleutel
   geeft géén typecheckfout, alleen `lib/signaal-tekst.test.ts` vangt het. Een verplicht nieuw veld in een lib-contract
   maakt de suite rood tot de pagina mee is (verwacht bij gesplitste bouwers). V6-tests sluiten via
@@ -4338,3 +4339,25 @@ dan ongewijzigd). Gesplitst: deel 1 (strook + signalen, deze), deel 2 (rapport).
 - **Tests:** `inzichten-conclusielaag.acceptance.test.tsx` (146), `KpiStrip.test.tsx`, `SignalenBlok.test.tsx`,
   `lib/signaal-tekst.test.ts`, uitbreidingen `lib/inzichten.test.ts`. Nieuwe flake gezien: `inzichten-metrics` AC-6.7.
 - **Rooktest deel 1 geslaagd** (Jamie, 2026-10-29). Open: deel 2 (seizoensrapport).
+
+## Feature: Inzichten conclusielaag deel 2 — seizoensrapport (2026-11-02, `920339e`, live)
+Brief deel 2 (R1–R10) in dezelfde ketenmap (`03-technische-brief-deel2`, `06`/`07`/`08-…-deel2`).
+- **Tekst gedeeld:** `lib/kpi-tekst.ts` (`kpiTegels`, `bronMelding`, `KPI_VOLGORDE`) levert de tegeltekst voor
+  zowel `KpiStrip` als `SeizoensrapportPrint`; `KpiStrip` behield props en DOM. Nooit tekstlogica dupliceren.
+- **Rapport** (`components/inzichten/SeizoensrapportPrint.tsx`): 6 tegels (`.rapport-kpis`, grid 3 kolommen,
+  `data-rapport-kpi`), volgorde kop → tegels → Wat valt op → Resultaten | Topscorers → Vorm → Opkomst per maand →
+  Ratings | Aanwezigheid → voet. `RAPPORT_MAX_TOPSCORERS = 6` met "Top 6 van N". Meldingen per sectie via
+  `bronMelding` (fout vóór afgekapt); Vorm toont bij fout geen "0 gewonnen…" meer (`vormBron` via `unwrapBron`).
+  `rapportSaldo` is verwijderd. Pagina blijft 18 `.rpc(` + 5 `.from(`.
+- **Rapport-DOM-regels:** geen `<h2>`, `<caption>`, `sr-only`, `data-kpi`, `data-conclusielaag`, `role="alert"`
+  in het rapport — de pariteitstests tellen die op het scherm.
+- **Print-CSS (`@media print`, ongelaagd):** `.rapport-lijst-rij > :first-child { min-width: 0; overflow-wrap: anywhere }`
+  + `.rapport-lijst-waarde { flex-shrink: 0 }` tegen overlap van lange namen; `.rapport:has(.rapport-kpis)
+  { padding-right: 0.5mm }` tegen 1 px afknippen rechts.
+- **PDF-bewijs:** 10 renders via de `/api/pdf`-instellingen (703×1000, `emulateMedia('print')`, A4 12 mm), alle
+  ≤ 2 A4 (slechtste ≈ 414 mm van 546). Let op: fonts laden vóór `emulateMedia` gaf lichtere terugvallettertypes.
+- **Bewust open:** R3 — `VormChart` op het scherm toont bij bronfout nog "geen data"; alle bronnen stuk → lege staat
+  (vastgelegd in test); C20 servertijdzone blijft.
+- **Tests:** `seizoensrapport.acceptance.test.tsx`, `inzichten-conclusielaag.acceptance.test.tsx` (199),
+  `lib/kpi-tekst.test.ts`. Bekend rood los hiervan: `cyclusweek-correctie` AC1/AC12.
+- **Rooktest deel 2:** open.
