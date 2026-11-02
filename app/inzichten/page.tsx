@@ -77,6 +77,7 @@ import VormChart from '@/components/inzichten/VormChart'
 import TopWorstRatings from '@/components/inzichten/TopWorstRatings'
 import TopWorstAanwezigheid from '@/components/inzichten/TopWorstAanwezigheid'
 import KpiStrip from '@/components/inzichten/KpiStrip'
+import type { KpiFout } from '@/lib/kpi-tekst'
 import SignalenBlok from '@/components/inzichten/SignalenBlok'
 import PeriodeFilter from '@/components/inzichten/PeriodeFilter'
 import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
@@ -367,10 +368,13 @@ export default async function InzichtenPage({
   )
   const aanwezigheidTopWorst = topWorstAanwezigheid(aanwezigheidPerSpelerBron.rijen)
 
-  const vormRows = unwrap<{ id: string; goals_for: number | null; goals_against: number | null }>(
+  // unwrapBron in plaats van unwrap: bij een falende bron moet het rapport
+  // een melding tonen en niet een verzonnen "0 gewonnen, 0 gelijk, 0 verloren".
+  const vormBron = unwrapBron<{ id: string; goals_for: number | null; goals_against: number | null }>(
     'inzichten.vorm',
     vormResult,
   )
+  const vormRows = vormBron.rijen
   const vormItems: FormStripItem[] = vormRows.map((m) => ({ id: m.id, result: matchResult(m) }))
   const vormTelling = telVorm(vormRows)
 
@@ -505,11 +509,14 @@ export default async function InzichtenPage({
   }
   const signalen = bepaalSignalen(signaalInvoer)
   const signalenOnvolledig = signaalBronnenOnvolledig(signaalInvoer)
-  // Rapport-Doelsaldo: het rapport kent in deel 1 nog geen foutmelding per
-  // tegel. Bij een fout of afgekapte bron geen gedeeltelijk cijfer maar
-  // wedstrijden: 0, zodat het rapport "—" toont.
-  const rapportSaldo =
-    uitslagen.fout || uitslagenAfgekapt ? { ...thuisUit.totaal, wedstrijden: 0 } : thuisUit.totaal
+  // Eén foutobject voor de strook én het rapport: dezelfde vlaggen, dus
+  // dezelfde melding per tegel.
+  const kpiFout: KpiFout = {
+    maandOpkomst: maandOpkomstBron.fout,
+    aanwezigheid: aanwezigheidBron.fout,
+    teamRating: teamRatingBron.fout,
+    uitslagen: uitslagen.fout,
+  }
 
   // Seizoen staat ingesteld, maar er is nog geen enkele registratie: dan is
   // elke kaart leeg en zegt de KPI-strook zes keer "—". Eén uitleg met een
@@ -617,12 +624,7 @@ export default async function InzichtenPage({
         resultaat={thuisUit.totaal}
         uitslagenAfgekapt={uitslagenAfgekapt}
         periodeLabel={periodeLabel}
-        fout={{
-          maandOpkomst: maandOpkomstBron.fout,
-          aanwezigheid: aanwezigheidBron.fout,
-          teamRating: teamRatingBron.fout,
-          uitslagen: uitslagen.fout,
-        }}
+        fout={kpiFout}
         t={t}
       />
 
@@ -683,7 +685,18 @@ export default async function InzichtenPage({
         maanden={maandOpkomst}
         aanwezigheidPercentage={aanwezigheidData?.percentage ?? null}
         rating={ratingTrend}
-        saldo={rapportSaldo}
+        saldo={thuisUit.totaal}
+        resultaten={thuisUit}
+        topscorers={topscorers}
+        uitslagenAfgekapt={uitslagenAfgekapt}
+        signalenOnvolledig={signalenOnvolledig}
+        fout={{
+          ...kpiFout,
+          ratingPerSpeler: ratingPerSpelerBron.fout,
+          aanwezigheidPerSpeler: aanwezigheidPerSpelerBron.fout,
+          spelerMomenten: spelerMomenten.fout,
+          vorm: vormBron.fout,
+        }}
         signalen={signalen}
         ratingTopWorst={ratingTopWorst}
         aanwezigheidTopWorst={aanwezigheidTopWorst}

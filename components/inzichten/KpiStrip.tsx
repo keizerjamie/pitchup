@@ -1,13 +1,12 @@
 import type { Dict } from '@/messages/nl'
 import {
   OPKOMST_DOEL,
-  maandLabel,
-  RATING_TREND_VENSTER,
   type MaandOpkomst,
   type MaandTrend,
   type RatingTrend,
   type ThuisUitTotaal,
 } from '@/lib/inzichten'
+import { kpiTegels, type KpiFout, type KpiTegel } from '@/lib/kpi-tekst'
 
 // De conclusie-laag boven de grafieken: zes cijfers die zeggen hoe het
 // ervoor staat, niet alleen wát er is. Elke tegel draagt drie dingen die de
@@ -48,12 +47,6 @@ function opkomstToon(percentage: number | null): Toon {
   return 'zorg'
 }
 
-// Deltaregel met expliciet teken. `+0` bestaat niet: exact gelijk is neutraal.
-function tekenTekst(delta: number, decimalen = 0): string {
-  const afgerond = decimalen > 0 ? delta.toFixed(decimalen) : String(Math.round(delta))
-  return delta > 0 ? `+${afgerond}` : afgerond
-}
-
 function deltaToon(delta: number | null): Toon {
   if (delta === null || delta === 0) return 'neutraal'
   return delta > 0 ? 'goed' : 'letop'
@@ -90,30 +83,18 @@ function Sparkline({ waarden, kleur }: { waarden: number[]; kleur: string }) {
   )
 }
 
-type KpiId = 'opkomst' | 'aanwezigheid' | 'rating' | 'doelsaldo' | 'punten' | 'cleansheets'
-
 function Kpi({
-  id,
-  label,
-  venster,
-  waarde,
-  detail,
+  tegel,
   detailToon = 'neutraal',
   toon,
   sparkline,
-  melding,
 }: {
-  id: KpiId
-  label: string
-  venster: string
-  waarde: string
-  detail: string
+  tegel: KpiTegel
   detailToon?: Toon
   toon: Toon
   sparkline?: number[]
-  // Fout- of afgekapt-tekst: vervangt het grote cijfer en het detail.
-  melding?: string
 }) {
+  const { id, label, venster, waarde, detail, melding } = tegel
   // Bij een fout of afgekapte bron is er geen oordeel en geen trend: rail
   // neutraal, geen sparkline.
   const heeftMelding = melding !== undefined
@@ -161,119 +142,53 @@ export default function KpiStrip({
   resultaat: ThuisUitTotaal
   uitslagenAfgekapt: boolean
   periodeLabel: string
-  fout: { maandOpkomst: boolean; aanwezigheid: boolean; teamRating: boolean; uitslagen: boolean }
+  fout: KpiFout
   t: Dict
 }) {
-  const bronFout = t.insights.bronFout
-  // Bij een fout heeft de fout voorrang op afgekapt (zoals ThuisUitKaart).
-  const uitslagMelding = fout.uitslagen ? bronFout : uitslagenAfgekapt ? t.insights.afgekapt : undefined
+  // Alle tekst (waarde, detail, venster, melding) komt uit lib/kpi-tekst.ts,
+  // zodat het seizoensrapport exact dezelfde tekst toont. Hier blijven alleen
+  // toon, rail en sparkline.
+  const tegels = kpiTegels(
+    {
+      opkomst,
+      aanwezigheidPercentage,
+      rating,
+      saldo: resultaat,
+      resultaat,
+      uitslagenAfgekapt,
+      periodeLabel,
+      fout,
+    },
+    t,
+  )
   const saldo = resultaat
-  const geenUitslagen = resultaat.wedstrijden === 0
-  const opkomstVenster =
-    opkomst === null
-      ? t.insights.kpiVensterLaatsteMaandLeeg
-      : t.insights.kpiVensterLaatsteMaand.replace('{maand}', maandLabel(opkomst.maand, t.browserLocale))
 
   const reeks = maanden
     .filter((m): m is MaandOpkomst & { percentage: number } => m.percentage !== null)
     .map((m) => m.percentage)
 
-  const opkomstDetail =
-    opkomst === null
-      ? t.insights.kpiGeenData
-      : opkomst.delta === null
-        ? t.insights.kpiGeenVergelijking
-        : t.insights.kpiDeltaMaand.replace('{delta}', tekenTekst(opkomst.delta))
-
-  const ratingDetail =
-    rating === null
-      ? t.insights.kpiGeenData
-      : rating.delta === null
-        ? t.insights.kpiRatingDetail.replace('{n}', String(rating.aantal))
-        : t.insights.kpiDeltaRating
-            .replace('{delta}', tekenTekst(rating.delta, 1))
-            .replace('{venster}', String(RATING_TREND_VENSTER))
-
   return (
     <div data-conclusielaag="kpi" className="grid grid-cols-2 lg:grid-cols-3 gap-3">
       <Kpi
-        id="opkomst"
-        melding={fout.maandOpkomst ? bronFout : undefined}
-        venster={opkomstVenster}
-        label={t.insights.kpiOpkomstLabel}
-        waarde={opkomst === null ? '—' : `${opkomst.percentage}%`}
-        detail={opkomstDetail}
+        tegel={tegels.opkomst}
         detailToon={opkomst === null ? 'neutraal' : deltaToon(opkomst.delta)}
         toon={opkomstToon(opkomst?.percentage ?? null)}
         sparkline={reeks}
       />
+      <Kpi tegel={tegels.aanwezigheid} toon={opkomstToon(aanwezigheidPercentage)} />
       <Kpi
-        id="aanwezigheid"
-        melding={fout.aanwezigheid ? bronFout : undefined}
-        venster={periodeLabel}
-        label={t.insights.kpiAanwezigheidLabel}
-        waarde={aanwezigheidPercentage === null ? '—' : `${aanwezigheidPercentage}%`}
-        detail={t.insights.kpiOpkomstDoel.replace('{doel}', String(OPKOMST_DOEL))}
-        toon={opkomstToon(aanwezigheidPercentage)}
-      />
-      <Kpi
-        id="rating"
-        melding={fout.teamRating ? bronFout : undefined}
-        venster={periodeLabel}
-        label={t.insights.kpiRatingLabel}
-        // Eén decimaal, zelfde afronding als TopWorstRatings/RatingsChart —
-        // hetzelfde gemiddelde mag nergens op de pagina anders staan.
-        waarde={rating === null ? '—' : (Math.round(rating.gemiddelde * 10) / 10).toFixed(1)}
-        detail={ratingDetail}
+        tegel={tegels.rating}
         detailToon={rating === null ? 'neutraal' : deltaToon(rating.delta)}
         toon={rating === null ? 'neutraal' : deltaToon(rating.delta)}
       />
       <Kpi
-        id="doelsaldo"
-        melding={uitslagMelding}
-        venster={periodeLabel}
-        label={t.insights.kpiDoelsaldoLabel}
-        waarde={saldo.wedstrijden === 0 ? '—' : tekenTekst(saldo.saldo)}
-        detail={
-          saldo.wedstrijden === 0
-            ? t.insights.kpiGeenData
-            : t.insights.kpiDoelsaldoDetail
-                .replace('{voor}', String(saldo.voor))
-                .replace('{tegen}', String(saldo.tegen))
-        }
+        tegel={tegels.doelsaldo}
         toon={saldo.wedstrijden === 0 ? 'neutraal' : saldo.saldo > 0 ? 'goed' : saldo.saldo < 0 ? 'letop' : 'neutraal'}
       />
       {/* De twee nieuwe tegels zijn bewust neutraal: de story vraagt om
           cijfers, niet om een oordeel over punten of clean sheets. */}
-      <Kpi
-        id="punten"
-        melding={uitslagMelding}
-        venster={periodeLabel}
-        label={t.insights.kpiPuntenLabel}
-        // Zelfde afronding als ResultaatTabel (2 decimalen).
-        waarde={resultaat.puntenPerWedstrijd === null ? '—' : resultaat.puntenPerWedstrijd.toFixed(2)}
-        detail={
-          geenUitslagen
-            ? t.insights.kpiGeenData
-            : t.insights.kpiPuntenDetail
-                .replace('{punten}', String(resultaat.punten))
-                .replace('{n}', String(resultaat.wedstrijden))
-        }
-        toon="neutraal"
-      />
-      <Kpi
-        id="cleansheets"
-        melding={uitslagMelding}
-        venster={periodeLabel}
-        label={t.insights.kpiCleanSheetsLabel}
-        waarde={geenUitslagen ? '—' : String(resultaat.cleanSheets)}
-        detail={
-          geenUitslagen
-            ? t.insights.kpiGeenData
-            : t.insights.kpiCleanSheetsDetail.replace('{n}', String(resultaat.wedstrijden))
-        }
-        toon="neutraal"
-      />
+      <Kpi tegel={tegels.punten} toon="neutraal" />
+      <Kpi tegel={tegels.cleansheets} toon="neutraal" />
     </div>
   )
 }

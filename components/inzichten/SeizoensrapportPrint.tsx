@@ -10,16 +10,20 @@ import {
   type RatingTrend,
   type Signaal,
   type Seizoensvenster,
+  type ThuisUitSplitsing,
   type TopWorst,
+  type Topscorers,
   type VormTelling,
 } from '@/lib/inzichten'
 import { vulSignaalIn } from '@/lib/signaal-tekst'
+import { KPI_VOLGORDE, bronMelding, kpiTegels, type KpiFout, type KpiTegel } from '@/lib/kpi-tekst'
+import { ResultaatCellen, ResultaatKoppen } from './ResultaatTabel'
 import TeamLogo from '@/components/TeamLogo'
 import type { FormStripItem } from '@/components/dashboard/FormStrip'
 import type { MatchResult } from '@/lib/types'
 
 // Print-only seizoensrapport (dual-markup-patroon, zie MatchSquadPrintList.tsx
-// en AttendanceSummary.tsx): één A4 dat een trainer kan meenemen naar een
+// en AttendanceSummary.tsx): maximaal twee A4's die een trainer kan meenemen naar een
 // ouderavond of bestuursvergadering.
 //
 // BEWUST EEN DOCUMENT, GEEN POSTER. De wedstrijdselectie is een aankondiging
@@ -56,14 +60,44 @@ function vormLetter(t: Dict, result: MatchResult): string {
   }
 }
 
-function Kpi({ label, waarde, detail }: { label: string; waarde: string; detail: string }) {
+// Topscorers-tabel: meer dan dit aantal rijen kost op papier te veel hoogte
+// (de paginabegroting is twee A4's); de regel rapportTopscorersAfgekort maakt
+// zichtbaar dat er is afgekapt.
+const RAPPORT_MAX_TOPSCORERS = 6
+
+// Foutvlaggen van de rapportbronnen: de vier KPI-bronnen (gedeeld met de
+// strook) plus de bronnen van de secties. Alles optioneel, default false.
+type RapportFout = KpiFout & {
+  ratingPerSpeler: boolean
+  aanwezigheidPerSpeler: boolean
+  spelerMomenten: boolean
+  vorm: boolean
+}
+
+// Vier <p>'s in dezelfde volgorde als de tegel op het scherm: label, venster,
+// waarde, detail. Bij een melding vervangt één regel tekst waarde en detail;
+// de melding is bewust nooit een role="alert" (dit is papier).
+// Bewust data-rapport-kpi en niet data-kpi: de schermtests tellen [data-kpi].
+function Kpi({ tegel }: { tegel: KpiTegel }) {
+  const heeftMelding = tegel.melding !== undefined
   return (
-    <div className="rapport-kpi">
-      <p className="rapport-kpi-label">{label}</p>
-      <p className="rapport-kpi-waarde font-pdf-display">{waarde}</p>
-      <p className="rapport-kpi-detail">{detail}</p>
+    <div className={heeftMelding ? 'rapport-kpi rapport-kpi-neutraal' : 'rapport-kpi'} data-rapport-kpi={tegel.id}>
+      <p className="rapport-kpi-label">{tegel.label}</p>
+      <p className="rapport-kpi-venster">{tegel.venster}</p>
+      {heeftMelding ? (
+        <p className="rapport-melding">{tegel.melding}</p>
+      ) : (
+        <>
+          <p className="rapport-kpi-waarde font-pdf-display">{tegel.waarde}</p>
+          <p className="rapport-kpi-detail">{tegel.detail}</p>
+        </>
+      )}
     </div>
   )
+}
+
+function Melding({ tekst }: { tekst: string }) {
+  return <p className="rapport-melding">{tekst}</p>
 }
 
 function SpelerLijst({ titel, rijen }: { titel: string; rijen: { id: string; naam: string; waarde: string }[] }) {
@@ -97,6 +131,11 @@ export default function SeizoensrapportPrint({
   aanwezigheidTopWorst,
   vormTelling,
   vormItems = [],
+  resultaten,
+  topscorers,
+  uitslagenAfgekapt = false,
+  signalenOnvolledig = false,
+  fout,
   generatedOn = null,
   primaryColor,
   secondaryColor,
@@ -119,13 +158,56 @@ export default function SeizoensrapportPrint({
   // familie als de wedstrijdselectie-poster (MatchFormCards). Optioneel met
   // lege default zodat bestaande aanroepen/testharnassen blijven compileren.
   vormItems?: FormStripItem[]
+  // Nieuwe props zijn optioneel (testharnassen blijven compileren). Zonder
+  // `resultaten` ontbreekt de sectie Resultaten en tonen punten/clean sheets
+  // "—"; zonder `topscorers` ontbreekt de sectie Topscorers.
+  resultaten?: ThuisUitSplitsing
+  topscorers?: Topscorers
+  uitslagenAfgekapt?: boolean
+  signalenOnvolledig?: boolean
+  fout?: Partial<RapportFout>
   // Al geformatteerde generatiedatum voor de voetstrook (server bepaalt de
   // datum en het locale-formaat; dit component blijft deterministisch).
   generatedOn?: string | null
   primaryColor: string
   secondaryColor: string
 }) {
+  const f: RapportFout = {
+    maandOpkomst: false,
+    aanwezigheid: false,
+    teamRating: false,
+    uitslagen: false,
+    ratingPerSpeler: false,
+    aanwezigheidPerSpeler: false,
+    spelerMomenten: false,
+    vorm: false,
+    ...fout,
+  }
   const metCijfer = maanden.filter((m): m is MaandOpkomst & { percentage: number } => m.percentage !== null)
+
+  const tegels = kpiTegels(
+    {
+      opkomst,
+      aanwezigheidPercentage,
+      rating,
+      saldo,
+      resultaat: resultaten?.totaal ?? null,
+      uitslagenAfgekapt,
+      periodeLabel,
+      fout: f,
+    },
+    t,
+  )
+
+  const resultatenMelding = bronMelding(t, f.uitslagen, uitslagenAfgekapt)
+  const topscorerRijen = topscorers?.spelers.slice(0, RAPPORT_MAX_TOPSCORERS) ?? []
+  const resultaatRijen: [string, ThuisUitSplitsing['thuis']][] = resultaten
+    ? [
+        [t.insights.thuisLabel, resultaten.thuis],
+        [t.insights.uitLabel, resultaten.uit],
+        ...(resultaten.onbekend ? ([[t.insights.onbekendLabel, resultaten.onbekend]] as [string, ThuisUitSplitsing['thuis']][]) : []),
+      ]
+    : []
 
   const vormRegel = t.insights.vormSummary
     .replace('{win}', String(vormTelling.win))
@@ -152,33 +234,12 @@ export default function SeizoensrapportPrint({
       </div>
 
       <div className="rapport-kpis">
-        <Kpi
-          label={t.insights.kpiOpkomstLabel}
-          waarde={opkomst === null ? '—' : `${opkomst.percentage}%`}
-          detail={t.insights.kpiOpkomstDoel.replace('{doel}', String(OPKOMST_DOEL))}
-        />
-        <Kpi
-          label={t.insights.kpiAanwezigheidLabel}
-          waarde={aanwezigheidPercentage === null ? '—' : `${aanwezigheidPercentage}%`}
-          detail={t.insights.kpiOpkomstDoel.replace('{doel}', String(OPKOMST_DOEL))}
-        />
-        <Kpi
-          label={t.insights.kpiRatingLabel}
-          waarde={rating === null ? '—' : (Math.round(rating.gemiddelde * 10) / 10).toFixed(1)}
-          detail={rating === null ? t.insights.kpiGeenData : t.insights.kpiRatingDetail.replace('{n}', String(rating.aantal))}
-        />
-        <Kpi
-          label={t.insights.kpiDoelsaldoLabel}
-          waarde={saldo.wedstrijden === 0 ? '—' : saldo.saldo > 0 ? `+${saldo.saldo}` : String(saldo.saldo)}
-          detail={
-            saldo.wedstrijden === 0
-              ? t.insights.kpiGeenData
-              : t.insights.kpiDoelsaldoDetail.replace('{voor}', String(saldo.voor)).replace('{tegen}', String(saldo.tegen))
-          }
-        />
+        {KPI_VOLGORDE.map((id) => (
+          <Kpi key={id} tegel={tegels[id]} />
+        ))}
       </div>
 
-      {signalen.length > 0 && (
+      {(signalen.length > 0 || signalenOnvolledig) && (
         <div className="rapport-sectie">
           <p className="rapport-sectiekop font-pdf-display">{t.insights.signalenTitle}</p>
           {signalen.map((s) => (
@@ -186,10 +247,124 @@ export default function SeizoensrapportPrint({
               {vulSignaalIn(t, s)}
             </p>
           ))}
+          {/* Geen .rapport-signaal: de melding is geen signaal en krijgt geen bolletje. */}
+          {signalenOnvolledig && <Melding tekst={t.insights.signalenOnvolledig} />}
         </div>
       )}
 
-      {metCijfer.length > 0 && (
+      {(resultaten || topscorers) && (
+        <div className="rapport-kolommen">
+          {resultaten && (
+            <div className="rapport-sectie">
+              <p className="rapport-sectiekop font-pdf-display">{t.insights.rapportResultatenTitle}</p>
+              {resultatenMelding ? (
+                <Melding tekst={resultatenMelding} />
+              ) : resultaten.totaal.wedstrijden === 0 ? (
+                <p className="rapport-noot">{t.insights.thuisUitEmpty}</p>
+              ) : (
+                <>
+                  <table className="rapport-tabel">
+                    <ResultaatKoppen eersteKolom={t.insights.locatieKolom} t={t} />
+                    <tbody>
+                      {resultaatRijen.map(([label, groep]) => (
+                        <tr key={label}>
+                          <th scope="row">{label}</th>
+                          <ResultaatCellen groep={groep} />
+                        </tr>
+                      ))}
+                      <tr>
+                        <th scope="row">{t.insights.totaalLabel}</th>
+                        <ResultaatCellen groep={resultaten.totaal} />
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p className="rapport-noot">
+                    {t.insights.cleanSheets
+                      .replace('{n}', String(resultaten.totaal.cleanSheets))
+                      .replace('{totaal}', String(resultaten.totaal.wedstrijden))}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
+          {topscorers && (
+            <div className="rapport-sectie">
+              <p className="rapport-sectiekop font-pdf-display">{t.insights.rapportTopscorersTitle}</p>
+              {f.spelerMomenten ? (
+                <Melding tekst={t.insights.bronFout} />
+              ) : topscorers.doelpunten === 0 ? (
+                <p className="rapport-noot">{t.insights.topscorersEmpty}</p>
+              ) : (
+                <>
+                  <table className="rapport-tabel">
+                    <thead>
+                      <tr>
+                        <th scope="col" className="text-left">{t.insights.kolomSpeler}</th>
+                        <th scope="col" className="rapport-tabel-getal">{t.players.statsGoals}</th>
+                        <th scope="col" className="rapport-tabel-getal">{t.players.statsAssists}</th>
+                        <th scope="col" className="rapport-tabel-getal">{t.insights.rapportKolomBetrokken}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topscorerRijen.map((sp) => (
+                        <tr key={sp.player_id}>
+                          <th scope="row">
+                            {sp.naam}
+                            {sp.gast && <span className="rapport-gast">({t.insights.gastLabel})</span>}
+                          </th>
+                          <td className="rapport-tabel-getal">{sp.doelpunten}</td>
+                          <td className="rapport-tabel-getal">{sp.assists}</td>
+                          <td className="rapport-tabel-getal">{sp.betrokken}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {topscorers.spelers.length > RAPPORT_MAX_TOPSCORERS && (
+                    <p className="rapport-noot">
+                      {t.insights.rapportTopscorersAfgekort
+                        .replace('{n}', String(RAPPORT_MAX_TOPSCORERS))
+                        .replace('{totaal}', String(topscorers.spelers.length))}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="rapport-sectie">
+        <p className="rapport-sectiekop font-pdf-display">{t.insights.vormTitle}</p>
+        {f.vorm ? (
+          <Melding tekst={t.insights.bronFout} />
+        ) : (
+          <>
+            {/* W/G/V-badges (meest recent links) in dezelfde vaste
+                groen/amber/rood-familie als de wedstrijdselectie-poster; de
+                leesbare telregel eronder blijft staan. */}
+            {vormItems.length > 0 && (
+              <div className="rapport-vorm-badges" aria-hidden="true">
+                {vormItems.map((item) => (
+                  <span key={item.id} className={`rapport-vorm-badge rapport-vorm-badge-${item.result} font-pdf-display`}>
+                    {vormLetter(t, item.result)}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="rapport-vorm">{vormRegel}</p>
+          </>
+        )}
+      </div>
+
+      {f.maandOpkomst && (
+        <div className="rapport-sectie">
+          <p className="rapport-sectiekop font-pdf-display">{t.insights.opkomstTitle}</p>
+          <Melding tekst={t.insights.bronFout} />
+        </div>
+      )}
+
+      {!f.maandOpkomst && metCijfer.length > 0 && (
         <div className="rapport-sectie">
           <p className="rapport-sectiekop font-pdf-display">{t.insights.opkomstTitle}</p>
           {/* Twee rijen met identieke flex-geometrie: de staven zitten in een
@@ -229,70 +404,65 @@ export default function SeizoensrapportPrint({
       <div className="rapport-kolommen">
         <div className="rapport-sectie">
           <p className="rapport-sectiekop font-pdf-display">{t.insights.topWorstRatingsTitle}</p>
-          <SpelerLijst
-            titel={t.insights.bestLabel}
-            rijen={ratingTopWorst.top.map((r) => ({
-              id: `top-${r.player_id}`,
-              naam: r.naam,
-              waarde: t.insights.topWorstRatingsWaarde
-                .replace('{gemiddelde}', (Math.round(r.gemiddelde * 10) / 10).toFixed(1))
-                .replace('{aantal}', String(r.aantal)),
-            }))}
-          />
-          <SpelerLijst
-            titel={t.insights.worstLabel}
-            rijen={ratingTopWorst.worst.map((r) => ({
-              id: `worst-${r.player_id}`,
-              naam: r.naam,
-              waarde: t.insights.topWorstRatingsWaarde
-                .replace('{gemiddelde}', (Math.round(r.gemiddelde * 10) / 10).toFixed(1))
-                .replace('{aantal}', String(r.aantal)),
-            }))}
-          />
+          {f.ratingPerSpeler ? (
+            <Melding tekst={t.insights.bronFout} />
+          ) : (
+            <>
+              <SpelerLijst
+                titel={t.insights.bestLabel}
+                rijen={ratingTopWorst.top.map((r) => ({
+                  id: `top-${r.player_id}`,
+                  naam: r.naam,
+                  waarde: t.insights.topWorstRatingsWaarde
+                    .replace('{gemiddelde}', (Math.round(r.gemiddelde * 10) / 10).toFixed(1))
+                    .replace('{aantal}', String(r.aantal)),
+                }))}
+              />
+              <SpelerLijst
+                titel={t.insights.worstLabel}
+                rijen={ratingTopWorst.worst.map((r) => ({
+                  id: `worst-${r.player_id}`,
+                  naam: r.naam,
+                  waarde: t.insights.topWorstRatingsWaarde
+                    .replace('{gemiddelde}', (Math.round(r.gemiddelde * 10) / 10).toFixed(1))
+                    .replace('{aantal}', String(r.aantal)),
+                }))}
+              />
+            </>
+          )}
         </div>
 
         <div className="rapport-sectie">
           <p className="rapport-sectiekop font-pdf-display">{t.insights.topWorstAanwezigheidTitle}</p>
-          <SpelerLijst
-            titel={t.insights.bestLabel}
-            rijen={aanwezigheidTopWorst.top.map((r) => ({
-              id: `atop-${r.player_id}`,
-              naam: r.naam,
-              waarde: t.insights.topWorstAanwezigheidWaarde
-                .replace('{percentage}', String(r.percentage))
-                .replace('{aanwezig}', String(r.aanwezig))
-                .replace('{totaal}', String(r.aanwezig + r.afwezig)),
-            }))}
-          />
-          <SpelerLijst
-            titel={t.insights.worstLabel}
-            rijen={aanwezigheidTopWorst.worst.map((r) => ({
-              id: `aworst-${r.player_id}`,
-              naam: r.naam,
-              waarde: t.insights.topWorstAanwezigheidWaarde
-                .replace('{percentage}', String(r.percentage))
-                .replace('{aanwezig}', String(r.aanwezig))
-                .replace('{totaal}', String(r.aanwezig + r.afwezig)),
-            }))}
-          />
+          {f.aanwezigheidPerSpeler ? (
+            <Melding tekst={t.insights.bronFout} />
+          ) : (
+            <>
+              <SpelerLijst
+                titel={t.insights.bestLabel}
+                rijen={aanwezigheidTopWorst.top.map((r) => ({
+                  id: `atop-${r.player_id}`,
+                  naam: r.naam,
+                  waarde: t.insights.topWorstAanwezigheidWaarde
+                    .replace('{percentage}', String(r.percentage))
+                    .replace('{aanwezig}', String(r.aanwezig))
+                    .replace('{totaal}', String(r.aanwezig + r.afwezig)),
+                }))}
+              />
+              <SpelerLijst
+                titel={t.insights.worstLabel}
+                rijen={aanwezigheidTopWorst.worst.map((r) => ({
+                  id: `aworst-${r.player_id}`,
+                  naam: r.naam,
+                  waarde: t.insights.topWorstAanwezigheidWaarde
+                    .replace('{percentage}', String(r.percentage))
+                    .replace('{aanwezig}', String(r.aanwezig))
+                    .replace('{totaal}', String(r.aanwezig + r.afwezig)),
+                }))}
+              />
+            </>
+          )}
         </div>
-      </div>
-
-      <div className="rapport-sectie">
-        <p className="rapport-sectiekop font-pdf-display">{t.insights.vormTitle}</p>
-        {/* W/G/V-badges (meest recent links) in dezelfde vaste
-            groen/amber/rood-familie als de wedstrijdselectie-poster; de
-            leesbare telregel eronder blijft staan. */}
-        {vormItems.length > 0 && (
-          <div className="rapport-vorm-badges" aria-hidden="true">
-            {vormItems.map((item) => (
-              <span key={item.id} className={`rapport-vorm-badge rapport-vorm-badge-${item.result} font-pdf-display`}>
-                {vormLetter(t, item.result)}
-              </span>
-            ))}
-          </div>
-        )}
-        <p className="rapport-vorm">{vormRegel}</p>
       </div>
 
       <div className="rapport-voet">

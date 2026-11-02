@@ -5,6 +5,8 @@
 // .test.tsx). Het rapport is een pure presentatielaag: alle rekenwerk zit in
 // lib/inzichten.ts en wordt daar al getoetst.
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { render, within } from '@testing-library/react'
 import { nl } from '@/messages/nl'
 import {
@@ -12,6 +14,8 @@ import {
   bepaalSignalen,
   doelsaldo,
   laatsteMaandTrend,
+  bepaalTopscorers,
+  splitsThuisUit,
   teamRatingTrend,
   toMaandOpkomst,
   topWorstAanwezigheid,
@@ -19,9 +23,28 @@ import {
   type AanwezigheidPerSpelerRij,
   type DoelpuntItem,
   type RatingPerSpelerRij,
+  type SpelerMomentenRij,
   type TeamRatingRij,
+  type WedstrijdUitslagRij,
 } from '@/lib/inzichten'
 import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
+
+const blokKpis = (blok: HTMLElement) => Array.from(blok.querySelectorAll('[data-rapport-kpi]'))
+
+const uitslag = (o: Partial<WedstrijdUitslagRij>): WedstrijdUitslagRij => ({
+  event_id: 'e', datum: '2026-09-01', home_away: 'home', goals_for: 1, goals_against: 0, formatie: null, ...o,
+})
+const uitslagen: WedstrijdUitslagRij[] = [
+  uitslag({ event_id: 'u1', goals_for: 3, goals_against: 0 }),
+  uitslag({ event_id: 'u2', goals_for: 1, goals_against: 1, home_away: 'away' }),
+  uitslag({ event_id: 'u3', goals_for: 2, goals_against: 1, home_away: 'away' }),
+]
+
+const moment = (o: Partial<SpelerMomentenRij>): SpelerMomentenRij => ({
+  player_id: 's', naam: 'Speler', gast: false, doelpunten: 0, assists: 0, geel: 0, rood: 0, ...o,
+})
+const scorers = (n: number) =>
+  Array.from({ length: n }, (_, k) => moment({ player_id: `s${k}`, naam: `Scorer ${k + 1}`, doelpunten: 20 - k, assists: k }))
 
 const maanden = toMaandOpkomst([
   { maand: '2026-08', aanwezig: 92, afwezig: 8 }, // 92% — boven de norm
@@ -180,16 +203,22 @@ describe('seizoensrapport — kop en huisstijl', () => {
 })
 
 describe('seizoensrapport — cijfers', () => {
-  it('toont de vier kernkijfers met hun labels', () => {
-    const blok = renderRapport()
+  const kpiIds = (blok: HTMLElement) =>
+    Array.from(blok.querySelectorAll('[data-rapport-kpi]')).map((e) => e.getAttribute('data-rapport-kpi'))
+
+  it('toont de zes kerncijfers met hun labels, in de volgorde van het scherm', () => {
+    const blok = renderRapport({ resultaten: splitsThuisUit(uitslagen) })
     for (const label of [
       nl.insights.kpiOpkomstLabel,
       nl.insights.kpiAanwezigheidLabel,
       nl.insights.kpiRatingLabel,
       nl.insights.kpiDoelsaldoLabel,
+      nl.insights.kpiPuntenLabel,
+      nl.insights.kpiCleanSheetsLabel,
     ]) {
       expect(within(blok).getByText(label)).toBeInTheDocument()
     }
+    expect(kpiIds(blok)).toEqual(['opkomst', 'aanwezigheid', 'rating', 'doelsaldo', 'punten', 'cleansheets'])
     // Scopen op het cijferblok: 71% staat óók als waarde boven de
     // septemberbalk verderop in het rapport.
     const kpis = within(blok.querySelector('.rapport-kpis') as HTMLElement)
@@ -197,6 +226,26 @@ describe('seizoensrapport — cijfers', () => {
     expect(kpis.getByText('79%')).toBeInTheDocument() // seizoen
     expect(kpis.getByText('7.2')).toBeInTheDocument() // gem. rating
     expect(kpis.getByText('+4')).toBeInTheDocument() // doelsaldo 5-1
+    expect(kpis.getByText('2.33')).toBeInTheDocument() // punten per wedstrijd
+  })
+
+  it('geen tegel erbij of eraf: precies zes, met en zonder resultaten (nooit >=)', () => {
+    expect(blokKpis(renderRapport())).toHaveLength(6)
+    expect(blokKpis(renderRapport({ resultaten: splitsThuisUit([]) }))).toHaveLength(6)
+  })
+
+  it('elke tegel toont label, venster, waarde en detail als vier <p> in vaste volgorde', () => {
+    const blok = renderRapport({ resultaten: splitsThuisUit(uitslagen) })
+    const opkomst = blok.querySelector('[data-rapport-kpi="opkomst"]') as HTMLElement
+    expect(Array.from(opkomst.querySelectorAll('p')).map((p) => p.className.split(' ')[0])).toEqual([
+      'rapport-kpi-label', 'rapport-kpi-venster', 'rapport-kpi-waarde', 'rapport-kpi-detail',
+    ])
+    expect(opkomst.querySelector('.rapport-kpi-venster')?.textContent).toContain('Sep 2026')
+    expect(opkomst.querySelector('.rapport-kpi-detail')?.textContent).toBe(
+      nl.insights.kpiDeltaMaand.replace('{delta}', '-21'),
+    )
+    const punten = blok.querySelector('[data-rapport-kpi="punten"]') as HTMLElement
+    expect(punten.querySelector('.rapport-kpi-venster')?.textContent).toBe(nl.insights.periodeSeizoen)
   })
 
   it('ontbrekende cijfers tonen een streepje, nooit een verzonnen 0', () => {
@@ -204,8 +253,10 @@ describe('seizoensrapport — cijfers', () => {
       opkomst: null, maanden: [], aanwezigheidPercentage: null, rating: null,
       saldo: { voor: 0, tegen: 0, saldo: 0, wedstrijden: 0 },
     })
-    expect(within(blok.querySelector('.rapport-kpis') as HTMLElement).getAllByText('—')).toHaveLength(4)
+    // Zonder `resultaten` tonen ook punten en clean sheets "—".
+    expect(within(blok.querySelector('.rapport-kpis') as HTMLElement).getAllByText('—')).toHaveLength(6)
     expect(blok.textContent).not.toMatch(/\b0%/)
+    expect(blok.querySelector('.rapport-kpis')?.textContent).not.toMatch(/0\.00|\b0\b/)
   })
 
   it('een negatief doelsaldo houdt zijn minteken en krijgt er geen plus bij', () => {
@@ -275,5 +326,207 @@ describe('seizoensrapport — signalen, maandbalken en spelerslijsten', () => {
       nl.insights.vormSummary.replace('{win}', '3').replace('{gelijk}', '1').replace('{verlies}', '1'),
     )
     expect(within(blok).getByText(nl.matchSquad.footerGenerated)).toBeInTheDocument()
+  })
+})
+
+describe('seizoensrapport — Resultaten en Topscorers', () => {
+  const sectie = (blok: HTMLElement, titel: string) =>
+    within(blok).getByText(titel).closest('.rapport-sectie') as HTMLElement
+
+  it('Resultaten: zeven kolommen, rijen Thuis, Uit en Totaal en de clean-sheetsregel; geen Onbekend', () => {
+    const blok = renderRapport({ resultaten: splitsThuisUit(uitslagen) })
+    const s = sectie(blok, nl.insights.rapportResultatenTitle)
+    expect(s.querySelectorAll('thead th')).toHaveLength(7)
+    expect(Array.from(s.querySelectorAll('tbody th')).map((e) => e.textContent)).toEqual([
+      nl.insights.thuisLabel, nl.insights.uitLabel, nl.insights.totaalLabel,
+    ])
+    expect(s.textContent).toContain(nl.insights.cleanSheets.replace('{n}', '1').replace('{totaal}', '3'))
+    expect(s.textContent).not.toContain(nl.insights.zonderEigenDoelpunt.replace('{n}', '0').replace('{totaal}', '3'))
+  })
+
+  it('Resultaten: de rij Onbekend verschijnt alleen als er onbekende wedstrijden zijn', () => {
+    const blok = renderRapport({ resultaten: splitsThuisUit([...uitslagen, uitslag({ event_id: 'u4', home_away: null })]) })
+    expect(within(sectie(blok, nl.insights.rapportResultatenTitle)).getByText(nl.insights.onbekendLabel)).toBeInTheDocument()
+  })
+
+  it('Resultaten: 0 wedstrijden toont thuisUitEmpty onder de kop, geen tabel', () => {
+    const blok = renderRapport({ resultaten: splitsThuisUit([]) })
+    const s = sectie(blok, nl.insights.rapportResultatenTitle)
+    expect(s.textContent).toContain(nl.insights.thuisUitEmpty)
+    expect(s.querySelector('table')).toBeNull()
+  })
+
+  it('Resultaten: afgekapt en fout tonen alleen een melding, fout gaat voor afgekapt; geen cijfers', () => {
+    const afgekapt = sectie(renderRapport({ resultaten: splitsThuisUit(uitslagen), uitslagenAfgekapt: true }), nl.insights.rapportResultatenTitle)
+    expect(afgekapt.textContent).toContain(nl.insights.afgekapt)
+    expect(afgekapt.querySelector('table')).toBeNull()
+    const stuk = sectie(
+      renderRapport({ resultaten: splitsThuisUit(uitslagen), uitslagenAfgekapt: true, fout: { uitslagen: true } }),
+      nl.insights.rapportResultatenTitle,
+    )
+    expect(stuk.textContent).toContain(nl.insights.bronFout)
+    expect(stuk.textContent).not.toContain(nl.insights.afgekapt)
+    expect(stuk.querySelector('table')).toBeNull()
+  })
+
+  it('Topscorers: vier kolommen, gast met label en sortering van bepaalTopscorers', () => {
+    const rijen = [
+      moment({ player_id: 'a', naam: 'Anna', doelpunten: 2, assists: 1 }),
+      moment({ player_id: 'b', naam: 'Gijs', gast: true, doelpunten: 5, assists: 0 }),
+    ]
+    const blok = renderRapport({ topscorers: bepaalTopscorers(rijen) })
+    const s = sectie(blok, nl.insights.rapportTopscorersTitle)
+    expect(Array.from(s.querySelectorAll('thead th')).map((e) => e.textContent)).toEqual([
+      nl.insights.kolomSpeler, nl.players.statsGoals, nl.players.statsAssists, nl.insights.rapportKolomBetrokken,
+    ])
+    const rows = Array.from(s.querySelectorAll('tbody tr'))
+    expect(rows.map((r) => r.querySelector('th')?.textContent)).toEqual([`Gijs(${nl.insights.gastLabel})`, 'Anna'])
+    expect(Array.from(rows[0].querySelectorAll('td')).map((e) => e.textContent)).toEqual(['5', '0', '5'])
+    expect(s.querySelector('.rapport-gast')?.textContent).toBe(`(${nl.insights.gastLabel})`)
+  })
+
+  it('Topscorers: precies 6 spelers geeft geen Top-regel, 7 geeft 6 rijen plus "Top 6 van 7"', () => {
+    const zes = sectie(renderRapport({ topscorers: bepaalTopscorers(scorers(6)) }), nl.insights.rapportTopscorersTitle)
+    expect(zes.querySelectorAll('tbody tr')).toHaveLength(6)
+    expect(zes.querySelector('.rapport-noot')).toBeNull()
+    const zeven = sectie(renderRapport({ topscorers: bepaalTopscorers(scorers(7)) }), nl.insights.rapportTopscorersTitle)
+    expect(zeven.querySelectorAll('tbody tr')).toHaveLength(6)
+    expect(zeven.textContent).toContain(nl.insights.rapportTopscorersAfgekort.replace('{n}', '6').replace('{totaal}', '7'))
+    expect(zeven.textContent).not.toContain('Scorer 7')
+  })
+
+  it('Topscorers: 0 doelpunten toont topscorersEmpty; fout toont bronFout', () => {
+    const leeg = sectie(renderRapport({ topscorers: bepaalTopscorers([]) }), nl.insights.rapportTopscorersTitle)
+    expect(leeg.textContent).toContain(nl.insights.topscorersEmpty)
+    expect(leeg.querySelector('table')).toBeNull()
+    const stuk = sectie(
+      renderRapport({ topscorers: bepaalTopscorers(scorers(3)), fout: { spelerMomenten: true } }),
+      nl.insights.rapportTopscorersTitle,
+    )
+    expect(stuk.textContent).toContain(nl.insights.bronFout)
+    expect(stuk.querySelector('table')).toBeNull()
+  })
+
+  it('Topscorers: een naam met {drempel} blijft letterlijk staan', () => {
+    const blok = renderRapport({ topscorers: bepaalTopscorers([moment({ naam: 'Jan {drempel}', doelpunten: 1 })]) })
+    expect(blok.textContent).toContain('Jan {drempel}')
+  })
+
+  it('zonder de nieuwe props ontbreken beide secties', () => {
+    const blok = renderRapport()
+    expect(within(blok).queryByText(nl.insights.rapportResultatenTitle)).toBeNull()
+    expect(within(blok).queryByText(nl.insights.rapportTopscorersTitle)).toBeNull()
+  })
+
+  it('Resultaten en Topscorers staan naast elkaar vóór de Vorm, en die vóór Opkomst per maand', () => {
+    const blok = renderRapport({ resultaten: splitsThuisUit(uitslagen), topscorers: bepaalTopscorers(scorers(2)) })
+    const volgorde = Array.from(blok.querySelectorAll('.rapport-sectiekop')).map((e) => e.textContent)
+    expect(volgorde.indexOf(nl.insights.rapportResultatenTitle)).toBeLessThan(volgorde.indexOf(nl.insights.vormTitle))
+    expect(volgorde.indexOf(nl.insights.rapportTopscorersTitle)).toBe(volgorde.indexOf(nl.insights.rapportResultatenTitle) + 1)
+    expect(volgorde.indexOf(nl.insights.vormTitle)).toBeLessThan(volgorde.indexOf(nl.insights.opkomstTitle))
+  })
+})
+
+describe('seizoensrapport — meldingen bij falende bronnen', () => {
+  const sectie = (blok: HTMLElement, titel: string) =>
+    within(blok).getByText(titel).closest('.rapport-sectie') as HTMLElement
+
+  it.each([
+    ['maandOpkomst', 'opkomst'],
+    ['aanwezigheid', 'aanwezigheid'],
+    ['teamRating', 'rating'],
+  ] as const)('fout %s: alleen die tegel toont bronFout, neutraal, zonder cijfer', (vlag, id) => {
+    const blok = renderRapport({ fout: { [vlag]: true } })
+    const tegel = blok.querySelector(`[data-rapport-kpi="${id}"]`) as HTMLElement
+    expect(tegel.className).toContain('rapport-kpi-neutraal')
+    expect(tegel.querySelector('.rapport-melding')?.textContent).toBe(nl.insights.bronFout)
+    expect(tegel.querySelector('.rapport-kpi-waarde')).toBeNull()
+    expect(blok.querySelectorAll('.rapport-kpis .rapport-melding')).toHaveLength(1)
+  })
+
+  it('uitslagen-fout en afgekapt raken precies de drie uitslagtegels; nooit role="alert"', () => {
+    const resultaten = splitsThuisUit(uitslagen)
+    const stuk = renderRapport({ resultaten, fout: { uitslagen: true } })
+    const afgekapt = renderRapport({ resultaten, uitslagenAfgekapt: true })
+    for (const [blok, tekst] of [[stuk, nl.insights.bronFout], [afgekapt, nl.insights.afgekapt]] as const) {
+      for (const id of ['doelsaldo', 'punten', 'cleansheets']) {
+        expect(blok.querySelector(`[data-rapport-kpi="${id}"] .rapport-melding`)?.textContent).toBe(tekst)
+      }
+      expect(blok.querySelector('.rapport-kpis')?.textContent).not.toContain('+4')
+      expect(blok.querySelector('[role="alert"]')).toBeNull()
+    }
+  })
+
+  it('Opkomst per maand, Ratings per speler en Aanwezigheid per speler: kop blijft, melding in plaats van inhoud', () => {
+    const blok = renderRapport({ fout: { maandOpkomst: true, ratingPerSpeler: true, aanwezigheidPerSpeler: true } })
+    for (const titel of [nl.insights.opkomstTitle, nl.insights.topWorstRatingsTitle, nl.insights.topWorstAanwezigheidTitle]) {
+      expect(sectie(blok, titel).querySelector('.rapport-melding')?.textContent).toBe(nl.insights.bronFout)
+    }
+    expect(blok.querySelectorAll('.rapport-bar')).toHaveLength(0)
+    expect(within(blok).queryByText(nl.insights.bestLabel)).toBeNull()
+  })
+
+  it('Vorm met fout: melding, geen telregel met een verzonnen 0', () => {
+    const blok = renderRapport({ vormTelling: { win: 0, gelijk: 0, verlies: 0, onbekend: 0 }, fout: { vorm: true } })
+    const s = sectie(blok, nl.insights.vormTitle)
+    expect(s.querySelector('.rapport-melding')?.textContent).toBe(nl.insights.bronFout)
+    expect(s.querySelector('.rapport-vorm')).toBeNull()
+    expect(blok.textContent).not.toContain('0 gewonnen')
+  })
+
+  it('signalenOnvolledig zonder signalen: blok met alleen de melding; zonder beide: blok weg', () => {
+    const alleen = renderRapport({ signalen: [], signalenOnvolledig: true })
+    const s = sectie(alleen, nl.insights.signalenTitle)
+    expect(s.querySelectorAll('.rapport-signaal')).toHaveLength(0)
+    expect(s.querySelector('.rapport-melding')?.textContent).toBe(nl.insights.signalenOnvolledig)
+    expect(within(renderRapport({ signalen: [] })).queryByText(nl.insights.signalenTitle)).toBeNull()
+  })
+
+  it('signalenOnvolledig met signalen: de melding is geen .rapport-signaal', () => {
+    const blok = renderRapport({ signalenOnvolledig: true })
+    const s = sectie(blok, nl.insights.signalenTitle)
+    expect(s.querySelectorAll('.rapport-melding')).toHaveLength(1)
+    expect(Array.from(s.querySelectorAll('.rapport-signaal')).map((e) => e.textContent)).not.toContain(nl.insights.signalenOnvolledig)
+  })
+})
+
+describe('seizoensrapport — harde DOM-regels en CSS-anker', () => {
+  it('geen h2, caption, sr-only, data-kpi of data-conclusielaag in het rapport', () => {
+    const blok = renderRapport({
+      resultaten: splitsThuisUit(uitslagen),
+      topscorers: bepaalTopscorers(scorers(3)),
+      fout: { vorm: true },
+    })
+    expect(blok.querySelector('h2')).toBeNull()
+    expect(blok.querySelector('caption')).toBeNull()
+    expect(blok.querySelector('.sr-only')).toBeNull()
+    expect(blok.querySelector('[data-kpi]')).toBeNull()
+    expect(blok.querySelector('[data-conclusielaag]')).toBeNull()
+  })
+
+  it('CSS-anker: .rapport-kpis is een raster van 3 kolommen (geen lay-outbewijs, wel een regressieanker)', () => {
+    const css = readFileSync(join(__dirname, 'app/globals.css'), 'utf8')
+    expect(css).toMatch(/\.rapport-kpis\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
+  })
+
+  it('CSS-anker: in de spelerlijsten mag de naam krimpen en afbreken, de waarde krimpt niet (lange namen zonder spaties)', () => {
+    const css = readFileSync(join(__dirname, 'app/globals.css'), 'utf8')
+    expect(css).toMatch(/\.rapport-lijst-rij\s*>\s*:first-child\s*\{[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.rapport-lijst-waarde\s*\{[^}]*flex-shrink:\s*0/)
+  })
+
+  it('CSS-anker: .rapport met .rapport-kpis krijgt een kleine rechtermarge (rand van kolom 3 niet op de kniplijn); alleen via :has, dus niet voor andere rapporten', () => {
+    const css = readFileSync(join(__dirname, 'app/globals.css'), 'utf8')
+    expect(css).toMatch(/\.rapport:has\(\.rapport-kpis\)\s*\{\s*padding-right:\s*0\.5mm;\s*\}/)
+    // geen ongeconditioneerde padding op .rapport zelf
+    expect(css).not.toMatch(/\.rapport\s*\{[^}]*padding-right/)
+  })
+
+  it('de tegellabels krijgen geen nowrap of ellipsis', () => {
+    const css = readFileSync(join(__dirname, 'app/globals.css'), 'utf8')
+    for (const klasse of ['rapport-kpi', 'rapport-kpi-label']) {
+      const regel = css.match(new RegExp(`\\.${klasse}\\s*\\{[^}]*\\}`))?.[0] ?? ''
+      expect(regel).not.toMatch(/nowrap|ellipsis/)
+    }
   })
 })

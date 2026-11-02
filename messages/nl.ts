@@ -932,6 +932,10 @@ export const nl = {
     // laag bovenaan de pagina (kpi*, signaal*). De grafiek-sleutels daaronder
     // zijn ouder en staan op onderwerp gegroepeerd.
     rapportTitle: 'SEIZOENSRAPPORT',
+    rapportResultatenTitle: 'Resultaten',
+    rapportTopscorersTitle: 'Topscorers',
+    rapportKolomBetrokken: 'Betrokken',
+    rapportTopscorersAfgekort: 'Top {n} van {totaal} spelers',
     periodeLabel: 'Periode',
     periode4w: 'Laatste 4 weken',
     periode8w: 'Laatste 8 weken',

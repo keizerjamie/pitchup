@@ -89,6 +89,12 @@ describe('KpiStrip', () => {
     }
   })
 
+  it('delta 0 (exact gelijk) geeft een neutrale rail, geen groene', () => {
+    const { container } = toon({ rating: { gemiddelde: 7.4, delta: 0, aantal: 12 } })
+    const rail = tegel(container, 'rating').querySelector('div.absolute') as HTMLElement
+    expect(rail.style.background).toBe('var(--faint)')
+  })
+
   it('zonder wedstrijden: "—" met kpiGeenData, punten null geeft ook "—"', () => {
     const { container } = toon({ resultaat: splitsThuisUit([]).totaal })
     for (const id of ['doelsaldo', 'punten', 'cleansheets']) {

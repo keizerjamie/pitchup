@@ -1050,6 +1050,11 @@ a, button, input, select, textarea, label, [role="button"] {
      Alle maten in millimeters: dit vel wordt uitsluitend afgedrukt, dus een
      paginamaat is een betekenisvollere eenheid dan pixels. */
   .rapport { color: #111827 !important; font-size: 9pt; line-height: 1.35; }
+  /* Alleen het seizoensrapport (herkenbaar aan .rapport-kpis; het
+     aanwezigheidsoverzicht deelt .rapport maar heeft die niet): het rapport is
+     even breed als het afdrukgebied, waardoor de rechterrand van de derde
+     tegelkolom en de laatste tabelkolom op de kniplijn vielen. */
+  .rapport:has(.rapport-kpis) { padding-right: 0.5mm; }
 
   .rapport-kop {
     display: flex;
@@ -1070,20 +1075,35 @@ a, button, input, select, textarea, label, [role="button"] {
     color: var(--club-secondary, #009966); white-space: nowrap;
   }
 
-  .rapport-kpis { display: flex; gap: 3mm; margin-top: 6mm; }
+  /* Raster 3 x 2: zes tegels naast elkaar zouden bij 186mm te smal worden
+     voor de langste labels. minmax(0, 1fr) laat een lang label afbreken in
+     plaats van de kolom op te rekken; bewust geen nowrap en geen ellipsis. */
+  .rapport-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3mm; margin-top: 6mm; }
   .rapport-kpi {
-    flex: 1;
+    min-width: 0;
+    break-inside: avoid;
     border: 0.3mm solid #d1d5db;
     border-top: 1mm solid var(--club-secondary, #009966);
     border-radius: 1.5mm;
     padding: 2.5mm 3mm 3mm;
   }
+  .rapport-kpi-neutraal { border-top-color: #d1d5db; }
   .rapport-kpi-label {
     font-size: 6.5pt; font-weight: 800; text-transform: uppercase;
     letter-spacing: 0.09em; color: #6b7280;
   }
   .rapport-kpi-waarde { font-size: 19pt; line-height: 1.05; color: var(--club-primary, #004f3b); margin-top: 1mm; }
   .rapport-kpi-detail { font-size: 6.5pt; font-weight: 700; color: #6b7280; margin-top: 0.8mm; }
+  .rapport-kpi-venster { font-size: 6pt; font-weight: 700; color: #6b7280; margin-top: 0.3mm; }
+  .rapport-melding { font-size: 7.5pt; font-weight: 600; line-height: 1.3; color: #6b7280; margin-top: 1mm; }
+  .rapport-noot { font-size: 7.5pt; font-weight: 700; color: #6b7280; margin-top: 1.4mm; }
+  .rapport-gast { font-size: 6.5pt; font-weight: 700; color: #6b7280; margin-left: 1mm; white-space: nowrap; }
+  .rapport-tabel { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .rapport-tabel th, .rapport-tabel td { font-size: 8pt; line-height: 1.2; padding: 1mm 0 1mm 1.5mm; color: #111827; }
+  .rapport-tabel th:first-child { padding-left: 0; text-align: left; overflow-wrap: anywhere; }
+  .rapport-tabel thead th { font-size: 6.5pt; font-weight: 800; color: #6b7280; }
+  .rapport-tabel tbody tr { border-top: 0.2mm solid #eef2f0; }
+  .rapport-tabel-getal { text-align: right; }
 
   /* Elke sectie blijft als geheel op één pagina staan. Een kopje onderaan
      pagina 1 met zijn inhoud op pagina 2 is precies het soort slordigheid dat
@@ -1167,7 +1187,10 @@ a, button, input, select, textarea, label, [role="button"] {
     font-size: 8pt; font-weight: 700; padding: 1.1mm 0;
     border-bottom: 0.2mm solid #eef2f0;
   }
-  .rapport-lijst-waarde { color: #6b7280; font-weight: 700; white-space: nowrap; }
+  /* Lange naam zonder spaties: het naamveld (eerste kind) mag krimpen en
+     overal afbreken; de waarde krimpt niet en blijft op zijn plek. */
+  .rapport-lijst-rij > :first-child { min-width: 0; overflow-wrap: anywhere; }
+  .rapport-lijst-waarde { color: #6b7280; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
   .rapport-vorm { font-size: 9pt; font-weight: 700; }
 
   /* Links teamnaam (· datum), rechts het merk — zelfde conventie als de

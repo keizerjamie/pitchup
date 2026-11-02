@@ -1029,13 +1029,16 @@ describe('6. Tegendoelpunten op /inzichten', () => {
 })
 
 describe('Afgeleide randvoorwaarden', () => {
-  it('V6: de nieuwe kaarten komen niet in het print-/seizoensrapport', async () => {
+  it('V6: kaarttitels komen niet in het rapport; het rapport gebruikt eigen sectietitels', async () => {
     await renderInzichten(hoofdDb())
     configure({ defaultIgnore: STANDAARD_IGNORE })
     const print = [...document.querySelectorAll('[data-print-only]')].map((n) => n.textContent).join(' ')
     for (const t of [T.thuisUit, T.formatie, T.top, T.kaarten, T.kwartier, T.tegen]) {
       expect(print).not.toContain(t)
     }
+    // Deel 2: het rapport heeft wél zijn eigen, kortere sectietitels.
+    expect(print).toContain(i.rapportResultatenTitle)
+    expect(print).toContain(i.rapportTopscorersTitle)
   })
 
   it('AC-A2 (opruimen): tegendoelpunten staat in TEAM_TABELLEN vóór events, en in beide blok-22-lussen van het verificatiescript', () => {

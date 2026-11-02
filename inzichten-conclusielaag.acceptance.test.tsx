@@ -27,7 +27,8 @@
 //   AC20 → describe('AC20 / AC23 / AC26 / AC27 — minima en grenzen')
 //   AC21 → describe('AC21 — null is geen 0')
 //   AC22 → describe('AC22 — lege staat')
-//   AC24 → describe('AC24 / O5 — scherm en rapport')
+//   AC10/AC24 → describe('AC10 / AC24 — pariteit scherm ↔ rapport in elke state') (Deel 2)
+//   AC12/AC17/AC19/AC13/AC29/AC32 (rapport) → de 'Deel 2'-describes onderaan
 //   AC25 → describe('AC25 — gasten en inactieven (positiesignaal)')
 //   AC28 → describe('AC28 — vensters en periodekiezer')
 //   AC29 → describe('AC29 — vijf talen')
@@ -37,10 +38,10 @@
 //   AC39 → describe('AC39 — print:hidden en hidden print:block')
 //   Faalpad: fout-vóór-afgekapt → describe('KpiStrip — fout gaat voor afgekapt')
 //
-// Niet in dit bestand (Deel 2 of niet van buitenaf te toetsen): AC10–AC14,
-// AC17, AC19 (rapport), AC38 en AC40 (PDF-route, vraagt een browser), AC14
-// (visuele lay-out), AC34 (/api/pdf, bestaand in delen-als-pdf), AC41 (volledige
-// suite groen: zie rapport).
+// Niet in dit bestand: AC38 en AC40 (echte PDF, vraagt een browser: zie het
+// PDF-rapport van de test-verifier), AC14 (visuele lay-out en paginatelling:
+// idem), AC34 (/api/pdf, bestaand in delen-als-pdf), AC41 (volledige suite
+// groen: zie rapport).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, cleanup } from '@testing-library/react'
@@ -77,6 +78,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { createClient } from '@/lib/supabase/server'
 import InzichtenPage from '@/app/inzichten/page'
 import KpiStrip from '@/components/inzichten/KpiStrip'
+import SeizoensrapportPrint from '@/components/inzichten/SeizoensrapportPrint'
 import { splitsThuisUit, type MaandTrend } from '@/lib/inzichten'
 
 type Row = Record<string, unknown>
@@ -214,7 +216,8 @@ interface Opties {
   locale?: string
   activeTeam?: string
   rpcErrors?: Record<string, unknown>
-  // 'posities' laat de players-query met position/secondary_positions falen.
+  // 'posities' laat de players-query met position/secondary_positions falen;
+  // 'vorm' laat de events-query van de recente vorm falen.
   selectErrors?: Record<string, unknown>
   // lokale tijd waarop de pagina draait
   klok?: { datum: string; uur?: number; min?: number }
@@ -237,7 +240,10 @@ function maakClient(teams: Record<string, TeamData>, o: Opties) {
     { team_id: id, key: 'season_end', value: (o.seizoen ?? [S, E])[1] },
   ])
   const alle = (k: 'events' | 'players' | 'metingen' | 'trainingOefeningen') => Object.values(teams).flatMap((t) => t[k])
-  const eventsT = tabel(alle('events'))
+  // De vorm-query (laatste 5 wedstrijden) is aan zijn select te herkennen.
+  const eventsT = tabel(alle('events'), (sel) =>
+    sel === 'id, date, goals_for, goals_against' ? (o.selectErrors?.vorm ?? null) : null,
+  )
   const playersT = tabel(alle('players'), (sel) =>
     sel.includes('secondary_positions') ? (o.selectErrors?.posities ?? null) : null,
   )
@@ -390,12 +396,19 @@ const melding = (c: HTMLElement) =>
 const printBlok = (c: HTMLElement) => c.querySelector('[data-print-only]') as HTMLElement
 const rapportSignalen = (c: HTMLElement) =>
   Array.from(printBlok(c).querySelectorAll('.rapport-signaal')).map((p) => p.textContent ?? '')
-const rapportKpi = (c: HTMLElement, label: string) => {
-  const k = Array.from(printBlok(c).querySelectorAll('.rapport-kpi')).find(
-    (e) => e.querySelector('.rapport-kpi-label')?.textContent === label,
-  )
+// Deel 2: de rapporttegel heeft data-rapport-kpi en dezelfde p-volgorde als het
+// scherm (label, venster, waarde, detail; bij een melding label, venster, melding).
+const rapportTegel = (c: HTMLElement, id: string) => {
+  const k = printBlok(c).querySelector(`[data-rapport-kpi="${id}"]`)
   return k ? Array.from(k.querySelectorAll('p')).map((p) => p.textContent) : null
 }
+const rapportSectie = (c: HTMLElement, titel: string) =>
+  Array.from(printBlok(c).querySelectorAll('.rapport-sectie')).find(
+    (e) => e.querySelector('.rapport-sectiekop')?.textContent === titel,
+  ) as HTMLElement | undefined
+const rapportMeldingen = (sectie: Element | undefined) =>
+  Array.from(sectie?.querySelectorAll('.rapport-melding') ?? []).map((e) => e.textContent)
+const celTekst = (tr: Element) => Array.from(tr.querySelectorAll('th, td')).map((e) => e.textContent ?? '')
 const rail = (c: HTMLElement, id: string) =>
   (tegel(c, id).querySelector('div.absolute') as HTMLElement).style.background
 const schermTekst = (c: HTMLElement) => (c.querySelector('.print\\:hidden') as HTMLElement).textContent ?? ''
@@ -1224,39 +1237,536 @@ describe('AC22 — lege staat', () => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC24 / O5 — scherm en rapport', () => {
-  it('AC24: het rapport toont dezelfde Doelsaldo-waarde als het scherm (één bron: thuisUit.totaal)', async () => {
+// ═══════════════════════════════════════════════════════════════════════
+// DEEL 2 — seizoensrapport (brief deel 2, AC10–AC14, AC17, AC19, AC24, AC29,
+// AC32, AC36, AC39–AC41). De rapporttegel is `[data-rapport-kpi]`; het scherm
+// `[data-kpi]`. Beide hebben dezelfde p-volgorde, zodat pariteit letterlijk
+// regel voor regel te toetsen is.
+// ═══════════════════════════════════════════════════════════════════════
+const KPI_IDS = ['opkomst', 'aanwezigheid', 'rating', 'doelsaldo', 'punten', 'cleansheets'] as const
+
+const moment = (id: string, naam: string, doelpunten: number, assists: number, gast = false): Row => ({
+  player_id: id, naam, gast, doelpunten, assists, geel: 0, rood: 0,
+})
+// n topscorers, aflopend op doelpunten; de derde is een gast.
+const scorers = (n: number): Row[] =>
+  Array.from({ length: n }, (_, i) => moment(`m${i}`, `Speler ${String.fromCharCode(65 + i)}`, 10 - i, i % 3, i === 2))
+const vormEvents = (): Row[] => [
+  { id: 'v1', team_id: TEAM, type: 'match', date: '2026-10-01', goals_for: 2, goals_against: 0, opponent: 'X', match_type: 'league', created_at: '2026-01-01' },
+  { id: 'v2', team_id: TEAM, type: 'match', date: '2026-10-05', goals_for: 1, goals_against: 1, opponent: 'Y', match_type: 'league', created_at: '2026-01-01' },
+  { id: 'v3', team_id: TEAM, type: 'match', date: '2026-10-09', goals_for: 0, goals_against: 3, opponent: 'Z', match_type: 'league', created_at: '2026-01-01' },
+]
+// rijk + topscorers + ratings per speler + vorm: alle rapportsecties gevuld
+function rijkRapport(aantalScorers = 8): Partial<TeamData> {
+  return merge(rijk(), {
+    spelerMomenten: scorers(aantalScorers),
+    ratingPerSpeler: [
+      { player_id: 'r1', naam: 'Rik Rating', gemiddelde: 7.8, aantal: 9 },
+      { player_id: 'r2', naam: 'Rob Rating', gemiddelde: 6.1, aantal: 9 },
+    ],
+    events: vormEvents(),
+  })
+}
+const vormTekst = (w: number, g: number, v: number) => `${w} gewonnen, ${g} gelijk, ${v} verloren`
+const viaKaart = (c: HTMLElement, titel: string) =>
+  Array.from(c.querySelectorAll('h2')).find((h) => h.textContent === titel)!.closest('.surface-card') as HTMLElement
+
+describe('AC10 / AC24 — pariteit scherm ↔ rapport in elke state', () => {
+  const tweehonderdeen = (): Partial<TeamData> => merge(basis(), { uitslagen: Array.from({ length: 201 }, (_, i) => uitslag(i, 3, 0)) })
+  const states: [string, () => Partial<TeamData>, Opties][] = [
+    ['rijk', rijk, {}],
+    ['rijk, periode 4w', rijk, { periode: '4w' }],
+    ['rijk, periode 8w', rijk, { periode: '8w' }],
+    ['aanwezigheid-bron stuk', rijk, { rpcErrors: { inzichten_aanwezigheid: FOUT } }],
+    ['maandopkomst-bron stuk', rijk, { rpcErrors: { inzichten_training_opkomst_per_maand: FOUT } }],
+    ['teamrating-bron stuk', rijk, { rpcErrors: { inzichten_rating_team_per_wedstrijd: FOUT } }],
+    ['uitslagen-bron stuk', rijk, { rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT } }],
+    ['201 wedstrijden (afgekapt)', tweehonderdeen, {}],
+    ['200 wedstrijden (grens)', () => merge(basis(), { uitslagen: Array.from({ length: 200 }, (_, i) => uitslag(i, 3, 0)) }), {}],
+    ['0 wedstrijden', basis, {}],
+  ]
+
+  it.each(states)('AC24: %s — alle zes tegels hebben op het rapport exact dezelfde regels als op het scherm', async (_n, data, o) => {
+    const { container } = await renderInzichten(data(), o)
+    for (const id of KPI_IDS) {
+      expect(rapportTegel(container, id), id).not.toBeNull()
+      expect(rapportTegel(container, id), id).toEqual(tegelTekst(container, id))
+    }
+    expect(printBlok(container).querySelectorAll('[data-rapport-kpi]')).toHaveLength(6)
+  })
+
+  it('AC10: het rapport heeft 6 tegels in de volgorde van het scherm, met venster en deltatekst (rijk)', async () => {
     const { container } = await renderInzichten(rijk())
-    expect(tegelTekst(container, 'doelsaldo').slice(2)).toEqual(['+6', '12 voor · 6 tegen'])
-    expect(rapportKpi(container, 'Doelsaldo')).toEqual(['Doelsaldo', '+6', '12 voor · 6 tegen'])
+    const ids = Array.from(printBlok(container).querySelectorAll('[data-rapport-kpi]')).map((e) => e.getAttribute('data-rapport-kpi'))
+    expect(ids).toEqual([...KPI_IDS])
+    expect(rapportTegel(container, 'opkomst')).toEqual(['Trainingsopkomst', `Laatste maand (${OKT})`, '90%', '+20 t.o.v. vorige maand'])
+    expect(rapportTegel(container, 'aanwezigheid')).toEqual(['Totale aanwezigheid', 'Heel seizoen', '84%', 'Norm 85%'])
+    expect(rapportTegel(container, 'rating')).toEqual(['Gem. teamrating', 'Heel seizoen', '7.3', '+0.6 t.o.v. de 5 daarvoor'])
+    expect(rapportTegel(container, 'doelsaldo')).toEqual(['Doelsaldo', 'Heel seizoen', '+6', '12 voor · 6 tegen'])
+    expect(rapportTegel(container, 'punten')).toEqual(['Punten per wedstrijd', 'Heel seizoen', '1.83', '11 punten uit 6 wedstrijden'])
+    expect(rapportTegel(container, 'cleansheets')).toEqual(['Clean sheets', 'Heel seizoen', '2', 'van 6 wedstrijden'])
   })
 
-  it('AC24: Totale aanwezigheid en Trainingsopkomst hebben dezelfde waarde en het nieuwe label op scherm en rapport', async () => {
+  it('AC24: de Doelsaldo-tegel op het rapport is gelijk aan de saldo-cel van de totaalrij in Resultaten (saldo === resultaten.totaal)', async () => {
     const { container } = await renderInzichten(rijk())
-    expect(rapportKpi(container, 'Totale aanwezigheid')![1]).toBe('84%')
-    expect(rapportKpi(container, 'Trainingsopkomst')![1]).toBe('90%')
-    expect(printBlok(container).textContent).not.toContain('Aanwezigheid seizoen')
+    const rijen = Array.from(rapportSectie(container, 'Resultaten')!.querySelectorAll('tbody tr')).map(celTekst)
+    const totaal = rijen.at(-1)!
+    expect(totaal[0]).toBe(nl.insights.totaalLabel)
+    expect(rapportTegel(container, 'doelsaldo')![2]).toBe(totaal.at(-1))
+    expect(rapportTegel(container, 'punten')![2]).toBe(totaal[5])
   })
 
-  it('O5: bij een uitslagen-fout toont het rapport-Doelsaldo "—", nooit een cijfer', async () => {
-    const { container } = await renderInzichten(rijk(), { rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT } })
-    expect(rapportKpi(container, 'Doelsaldo')).toEqual(['Doelsaldo', '—', 'Nog geen data'])
+  it('AC17/AC19: fout → alle drie uitslagtegels tonen bronFout; 201 → afgekapt; nooit een cijfer of een verzonnen 0', async () => {
+    const stuk = await renderInzichten(rijk(), { rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT } })
+    for (const [id, label] of [['doelsaldo', 'Doelsaldo'], ['punten', 'Punten per wedstrijd'], ['cleansheets', 'Clean sheets']]) {
+      expect(rapportTegel(stuk.container, id)).toEqual([label, 'Heel seizoen', nl.insights.bronFout])
+    }
+    cleanup()
+    const veel = await renderInzichten(tweehonderdeen())
+    for (const [id, label] of [['doelsaldo', 'Doelsaldo'], ['punten', 'Punten per wedstrijd'], ['cleansheets', 'Clean sheets']]) {
+      expect(rapportTegel(veel.container, id)).toEqual([label, 'Heel seizoen', nl.insights.afgekapt])
+    }
+    expect(printBlok(veel.container).textContent).not.toContain('+603')
+    expect(printBlok(veel.container).textContent).not.toContain('603 voor')
+    expect(printBlok(veel.container).textContent).not.toContain('3.00')
   })
 
-  it('O5: bij afgekapte uitslagen (201) toont het rapport-Doelsaldo "—" en nooit een gedeeltelijk cijfer', async () => {
-    const { container } = await renderInzichten(
-      merge(basis(), { uitslagen: Array.from({ length: 201 }, (_, i) => uitslag(i, 3, 0)) }),
+  it('AC21: 0 wedstrijden → "—" met "Nog geen data" in het rapport, geen 0.00 en geen losse 0', async () => {
+    const { container } = await renderInzichten(basis())
+    for (const [id, label] of [['doelsaldo', 'Doelsaldo'], ['punten', 'Punten per wedstrijd'], ['cleansheets', 'Clean sheets']]) {
+      expect(rapportTegel(container, id)).toEqual([label, 'Heel seizoen', '—', 'Nog geen data'])
+    }
+    expect(printBlok(container).textContent).not.toContain('0.00')
+  })
+
+  it('AC24 (1 bron): het rapport rekent met dezelfde delta als de strook (ruis rond 0 → "0.0", geen plusteken)', async () => {
+    const { container } = await renderInzichten(merge(basis(), rating(7.0, 7.001)))
+    expect(rapportTegel(container, 'rating')![3]).toBe('0.0 t.o.v. de 5 daarvoor')
+  })
+})
+
+describe('AC12 / AC24 — sectie Resultaten tegen de Thuis/uit-kaart', () => {
+  it('AC12: de tabel heeft 7 kolommen, rijen Thuis, Uit, Onbekend, Totaal; alle cellen gelijk aan de kaart', async () => {
+    const { container } = await renderInzichten(rijk())
+    const sectie = rapportSectie(container, 'Resultaten')!
+    const tabel = sectie.querySelector('table.rapport-tabel')!
+    const kaart = viaKaart(container, nl.insights.thuisUitTitle)
+    expect(Array.from(tabel.querySelectorAll('thead th'))).toHaveLength(7)
+    expect(Array.from(tabel.querySelectorAll('thead th')).map((e) => e.textContent)).toEqual(
+      Array.from(kaart.querySelectorAll('thead th')).map((e) => e.textContent),
     )
-    expect(rapportKpi(container, 'Doelsaldo')).toEqual(['Doelsaldo', '—', 'Nog geen data'])
-    expect(printBlok(container).textContent).not.toContain('+603')
-    expect(printBlok(container).textContent).not.toContain('603 voor')
+    const rapportRijen = Array.from(tabel.querySelectorAll('tbody tr')).map(celTekst)
+    expect(rapportRijen).toEqual(Array.from(kaart.querySelectorAll('tbody tr')).map(celTekst))
+    expect(rapportRijen.map((r) => r[0])).toEqual([nl.insights.thuisLabel, nl.insights.uitLabel, nl.insights.onbekendLabel, nl.insights.totaalLabel])
+    expect(rapportRijen.at(-1)).toEqual(['Totaal', '6', '3', '2', '1', '1.83', '+6'])
+    // clean-sheetsregel gelijk aan de kaart
+    const kaartRegel = Array.from(kaart.querySelectorAll('p')).find((p) => p.textContent?.startsWith('Clean sheets'))!.textContent
+    expect(kaartRegel).toBe('Clean sheets: 2 van 6')
+    expect(Array.from(sectie.querySelectorAll('.rapport-noot')).map((e) => e.textContent)).toEqual([kaartRegel])
+    // zonder eigen doelpunt komt bewust niet mee (R8)
+    expect(sectie.textContent).not.toContain('Zonder eigen doelpunt')
   })
 
-  it('O5: zonder fout of afkapping toont het rapport het echte saldo (200 wedstrijden)', async () => {
-    const { container } = await renderInzichten(
-      merge(basis(), { uitslagen: Array.from({ length: 200 }, (_, i) => uitslag(i, 3, 0)) }),
+  it('AC12: zonder wedstrijd met home_away = null geen Onbekend-rij', async () => {
+    const { container } = await renderInzichten(merge(basis(), { uitslagen: uitslagen([[1, 0], [2, 1, 'away']]) }))
+    const rijen = Array.from(rapportSectie(container, 'Resultaten')!.querySelectorAll('tbody tr')).map((tr) => celTekst(tr)[0])
+    expect(rijen).toEqual([nl.insights.thuisLabel, nl.insights.uitLabel, nl.insights.totaalLabel])
+  })
+
+  it('AC17/AC19: fout → kop + bronFout, geen tabel; 201 → kop + afgekapt, geen tabel en geen cijfers', async () => {
+    const stuk = await renderInzichten(rijk(), { rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT } })
+    let sectie = rapportSectie(stuk.container, 'Resultaten')!
+    expect(sectie).toBeDefined()
+    expect(rapportMeldingen(sectie)).toEqual([nl.insights.bronFout])
+    expect(sectie.querySelector('table')).toBeNull()
+    cleanup()
+    const veel = await renderInzichten(merge(basis(), { uitslagen: Array.from({ length: 201 }, (_, i) => uitslag(i, 3, 0)) }))
+    sectie = rapportSectie(veel.container, 'Resultaten')!
+    expect(rapportMeldingen(sectie)).toEqual([nl.insights.afgekapt])
+    expect(sectie.querySelector('table')).toBeNull()
+    expect(sectie.textContent).not.toMatch(/\d/)
+  })
+
+  it('AC12: 0 wedstrijden → kop + thuisUitEmpty (geen tabel, geen melding)', async () => {
+    const { container } = await renderInzichten(basis())
+    const sectie = rapportSectie(container, 'Resultaten')!
+    expect(sectie.querySelector('table')).toBeNull()
+    expect(sectie.querySelector('.rapport-noot')!.textContent).toBe(nl.insights.thuisUitEmpty)
+    expect(rapportMeldingen(sectie)).toEqual([])
+  })
+})
+
+describe('AC12 / R1 — sectie Topscorers tegen de Topscorers-kaart', () => {
+  it('AC12: 4 kolommen; rijen, volgorde, aantallen en gast-markering gelijk aan de eerste 6 rijen van de kaart', async () => {
+    const { container } = await renderInzichten(rijkRapport(8))
+    const sectie = rapportSectie(container, 'Topscorers')!
+    const tabel = sectie.querySelector('table.rapport-tabel')!
+    expect(Array.from(tabel.querySelectorAll('thead th')).map((e) => e.textContent)).toEqual(['Speler', 'Doelpunten', 'Assists', 'Betrokken'])
+    const rapportRijen = Array.from(tabel.querySelectorAll('tbody tr'))
+    expect(rapportRijen).toHaveLength(6)
+    const kaartRijen = Array.from(viaKaart(container, nl.insights.topscorersTitle).querySelectorAll('li'))
+    expect(kaartRijen).toHaveLength(8)
+    rapportRijen.forEach((tr, i) => {
+      const kaartLi = kaartRijen[i]
+      const naamR = tr.querySelector('th')!.childNodes[0].textContent
+      const naamK = kaartLi.querySelector('span')!.childNodes[0].textContent
+      expect(naamR).toBe(naamK)
+      expect(Boolean(tr.querySelector('.rapport-gast'))).toBe(kaartLi.textContent!.includes(nl.insights.gastLabel))
+      const getallenK = (kaartLi.lastElementChild!.textContent ?? '').match(/\d+/g)
+      const getallenR = Array.from(tr.querySelectorAll('td')).map((td) => td.textContent)
+      expect(getallenR).toEqual(getallenK)
+    })
+    // de gast heeft tekst, geen kleur alleen
+    expect(rapportRijen[2].querySelector('.rapport-gast')!.textContent).toBe('(gast)')
+    expect(rapportRijen[0].querySelector('.rapport-gast')).toBeNull()
+  })
+
+  it('AC12 (grens): 6 topscorers → geen "Top 6 van"-regel; 7 → 6 rijen + "Top 6 van 7 spelers", de zevende ontbreekt', async () => {
+    const zes = await renderInzichten(rijkRapport(6))
+    expect(rapportSectie(zes.container, 'Topscorers')!.querySelectorAll('tbody tr')).toHaveLength(6)
+    expect(rapportSectie(zes.container, 'Topscorers')!.querySelector('.rapport-noot')).toBeNull()
+    cleanup()
+    const zeven = await renderInzichten(rijkRapport(7))
+    const sectie = rapportSectie(zeven.container, 'Topscorers')!
+    expect(sectie.querySelectorAll('tbody tr')).toHaveLength(6)
+    expect(sectie.querySelector('.rapport-noot')!.textContent).toBe('Top 6 van 7 spelers')
+    expect(sectie.textContent).not.toContain('Speler G')
+    // op het scherm staat hij er wel
+    expect(viaKaart(zeven.container, nl.insights.topscorersTitle).textContent).toContain('Speler G')
+  })
+
+  it('AC12: fout → bronFout; geen doelpunten → topscorersEmpty (ook als er alleen assists zijn, zoals de kaart); zonder rijen geen tabel', async () => {
+    const stuk = await renderInzichten(rijkRapport(), { rpcErrors: { inzichten_speler_momenten: FOUT } })
+    expect(rapportMeldingen(rapportSectie(stuk.container, 'Topscorers'))).toEqual([nl.insights.bronFout])
+    expect(rapportSectie(stuk.container, 'Topscorers')!.querySelector('table')).toBeNull()
+    cleanup()
+    const alleenAssists = await renderInzichten(merge(rijk(), { spelerMomenten: [moment('a', 'Alleen Assist', 0, 4)] }))
+    const sectie = rapportSectie(alleenAssists.container, 'Topscorers')!
+    expect(sectie.querySelector('.rapport-noot')!.textContent).toBe(nl.insights.topscorersEmpty)
+    expect(sectie.querySelector('table')).toBeNull()
+    expect(viaKaart(alleenAssists.container, nl.insights.topscorersTitle).textContent).toContain(nl.insights.topscorersEmpty)
+  })
+
+  it('AC12: een naam met {placeholder} blijft letterlijk staan', async () => {
+    const { container } = await renderInzichten(merge(rijk(), { spelerMomenten: [moment('x', 'Piet {drempel} {n}', 3, 1)] }))
+    expect(rapportSectie(container, 'Topscorers')!.querySelector('tbody th')!.textContent).toBe('Piet {drempel} {n}')
+  })
+
+  it('AC12: een inactieve of gast-speler telt mee (de kaart ook); inactieve spelers krijgen geen label', async () => {
+    const { container } = await renderInzichten(merge(rijk(), { spelerMomenten: [moment('g', 'Gerrit Gast', 2, 0, true), moment('i', 'Ivo Inactief', 1, 0)] }))
+    const rijen = Array.from(rapportSectie(container, 'Topscorers')!.querySelectorAll('tbody tr'))
+    expect(rijen.map((r) => r.querySelector('th')!.textContent)).toEqual(['Gerrit Gast(gast)', 'Ivo Inactief'])
+  })
+})
+
+describe('AC13 — het rapport volgt de gekozen periode', () => {
+  // Twee wedstrijden binnen de laatste 4 weken (t.o.v. 2026-10-15), drie erbuiten.
+  const metDatums = (): Partial<TeamData> =>
+    merge(basis(), {
+      uitslagen: [
+        { event_id: 'o1', datum: '2026-07-10', home_away: 'home', goals_for: 1, goals_against: 0, formatie: null },
+        { event_id: 'o2', datum: '2026-08-10', home_away: 'home', goals_for: 1, goals_against: 0, formatie: null },
+        { event_id: 'o3', datum: '2026-09-01', home_away: 'away', goals_for: 0, goals_against: 2, formatie: null },
+        { event_id: 'i1', datum: '2026-09-25', home_away: 'home', goals_for: 3, goals_against: 0, formatie: null },
+        { event_id: 'i2', datum: '2026-10-02', home_away: 'away', goals_for: 2, goals_against: 2, formatie: null },
+      ],
+    })
+
+  it('AC13: heel seizoen → 5 wedstrijden, 4w → 2 wedstrijden; Resultaten en tegels volgen dezelfde periode als het scherm', async () => {
+    const seizoen = await renderInzichten(metDatums())
+    expect(rapportSectie(seizoen.container, 'Resultaten')!.querySelector('tbody tr:last-child td')!.textContent).toBe('5')
+    cleanup()
+    const vier = await renderInzichten(metDatums(), { periode: '4w' })
+    const totaal = celTekst(rapportSectie(vier.container, 'Resultaten')!.querySelector('tbody tr:last-child')!)
+    expect(totaal.slice(0, 2)).toEqual(['Totaal', '2'])
+    expect(rapportTegel(vier.container, 'punten')).toEqual(['Punten per wedstrijd', nl.insights.periode4w, '2.00', '4 punten uit 2 wedstrijden'])
+    expect(rapportTegel(vier.container, 'punten')).toEqual(tegelTekst(vier.container, 'punten'))
+  })
+
+  it('AC13 (4w): alle tegels dragen het 4w-venster, Trainingsopkomst blijft "Laatste maand"; nergens "Heel seizoen" in het rapport', async () => {
+    const { container } = await renderInzichten(rijk(), { periode: '4w' })
+    for (const id of ['aanwezigheid', 'rating', 'doelsaldo', 'punten', 'cleansheets']) {
+      expect(rapportTegel(container, id)![1]).toBe(nl.insights.periode4w)
+    }
+    expect(rapportTegel(container, 'opkomst')![1]).toBe(`Laatste maand (${OKT})`)
+    expect(printBlok(container).textContent).not.toContain(nl.insights.periodeSeizoen)
+    expect(printBlok(container).querySelector('.rapport-periode')!.textContent).toContain(nl.insights.periode4w)
+  })
+
+  it('AC13 / R5: de signalen die het hele seizoen of een momentopname gebruiken, zeggen dat zelf in de zin (geen extra tekst nodig)', async () => {
+    const { container } = await renderInzichten(merge(basis(), daler(), keeperGeblesseerd()), { periode: '4w' })
+    expect(rapportSignalen(container)).toEqual([
+      expect.stringContaining('seizoensgemiddelde'),
+      expect.stringContaining('op dit moment'),
+    ])
+  })
+})
+
+describe('AC17 / AC19 / AC40 — bronfout per rapportsectie, op paginaniveau', () => {
+  const secties: [string, Opties, string][] = [
+    ['uitslagen → Resultaten', { rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT } }, 'Resultaten'],
+    ['speler_momenten → Topscorers', { rpcErrors: { inzichten_speler_momenten: FOUT } }, 'Topscorers'],
+    ['rating_per_speler → Ratings per speler', { rpcErrors: { inzichten_rating_per_speler: FOUT } }, 'Ratings per speler'],
+    ['aanwezigheid_per_speler → Aanwezigheid per speler', { rpcErrors: { inzichten_aanwezigheid_per_speler: FOUT } }, 'Aanwezigheid per speler'],
+    ['training_opkomst_per_maand → Trainingsopkomst per maand', { rpcErrors: { inzichten_training_opkomst_per_maand: FOUT } }, 'Trainingsopkomst per maand'],
+    ['vorm (events-query) → Recente vorm', { selectErrors: { vorm: FOUT } }, 'Recente vorm'],
+  ]
+
+  it.each(secties)('AC17: %s — de sectie blijft staan met exact bronFout, geen ruwe fout, het rapport blijft bestaan', async (_n, o, titel) => {
+    // controle zonder fout: geen melding in die sectie
+    const ok = await renderInzichten(rijkRapport(), {})
+    expect(rapportMeldingen(rapportSectie(ok.container, titel))).toEqual([])
+    cleanup()
+    const { container } = await renderInzichten(rijkRapport(), o)
+    expect(printBlok(container)).not.toBeNull()
+    const sectie = rapportSectie(container, titel)
+    expect(sectie, titel).toBeDefined()
+    expect(rapportMeldingen(sectie)).toEqual([nl.insights.bronFout])
+    expect(document.body.textContent).not.toContain('PGRST202')
+    expect(document.body.textContent).not.toContain('geheime_functie')
+  })
+
+  it('AC17: een falende vorm toont geen verzonnen "0 gewonnen, 0 gelijk, 0 verloren" en geen badges; zonder fout staat de telregel er wel', async () => {
+    const ok = await renderInzichten(rijkRapport())
+    expect(rapportSectie(ok.container, 'Recente vorm')!.textContent).toContain(vormTekst(1, 1, 1))
+    cleanup()
+    const { container } = await renderInzichten(rijkRapport(), { selectErrors: { vorm: FOUT } })
+    const sectie = rapportSectie(container, 'Recente vorm')!
+    expect(sectie.textContent).toBe('Recente vorm' + nl.insights.bronFout)
+    expect(printBlok(container).textContent).not.toContain('0 gewonnen')
+  })
+
+  it('AC17: de melding bij Trainingsopkomst per maand is hetzelfde als bij de tegel (opkomst-tegel én sectie)', async () => {
+    const { container } = await renderInzichten(rijkRapport(), { rpcErrors: { inzichten_training_opkomst_per_maand: FOUT } })
+    expect(rapportTegel(container, 'opkomst')).toEqual(['Trainingsopkomst', 'Laatste maand', nl.insights.bronFout])
+    expect(rapportMeldingen(rapportSectie(container, 'Trainingsopkomst per maand'))).toEqual([nl.insights.bronFout])
+  })
+
+  it('AC40 (paginadeel): acht RPC\'s en twee selects stuk, maar nog wel data elders (aanwezigheid, events) → geen 500 maar het rapport met meldingen', async () => {
+    const o: Opties = {
+      rpcErrors: {
+        inzichten_wedstrijd_uitslagen: FOUT, inzichten_speler_momenten: FOUT, inzichten_rating_per_speler: FOUT,
+        inzichten_aanwezigheid_per_speler: FOUT, inzichten_training_opkomst_per_maand: FOUT, inzichten_rating_team_per_wedstrijd: FOUT,
+        inzichten_rating_vorm_per_speler: FOUT, inzichten_training_evaluaties: FOUT,
+      },
+      selectErrors: { vorm: FOUT, posities: FOUT },
+    }
+    const { container } = await renderInzichten(merge(rijkRapport(), { evaluaties: trainingen('2026-10', 3) }), o)
+    expect(printBlok(container)).not.toBeNull()
+    expect(rapportMeldingen(printBlok(container) as HTMLElement).length).toBeGreaterThanOrEqual(10)
+    expect(document.body.textContent).not.toContain('PGRST202')
+  })
+
+  it('bestaand gedrag (brief deel 1 §7, deel 2 §2.5): als écht álle bronnen falen valt de pagina terug op de lege staat — geen crash, geen ruwe fout, geen rapport', async () => {
+    const alleRpcs = Object.fromEntries(Object.keys(RPC_BRON).map((n) => [n, FOUT]))
+    // Geen enkele data in de tabellen (events/players/metingen): ook de niet-RPC-bronnen leveren niets.
+    const { container } = await renderInzichten({}, { rpcErrors: alleRpcs, selectErrors: { vorm: FOUT, posities: FOUT } })
+    expect(container.textContent).toContain(nl.insights.geenDataTitle)
+    expect(strook(container)).toBeNull()
+    expect(blok(container)).toBeNull()
+    expect(container.querySelector('[data-print-only]')).toBeNull()
+    expect(document.body.textContent).not.toContain('PGRST202')
+    expect(document.body.textContent).not.toContain('geheime_functie')
+    expect(document.body.textContent).not.toContain(nl.insights.bronFout)
+  })
+
+  it('bestaand gedrag: alleen lege data (alle RPC\'s slagen met 0 rijen, aanwezigheid 0/0) geeft dezelfde lege staat', async () => {
+    const { container } = await renderInzichten({ aanwezigheid: [{ aanwezig: 0, afwezig: 0 }] })
+    expect(container.textContent).toContain(nl.insights.geenDataTitle)
+    expect(strook(container)).toBeNull()
+    expect(container.querySelector('[data-print-only]')).toBeNull()
+    expect(document.body.textContent).not.toContain(nl.insights.bronFout)
+  })
+
+  it('AC17: bij een fout op de uitslagen en tegelijk een fout op de momenten blijft de rest van het rapport (opkomst, ratings) gewoon staan', async () => {
+    const { container } = await renderInzichten(rijkRapport(), { rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT, inzichten_speler_momenten: FOUT } })
+    expect(rapportSectie(container, 'Trainingsopkomst per maand')!.querySelector('.rapport-bars')).not.toBeNull()
+    expect(rapportSectie(container, 'Ratings per speler')!.textContent).toContain('Rik Rating')
+  })
+})
+
+describe('AC16 / AC19 — signalenblok in het rapport', () => {
+  it('AC16: een falende bron + signalen → rapport toont de signalen en één melding eronder, zonder bolletje (geen .rapport-signaal)', async () => {
+    const { container } = await renderInzichten(merge(basis(), wegblijver(), stijger()), { rpcErrors: { inzichten_rating_vorm_per_speler: FOUT } })
+    const sectie = rapportSectie(container, nl.insights.signalenTitle)!
+    expect(rapportSignalen(container)).toEqual(['Wim Weg was minder dan 50% van de tijd aanwezig.'])
+    expect(rapportMeldingen(sectie)).toEqual([nl.insights.signalenOnvolledig])
+    expect(sectie.lastElementChild!.textContent).toBe(nl.insights.signalenOnvolledig)
+    // scherm en rapport zijn gelijk
+    expect(rapportSignalen(container)).toEqual(signalen(container))
+    expect(melding(container)).toEqual([nl.insights.signalenOnvolledig])
+  })
+
+  it('AC16: 0 signalen + onvolledig → het rapportblok bestaat met alleen de melding; zonder onvolledig verdwijnt het', async () => {
+    const stuk = await renderInzichten(merge(basis(), stijger()), { rpcErrors: { inzichten_rating_vorm_per_speler: FOUT } })
+    const sectie = rapportSectie(stuk.container, nl.insights.signalenTitle)!
+    expect(rapportSignalen(stuk.container)).toEqual([])
+    expect(rapportMeldingen(sectie)).toEqual([nl.insights.signalenOnvolledig])
+    cleanup()
+    const ok = await renderInzichten(basis())
+    expect(rapportSectie(ok.container, nl.insights.signalenTitle)).toBeUndefined()
+  })
+
+  it('AC19 / O4: 201 wedstrijden → geen doelsaldo-signaal, wel de onvolledig-melding in het rapport', async () => {
+    const { container } = await renderInzichten(merge(basis(), { uitslagen: Array.from({ length: 201 }, (_, i) => uitslag(i, 3, 0)) }))
+    expect(rapportSignalen(container)).toEqual([])
+    expect(rapportMeldingen(rapportSectie(container, nl.insights.signalenTitle))).toEqual([nl.insights.signalenOnvolledig])
+  })
+})
+
+describe('Rapport — fout gaat voor afgekapt, DOM-regels', () => {
+  it('fout én afgekapt tegelijk (op paginaniveau onbereikbaar): tegels en Resultaten tonen bronFout, nergens afgekapt', () => {
+    const resultaten = splitsThuisUit([{ event_id: 'a', datum: S, home_away: 'home', goals_for: 1, goals_against: 0, formatie: null }])
+    const { container } = render(
+      <SeizoensrapportPrint
+        t={nl}
+        teamName="FC Test"
+        teamLogoUrl={null}
+        venster={{ start: S, end: E }}
+        periodeLabel="Heel seizoen"
+        opkomst={null}
+        maanden={[]}
+        aanwezigheidPercentage={null}
+        rating={null}
+        saldo={resultaten.totaal}
+        signalen={[]}
+        ratingTopWorst={{ top: [], worst: [] }}
+        aanwezigheidTopWorst={{ top: [], worst: [] }}
+        vormTelling={{ win: 0, gelijk: 0, verlies: 0, onbekend: 0 }}
+        resultaten={resultaten}
+        topscorers={{ spelers: [], doelpunten: 0, assists: 0, assistPercentage: null }}
+        uitslagenAfgekapt={true}
+        fout={{ uitslagen: true }}
+        primaryColor="#111111"
+        secondaryColor="#222222"
+      />,
     )
-    expect(rapportKpi(container, 'Doelsaldo')).toEqual(['Doelsaldo', '+600', '600 voor · 0 tegen'])
+    const blok = container.querySelector('[data-print-only]') as HTMLElement
+    for (const id of ['doelsaldo', 'punten', 'cleansheets']) {
+      const regels = Array.from(blok.querySelectorAll(`[data-rapport-kpi="${id}"] p`)).map((p) => p.textContent)
+      expect(regels[2]).toBe(nl.insights.bronFout)
+    }
+    expect(blok.textContent).toContain(nl.insights.bronFout)
+    expect(blok.textContent).not.toContain(nl.insights.afgekapt)
+  })
+
+  it('AC39/R-regels: geen <h2>, <caption>, [data-kpi], [data-conclusielaag], role=alert of sr-only-tabel in het rapport', async () => {
+    const { container } = await renderInzichten(rijkRapport(), { rpcErrors: { inzichten_speler_momenten: FOUT } })
+    const blok = printBlok(container)
+    expect(blok.querySelector('h2')).toBeNull()
+    expect(blok.querySelector('caption')).toBeNull()
+    expect(blok.querySelector('[data-kpi]')).toBeNull()
+    expect(blok.querySelector('[data-conclusielaag]')).toBeNull()
+    expect(blok.querySelector('[role="alert"]')).toBeNull()
+    expect(blok.querySelector('table.sr-only')).toBeNull()
+  })
+
+  it('AC41: de sectievolgorde is Kop, tegels, Wat valt op, Resultaten | Topscorers, Vorm, Opkomst, Ratings | Aanwezigheid, voet', async () => {
+    const { container } = await renderInzichten(rijkRapport())
+    const kopjes = Array.from(printBlok(container).querySelectorAll('.rapport-sectiekop')).map((e) => e.textContent)
+    expect(kopjes).toEqual([
+      'Wat valt op', 'Resultaten', 'Topscorers', 'Recente vorm', 'Trainingsopkomst per maand', 'Ratings per speler', 'Aanwezigheid per speler',
+    ])
+    const delen = Array.from(printBlok(container).children).map((e) => e.className.split(' ')[0])
+    expect(delen[0]).toBe('rapport-kop')
+    expect(delen[1]).toBe('rapport-kpis')
+    expect(delen.at(-1)).toBe('rapport-voet')
+    // Resultaten en Topscorers staan in dezelfde rij naast elkaar
+    expect(rapportSectie(container, 'Resultaten')!.parentElement).toBe(rapportSectie(container, 'Topscorers')!.parentElement)
+    expect(rapportSectie(container, 'Resultaten')!.parentElement!.className).toBe('rapport-kolommen')
+  })
+
+  it('AC41/AC9: het aantal queries is ongewijzigd met alle rapportsecties gevuld (18 rpc, 17 namen, 10 from)', async () => {
+    const { rpcCalls, fromCalls } = await renderInzichten(
+      merge(rijkRapport(), {
+        events: [...vormEvents(), { id: 'tr1', team_id: TEAM, type: 'training', date: '2026-10-01', trainingstype: 'vct' }],
+        trainingOefeningen: [{ team_id: TEAM, event_id: 'tr1', oefeningen: { categorie: 'passen' } }],
+        metingen: [{ id: 'mt1', team_id: TEAM, categorie: 'partijen_groot', datum: '2026-07-05', stap: 1, notes: null, created_at: '2026-07-05' }],
+      }),
+    )
+    expect(rpcCalls).toHaveLength(VOOR.rpcAantal)
+    expect(Array.from(new Set(rpcCalls.map((c) => c.name))).sort()).toEqual(VOOR.rpcNamen)
+    expect(fromCalls).toHaveLength(VOOR.fromAantal)
+  })
+})
+
+describe('AC29 (rapport) — vijf talen', () => {
+  const R: Record<string, { res: string; top: string; betrokken: string; afgekort: string }> = {
+    nl: { res: 'Resultaten', top: 'Topscorers', betrokken: 'Betrokken', afgekort: 'Top {n} van {totaal} spelers' },
+    en: { res: 'Results', top: 'Top scorers', betrokken: 'Involved', afgekort: 'Top {n} of {totaal} players' },
+    de: { res: 'Ergebnisse', top: 'Torschützen', betrokken: 'Beteiligt', afgekort: 'Top {n} von {totaal} Spielern' },
+    es: { res: 'Resultados', top: 'Goleadores', betrokken: 'Implicado', afgekort: 'Top {n} de {totaal} jugadores' },
+    fr: { res: 'Résultats', top: 'Buteurs', betrokken: 'Impliqué', afgekort: 'Top {n} sur {totaal} joueurs' },
+  }
+  const talen = Object.keys(R)
+
+  it.each(talen)('AC29 (%s): sectietitels, kolomkop en "Top 6 van 7" in de taal; geen kaarttitel, geen restant {…}', async (taal) => {
+    const d = dicts[taal]
+    const { container } = await renderInzichten(rijkRapport(7), { locale: taal })
+    const blok = printBlok(container)
+    const res = rapportSectie(container, R[taal].res)
+    const top = rapportSectie(container, R[taal].top)
+    expect(res, 'Resultaten').toBeDefined()
+    expect(top, 'Topscorers').toBeDefined()
+    expect(top!.querySelectorAll('thead th')[3].textContent).toBe(R[taal].betrokken)
+    expect(top!.querySelector('.rapport-noot')!.textContent).toBe(R[taal].afgekort.replace('{n}', '6').replace('{totaal}', '7'))
+    expect(res!.querySelectorAll('thead th')).toHaveLength(7)
+    // titels zijn niet gelijk aan de kaarttitels en die staan ook niet in het rapport (V6)
+    for (const kaartTitel of [d.insights.thuisUitTitle, d.insights.topscorersTitle, d.insights.formatieTitle]) {
+      expect(blok.textContent).not.toContain(kaartTitel)
+      expect([R[taal].res, R[taal].top]).not.toContain(kaartTitel)
+    }
+    expect(blok.textContent).not.toMatch(/\{[a-zA-Z]+\}/)
+    if (taal !== 'nl') {
+      expect(R[taal].res).not.toBe(R.nl.res)
+      expect(R[taal].top).not.toBe(R.nl.top)
+      expect(R[taal].betrokken).not.toBe(R.nl.betrokken)
+      expect(R[taal].afgekort).not.toBe(R.nl.afgekort)
+    }
+    // zelfde regels voor de zes tegels op scherm en rapport, ook in deze taal
+    for (const id of KPI_IDS) expect(rapportTegel(container, id), id).toEqual(tegelTekst(container, id))
+  })
+
+  it.each(talen)('AC29 / AC17 (%s): bronFout en afgekapt in het rapport zijn de woorden van de taal', async (taal) => {
+    const stuk = await renderInzichten(rijkRapport(), { locale: taal, rpcErrors: { inzichten_wedstrijd_uitslagen: FOUT, inzichten_speler_momenten: FOUT } })
+    expect(rapportMeldingen(rapportSectie(stuk.container, R[taal].res))).toEqual([dicts[taal].insights.bronFout])
+    expect(rapportMeldingen(rapportSectie(stuk.container, R[taal].top))).toEqual([dicts[taal].insights.bronFout])
+    cleanup()
+    const veel = await renderInzichten(merge(basis(), { uitslagen: Array.from({ length: 201 }, (_, i) => uitslag(i, 3, 0)) }), { locale: taal })
+    expect(rapportMeldingen(rapportSectie(veel.container, R[taal].res))).toEqual([dicts[taal].insights.afgekapt])
+  })
+})
+
+describe('AC32 (rapport) — tenant', () => {
+  const beide = [
+    { team_id: TEAM, user_id: 'u1', rol: 'owner' },
+    { team_id: ANDER, user_id: 'u1', rol: 'owner' },
+  ]
+  const ander = (): Partial<TeamData> => ({
+    aanwezigheid: [{ aanwezig: 5, afwezig: 5 }],
+    uitslagen: Array.from({ length: 9 }, (_, i) => uitslag(i, 9, 0)),
+    spelerMomenten: [moment('z1', 'Zita Ander', 40, 9)],
+    ratingPerSpeler: [{ player_id: 'z2', naam: 'Zeno Ander', gemiddelde: 9.9, aantal: 9 }],
+  })
+
+  it('AC32: namen en aantallen van team 2 komen niet voor in Resultaten, Topscorers of de andere rapportsecties', async () => {
+    const { container, rpcCalls } = await renderInzichten(rijkRapport(), { anderen: { [ANDER]: ander() }, members: beide, activeTeam: TEAM })
+    const blok = printBlok(container)
+    expect(blok.textContent).not.toContain('Ander')
+    expect(blok.textContent).not.toContain('Zita')
+    expect(rapportSectie(container, 'Resultaten')!.querySelector('tbody tr:last-child td')!.textContent).toBe('6')
+    expect(rapportSectie(container, 'Topscorers')!.textContent).toContain('Speler A')
+    expect(rapportTegel(container, 'punten')![3]).toBe('11 punten uit 6 wedstrijden')
+    expect(rpcCalls.every((c) => c.args.p_team_id === TEAM)).toBe(true)
+  })
+
+  it('AC32: bij het andere actieve team zijn alleen díe gegevens in het rapport te zien', async () => {
+    const { container } = await renderInzichten(rijkRapport(), { anderen: { [ANDER]: ander() }, members: beide, activeTeam: ANDER })
+    const blok = printBlok(container)
+    expect(blok.textContent).toContain('Zita Ander')
+    expect(blok.textContent).not.toContain('Speler A')
+    expect(blok.textContent).not.toContain('Rik Rating')
+    expect(rapportSectie(container, 'Resultaten')!.querySelector('tbody tr:last-child td')!.textContent).toBe('9')
   })
 })
 
@@ -1611,6 +2121,10 @@ describe.each(TZS)('AC35–AC37 — tijdzone %s', (tz) => {
     expect(signalen(container)).toEqual([`De trainingsopkomst haalt de norm: 90% in ${OKT}, boven de 85%.`])
     expect(rapportSignalen(container)).toEqual(signalen(container))
     expect(melding(container)).toEqual([])
+    // AC36 (Deel 2): ook in het rapport blijven vensterlabel en maandlabels UTC-veilig
+    expect(rapportTegel(container, 'opkomst')).toEqual(tegelTekst(container, 'opkomst'))
+    expect(rapportTegel(container, 'opkomst')![1]).toBe(`Laatste maand (${OKT})`)
+    expect(Array.from(printBlok(container).querySelectorAll('.rapport-bar-label')).map((e) => e.textContent)).toEqual(['Sep 2026', OKT])
   })
 
   it.each(TIJDEN)('AC36: om %i:%i lokaal — op de laatste dag van de maand blijft de maand ongewijzigd', async (uur, min) => {
