@@ -505,9 +505,17 @@ const sluitConclusielaagUit = (klon: HTMLElement): void => {
     if (sectie.querySelector('.rapport-sectiekop')?.textContent === nl.insights.signalenTitle) sectie.remove()
   })
 }
+// Het rapport heeft sinds de uitbreiding een eigen sectie voor deze bron; die
+// verschilt per ontwerp tussen "met" en "zonder" data. Alleen die ene sectie
+// gaat eruit (U3): de rest van het print-blok blijft byte-voor-byte bewaakt.
+const sluitRapportSectiesUit = (klon: HTMLElement, titels: string[]): void =>
+  klon.querySelectorAll('[data-print-only] .rapport-sectie').forEach((s) => {
+    if (titels.includes(s.querySelector('.rapport-sectiekop')?.textContent ?? '')) s.remove()
+  })
 const zonderKaart = (container: HTMLElement, titel: string): string => {
   const kopie = container.cloneNode(true) as HTMLElement
   sluitConclusielaagUit(kopie)
+  sluitRapportSectiesUit(kopie, [nl.insights.rapportSpeelminutenTitle])
   const h2 = [...kopie.querySelectorAll('h2')].find((h) => h.textContent === titel)
   h2?.closest('.surface-card')?.remove()
   // recharts telt zijn eigen DOM-id's op per render (clip-paden, _r_N_); dat is geen inhoud.
@@ -539,6 +547,21 @@ describe('AC-A1 — fase-1- en fase-2a-kaarten ongewijzigd; nieuwe kaart eronder
     const htmlZonder = zonderKaart(zonder.container, i.speelminutenTitle)
     expect(htmlMet.length).toBeGreaterThan(5000) // niet-triviale vergelijking
     expect(htmlMet).toBe(htmlZonder)
+  })
+})
+
+describe('AC-A1 / U3 — controle dat de uitgesloten rapportsectie echt verschilt', () => {
+  it('U3: het print-blok heeft met speelminuten-data een tabel en zonder data speelminutenEmpty, dus de uitsluiting is niet leeg', async () => {
+    const sectie = (c: HTMLElement) =>
+      [...c.querySelectorAll('[data-print-only] .rapport-sectie')].find(
+        (x) => x.querySelector('.rapport-sectiekop')?.textContent === nl.insights.rapportSpeelminutenTitle,
+      ) as HTMLElement
+    const met = await renderInzichten(hoofdDb())
+    expect(sectie(met.container).querySelector('table')).not.toBeNull()
+    cleanup()
+    const zonder = await renderInzichten(leegDb({ ...hoofdDb(), speelminuten: [] }))
+    expect(sectie(zonder.container).querySelector('table')).toBeNull()
+    expect(sectie(zonder.container).textContent).toContain(nl.insights.speelminutenEmpty)
   })
 })
 

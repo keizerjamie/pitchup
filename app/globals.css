@@ -1192,6 +1192,31 @@ a, button, input, select, textarea, label, [role="button"] {
   .rapport-lijst-rij > :first-child { min-width: 0; overflow-wrap: anywhere; }
   .rapport-lijst-waarde { color: #6b7280; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
   .rapport-vorm { font-size: 9pt; font-weight: 700; }
+  /* Kwartieroverzicht: div-balken, twee reeksen, één gedeelde schaal. Hoogte
+     per balk is een percentage van dit vaste vlak (zie .rapport-bars). */
+  .rapport-kwartier-bars { display: flex; align-items: flex-end; gap: 1.5mm; height: 20mm; border-bottom: 0.3mm solid #d1d5db; }
+  .rapport-kwartier-kolom { flex: 1 1 0; min-width: 0; display: flex; gap: 0.5mm; }
+  .rapport-kwartier-bars > .rapport-kwartier-kolom { height: 100%; align-items: flex-end; }
+  .rapport-kwartier-slot { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+  .rapport-kwartier-bar { display: block; width: 100%; box-sizing: border-box; border-radius: 0.8mm 0.8mm 0 0; }
+  .rapport-kwartier-bar-voor { background: var(--club-secondary, #009966); }
+  .rapport-kwartier-bar-tegen { background: #ffffff; border: 0.35mm solid var(--club-primary, #004f3b); border-bottom: 0; }
+  .rapport-kwartier-labels { display: flex; gap: 1.5mm; margin-top: 0.8mm; }
+  .rapport-kwartier-labels > .rapport-kwartier-kolom { flex-direction: column; }
+  .rapport-kwartier-waarden { display: flex; gap: 0.5mm; }
+  .rapport-kwartier-waarde { flex: 1 1 0; min-width: 0; text-align: center; font-size: 6pt; font-weight: 800; color: #111827; font-variant-numeric: tabular-nums; }
+  .rapport-kwartier-regel { display: flex; align-items: baseline; gap: 1.5mm; margin-top: 1.2mm; }
+  .rapport-kwartier-regel > .rapport-noot, .rapport-kwartier-regel > .rapport-melding { margin-top: 0; min-width: 0; }
+  .rapport-kwartier-sleutel { flex-shrink: 0; align-self: center; width: 2.4mm; height: 2.4mm; border-radius: 0.5mm; box-sizing: border-box; }
+  .rapport-kwartier-sleutel-voor { background: var(--club-secondary, #009966); }
+  .rapport-kwartier-sleutel-tegen { background: #ffffff; border: 0.35mm solid var(--club-primary, #004f3b); }
+  .rapport-kwartier-reeks { flex-shrink: 0; font-size: 7.5pt; font-weight: 800; color: #111827; }
+  /* Doelstelling: vier vakjes, zelfde ritme als de oordeelkaart op het scherm. */
+  .rapport-oordeel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2mm; }
+  /* Vakjes strekken tot de hoogte van de hoogste (grid-stretch); waarde onderaan, zodat een label over twee regels de waarden niet uit lijn zet. */
+  .rapport-oordeel > div { display: flex; flex-direction: column; justify-content: space-between; }
+  .rapport-oordeel-label { font-size: 6.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.09em; color: #6b7280; overflow-wrap: anywhere; }
+  .rapport-oordeel-waarde { font-size: 13pt; line-height: 1.1; color: var(--club-primary, #004f3b); margin-top: 0.6mm; font-variant-numeric: tabular-nums; }
 
   /* Links teamnaam (· datum), rechts het merk — zelfde conventie als de
      poster-voetstrook. Geen space-between: het merk duwt zichzelf naar

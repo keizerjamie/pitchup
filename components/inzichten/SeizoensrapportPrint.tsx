@@ -1,15 +1,21 @@
 import type { Dict } from '@/messages/nl'
 import {
+  KWARTIER_BAKKEN,
   OPKOMST_DOEL,
   maandLabel,
   type AanwezigheidPerSpeler,
   type Doelsaldo,
+  type EvaluatieOverzicht,
+  type KwartierTelling,
   type MaandOpkomst,
   type MaandTrend,
   type RatingPerSpelerRij,
   type RatingTrend,
   type Signaal,
   type Seizoensvenster,
+  type SpeelminutenVerdeling,
+  type SpelerMomentenRij,
+  type TegendoelpuntTelling,
   type ThuisUitSplitsing,
   type TopWorst,
   type Topscorers,
@@ -23,8 +29,10 @@ import type { FormStripItem } from '@/components/dashboard/FormStrip'
 import type { MatchResult } from '@/lib/types'
 
 // Print-only seizoensrapport (dual-markup-patroon, zie MatchSquadPrintList.tsx
-// en AttendanceSummary.tsx): maximaal twee A4's die een trainer kan meenemen naar een
-// ouderavond of bestuursvergadering.
+// en AttendanceSummary.tsx): bedoeld als twee A4's die een trainer kan meenemen
+// naar een ouderavond of bestuursvergadering. Alleen in het extreme geval (zeer
+// lange namen plus maximaal gevulde lijsten) mag het drie A4's worden (besluit
+// Jamie U6); de balkhoogtes zijn daarvoor bewust niet verlaagd.
 //
 // BEWUST EEN DOCUMENT, GEEN POSTER. De wedstrijdselectie is een aankondiging
 // en gebruikt daarom een named page zonder marge, met kleurvlakken tot aan de
@@ -61,9 +69,28 @@ function vormLetter(t: Dict, result: MatchResult): string {
 }
 
 // Topscorers-tabel: meer dan dit aantal rijen kost op papier te veel hoogte
-// (de paginabegroting is twee A4's); de regel rapportTopscorersAfgekort maakt
-// zichtbaar dat er is afgekapt.
+// (de paginabegroting mikt op twee A4's, zie de kopcommentaar voor de uitzondering
+// in het extreme geval); de regel rapportTopscorersAfgekort maakt zichtbaar dat
+// er is afgekapt.
 const RAPPORT_MAX_TOPSCORERS = 6
+
+// Rijlimieten van Speelminuten en Kaarten, zelfde reden als hierboven. Losse
+// constanten zodat elk getal apart te wijzigen is. De afkapregel hergebruikt
+// de gedeelde sleutel rapportTopscorersAfgekort ("Top {n} van {totaal}").
+const RAPPORT_MAX_SPEELMINUTEN = 6
+const RAPPORT_MAX_KAARTEN = 6
+
+// Eén reeks van het Kwartieroverzicht. `staat` volgt dezelfde volgorde als de
+// schermkaarten (KwartierChart, TegendoelpuntenChart): fout, leeg, en voor
+// tegen de dekkingsstaat 'geenMinuut' (wel tegendoelpunten, geen enkele met
+// minuut: geen balken, wel de dekkingsregel).
+type KwartierReeks = {
+  id: 'voor' | 'tegen'
+  label: string
+  waarden: Record<(typeof KWARTIER_BAKKEN)[number], number>
+  staat: 'fout' | 'leeg' | 'geenMinuut' | 'getekend'
+  tekst: string
+}
 
 // Foutvlaggen van de rapportbronnen: de vier KPI-bronnen (gedeeld met de
 // strook) plus de bronnen van de secties. Alles optioneel, default false.
@@ -72,6 +99,10 @@ type RapportFout = KpiFout & {
   aanwezigheidPerSpeler: boolean
   spelerMomenten: boolean
   vorm: boolean
+  doelpuntMinuten: boolean
+  tegendoelpunten: boolean
+  speelminuten: boolean
+  evaluaties: boolean
 }
 
 // Vier <p>'s in dezelfde volgorde als de tegel op het scherm: label, venster,
@@ -133,6 +164,11 @@ export default function SeizoensrapportPrint({
   vormItems = [],
   resultaten,
   topscorers,
+  kwartieren,
+  tegenKwartieren,
+  speelminuten,
+  kaarten,
+  evaluaties,
   uitslagenAfgekapt = false,
   signalenOnvolledig = false,
   fout,
@@ -163,6 +199,14 @@ export default function SeizoensrapportPrint({
   // "—"; zonder `topscorers` ontbreekt de sectie Topscorers.
   resultaten?: ThuisUitSplitsing
   topscorers?: Topscorers
+  // Zonder `kwartieren` en `tegenKwartieren` ontbreekt de sectie Kwartieroverzicht
+  // (met één van beide alleen die reeks); zonder `speelminuten`, `kaarten` of
+  // `evaluaties` ontbreekt de eigen sectie.
+  kwartieren?: KwartierTelling
+  tegenKwartieren?: TegendoelpuntTelling
+  speelminuten?: SpeelminutenVerdeling
+  kaarten?: SpelerMomentenRij[]
+  evaluaties?: EvaluatieOverzicht
   uitslagenAfgekapt?: boolean
   signalenOnvolledig?: boolean
   fout?: Partial<RapportFout>
@@ -181,6 +225,10 @@ export default function SeizoensrapportPrint({
     aanwezigheidPerSpeler: false,
     spelerMomenten: false,
     vorm: false,
+    doelpuntMinuten: false,
+    tegendoelpunten: false,
+    speelminuten: false,
+    evaluaties: false,
     ...fout,
   }
   const metCijfer = maanden.filter((m): m is MaandOpkomst & { percentage: number } => m.percentage !== null)
@@ -206,6 +254,60 @@ export default function SeizoensrapportPrint({
         [t.insights.thuisLabel, resultaten.thuis],
         [t.insights.uitLabel, resultaten.uit],
         ...(resultaten.onbekend ? ([[t.insights.onbekendLabel, resultaten.onbekend]] as [string, ThuisUitSplitsing['thuis']][]) : []),
+      ]
+    : []
+
+  const reeksen: KwartierReeks[] = []
+  if (kwartieren) {
+    const staat = f.doelpuntMinuten ? 'fout' : kwartieren.metMinuut === 0 ? 'leeg' : 'getekend'
+    reeksen.push({
+      id: 'voor',
+      label: t.insights.rapportKwartierVoor,
+      waarden: kwartieren.perBak,
+      staat,
+      tekst:
+        staat === 'fout'
+          ? t.insights.bronFout
+          : staat === 'leeg'
+            ? t.insights.kwartierEmpty
+            : t.insights.kwartierDekking.replace('{x}', String(kwartieren.metMinuut)).replace('{y}', String(kwartieren.totaal)),
+    })
+  }
+  if (tegenKwartieren) {
+    const staat = f.tegendoelpunten
+      ? 'fout'
+      : tegenKwartieren.totaal === 0
+        ? 'leeg'
+        : tegenKwartieren.metMinuut === 0
+          ? 'geenMinuut'
+          : 'getekend'
+    const waarden = Object.fromEntries(
+      KWARTIER_BAKKEN.map((bak) => [bak, tegenKwartieren.perBak[bak].set_piece + tegenKwartieren.perBak[bak].open_play]),
+    ) as KwartierReeks['waarden']
+    reeksen.push({
+      id: 'tegen',
+      label: t.insights.rapportKwartierTegen,
+      waarden,
+      staat,
+      tekst:
+        staat === 'fout'
+          ? t.insights.bronFout
+          : staat === 'leeg'
+            ? t.insights.tegenEmpty
+            : t.insights.tegenDekking.replace('{x}', String(tegenKwartieren.metMinuut)).replace('{y}', String(tegenKwartieren.totaal)),
+    })
+  }
+  const getekend = reeksen.filter((r) => r.staat === 'getekend')
+  // Eén gedeelde schaal over de getekende reeksen; 100% = de hoogste bak, dus
+  // een balk kan nooit buiten het vlak lopen. Guard tegen deling door nul.
+  const kwartierMax = Math.max(0, ...getekend.flatMap((r) => KWARTIER_BAKKEN.map((bak) => r.waarden[bak])))
+
+  const oordeelVakjes: Array<[string, number]> = evaluaties
+    ? [
+        [t.insights.kolomJa, evaluaties.totaal.ja],
+        [t.insights.kolomDeels, evaluaties.totaal.deels],
+        [t.insights.kolomNee, evaluaties.totaal.nee],
+        [t.insights.kolomZonderOordeel, evaluaties.totaal.metDoelstellingZonderOordeel],
       ]
     : []
 
@@ -464,6 +566,171 @@ export default function SeizoensrapportPrint({
           )}
         </div>
       </div>
+
+      {(speelminuten || kaarten) && (
+        <div className="rapport-kolommen">
+          {speelminuten && (
+            <div className="rapport-sectie">
+              <p className="rapport-sectiekop font-pdf-display">{t.insights.rapportSpeelminutenTitle}</p>
+              {f.speelminuten ? (
+                <Melding tekst={t.insights.bronFout} />
+              ) : speelminuten.noemer === 0 ? (
+                <p className="rapport-noot">{t.insights.speelminutenEmpty}</p>
+              ) : (
+                <>
+                  <table className="rapport-tabel">
+                    <thead>
+                      <tr>
+                        <th scope="col" className="text-left">{t.insights.kolomSpeler}</th>
+                        <th scope="col" className="rapport-tabel-getal">{t.insights.kolomMinutenTotaal}</th>
+                        <th scope="col" className="rapport-tabel-getal">{t.insights.kolomWedstrijdenMetMinuten}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {speelminuten.regels.slice(0, RAPPORT_MAX_SPEELMINUTEN).map((r) => (
+                        <tr key={r.player_id}>
+                          <th scope="row">
+                            {r.naam}
+                            {r.gast && <span className="rapport-gast">({t.insights.gastLabel})</span>}
+                          </th>
+                          {/* Zelfde regel als SpeelminutenKaart: geen minuten-rij is "geen gegevens", nooit een verzonnen 0. */}
+                          <td className="rapport-tabel-getal">
+                            {r.wedstrijden === 0 || r.minuten === null ? t.insights.geenGegevens : r.minuten}
+                          </td>
+                          <td className="rapport-tabel-getal">{r.wedstrijden}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {speelminuten.regels.length > RAPPORT_MAX_SPEELMINUTEN && (
+                    <p className="rapport-noot">
+                      {t.insights.rapportTopscorersAfgekort
+                        .replace('{n}', String(RAPPORT_MAX_SPEELMINUTEN))
+                        .replace('{totaal}', String(speelminuten.regels.length))}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {kaarten && (
+            <div className="rapport-sectie">
+              <p className="rapport-sectiekop font-pdf-display">{t.insights.rapportKaartenTitle}</p>
+              {f.spelerMomenten ? (
+                <Melding tekst={t.insights.bronFout} />
+              ) : kaarten.length === 0 ? (
+                <p className="rapport-noot">{t.insights.kaartenEmpty}</p>
+              ) : (
+                <>
+                  <div className="rapport-lijst">
+                    {kaarten.slice(0, RAPPORT_MAX_KAARTEN).map((r) => (
+                      <p key={r.player_id} className="rapport-lijst-rij">
+                        <span>
+                          {r.naam}
+                          {r.gast && <span className="rapport-gast">({t.insights.gastLabel})</span>}
+                        </span>
+                        <span className="rapport-lijst-waarde">
+                          {t.insights.kaartenWaarde.replace('{geel}', String(r.geel)).replace('{rood}', String(r.rood))}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                  {kaarten.length > RAPPORT_MAX_KAARTEN && (
+                    <p className="rapport-noot">
+                      {t.insights.rapportTopscorersAfgekort
+                        .replace('{n}', String(RAPPORT_MAX_KAARTEN))
+                        .replace('{totaal}', String(kaarten.length))}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(reeksen.length > 0 || evaluaties) && (
+        <div className="rapport-kolommen">
+          {reeksen.length > 0 && (
+            <div className="rapport-sectie">
+              <p className="rapport-sectiekop font-pdf-display">{t.insights.rapportKwartierTitle}</p>
+              {getekend.length > 0 && (
+                <>
+                  {/* Bewust niet .rapport-bar/.rapport-bars: seizoensrapport.acceptance.test telt .rapport-bar. */}
+                  <div className="rapport-kwartier-bars">
+                    {KWARTIER_BAKKEN.map((bak) => (
+                      <span key={bak} className="rapport-kwartier-kolom">
+                        {getekend.map((r) => (
+                          <span key={r.id} className="rapport-kwartier-slot">
+                            {r.waarden[bak] > 0 && kwartierMax > 0 && (
+                              <span
+                                className={`rapport-kwartier-bar rapport-kwartier-bar-${r.id}`}
+                                style={{ height: `${(r.waarden[bak] / kwartierMax) * 100}%` }}
+                              />
+                            )}
+                          </span>
+                        ))}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="rapport-kwartier-labels">
+                    {KWARTIER_BAKKEN.map((bak) => (
+                      <span key={bak} className="rapport-kwartier-kolom">
+                        <span className="rapport-kwartier-waarden">
+                          {getekend.map((r) => (
+                            <span key={r.id} className="rapport-kwartier-waarde">{r.waarden[bak]}</span>
+                          ))}
+                        </span>
+                        <span className="rapport-bar-label">{bak}</span>
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+              {/* De regel per reeks is ook de legenda (sleutelvakje + label) en draagt de dekkingsregel. */}
+              {reeksen.map((r) => (
+                <div key={r.id} className="rapport-kwartier-regel">
+                  {r.staat === 'getekend' && (
+                    <span className={`rapport-kwartier-sleutel rapport-kwartier-sleutel-${r.id}`} aria-hidden="true" />
+                  )}
+                  <span className="rapport-kwartier-reeks">{r.label}</span>
+                  <p className={r.staat === 'fout' ? 'rapport-melding' : 'rapport-noot'}>{r.tekst}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {evaluaties && (
+            <div className="rapport-sectie">
+              <p className="rapport-sectiekop font-pdf-display">{t.insights.rapportOordeelTitle}</p>
+              {f.evaluaties ? (
+                <Melding tekst={t.insights.bronFout} />
+              ) : evaluaties.afgekaptEvaluaties ? (
+                <Melding tekst={t.insights.afgekaptTraining} />
+              ) : !evaluaties.heeftTrainingen ? (
+                <p className="rapport-noot">{t.insights.oordeelEmpty}</p>
+              ) : evaluaties.totaal.metDoelstelling === 0 &&
+                evaluaties.totaal.ja + evaluaties.totaal.deels + evaluaties.totaal.nee === 0 ? (
+                <p className="rapport-noot">{t.insights.oordeelGeenDoelstellingen}</p>
+              ) : (
+                <>
+                  {/* Bewust <p> en geen dl/dt/dd: zelfde patroon als de Kpi-tegel. afgekaptDuur wordt genegeerd, zoals in DoelstellingOordeelKaart. */}
+                  <div className="rapport-oordeel">
+                    {oordeelVakjes.map(([naam, n]) => (
+                      <div key={naam}>
+                        <p className="rapport-oordeel-label">{naam}</p>
+                        <p className="rapport-oordeel-waarde font-pdf-display">{n}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="rapport-noot">{t.insights.rapportOordeelNoot}</p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="rapport-voet">
         <span>{teamName}</span>

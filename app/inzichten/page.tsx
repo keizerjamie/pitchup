@@ -688,6 +688,11 @@ export default async function InzichtenPage({
         saldo={thuisUit.totaal}
         resultaten={thuisUit}
         topscorers={topscorers}
+        kwartieren={kwartieren}
+        tegenKwartieren={tegenKwartieren}
+        speelminuten={speelminuten}
+        kaarten={kaarten}
+        evaluaties={evaluaties}
         uitslagenAfgekapt={uitslagenAfgekapt}
         signalenOnvolledig={signalenOnvolledig}
         fout={{
@@ -696,6 +701,10 @@ export default async function InzichtenPage({
           aanwezigheidPerSpeler: aanwezigheidPerSpelerBron.fout,
           spelerMomenten: spelerMomenten.fout,
           vorm: vormBron.fout,
+          doelpuntMinuten: doelpuntMinuten.fout,
+          tegendoelpunten: tegendoelpuntRijen.fout,
+          speelminuten: speelminutenBron.fout,
+          evaluaties: evaluatieBron.fout,
         }}
         signalen={signalen}
         ratingTopWorst={ratingTopWorst}

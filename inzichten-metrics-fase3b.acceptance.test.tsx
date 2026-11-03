@@ -1484,9 +1484,17 @@ const sluitConclusielaagUit = (klon: HTMLElement): void => {
     if (sectie.querySelector('.rapport-sectiekop')?.textContent === nl.insights.signalenTitle) sectie.remove()
   })
 }
+// Het rapport heeft sinds de uitbreiding een eigen sectie voor deze bron; die
+// verschilt per ontwerp tussen "met" en "zonder" data. Alleen die ene sectie
+// gaat eruit (U3): de rest van het print-blok blijft byte-voor-byte bewaakt.
+const sluitRapportSectiesUit = (klon: HTMLElement, titels: string[]): void =>
+  klon.querySelectorAll('[data-print-only] .rapport-sectie').forEach((s) => {
+    if (titels.includes(s.querySelector('.rapport-sectiekop')?.textContent ?? '')) s.remove()
+  })
 function zonderKaarten(container: HTMLElement, titels: string[]): string {
   const kopie = container.cloneNode(true) as HTMLElement
   sluitConclusielaagUit(kopie)
+  sluitRapportSectiesUit(kopie, [nl.insights.rapportOordeelTitle])
   for (const titel of titels) {
     const h2 = [...kopie.querySelectorAll('h2')].find((x) => x.textContent === titel)
     h2?.closest('.surface-card')?.remove()
@@ -1934,6 +1942,21 @@ describe('AC-A1 / AC-A15 — volgorde en bestaande kaarten ongewijzigd', () => {
     const htmlZonder = zonderKaarten(zonder.container, NIEUWE_3B)
     expect(htmlMet.length).toBeGreaterThan(5000)
     expect(htmlMet).toBe(htmlZonder)
+  })
+
+  it('AC-A15 / U3: de uitgesloten rapportsectie verschilt echt: de sectie heeft met 3b-data andere vakjes dan zonder', async () => {
+    const sectie = (c: HTMLElement) =>
+      [...c.querySelectorAll('[data-print-only] .rapport-sectie')].find(
+        (x) => x.querySelector('.rapport-sectiekop')?.textContent === nl.insights.rapportOordeelTitle,
+      ) as HTMLElement
+    const met = await renderInzichten(srpeDb())
+    const metTekst = sectie(met.container).textContent
+    expect(sectie(met.container).querySelector('.rapport-oordeel')).not.toBeNull()
+    met.unmount()
+    cleanup()
+    const zonder = await renderInzichten(srpeDb({ training_evaluaties: [] }))
+    // trainingen komen uit events (left join), dus zonder evaluaties blijft de sectie staan maar met andere getallen
+    expect(sectie(zonder.container).textContent).not.toBe(metTekst)
   })
 
   it('AC-A15 / D.4: belasting- en discipline-uitkomsten zijn gelijk aan de hand-afgeleide 3a-waarden (belastingkaart: wk 36 trainingstotaal 135, wk 37 30, wk 38 30 *, wk 41 20 *, wk 42 50)', async () => {

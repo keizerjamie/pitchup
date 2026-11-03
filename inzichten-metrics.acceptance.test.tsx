@@ -1033,12 +1033,16 @@ describe('Afgeleide randvoorwaarden', () => {
     await renderInzichten(hoofdDb())
     configure({ defaultIgnore: STANDAARD_IGNORE })
     const print = [...document.querySelectorAll('[data-print-only]')].map((n) => n.textContent).join(' ')
-    for (const t of [T.thuisUit, T.formatie, T.top, T.kaarten, T.kwartier, T.tegen]) {
+    // Uitbreiding: ook de titels van de speelminuten- en oordeelkaart mogen niet in het rapport staan.
+    for (const t of [T.thuisUit, T.formatie, T.top, T.kaarten, T.kwartier, T.tegen, i.speelminutenTitle, i.oordeelTitle]) {
       expect(print).not.toContain(t)
     }
     // Deel 2: het rapport heeft wél zijn eigen, kortere sectietitels.
     expect(print).toContain(i.rapportResultatenTitle)
     expect(print).toContain(i.rapportTopscorersTitle)
+    // Uitbreiding: de nieuwe rapporttitels staan er wél.
+    expect(print).toContain(i.rapportKwartierTitle)
+    expect(print).toContain(i.rapportKaartenTitle)
   })
 
   it('AC-A2 (opruimen): tegendoelpunten staat in TEAM_TABELLEN vóór events, en in beide blok-22-lussen van het verificatiescript', () => {
