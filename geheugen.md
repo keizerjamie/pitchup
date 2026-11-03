@@ -4361,3 +4361,23 @@ Brief deel 2 (R1–R10) in dezelfde ketenmap (`03-technische-brief-deel2`, `06`/
 - **Tests:** `seizoensrapport.acceptance.test.tsx`, `inzichten-conclusielaag.acceptance.test.tsx` (199),
   `lib/kpi-tekst.test.ts`. Bekend rood los hiervan: `cyclusweek-correctie` AC1/AC12.
 - **Rooktest deel 2:** open.
+
+## Feature: Inzichten rapportuitbreiding — speelminuten, kaarten, kwartieren, doelstelling (2026-11-03, `f4085d3`, live)
+Ketenmap `ff-inzichten-metrics/rapport-uitbreiding/` (01–08).
+- **Rapport** (`SeizoensrapportPrint`): twee extra `.rapport-kolommen`-rijen vóór de voet — Speelminuten | Kaarten,
+  Kwartieroverzicht | Doelstelling behaald. Pagina 1 ongewijzigd; thuis/uit zat er al in. Optionele props
+  `kwartieren`, `tegenKwartieren`, `speelminuten`, `kaarten`, `evaluaties` + foutvlaggen uit de bestaande bronnen
+  (`doelpuntMinuten.fout`, `tegendoelpuntRijen.fout`, `speelminutenBron.fout`, `evaluatieBron.fout`). Geen nieuwe
+  queries: nog 18 `.rpc(` + 5 `.from(`.
+- **Limieten:** `RAPPORT_MAX_SPEELMINUTEN = 6`, `RAPPORT_MAX_KAARTEN = 6` ("Top 6 van N", gast-label).
+- **Kwartieren:** div-balken 20 mm; voor gevuld (`--club-secondary`), tegen omlijnd (`--club-primary`), met
+  "x van y met minuut". Tegen-totaal > 0 maar 0 met minuut → alleen dekkingsregel, geen balken (V1).
+- **Doelstelling:** `.rapport-oordeel` grid 4 kolommen (ja/deels/nee/zonder oordeel); `> div` is flex-column
+  met space-between zodat een label over 2 regels het cijfer niet scheef duwt. Noot: telt t/m gisteren.
+- **Paginagrens (U6):** doel 2 A4; extreem geval (lange namen, DE/FR) mag 3 A4 — door Jamie geaccepteerd. AC21
+  (lagere balken) bewust niet toegepast. Meting: 14 PDF's, 12 ≤ 2 A4, normaal team ~60 mm over op pagina 2;
+  geen sectie splitst (`.rapport-sectie` `break-inside: avoid`).
+- **Testwijziging (U3):** de byte-pariteitstests in fase2b/fase3b sluiten via `sluitRapportSectiesUit` precies één
+  rapportsectie uit (Speelminuten resp. Doelstelling), met controletest dat de vergelijking niet leeg is.
+- **Niet getest:** echte data via de Delen-knop; lichte clubkleur (rand tegen-balk mogelijk zwak zichtbaar).
+- **Rooktest:** open (samen met die van deel 2).
