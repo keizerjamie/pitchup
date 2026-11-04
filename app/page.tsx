@@ -73,10 +73,10 @@ export default async function DashboardPage() {
       .limit(5),
     // Gastspelers tellen niet mee in de opkomsttegel hieronder, zodat het
     // dashboard hetzelfde percentage toont als /inzichten (dat de gasten in
-    // SQL wegfiltert — supabase/inzichten.sql). Bewust een APARTE query zonder
-    // active-filter: de telling kijkt vandaag naar álle attendance-rijen van de
-    // aankomende events, ook die van inactief geworden spelers, en dat gedrag
-    // blijft ongewijzigd.
+    // SQL wegfiltert — supabase/inzichten.sql). Een APARTE query zonder
+    // active-filter, zodat een fout hier apart herkenbaar blijft (guestPlayerError).
+    // Inactieve spelers vallen al weg via het filter op allAttendance
+    // (actieveSpelerIds) verderop.
     supabase.from('players').select('id').eq('team_id', ctx.teamId).eq('type', 'guest'),
     // Periodisering per onderdeel (vervangt de vroegere alles-of-niets
     // count-query op `metingen`). Team-gescoped, nieuwste eerst — zelfde vorm
@@ -116,7 +116,15 @@ export default async function DashboardPage() {
   const { data: attendanceRows } = allEventIds.length > 0
     ? await supabase.from('attendance').select('event_id, player_id, status').eq('team_id', ctx.teamId).in('event_id', allEventIds)
     : { data: [] }
-  const allAttendance = attendanceRows ?? []
+  // Alleen rijen van ACTIEVE spelers tellen mee. Een speler die op inactief
+  // wordt gezet houdt zijn attendance-rijen voor komende events (vaak op
+  // 'present'), en zonder dit filter telden die mee in de hero-ring, de
+  // opkomsttegel en "geen reactie" — terwijl de noemer (heroSquadSize) hem al
+  // wegliet. `players` is al op active = true gefilterd, dus nul extra queries.
+  // Faalt die query, dan blijft er niets over en toont de opkomsttegel "—":
+  // liever geen getal dan een verkeerd getal (zelfde regel als bij de gasten).
+  const actieveSpelerIds = new Set(players.map((p) => p.id))
+  const allAttendance = (attendanceRows ?? []).filter((a) => actieveSpelerIds.has(a.player_id))
 
   // Faalt de gast-query, dan weten we niet wie gast is. Doortellen zou de
   // gasten stilzwijgend meerekenen en dus een te hoog percentage tonen dat
