@@ -4381,3 +4381,19 @@ Ketenmap `ff-inzichten-metrics/rapport-uitbreiding/` (01–08).
   rapportsectie uit (Speelminuten resp. Doelstelling), met controletest dat de vergelijking niet leeg is.
 - **Niet getest:** echte data via de Delen-knop; lichte clubkleur (rand tegen-balk mogelijk zwak zichtbaar).
 - **Rooktest:** open (samen met die van deel 2).
+
+## Fix: inactieve spelers tellen niet mee in dashboard en agenda (2026-11-04, `68a0be1`, live)
+Geen feature-factory (kleine fix, optie A gekozen door Jamie).
+- **Oorzaak:** inactief zetten (`active=false`) laat de attendance-rijen voor komende events staan (CSW 2: 69 rijen
+  op `present`). De namenlijsten filterden al op `active`; de **tellingen** niet: hero-ring/"geen reactie" en de
+  opkomsttegel op het dashboard, en de `x/y`-teller per agendarij. De hero-noemer (`heroSquadSize`) liet de speler
+  al weg, dus de ring was intern inconsistent.
+- **Dashboard** (`app/page.tsx`): `allAttendance` gefilterd op `actieveSpelerIds` (uit de al op `active` gefilterde
+  `players`-query, nul extra queries). Faalt die query → niets over → opkomsttegel "—".
+- **Agenda** (`app/events/page.tsx`): extra query `players.id` met `team_id` + `active = false` → `inactiefIds`.
+  Faalt hij → `logError('events.inactivePlayers')` en ongefilterd doortellen (zelfde afweging als de gast-query).
+- **Bewust niet:** attendance-rijen verwijderen bij inactief zetten (optie B, raakt data/historie). Wedstrijdselectie
+  (al geselecteerde inactieve speler blijft zichtbaar met label) en speelminuten-namen op de analyse blijven zoals ze waren.
+- **Tests:** `inactieve-spelers-tellingen.acceptance.test.tsx` (6; 3 falen zonder fix). Bekend rood los hiervan:
+  `cyclusweek-correctie` AC1/AC12.
+- **Gotcha:** push faalde eerst door een GitHub-storing (500 "Internal Server Error"); niet de repo, gewoon opnieuw proberen.
