@@ -43,7 +43,7 @@ import { nl } from '@/messages/nl'
 import { CLUB_COLOR_FALLBACK, CLUB_COLOR_KEYS, KIT_INK_LIGHT, READABLE_INK_DARK } from '@/lib/club-colors'
 
 vi.mock('@/app/actions/attendance', () => ({
-  saveLineup: vi.fn().mockResolvedValue(undefined),
+  saveLineup: vi.fn().mockResolvedValue({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false }),
 }))
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {

@@ -373,3 +373,18 @@ describe('OU — optimistisch per rij, rollback bij fout', () => {
     expect(screen.queryByRole('button', { name: nl.event.markAllPresent })).not.toBeInTheDocument()
   })
 })
+
+// Kloppende cijfers (punt 5): lange spelersnamen breken om i.p.v. afgekapt te
+// worden; de statusknoppen behouden hun breedte.
+describe('TrainingAttendance — lange spelersnaam', () => {
+  it('de naam-span heeft geen truncate maar breekt om', () => {
+    const naam = 'Maximiliaan Alexander van der Heijden-Oosterhuis'
+    renderAttendance([makePlayer('p1', 'regular', { name: naam })], { p1: 'unknown' })
+    const span = screen.getByText(naam)
+    expect(span.className).not.toContain('truncate')
+    expect(span.className).toContain('break-words')
+    expect(span.className).toContain('[overflow-wrap:anywhere]')
+    // De knoppengroep krimpt niet.
+    expect(attendanceRowFor(naam).lastElementChild?.className).toContain('flex-shrink-0')
+  })
+})

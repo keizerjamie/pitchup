@@ -105,6 +105,19 @@ export function telAanwezigheid<T extends TelbareSpeler>(
   }
 }
 
+// Teller en noemer van "x/y aanwezig" op de dashboardhero en in de kalender:
+// UITSLUITEND vaste spelers. Teller = vast aanwezig; noemer = alle vaste
+// spelers (aanwezig + afwezig + geblesseerd + nog niet gereageerd). Een gast
+// telt hier dus nooit mee, ook niet als hij aanwezig staat — dezelfde basis als
+// opkomstPercentage, zodat "19/30" en "63%" bij elkaar horen. afwezig,
+// geblesseerd en onbekend bevatten al alleen vaste spelers (zie telAanwezigheid).
+export function vasteTelling(t: AanwezigheidsTelling): { aanwezig: number; noemer: number } {
+  return {
+    aanwezig: t.vastAanwezig,
+    noemer: t.vastAanwezig + t.afwezig + t.geblesseerd + t.onbekend,
+  }
+}
+
 // Dezelfde regel voor de twee lijstpagina's (trainingsplan en opstelling).
 // `afwezig` is hier bewust "niet aanwezig", dus INCLUSIEF status 'unknown' —
 // dat is het bestaande gedrag van beide pagina's en verandert niet; deze

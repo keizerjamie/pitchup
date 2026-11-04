@@ -291,20 +291,20 @@ export default function MatchAnalysisEditor({
           {presentPlayers.map((player, i) => {
             const rating = ratings[player.id] ?? null
             return (
-              <div key={player.id} className="flex items-center gap-3 px-4 py-2.5"
+              <div key={player.id} className="flex items-center gap-3 px-4 py-2.5 max-sm:flex-wrap"
                 style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
                 <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[13px] font-bold font-display flex-shrink-0"
                   style={{ background: avatarBg(player.name) }} aria-hidden="true">
                   {initialsOf(player.name)}
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col leading-tight">
-                  <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+                  <span className="text-[14.5px] font-bold text-ink break-words [overflow-wrap:anywhere]">{player.name}</span>
                   <span className="text-[12px] font-semibold text-faint">
                     {player.jersey_number != null ? `#${player.jersey_number} · ` : ''}
                     {POSITION_ABBREVIATIONS[player.position] ?? player.position}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 [--hit-slop-gap:8px] flex-shrink-0">
+                <div className="flex items-center gap-2 [--hit-slop-gap:8px] flex-shrink-0 max-sm:w-full max-sm:justify-end">
                   {canEdit ? (
                     <>
                       <button

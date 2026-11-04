@@ -345,6 +345,15 @@ function tableFactory(
         opts.onInsert?.(payload)
         return Promise.resolve({ data: null, error: opts.insertError ?? null })
       },
+      // De backfill op de eventpagina schrijft sinds "kloppende cijfers" met
+      // upsert(..., { ignoreDuplicates: true }) i.p.v. insert (twee
+      // gelijktijdige loads botsten op UNIQUE(event_id, player_id)). Zelfde
+      // haak en zelfde foutinjectie als insert, zodat de bewijsvoering
+      // hieronder ongewijzigd blijft.
+      upsert: (payload: Row[]) => {
+        opts.onInsert?.(payload)
+        return Promise.resolve({ data: null, error: opts.insertError ?? null })
+      },
       then: (resolve: (v: { data: Row[] | null; error: unknown }) => unknown) =>
         resolve({ data: failure ? null : resolveRows(), error: failure }),
     }

@@ -170,3 +170,26 @@ describe('MatchAnalysisEditor: gebeurtenis verwijderen met undo', () => {
     expect(screen.queryByText(nl.undo.deleteError)).not.toBeInTheDocument()
   })
 })
+
+// Kloppende cijfers (punt 5): lange spelersnamen worden niet meer afgekapt maar
+// breken om; de rij mag onder sm wrappen met de knoppen op een eigen regel.
+describe('MatchAnalysisEditor — spelersnaam in de beoordelingsrij', () => {
+  it('de naam-span heeft geen truncate en breekt om (break-words + overflow-wrap:anywhere)', () => {
+    const { container } = renderEditor()
+    const naam = Array.from(container.querySelectorAll('span.text-ink')).find((e) => e.textContent === 'Piet Peters')
+    expect(naam).toBeDefined()
+    expect(naam!.className).not.toContain('truncate')
+    expect(naam!.className).toContain('break-words')
+    expect(naam!.className).toContain('[overflow-wrap:anywhere]')
+  })
+
+  it('de rij wrapt onder sm en de knoppengroep krijgt dan een eigen regel rechts', () => {
+    const { container } = renderEditor()
+    const naam = Array.from(container.querySelectorAll('span.text-ink')).find((e) => e.textContent === 'Piet Peters')!
+    const rij = naam.parentElement!.parentElement!
+    expect(rij.className).toContain('max-sm:flex-wrap')
+    const knoppen = rij.lastElementChild as HTMLElement
+    expect(knoppen.className).toContain('max-sm:w-full')
+    expect(knoppen.className).toContain('max-sm:justify-end')
+  })
+})

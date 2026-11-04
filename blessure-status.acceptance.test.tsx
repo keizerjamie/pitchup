@@ -41,6 +41,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined }),
+  headers: vi.fn().mockResolvedValue({ get: () => null }),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 

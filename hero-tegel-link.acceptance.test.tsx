@@ -33,6 +33,7 @@ function renderHero() {
       t={nl}
       present={9}
       absent={2}
+      injured={0}
       squadSize={14}
       primaryHref="/events/ev1/training-plan"
       primaryLabel={nl.home.makeTrainingPlan}

@@ -166,6 +166,12 @@ describe('ActionBar', () => {
     expect(second).toHaveAccessibleName('Opslaan')
     expect(second).toHaveAttribute('type', 'submit')
   })
+
+  it('plakt op mobiel (sticky) maar niet vanaf md (md:static, besluit V8)', () => {
+    const { container } = render(<ActionBar primary={<Button type="submit">Opslaan</Button>} />)
+    const balk = container.firstElementChild as HTMLElement
+    expect(balk).toHaveClass('action-bar', 'sticky', 'md:static')
+  })
 })
 
 describe('PageSkeleton', () => {

@@ -87,7 +87,11 @@ function buildTodoItems(events, { trainingDates = [], manualSet = new Set() } = 
         })
       }
 
-      const lineupAuto = !!e.lineupExists
+      // Productie (app/page.tsx, lineupSet): auto-done = de opstelling is
+      // COMPLEET volgens telOpstelling (lib/lineup-compleet.ts) — elke positie
+      // een unieke speler — niet langer "er bestaat een lineups-rij". Het
+      // harnas krijgt die uitkomst als boolean `lineupComplete` aangeleverd.
+      const lineupAuto = !!e.lineupComplete
       const lineupManual = manualSet.has(`${e.id}:lineup`)
       const lineupEffective = effectiveDone(lineupAuto, lineupManual)
       if (
@@ -177,7 +181,7 @@ function findTask(items, eventId, taskType) {
 test('AC1: wedstrijd deze week → open lineup-taak met deadline = wedstrijddag', () => {
   const matchDate = addDaysFixed(TODAY, 3)
   const items = buildTodoItems([
-    { id: 'm1', type: 'match', date: matchDate, lineupExists: false },
+    { id: 'm1', type: 'match', date: matchDate, lineupComplete: false },
   ])
   const task = findTask(items, 'm1', 'lineup')
   assert.ok(task, 'lineup-taak moet bestaan')
@@ -232,11 +236,13 @@ test('AC4: training deze week → open training_plan-taak met deadline = trainin
 // Auto-done
 // ═══════════════════════════════════════════════════════════════════════════
 
-// AC5: Er bestaat een lineups-rij → lineup-taak automatisch afgerond.
-test('AC5: lineup-rij aanwezig → lineup-taak automatisch afgerond', () => {
+// AC5: Er staat een COMPLETE opstelling (elke positie een unieke speler) →
+// lineup-taak automatisch afgerond. Een lineups-rij met lege posities telt
+// niet meer als gemaakt (kloppende cijfers, punt 4).
+test('AC5: complete opstelling → lineup-taak automatisch afgerond', () => {
   const matchDate = addDaysFixed(TODAY, 2)
   const items = buildTodoItems([
-    { id: 'm5', type: 'match', date: matchDate, lineupExists: true },
+    { id: 'm5', type: 'match', date: matchDate, lineupComplete: true },
   ])
   const task = findTask(items, 'm5', 'lineup')
   assert.ok(task, 'taak blijft zichtbaar (kort na aanmaak, binnen forward-venster)')
@@ -301,20 +307,20 @@ test('AC7: trainingsplan automatisch af bij doelstelling of bij oefeningen (elk 
 test('AC8: effectieve done-status is auto OF handmatig, in alle vier combinaties', () => {
   const matchDate = addDaysFixed(TODAY, 1)
 
-  const neither = buildTodoItems([{ id: 'e1', type: 'match', date: matchDate, lineupExists: false }])
+  const neither = buildTodoItems([{ id: 'e1', type: 'match', date: matchDate, lineupComplete: false }])
   assert.equal(findTask(neither, 'e1', 'lineup').effective, false)
 
-  const autoOnly = buildTodoItems([{ id: 'e2', type: 'match', date: matchDate, lineupExists: true }])
+  const autoOnly = buildTodoItems([{ id: 'e2', type: 'match', date: matchDate, lineupComplete: true }])
   assert.equal(findTask(autoOnly, 'e2', 'lineup').effective, true)
 
   const manualOnly = buildTodoItems(
-    [{ id: 'e3', type: 'match', date: matchDate, lineupExists: false }],
+    [{ id: 'e3', type: 'match', date: matchDate, lineupComplete: false }],
     { manualSet: new Set(['e3:lineup']) },
   )
   assert.equal(findTask(manualOnly, 'e3', 'lineup').effective, true)
 
   const both = buildTodoItems(
-    [{ id: 'e4', type: 'match', date: matchDate, lineupExists: true }],
+    [{ id: 'e4', type: 'match', date: matchDate, lineupComplete: true }],
     { manualSet: new Set(['e4:lineup']) },
   )
   assert.equal(findTask(both, 'e4', 'lineup').effective, true)
@@ -350,15 +356,15 @@ test('AC9: handmatig afvinken van een niet-automatisch-gedane taak toont de taak
 test('AC10: manual-vlag weghalen bij een auto-gedane taak heeft geen zichtbaar effect', () => {
   const matchDate = addDaysFixed(TODAY, 1)
   const beforeReopen = buildTodoItems(
-    [{ id: 'r1', type: 'match', date: matchDate, lineupExists: true }],
+    [{ id: 'r1', type: 'match', date: matchDate, lineupComplete: true }],
     { manualSet: new Set(['r1:lineup']) }, // auto=true én manual=true
   )
   assert.equal(findTask(beforeReopen, 'r1', 'lineup').effective, true)
 
   // "Heropenen" simuleren: alleen de manual-vlag verdwijnt, de auto-bron
-  // (lineups-rij) blijft ongewijzigd.
+  // (complete opstelling) blijft ongewijzigd.
   const afterReopen = buildTodoItems(
-    [{ id: 'r1', type: 'match', date: matchDate, lineupExists: true }],
+    [{ id: 'r1', type: 'match', date: matchDate, lineupComplete: true }],
     { manualSet: new Set() },
   )
   assert.equal(findTask(afterReopen, 'r1', 'lineup').effective, true, 'stille no-op: nog steeds afgerond via auto')
@@ -389,8 +395,8 @@ test('AC11: open taken eerst (oplopend op deadline), daarna afgevinkte taken (op
   const items = buildTodoItems([
     { id: 'o1', type: 'training', date: addDaysFixed(TODAY, 5), doelstelling: null, oefCount: 0 }, // open, laat
     { id: 'o2', type: 'training', date: addDaysFixed(TODAY, 1), doelstelling: null, oefCount: 0 }, // open, vroeg
-    { id: 'd1', type: 'match', date: TODAY, squadExists: true, lineupExists: true }, // done, vroege deadline (vandaag)
-    { id: 'd2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupExists: true }, // done, latere deadline
+    { id: 'd1', type: 'match', date: TODAY, squadExists: true, lineupComplete: true }, // done, vroege deadline (vandaag)
+    { id: 'd2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupComplete: true }, // done, latere deadline
   ])
   // Alleen de opstellings- en trainingstaken: deze test gaat over open-vóór-
   // afgevinkt en deadline-volgorde, niet over de selectie/opstelling-splitsing
@@ -405,7 +411,7 @@ test('AC11: open taken eerst (oplopend op deadline), daarna afgevinkte taken (op
 // eerst spelers op en stelt daarna op.
 test('selectie en opstelling zijn twee aparte taken; selectie staat bóven de opstelling', () => {
   const items = buildTodoItems([
-    { id: 'm1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupExists: false },
+    { id: 'm1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupComplete: false },
   ])
   const perEvent = items.filter((i) => i.eventId === 'm1' && i.taskType !== 'analysis')
   assert.deepEqual(perEvent.map((i) => i.taskType), ['squad', 'lineup'])
@@ -413,16 +419,16 @@ test('selectie en opstelling zijn twee aparte taken; selectie staat bóven de op
 })
 
 // Elk van de twee taken heeft zijn eigen 'auto klaar'-bron: match_squad-rijen
-// voor de selectie, een lineups-rij voor de opstelling. Ze vinken elkaar niet af.
+// voor de selectie, een complete opstelling voor de opstelling. Ze vinken elkaar niet af.
 test('selectie en opstelling vinken elkaar niet af', () => {
   const alleenSelectie = buildTodoItems([
-    { id: 's1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupExists: false },
+    { id: 's1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: true, lineupComplete: false },
   ])
   assert.equal(findTask(alleenSelectie, 's1', 'squad').effective, true)
   assert.equal(findTask(alleenSelectie, 's1', 'lineup').effective, false)
 
   const alleenOpstelling = buildTodoItems([
-    { id: 's2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupExists: true },
+    { id: 's2', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupComplete: true },
   ])
   assert.equal(findTask(alleenOpstelling, 's2', 'squad').effective, false)
   assert.equal(findTask(alleenOpstelling, 's2', 'lineup').effective, true)
@@ -432,7 +438,7 @@ test('selectie en opstelling vinken elkaar niet af', () => {
 // selectietaak open staan.
 test('een handmatige override op de opstelling raakt de selectietaak niet', () => {
   const items = buildTodoItems(
-    [{ id: 'h1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupExists: false }],
+    [{ id: 'h1', type: 'match', date: addDaysFixed(TODAY, 2), squadExists: false, lineupComplete: false }],
     { manualSet: new Set(['h1:lineup']) },
   )
   assert.equal(findTask(items, 'h1', 'lineup').effective, true)
@@ -454,7 +460,7 @@ test('AC12: geen limiet — meerdere events leveren hun volledige takenset op', 
       type: 'match',
       date: TODAY,
       squadExists: true,
-      lineupExists: true,
+      lineupComplete: true,
       goals_for: 1,
       goals_against: 0,
     })
@@ -492,12 +498,12 @@ test('AC13: geen kandidaat-events → lege takenlijst', () => {
 // ná de wedstrijd).
 test('AC14: afgeronde taak zichtbaar t/m de deadline-dag, de dag erna verdwijnt hij', () => {
   const onDayAuto = buildTodoItems([
-    { id: 'v1', type: 'match', date: TODAY, lineupExists: true },
+    { id: 'v1', type: 'match', date: TODAY, lineupComplete: true },
   ])
   assert.ok(findTask(onDayAuto, 'v1', 'lineup'), 'deadline vandaag (auto-done) zichtbaar')
 
   const yesterdayAuto = buildTodoItems([
-    { id: 'v2', type: 'match', date: addDaysFixed(TODAY, -1), lineupExists: true },
+    { id: 'v2', type: 'match', date: addDaysFixed(TODAY, -1), lineupComplete: true },
   ])
   assert.equal(findTask(yesterdayAuto, 'v2', 'lineup'), undefined, 'deadline gisteren (auto-done) niet meer zichtbaar')
 
@@ -514,7 +520,7 @@ test('AC14: afgeronde taak zichtbaar t/m de deadline-dag, de dag erna verdwijnt 
   assert.equal(findTask(yesterdayManual, 'v4', 'training_plan'), undefined, 'deadline gisteren (handmatig afgevinkt) niet meer zichtbaar')
 
   const futureDone = buildTodoItems([
-    { id: 'v5', type: 'match', date: addDaysFixed(TODAY, 7), lineupExists: true },
+    { id: 'v5', type: 'match', date: addDaysFixed(TODAY, 7), lineupComplete: true },
   ])
   assert.ok(findTask(futureDone, 'v5', 'lineup'), 'afgerond met deadline +7 nog zichtbaar')
 })
@@ -572,17 +578,17 @@ test('AC15: open analyse-taak alleen zichtbaar vanaf wedstrijddag, zonder +7-cap
 // event-dag vervalt de open taak.
 test('AC16: open lineup/training-taak zichtbaar in [vandaag, +7], vervalt na de eigen event-dag', () => {
   const withinWindow = buildTodoItems([
-    { id: 'w1', type: 'match', date: addDaysFixed(TODAY, 7), lineupExists: false },
+    { id: 'w1', type: 'match', date: addDaysFixed(TODAY, 7), lineupComplete: false },
   ])
   assert.ok(findTask(withinWindow, 'w1', 'lineup'), '+7 dagen nog net zichtbaar')
 
   const beyondWindow = buildTodoItems([
-    { id: 'w2', type: 'match', date: addDaysFixed(TODAY, 8), lineupExists: false },
+    { id: 'w2', type: 'match', date: addDaysFixed(TODAY, 8), lineupComplete: false },
   ])
   assert.equal(findTask(beyondWindow, 'w2', 'lineup'), undefined, '+8 dagen buiten het venster')
 
   const pastEventOpen = buildTodoItems([
-    { id: 'w3', type: 'match', date: addDaysFixed(TODAY, -1), lineupExists: false },
+    { id: 'w3', type: 'match', date: addDaysFixed(TODAY, -1), lineupComplete: false },
   ])
   assert.equal(findTask(pastEventOpen, 'w3', 'lineup'), undefined, 'open taak vervalt zodra de event-dag voorbij is')
 

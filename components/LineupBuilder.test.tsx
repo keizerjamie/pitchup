@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
 import type { Player } from '@/lib/types'
 import type { PlayerForm } from '@/lib/lineup-form'
 import LineupBuilder from '@/components/LineupBuilder'
+import { saveLineup } from '@/app/actions/attendance'
 
 vi.mock('@/app/actions/attendance', () => ({
-  saveLineup: vi.fn().mockResolvedValue(undefined),
+  saveLineup: vi.fn().mockResolvedValue({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false }),
 }))
 
 beforeEach(() => {
@@ -156,5 +157,64 @@ describe('canEdit (assistent-trainers fase 2, brief §4.5)', () => {
     renderBuilder(players, { p1: form() })
     expect(screen.getByText(nl.lineup.autoLineup)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: nl.lineup.save })).toBeInTheDocument()
+  })
+})
+
+// Kloppende cijfers (punt 4): saveLineup geeft een SaveLineupResultaat terug;
+// LineupBuilder meldt een onvolledige opstelling, een mislukte auto-selectie en
+// een mislukte opslag.
+describe('LineupBuilder — meldingen na opslaan (SaveLineupResultaat)', () => {
+  const resultaat = (o: Partial<{ legePosities: number | null; selectieAutomatischGevuld: boolean; selectieFout: boolean }> = {}) =>
+    ({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false, ...o })
+
+  async function slaOp() {
+    renderBuilder([player()], { p1: form() })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.save }))
+  }
+
+  it('3 lege posities: meervoud met aantal, in een role=status', async () => {
+    vi.mocked(saveLineup).mockResolvedValueOnce(resultaat({ legePosities: 3 }))
+    await slaOp()
+    const tekst = nl.lineup.savedIncompleteMany.replace('{n}', '3')
+    expect(await screen.findByText(tekst)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(tekst)
+  })
+
+  it('1 lege positie: enkelvoud', async () => {
+    vi.mocked(saveLineup).mockResolvedValueOnce(resultaat({ legePosities: 1 }))
+    await slaOp()
+    expect(await screen.findByText(nl.lineup.savedIncompleteOne)).toBeInTheDocument()
+  })
+
+  it('0 of onbekend (null) aantal lege posities: geen melding', async () => {
+    vi.mocked(saveLineup).mockResolvedValueOnce(resultaat({ legePosities: null }))
+    await slaOp()
+    await screen.findByText(nl.lineup.saved)
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('selectieFout: opstelling wel opgeslagen, aparte melding over de selectie', async () => {
+    vi.mocked(saveLineup).mockResolvedValueOnce(resultaat({ selectieFout: true }))
+    await slaOp()
+    expect(await screen.findByText(nl.lineup.squadAutoFillError)).toBeInTheDocument()
+    expect(screen.getByText(nl.lineup.saved)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('gooit saveLineup: role=alert met saveError, geen "opgeslagen"-staat', async () => {
+    vi.mocked(saveLineup).mockRejectedValueOnce(new Error('boom'))
+    await slaOp()
+    expect(await screen.findByRole('alert')).toHaveTextContent(nl.lineup.saveError)
+    expect(screen.queryByText(nl.lineup.saved)).not.toBeInTheDocument()
+    expect(screen.queryByText('boom')).not.toBeInTheDocument()
+  })
+
+  it('wist de melding bij de volgende wijziging van de opstelling', async () => {
+    vi.mocked(saveLineup).mockResolvedValueOnce(resultaat({ legePosities: 2 }))
+    await slaOp()
+    await screen.findByText(nl.lineup.savedIncompleteMany.replace('{n}', '2'))
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    await waitFor(() => expect(screen.getByRole('status')).toBeEmptyDOMElement())
   })
 })

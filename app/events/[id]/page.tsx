@@ -19,6 +19,7 @@ import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { genericError, logError } from '@/lib/errors'
 import { isTrainingOordeel, isValidRpe } from '@/lib/training-evaluatie'
 import type { TrainingEvaluatie } from '@/lib/types'
+import { telOpstelling } from '@/lib/lineup-compleet'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -33,7 +34,7 @@ export default async function EventDetailPage({ params }: Props) {
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('players').select('*').eq('team_id', ctx.teamId).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', ctx.teamId),
-    supabase.from('lineups').select('id').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
+    supabase.from('lineups').select('formation, positions').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
     supabase.from('metingen').select('*').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
     supabase.from('training_oefeningen').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
     supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', ctx.teamId),
@@ -158,15 +159,23 @@ export default async function EventDetailPage({ params }: Props) {
 
     // Elke rij krijgt dezelfde sleutels — PostgREST weigert een bulk-insert
     // met afwijkende kolommen, dus buildAttendanceRow zet ze altijd alle vijf.
-    const { error: backfillError } = await supabase.from('attendance').insert(backfillRows)
+    // Upsert met ignoreDuplicates in plaats van insert: twee gelijktijdige
+    // pagina-loads backfillen dezelfde ontbrekende spelers, en de tweede liep
+    // dan op UNIQUE(event_id, player_id) stuk (harde fout op de pagina). Een
+    // bestaande rij wordt zo nooit overschreven — wat er al staat wint.
+    const { error: backfillError } = await supabase
+      .from('attendance')
+      .upsert(backfillRows, { onConflict: 'event_id,player_id', ignoreDuplicates: true })
     // Zonder deze check zou de lus hieronder de attendanceMap vullen alsof de
     // insert lukte: de coach ziet dan statussen die nooit zijn opgeslagen.
     // Zelfde harde faal als settings.generateSeasonTrainings.attendance
     // (app/actions/settings.ts:206).
     if (backfillError) throw genericError('eventDetail.backfill.attendance', backfillError)
 
-    // Dezelfde rijen als de insert hierboven: de gerenderde status kan zo niet
-    // uit de pas lopen met wat er daadwerkelijk in de database staat.
+    // Dezelfde rijen als de upsert hierboven. Bij een gelijktijdige backfill
+    // kan de andere load net eerder geschreven hebben; die rij is dan via
+    // dezelfde regel (buildAttendanceRow) bepaald, dus de getoonde status
+    // klopt met wat er in de database staat.
     for (const row of backfillRows) attendanceMap.set(row.player_id, row.status)
   }
 
@@ -181,7 +190,16 @@ export default async function EventDetailPage({ params }: Props) {
     rpe: isValidRpe(evaluatieRij?.rpe) ? evaluatieRij.rpe : null,
     oordeel: isTrainingOordeel(evaluatieRij?.oordeel) ? evaluatieRij.oordeel : null,
   }
-  const trainingGehouden = typeof event.date === 'string' && event.date <= todayLocal()
+  // Is de datum van het event bereikt (vandaag of eerder)? Eén expressie voor
+  // de trainingsevaluatie én de analysekaart van een wedstrijd: vóór de
+  // wedstrijddag valt er niets te analyseren. Servertijd (todayLocal), zelfde
+  // als /inzichten en de analysepagina — bewust.
+  const datumBereikt = typeof event.date === 'string' && event.date <= todayLocal()
+  const trainingGehouden = datumBereikt
+  // Opstelling "gemaakt" = elke positie van de formatie heeft een unieke
+  // speler (telOpstelling, lib/lineup-compleet.ts); dezelfde regel als de
+  // To-do op het dashboard. Geen lineups-rij → niet compleet.
+  const opstellingCompleet = telOpstelling(lineup?.formation, lineup?.positions).compleet
 
   const initialStatuses = Object.fromEntries(attendanceMap) as Record<string, AttendanceStatus>
   const title = isMatch && event.opponent ? `vs ${event.opponent}` : t.event.training
@@ -220,7 +238,7 @@ export default async function EventDetailPage({ params }: Props) {
               viewLabel={t.event.squadView} viewHint={t.event.squadViewHint} cta={t.event.squadCta} />
           )}
           {isMatch && (
-            <ActionCard href={`/events/${id}/lineup`} done={!!lineup} icon="dashboard"
+            <ActionCard href={`/events/${id}/lineup`} done={opstellingCompleet} icon="dashboard"
               title={t.event.lineup} hint={t.event.lineupHint}
               viewLabel={t.event.lineupView} viewHint={t.event.lineupViewHint} cta={t.event.lineupCta} />
           )}
@@ -228,7 +246,8 @@ export default async function EventDetailPage({ params }: Props) {
             <ActionCard href={`/events/${id}/analysis`} done={analyseBestaat} icon="scoreboard"
               title={t.event.analysis} hint={t.event.analysisHint}
               viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta}
-              accent="var(--warning)" />
+              accent="var(--warning)"
+              vergrendeld={!analyseBestaat && !datumBereikt ? { hint: t.event.analysisAfterMatch } : undefined} />
           )}
           {isTraining && (
             <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
@@ -265,10 +284,12 @@ export default async function EventDetailPage({ params }: Props) {
 }
 
 function ActionCard({
-  href, done, icon, title, hint, viewLabel, viewHint, cta, accent,
+  href, done, icon, title, hint, viewLabel, viewHint, cta, accent, vergrendeld,
 }: {
   href: string; done: boolean; icon: string; title: string; hint: string
   viewLabel: string; viewHint: string; cta: string; accent?: string
+  // Nog niet beschikbaar (bv. analyse vóór de wedstrijd): geen link, geen CTA.
+  vergrendeld?: { hint: string }
 }) {
   if (done) {
     return (
@@ -284,6 +305,20 @@ function ActionCard({
         </div>
         <span className="ms text-[22px] text-faint">chevron_right</span>
       </Link>
+    )
+  }
+  if (vergrendeld) {
+    return (
+      <div aria-disabled="true" className="surface-card rounded-2xl p-4 flex items-center gap-4">
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
+          style={{ background: 'var(--surface-sunken)', color: 'var(--faint)' }}>
+          <span className="ms text-[24px]" aria-hidden="true">{icon}</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-muted">{title}</div>
+          <div className="text-[13px] font-semibold text-faint">{vergrendeld.hint}</div>
+        </div>
+      </div>
     )
   }
   // Default groen (--primary/--brand-accent); een optioneel accent (bv. oranje

@@ -49,7 +49,7 @@ function makeSupabase(opts: {
   const calls = {
     select: [] as { table: string; eqs: Eq[]; ins?: In[] }[],
     insert: [] as { table: string; payload: unknown }[],
-    upsert: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[] }[],
+    upsert: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; options?: Record<string, unknown> }[],
     update: [] as { table: string; payload: Record<string, unknown>; eqs: Eq[]; ins: In[]; neqs: Eq[]; iss: Eq[] }[],
     delete: [] as { table: string; eqs: Eq[] }[],
     // Volgorde van schrijfacties, om te kunnen aantonen dat het herstellen vóór
@@ -85,14 +85,15 @@ function makeSupabase(opts: {
     c.lte = () => c
     c.neq = (col: string, val: unknown) => { neqs.push({ col, val }); return c }
     c.order = () => c
+    c.limit = () => c
     c.in = (col: string, val: unknown) => { ins.push({ col, val }); return c }
     c.insert = (payload: unknown) => {
       calls.insert.push({ table, payload })
       calls.sequence.push(`${table}.insert`)
       return c
     }
-    c.upsert = (payload: Record<string, unknown>) => {
-      calls.upsert.push({ table, payload, eqs })
+    c.upsert = (payload: Record<string, unknown>, options?: Record<string, unknown>) => {
+      calls.upsert.push({ table, payload, eqs, options })
       calls.sequence.push(`${table}.upsert`)
       return c
     }
@@ -1326,9 +1327,16 @@ describe('markAllPresent', () => {
   })
 })
 
+// saveLineup eist sinds "kloppende cijfers" een WEDSTRIJD (assertOwnMatchEvent),
+// dus het event in deze fixture heeft type 'match'. Bewust aangepast t.o.v.
+// eigenTeam(): daar ontbreekt het type en zou elke opstelling geweigerd worden.
+function eigenWedstrijd(extra: Record<string, TableResult> = {}) {
+  return eigenTeam({ events: { data: { id: 'e1', type: 'match' }, error: null }, ...extra })
+}
+
 describe('saveLineup', () => {
   it('slaat eigen spelers op, team-gescoped', async () => {
-    const m = eigenTeam()
+    const m = eigenWedstrijd()
     use(m)
 
     await saveLineup('e1', '4-3-3', [positie(PLAYER_A), positie(null)])
@@ -1343,7 +1351,7 @@ describe('saveLineup', () => {
   })
 
   it('haalt de spelerslijst team-gescoped op', async () => {
-    const m = eigenTeam()
+    const m = eigenWedstrijd()
     use(m)
 
     await saveLineup('e1', '4-3-3', [positie(PLAYER_A)])
@@ -1353,7 +1361,7 @@ describe('saveLineup', () => {
   })
 
   it('weigert een player_id van een ander team', async () => {
-    const m = eigenTeam()
+    const m = eigenWedstrijd()
     use(m)
 
     await expect(saveLineup('e1', '4-3-3', [positie(VREEMDE_SPELER)]))
@@ -1362,7 +1370,7 @@ describe('saveLineup', () => {
   })
 
   it('weigert een player_id dat geen UUID is', async () => {
-    const m = eigenTeam()
+    const m = eigenWedstrijd()
     use(m)
 
     await expect(saveLineup('e1', '4-3-3', [positie('niet-een-uuid')]))
@@ -1371,7 +1379,7 @@ describe('saveLineup', () => {
   })
 
   it('weigert een absurd lange player_id (geen ongelimiteerde JSONB-waarde)', async () => {
-    const m = eigenTeam()
+    const m = eigenWedstrijd()
     use(m)
 
     await expect(saveLineup('e1', '4-3-3', [positie('x'.repeat(100_000))]))
@@ -1380,7 +1388,7 @@ describe('saveLineup', () => {
   })
 
   it('weigert een opstelling voor een event van een ander team', async () => {
-    const m = eigenTeam({ events: { data: null, error: null } })
+    const m = eigenWedstrijd({ events: { data: null, error: null } })
     use(m)
 
     await expect(saveLineup('vreemd', '4-3-3', [positie(PLAYER_A)]))
@@ -1389,7 +1397,7 @@ describe('saveLineup', () => {
   })
 
   it('houdt de bestaande grenzen op formatie en aantal posities aan', async () => {
-    use(eigenTeam())
+    use(eigenWedstrijd())
 
     await expect(saveLineup('e1', 'x'.repeat(21), [])).rejects.toThrow('Ongeldige formatie')
     await expect(saveLineup('e1', '4-3-3', Array.from({ length: 31 }, () => positie(null))))
@@ -1397,7 +1405,7 @@ describe('saveLineup', () => {
   })
 
   it('normaliseert coördinaten, label en rugnummer', async () => {
-    const m = eigenTeam()
+    const m = eigenWedstrijd()
     use(m)
 
     await saveLineup('e1', '4-3-3', [{
@@ -1419,7 +1427,7 @@ describe('saveLineup', () => {
   })
 
   it('geeft een generieke melding bij een databasefout', async () => {
-    use(eigenTeam({ lineups: { data: null, error: { code: '42501', message: 'permission denied for table lineups' } } }))
+    use(eigenWedstrijd({ lineups: { data: null, error: { code: '42501', message: 'permission denied for table lineups' } } }))
 
     await expect(saveLineup('e1', '4-3-3', [positie(PLAYER_A)])).rejects.toThrow(GENERIC_ERROR_MESSAGE)
 
@@ -1432,5 +1440,226 @@ describe('saveLineup', () => {
     use(makeSupabase({ user: null }))
 
     await expect(saveLineup('e1', '4-3-3', [])).rejects.toThrow('Niet ingelogd')
+  })
+})
+
+// ── saveLineup: resultaat en automatisch vullen van de wedstrijdselectie ──
+describe('saveLineup — resultaat en automatische selectie', () => {
+  const PLAYER_C = '66666666-6666-4666-8666-666666666666'
+  const GAST = '77777777-7777-4777-8777-777777777777'
+  const INACTIEF = '88888888-8888-4888-8888-888888888888'
+
+  // players wordt twee keer bevraagd: eerst getOwnPlayerIds (alle eigen
+  // spelers, ook inactief), daarna de actieve spelers voor de bank. De mock
+  // filtert zelf niet, dus de wachtrij levert per aanroep het juiste antwoord.
+  function scenario(opts: {
+    squadCheck?: TableResult
+    squadUpsert?: TableResult
+    aanwezig?: TableResult
+    actief?: TableResult
+    events?: TableResult
+  } = {}) {
+    return makeSupabase({
+      tables: {
+        events: opts.events ?? { data: { id: 'e1', type: 'match' }, error: null },
+        lineups: { data: null, error: null },
+        attendance: opts.aanwezig ?? {
+          data: [
+            { player_id: PLAYER_A },
+            { player_id: PLAYER_C },
+            { player_id: GAST },
+            { player_id: INACTIEF },
+          ],
+          error: null,
+        },
+      },
+      queues: {
+        players: [
+          { data: [PLAYER_A, PLAYER_B, PLAYER_C, GAST, INACTIEF].map((id) => ({ id })), error: null },
+          opts.actief ?? { data: [PLAYER_A, PLAYER_B, PLAYER_C, GAST].map((id) => ({ id })), error: null },
+        ],
+        match_squad: [
+          opts.squadCheck ?? { data: [], error: null },
+          opts.squadUpsert ?? { data: null, error: null },
+        ],
+      },
+    })
+  }
+
+  // 11 posities van 4-3-3, alleen de eerste n gevuld met de gegeven ids.
+  function elfPosities(ids: (string | null)[]) {
+    return Array.from({ length: 11 }, (_, i) => positie(ids[i] ?? null))
+  }
+
+  it('lege selectie → upsert opgesteld + bank, uniek, zonder null, met ignoreDuplicates en team_id', async () => {
+    const m = scenario()
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A, PLAYER_B, PLAYER_A]))
+
+    const upsert = m.calls.upsert.find((u) => u.table === 'match_squad')!
+    expect(upsert).toBeDefined()
+    const rijen = upsert.payload as unknown as { event_id: string; player_id: string; team_id: string }[]
+    const ids = rijen.map((r) => r.player_id)
+    // A en B opgesteld (A dubbel → één keer), bank = aanwezig ∩ actief − opgesteld:
+    // C en de gast; de inactieve speler valt weg.
+    expect(ids).toEqual([PLAYER_A, PLAYER_B, PLAYER_C, GAST])
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).not.toContain(null)
+    expect(ids).not.toContain(INACTIEF)
+    for (const rij of rijen) {
+      expect(rij.team_id).toBe('team-1')
+      expect(rij.event_id).toBe('e1')
+    }
+    expect(upsert.options).toEqual({ onConflict: 'event_id,player_id', ignoreDuplicates: true })
+    expect(r).toEqual({ legePosities: 9, selectieAutomatischGevuld: true, selectieFout: false })
+  })
+
+  it('bestaande selectie → niets schrijven naar match_squad', async () => {
+    const m = scenario({ squadCheck: { data: [{ id: 'sq1' }], error: null } })
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))
+
+    expect(m.calls.upsert.filter((u) => u.table === 'match_squad')).toHaveLength(0)
+    expect(r.selectieAutomatischGevuld).toBe(false)
+    expect(r.selectieFout).toBe(false)
+  })
+
+  it('alleen lege posities → geen auto-vullen, de selectie wordt niet eens bevraagd', async () => {
+    const m = scenario()
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([]))
+
+    expect(m.calls.select.filter((s) => s.table === 'match_squad')).toHaveLength(0)
+    expect(m.calls.upsert.filter((u) => u.table === 'match_squad')).toHaveLength(0)
+    expect(r).toEqual({ legePosities: 11, selectieAutomatischGevuld: false, selectieFout: false })
+  })
+
+  it('squad-check faalt → selectieFout, lineup wél opgeslagen, geen throw, geen ruwe fout in de log', async () => {
+    const m = scenario({ squadCheck: { data: null, error: { code: '42501', message: 'permission denied for table match_squad' } } })
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))
+
+    expect(m.calls.upsert.find((u) => u.table === 'lineups')).toBeDefined()
+    expect(m.calls.upsert.filter((u) => u.table === 'match_squad')).toHaveLength(0)
+    expect(r).toEqual({ legePosities: 10, selectieAutomatischGevuld: false, selectieFout: true })
+    expect(logged()).toContain('attendance.saveLineup.squadCheck')
+    expect(logged()).not.toContain('permission denied')
+  })
+
+  it('bank-query faalt → selectieFout en géén half gevulde selectie', async () => {
+    const m = scenario({ aanwezig: { data: null, error: { code: '500', message: 'boom' } } })
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))
+
+    expect(m.calls.upsert.filter((u) => u.table === 'match_squad')).toHaveLength(0)
+    expect(r.selectieFout).toBe(true)
+    expect(logged()).not.toContain('boom')
+  })
+
+  it('upsert van de selectie faalt → selectieFout, geen throw', async () => {
+    const m = scenario({ squadUpsert: { data: null, error: { code: '23503', message: 'fk violation' } } })
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))
+
+    expect(r).toEqual({ legePosities: 10, selectieAutomatischGevuld: false, selectieFout: true })
+    expect(logged()).toContain('attendance.saveLineup.squadAutoFill')
+    expect(logged()).not.toContain('fk violation')
+  })
+
+  it('geen wedstrijd (training) → throw, niets geschreven', async () => {
+    const m = scenario({ events: { data: { id: 'e1', type: 'training' }, error: null } })
+    use(m)
+
+    await expect(saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('event van een ander team → throw, niets geschreven', async () => {
+    const m = scenario({ events: { data: null, error: null } })
+    use(m)
+
+    await expect(saveLineup('vreemd', '4-3-3', elfPosities([PLAYER_A]))).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.upsert).toHaveLength(0)
+  })
+
+  it('alle queries van saveLineup zijn team-gescoped', async () => {
+    const m = scenario()
+    use(m)
+
+    await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))
+
+    // team_members/settings zijn de teamcontext zelf (lib/team-context.ts),
+    // niet de queries van saveLineup.
+    const eigenTabellen = ['events', 'players', 'lineups', 'match_squad', 'attendance']
+    const selects = m.calls.select.filter((s) => eigenTabellen.includes(s.table))
+    expect(selects.length).toBeGreaterThanOrEqual(5)
+    for (const s of selects) {
+      expect(s.eqs, `select op ${s.table}`).toContainEqual({ col: 'team_id', val: 'team-1' })
+    }
+    const squadCheck = m.calls.select.find((s) => s.table === 'match_squad')!
+    expect(squadCheck.eqs).toEqual([{ col: 'event_id', val: 'e1' }, { col: 'team_id', val: 'team-1' }])
+    const aanwezig = m.calls.select.find((s) => s.table === 'attendance')!
+    expect(aanwezig.eqs).toEqual([
+      { col: 'event_id', val: 'e1' }, { col: 'team_id', val: 'team-1' }, { col: 'status', val: 'present' },
+    ])
+    const actief = m.calls.select.filter((s) => s.table === 'players')[1]
+    expect(actief.eqs).toEqual([{ col: 'team_id', val: 'team-1' }, { col: 'active', val: true }])
+  })
+
+  it('verwijdert of overschrijft nooit iets in de selectie (geen delete/update)', async () => {
+    const m = scenario()
+    use(m)
+
+    await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A, PLAYER_B]))
+
+    expect(m.calls.delete).toHaveLength(0)
+    expect(m.calls.update).toHaveLength(0)
+    // Een tussendoor door iemand anders gevulde selectie blijft staan: de
+    // upsert slaat bestaande rijen over in plaats van ze te overschrijven.
+    expect(m.calls.upsert.find((u) => u.table === 'match_squad')!.options?.ignoreDuplicates).toBe(true)
+  })
+
+  it('volledige opstelling → legePosities 0', async () => {
+    const ids = [PLAYER_A, PLAYER_B, PLAYER_C, GAST, INACTIEF]
+    const extra = Array.from({ length: 6 }, (_, i) => `99999999-9999-4999-8999-${String(i).padStart(12, '0')}`)
+    const m = makeSupabase({
+      tables: {
+        events: { data: { id: 'e1', type: 'match' }, error: null },
+        players: { data: [...ids, ...extra].map((id) => ({ id })), error: null },
+        match_squad: { data: [{ id: 'sq1' }], error: null },
+      },
+    })
+    use(m)
+
+    const r = await saveLineup('e1', '4-3-3', elfPosities([...ids, ...extra]))
+
+    expect(r.legePosities).toBe(0)
+  })
+
+  it('onbekende formatie → legePosities null, opstelling wel opgeslagen', async () => {
+    const m = scenario()
+    use(m)
+
+    const r = await saveLineup('e1', 'onbekend', elfPosities([PLAYER_A]))
+
+    expect(m.calls.upsert.find((u) => u.table === 'lineups')).toBeDefined()
+    expect(r.legePosities).toBeNull()
+  })
+
+  it('revalideert opstelling, detail, selectie en dashboard', async () => {
+    use(scenario())
+
+    await saveLineup('e1', '4-3-3', elfPosities([PLAYER_A]))
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
+    expect(revalidatePath).toHaveBeenCalledWith('/')
   })
 })

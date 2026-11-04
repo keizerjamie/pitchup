@@ -4,13 +4,14 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 import { AttendanceStatus } from '@/lib/types'
-import { assertKnownPlayerId, assertOwnEvent, assertOwnPlayer, getOwnPlayerIds, isUuid } from '@/lib/authz'
+import { assertKnownPlayerId, assertOwnEvent, assertOwnMatchEvent, assertOwnPlayer, getOwnPlayerIds, isUuid } from '@/lib/authz'
 import { errorCode, genericError, logError } from '@/lib/errors'
 import { findCoveringPeriod, type AbsencePeriodRange } from '@/lib/absence-periods'
 import { isDateString } from '@/lib/season-dates'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { resolveAttendanceStatus } from '@/lib/attendance-rows'
 import { herstelNietMogelijk, schoonCreatedAt, uuidLijst, type HerstelAfmeldperiode } from '@/lib/herstel'
+import { telOpstelling, type SaveLineupResultaat } from '@/lib/lineup-compleet'
 
 // Maximale lengte van een `.in()`-lijst, gelijk aan de batchgrootte van
 // generateSeasonTrainings (app/actions/settings.ts): een periode kan een
@@ -601,12 +602,14 @@ export async function saveLineup(
   eventId: string,
   formation: string,
   positions: { player_id: string | null; x: number; y: number; position_label: string; position_number?: number }[]
-) {
+): Promise<SaveLineupResultaat> {
   const supabase = await createClient()
   const ctx = await requireTeamContext()
   assertCanEdit(ctx, 'wedstrijd')
 
-  await assertOwnEvent(supabase, eventId, ctx.teamId)
+  // Strenger dan assertOwnEvent: een opstelling (en de wedstrijdselectie die
+  // hieronder automatisch gevuld kan worden) hoort alleen bij een wedstrijd.
+  await assertOwnMatchEvent(supabase, eventId, ctx.teamId)
 
   if (typeof formation !== 'string' || formation.length > 20) throw new Error('Ongeldige formatie')
   if (!Array.isArray(positions) || positions.length > 30) throw new Error('Ongeldige opstelling')
@@ -635,5 +638,102 @@ export async function saveLineup(
     )
 
   if (error) throw genericError('attendance.saveLineup', error)
+
+  // Vanaf hier is de opstelling opgeslagen. Wat nog volgt (de selectie
+  // automatisch vullen) mag de opslag nooit ongedaan maken of laten falen: een
+  // fout wordt gemeld via selectieFout, niet gegooid.
+  const { selectieAutomatischGevuld, selectieFout } = await vulSelectieAanUitOpstelling(
+    supabase,
+    ctx.teamId,
+    eventId,
+    cleanPositions,
+  )
+
   revalidatePath(`/events/${eventId}/lineup`)
+  // De detailpagina (ActionCards), de selectiepagina en het dashboard (To-do)
+  // hangen af van de opstelling en de selectie.
+  revalidatePath(`/events/${eventId}`)
+  revalidatePath(`/events/${eventId}/squad`)
+  revalidatePath('/')
+
+  return {
+    legePosities: telOpstelling(formation, cleanPositions).leeg,
+    selectieAutomatischGevuld,
+    selectieFout,
+  }
+}
+
+// Een opgeslagen opstelling zonder wedstrijdselectie vult de selectie
+// automatisch: opgestelde spelers plus de bank. De bank wordt niet opgeslagen
+// (lineups kent alleen formation en positions), dus die rekenen we hier
+// zelf uit, op dezelfde manier als de opstellingspagina zonder selectie:
+// aanwezig ∩ actief, min de opgestelden (gasten tellen mee).
+//
+// Regels:
+//   * Geen enkele opgestelde speler (alleen lege posities) → niets vullen.
+//   * Er bestaat al een selectie (≥ 1 rij) → nooit aanraken; nooit verwijderen
+//     of overschrijven (ook niet als hij tussendoor door iemand anders gevuld
+//     is: upsert met ignoreDuplicates laat bestaande rijen staan).
+//   * Elke fout → selectieFout = true, statisch label naar de log, niets
+//     gooien (de opstelling zelf is al opgeslagen).
+// Het restvenster tussen de check en de upsert (twee trainers tegelijk) is
+// bewust geaccepteerd: hooguit komen er extra rijen bij, er verdwijnt niets.
+async function vulSelectieAanUitOpstelling(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  teamId: string,
+  eventId: string,
+  cleanPositions: { player_id: string | null }[],
+): Promise<{ selectieAutomatischGevuld: boolean; selectieFout: boolean }> {
+  const niets = { selectieAutomatischGevuld: false, selectieFout: false }
+  const fout = { selectieAutomatischGevuld: false, selectieFout: true }
+
+  const opgesteld = [...new Set(
+    cleanPositions.map((p) => p.player_id).filter((id): id is string => typeof id === 'string' && id.length > 0),
+  )]
+  if (opgesteld.length === 0) return niets
+
+  const { data: bestaandeSelectie, error: squadCheckError } = await supabase
+    .from('match_squad')
+    .select('id')
+    .eq('event_id', eventId)
+    .eq('team_id', teamId)
+    .limit(1)
+  if (squadCheckError) {
+    logError('attendance.saveLineup.squadCheck', squadCheckError)
+    return fout
+  }
+  if ((bestaandeSelectie ?? []).length > 0) return niets
+
+  const [aanwezigResult, actiefResult] = await Promise.all([
+    supabase.from('attendance').select('player_id').eq('event_id', eventId).eq('team_id', teamId).eq('status', 'present'),
+    supabase.from('players').select('id').eq('team_id', teamId).eq('active', true),
+  ])
+  // Zonder bank zou een half gevulde selectie ontstaan, en die blokkeert
+  // daarna elke volgende automatische vulling. Dan liever niets schrijven.
+  if (aanwezigResult.error || actiefResult.error) {
+    logError('attendance.saveLineup.bank', aanwezigResult.error ?? actiefResult.error)
+    return fout
+  }
+
+  const actief = new Set(((actiefResult.data ?? []) as { id: string }[]).map((p) => p.id))
+  const opgesteldSet = new Set(opgesteld)
+  const bank = ((aanwezigResult.data ?? []) as { player_id: string }[])
+    .map((a) => a.player_id)
+    .filter((id) => typeof id === 'string' && actief.has(id) && !opgesteldSet.has(id))
+
+  const rijen = [...new Set([...opgesteld, ...bank])].map((playerId) => ({
+    event_id: eventId,
+    player_id: playerId,
+    team_id: teamId,
+  }))
+
+  // Zelfde schrijfpatroon als toggleSquadPlayer (app/actions/match-squad.ts).
+  const { error: upsertError } = await supabase
+    .from('match_squad')
+    .upsert(rijen, { onConflict: 'event_id,player_id', ignoreDuplicates: true })
+  if (upsertError) {
+    logError('attendance.saveLineup.squadAutoFill', upsertError)
+    return fout
+  }
+  return { selectieAutomatischGevuld: true, selectieFout: false }
 }

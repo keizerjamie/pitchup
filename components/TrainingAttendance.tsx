@@ -146,7 +146,7 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
                 {initialsOf(player.name)}
               </div>
               <div className="flex-1 min-w-0 flex flex-col leading-tight">
-                <span className="text-[14.5px] font-bold text-ink truncate">{player.name}</span>
+                <span className="text-[14.5px] font-bold text-ink break-words [overflow-wrap:anywhere]">{player.name}</span>
                 <span className="text-[12px] font-semibold text-faint">
                   {player.jersey_number != null ? `#${player.jersey_number} · ` : ''}
                   {POSITION_ABBREVIATIONS[player.position] ?? player.position}

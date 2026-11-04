@@ -93,6 +93,11 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   const [isPending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
   const [formationOpen, setFormationOpen] = useState(false)
+  // Meldingen na opslaan (uitkomst van saveLineup); gewist bij de volgende
+  // wijziging van de opstelling.
+  const [leegMelding, setLeegMelding] = useState<number | null>(null)
+  const [selectieFout, setSelectieFout] = useState(false)
+  const [saveError, setSaveError] = useState(false)
   // Aantal spelers dat bij de laatste formatiewissel geen vergelijkbaar slot
   // had. Alleen om het te MELDEN — nooit stilzwijgend iemand van het veld halen.
   const [naarBankCount, setNaarBankCount] = useState(0)
@@ -120,7 +125,14 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   // popup iemand kunnen aanbieden die niet op de bank staat.
   const eligibleIds = new Set(eligiblePlayerIds ?? players.map((p) => p.id))
 
+  function wisMeldingen() {
+    setLeegMelding(null)
+    setSelectieFout(false)
+    setSaveError(false)
+  }
+
   function handleFormationChange(f: string) {
+    wisMeldingen()
     // Spelers verhuizen mee naar het best vergelijkbare slot; wie nergens past
     // valt terug op de bank (en wordt gemeld). Vroeger gooide een wissel de
     // hele opstelling leeg.
@@ -134,6 +146,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
 
   function assignPlayer(playerId: string | null) {
     if (selectedSlot === null) return
+    wisMeldingen()
     const slot = selectedSlot
     setPositions((prev) => prev.map((p, i) => {
       if (i === slot) return { ...p, player_id: playerId }
@@ -151,6 +164,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   }
 
   function autoFillLineup() {
+    wisMeldingen()
     const pool = players.filter((p) => eligibleIds.has(p.id))
     const formationSlots = FORMATIONS[formation].positions
 
@@ -186,10 +200,17 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   const availablePlayers = players.filter((p) => eligibleIds.has(p.id) && !assignedPlayerIds.has(p.id))
 
   function handleSave() {
+    wisMeldingen()
     startTransition(async () => {
-      await saveLineup(eventId, formation, positions)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      try {
+        const r = await saveLineup(eventId, formation, positions)
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+        if (r.legePosities !== null && r.legePosities > 0) setLeegMelding(r.legePosities)
+        if (r.selectieFout) setSelectieFout(true)
+      } catch {
+        setSaveError(true)
+      }
     })
   }
 
@@ -572,6 +593,29 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
           style={{ background: saved ? '#22c55e' : isPending ? 'var(--faint)' : 'var(--primary)' }}>
           {saved ? t.lineup.saved : isPending ? t.lineup.saving : t.lineup.save}
         </button>
+      )}
+
+      {/* Live-region staat altijd in de DOM (leeg zonder melding): een region
+          die tegelijk met zijn tekst mount wordt door screenreaders vaak niet
+          aangekondigd. */}
+      <div role="status" className="flex flex-col gap-2">
+        {leegMelding !== null && (
+          <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
+            {leegMelding === 1
+              ? t.lineup.savedIncompleteOne
+              : t.lineup.savedIncompleteMany.replace('{n}', String(leegMelding))}
+          </p>
+        )}
+        {selectieFout && (
+          <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
+            {t.lineup.squadAutoFillError}
+          </p>
+        )}
+      </div>
+      {saveError && (
+        <p role="alert" className="text-[13px] font-semibold text-panel-red-ink bg-panel-red border border-panel-red-edge px-3 py-2 rounded-lg">
+          {t.lineup.saveError}
+        </p>
       )}
     </div>
   )

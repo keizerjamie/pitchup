@@ -62,6 +62,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined }),
+  headers: vi.fn().mockResolvedValue({ get: () => null }),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 // Nooit daadwerkelijk aangeroepen in deze tests (geen enkele test klikt een
@@ -73,7 +74,7 @@ vi.mock('@/app/actions/attendance', () => ({
   // Nooit daadwerkelijk aangeroepen (geen enkele test klikt "Opslaan") — puur
   // nodig zodat de import in LineupBuilder (AC4-tests) resolvet. Zelfde
   // precedent als opstelling-vorm.acceptance.test.tsx.
-  saveLineup: vi.fn().mockResolvedValue(undefined),
+  saveLineup: vi.fn().mockResolvedValue({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false }),
 }))
 vi.mock('@/app/actions/players', () => ({
   markInjured: vi.fn().mockResolvedValue(undefined),
@@ -186,17 +187,72 @@ function tableFactory(rows: Row[]) {
       maybeSingle: () => Promise.resolve({ data: resolveRows()[0] ?? null, error: null }),
       single: () => Promise.resolve({ data: resolveRows()[0] ?? null, error: null }),
       insert: () => Promise.resolve({ data: null, error: null }),
+      // Upsert met de echte UNIQUE-semantiek van de conflictkolommen: zonder
+      // ignoreDuplicates is een botsing een 23505-fout (zoals een insert in
+      // Postgres), mét ignoreDuplicates wordt de botsende rij overgeslagen en
+      // blijft de bestaande staan. De rijen worden echt toegevoegd, zodat een
+      // tweede, gelijktijdige backfill dezelfde botsing tegenkomt.
+      upsert: (payload: Row | Row[], options: { onConflict?: string; ignoreDuplicates?: boolean } = {}) => {
+        const nieuw = Array.isArray(payload) ? payload : [payload]
+        const sleutels = (options.onConflict ?? 'id').split(',').map((k) => k.trim())
+        const botst = (a: Row, b: Row) => sleutels.every((k) => a[k] === b[k])
+        for (const rij of nieuw) {
+          if (rows.some((bestaand) => botst(bestaand, rij))) {
+            if (options.ignoreDuplicates) continue
+            return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } })
+          }
+          rows.push({ ...rij })
+        }
+        return Promise.resolve({ data: null, error: null })
+      },
       then: (resolve: (v: { data: Row[]; error: null }) => unknown) => resolve({ data: resolveRows(), error: null }),
     }
     return chain
   }
 }
 
-function makeSupabase(user: { id: string } | null, tables: Record<string, Row[]>) {
+// Emulatie van de RPC inzichten_aanwezigheid (supabase/blessure-status.sql),
+// zelfde precedent als rpcAanwezigheid in inzichten.acceptance.test.tsx:
+// attendance × events × players van p_team_id, type <> 'meting', datum binnen
+// [p_start, p_end], ALLEEN vaste spelers (p.type = 'regular', geen
+// active-filter), 'injured' telt als afwezig. Altijd precies één rij.
+function rpcAanwezigheid(tables: Record<string, Row[]>, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const events = new Map((tables.events ?? []).filter((e) => e.team_id === p_team_id).map((e) => [e.id as string, e]))
+  const players = new Map((tables.players ?? []).filter((p) => p.team_id === p_team_id).map((p) => [p.id as string, p]))
+  let aanwezig = 0
+  let afwezig = 0
+  for (const a of tables.attendance ?? []) {
+    if (a.team_id !== p_team_id) continue
+    const e = events.get(a.event_id as string)
+    if (!e || e.type === 'meting') continue
+    const datum = e.date as string
+    if (datum < p_start || datum > p_end) continue
+    const speler = players.get(a.player_id as string)
+    if (!speler || speler.type !== 'regular') continue
+    if (a.status === 'present') aanwezig++
+    else if (a.status === 'absent' || a.status === 'injured') afwezig++
+  }
+  return [{ aanwezig, afwezig }]
+}
+
+function makeSupabase(
+  user: { id: string } | null,
+  tables: Record<string, Row[]>,
+  opts: { rpcError?: unknown } = {},
+) {
+  const rpcCalls: { name: string; args: Row }[] = []
   return {
+    rpcCalls,
     auth: { getUser: async () => ({ data: { user } }) },
     from: (t: string) =>
       t === 'team_members' ? teamMembersChain(user?.id) : tableFactory(tables[t] ?? [])(),
+    rpc: (name: string, args: Row) => {
+      rpcCalls.push({ name, args })
+      if (opts.rpcError) return Promise.resolve({ data: null, error: opts.rpcError })
+      if (name === 'inzichten_aanwezigheid') return Promise.resolve({ data: rpcAanwezigheid(tables, args), error: null })
+      return Promise.resolve({ data: [], error: null })
+    },
   }
 }
 
@@ -418,6 +474,34 @@ describe('AC8 — backfill op de eventpagina geeft een gast "absent", niet de te
     // gezet — AC3), dan mag de backfill die niet overschrijven.
     expect(statusOf('Handmatig Aanwezige Gast')).toBe('present')
   })
+
+  // Kloppende cijfers: de backfill is een upsert met ignoreDuplicates. Twee
+  // gelijktijdige loads zien allebei dezelfde ontbrekende rijen; de tweede
+  // botste met een insert op UNIQUE(event_id, player_id) en gooide een harde
+  // paginafout. Nu slaagt hij en blijft er precies één rij per speler.
+  it('twee gelijktijdige backfills: geen throw, precies één rij per speler', async () => {
+    const tables: Record<string, Row[]> = {
+      events: [baseEventRow()],
+      players: [
+        makePlayer({ id: 'p1', team_id: TEAM, name: 'Gelijktijdig Regulier', type: 'regular', active: true }),
+        makePlayer({ id: 'p2', team_id: TEAM, name: 'Gelijktijdig Gast', type: 'guest', active: true }),
+      ],
+      attendance: [],
+      lineups: [], metingen: [], training_oefeningen: [], match_ratings: [], match_events: [],
+      match_squad: [], absence_periods: [],
+    }
+    vi.mocked(createClient).mockResolvedValue(
+      makeSupabase({ id: TEAM }, tables) as unknown as Awaited<ReturnType<typeof createClient>>,
+    )
+
+    await expect(Promise.all([
+      EventDetailPage({ params: Promise.resolve({ id: 'e1' }) }),
+      EventDetailPage({ params: Promise.resolve({ id: 'e1' }) }),
+    ])).resolves.toHaveLength(2)
+
+    expect(tables.attendance).toHaveLength(2)
+    expect(tables.attendance.map((r) => r.player_id).sort()).toEqual(['p1', 'p2'])
+  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -614,7 +698,7 @@ function dashboardEventRow(overrides: Row = {}): Row {
   }
 }
 
-// Fout die de gast-query oplevert als hij faalt. `message`/`details` staan er
+// Fout die de spelersquery van de kalender oplevert als hij faalt. `message`/`details` staan er
 // bewust in: ze mogen NIET in de log belanden (lib/errors.ts logt alleen het
 // statische label plus de waardevrije code).
 const GUEST_QUERY_ERROR = {
@@ -624,30 +708,39 @@ const GUEST_QUERY_ERROR = {
   hint: null,
 }
 
-// Laat UITSLUITEND de gast-query (players + .eq('type','guest')) falen; de
-// andere players-query op dezelfde tabel blijft gewoon rijen leveren. Zo
-// simuleren we precies de situatie uit de bevinding: guestPlayerRows is null
-// terwijl er wél attendance-rijen zijn.
-function withFailingGuestQuery(supabase: ReturnType<typeof makeSupabase>): ReturnType<typeof makeSupabase> {
+// Laat de spelersquery van de kalender (players) volledig falen. Sinds
+// kloppende cijfers is er nog maar één players-query op die pagina.
+function withFailingPlayersQuery(supabase: ReturnType<typeof makeSupabase>): ReturnType<typeof makeSupabase> {
   return {
     ...supabase,
     from: (t: string) => {
       const chain = supabase.from(t)
       if (t !== 'players') return chain
-      let isGuestQuery = false
-      const origEq = chain.eq as (col: string, val: unknown) => unknown
-      const origThen = chain.then as (resolve: (v: unknown) => unknown) => unknown
-      chain.eq = (col: string, val: unknown) => {
-        if (col === 'type' && val === 'guest') isGuestQuery = true
-        origEq(col, val)
-        return chain
-      }
-      chain.then = (resolve: (v: unknown) => unknown) => (
-        isGuestQuery ? resolve({ data: null, error: GUEST_QUERY_ERROR }) : origThen(resolve)
-      )
+      ;(chain as { then: unknown }).then = (resolve: (v: unknown) => unknown) =>
+        resolve({ data: null, error: GUEST_QUERY_ERROR })
       return chain
     },
   }
+}
+
+// Seizoen rond de vaste testdatum (2026-08-19): de KPI-tegel "Aanwezigheid ·
+// laatste 4 weken" komt sinds kloppende cijfers uit de RPC
+// inzichten_aanwezigheid over [max(seizoensstart, vandaag-27), gisteren] —
+// zonder seizoen toont hij "—" zonder RPC-call.
+const SEIZOEN_SETTINGS: Row[] = [
+  { team_id: TEAM, key: 'season_start', value: '2026-07-01' },
+  { team_id: TEAM, key: 'season_end', value: '2027-06-30' },
+]
+
+// Een afgelopen event binnen dat venster. De KPI telt niets van vandaag of
+// later mee (verledenSeizoensVenster), dus KPI-scenario's zetten hun
+// attendance-rijen op dit event in plaats van op het hero-event ev1.
+const VERLEDEN_EVENT = 'ev-verleden'
+function verledenEventRow(): Row {
+  return dashboardEventRow({ id: VERLEDEN_EVENT, date: '2026-08-12' })
+}
+function opVerledenEvent(rows: Row[]): Row[] {
+  return rows.map((r) => ({ ...r, event_id: VERLEDEN_EVENT }))
 }
 
 async function renderDashboard(opts: {
@@ -655,13 +748,14 @@ async function renderDashboard(opts: {
   events?: Row[]
   players?: Row[]
   attendance?: Row[]
-  failGuestQuery?: boolean
+  settings?: Row[]
+  rpcError?: unknown
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const tables: Record<string, Row[]> = {
-    events: opts.events ?? [dashboardEventRow()],
+    events: opts.events ?? [dashboardEventRow(), verledenEventRow()],
     players: opts.players ?? [],
-    settings: [],
+    settings: opts.settings ?? SEIZOEN_SETTINGS,
     attendance: opts.attendance ?? [],
     training_oefeningen: [],
     task_overrides: [],
@@ -669,14 +763,12 @@ async function renderDashboard(opts: {
     match_ratings: [],
     match_events: [],
   }
-  const supabase = opts.failGuestQuery
-    ? withFailingGuestQuery(makeSupabase(user, tables))
-    : makeSupabase(user, tables)
+  const supabase = makeSupabase(user, tables, { rpcError: opts.rpcError })
   vi.mocked(createClient).mockResolvedValue(
     supabase as unknown as Awaited<ReturnType<typeof createClient>>,
   )
   const el = await DashboardPage()
-  return render(<DictProvider dict={nl}>{el}</DictProvider>)
+  return { ...render(<DictProvider dict={nl}>{el}</DictProvider>), rpcCalls: supabase.rpcCalls }
 }
 
 function attendancePercentage(): string {
@@ -700,10 +792,10 @@ describe('O1 (brief §8) — dashboard-opkomst met en zonder gast levert hetzelf
       makePlayer({ id: 'r1', team_id: TEAM, name: 'Reg 1', type: 'regular' }),
       makePlayer({ id: 'r2', team_id: TEAM, name: 'Reg 2', type: 'regular' }),
     ]
-    const baseAttendance: Row[] = [
+    const baseAttendance: Row[] = opVerledenEvent([
       { event_id: 'ev1', team_id: TEAM, player_id: 'r1', status: 'present' },
       { event_id: 'ev1', team_id: TEAM, player_id: 'r2', status: 'absent' },
-    ]
+    ])
 
     const { unmount } = await renderDashboard({ players: regulars, attendance: baseAttendance })
     const zonderGast = attendancePercentage()
@@ -712,7 +804,7 @@ describe('O1 (brief §8) — dashboard-opkomst met en zonder gast levert hetzelf
     const guest = makePlayer({ id: 'g1', team_id: TEAM, name: 'Gast 1', type: 'guest' })
     const attendanceMetGast: Row[] = [
       ...baseAttendance,
-      { event_id: 'ev1', team_id: TEAM, player_id: 'g1', status: 'present' },
+      { event_id: VERLEDEN_EVENT, team_id: TEAM, player_id: 'g1', status: 'present' },
     ]
     await renderDashboard({ players: [...regulars, guest], attendance: attendanceMetGast })
     const metGast = attendancePercentage()
@@ -723,9 +815,9 @@ describe('O1 (brief §8) — dashboard-opkomst met en zonder gast levert hetzelf
 
   it('een afwezige gast erbij verandert het opkomstpercentage evenmin (telt niet mee in de noemer)', async () => {
     const regulars = [makePlayer({ id: 'r1', team_id: TEAM, name: 'Reg 1', type: 'regular' })]
-    const baseAttendance: Row[] = [
+    const baseAttendance: Row[] = opVerledenEvent([
       { event_id: 'ev1', team_id: TEAM, player_id: 'r1', status: 'present' },
-    ]
+    ])
 
     const { unmount } = await renderDashboard({ players: regulars, attendance: baseAttendance })
     const zonderGast = attendancePercentage()
@@ -734,7 +826,7 @@ describe('O1 (brief §8) — dashboard-opkomst met en zonder gast levert hetzelf
     const guest = makePlayer({ id: 'g1', team_id: TEAM, name: 'Gast 1', type: 'guest' })
     const attendanceMetGast: Row[] = [
       ...baseAttendance,
-      { event_id: 'ev1', team_id: TEAM, player_id: 'g1', status: 'absent' },
+      { event_id: VERLEDEN_EVENT, team_id: TEAM, player_id: 'g1', status: 'absent' },
     ]
     await renderDashboard({ players: [...regulars, guest], attendance: attendanceMetGast })
     const metGast = attendancePercentage()
@@ -745,10 +837,12 @@ describe('O1 (brief §8) — dashboard-opkomst met en zonder gast levert hetzelf
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Validator-bevinding — faalt de gast-query, dan toont de opkomsttegel GEEN
-// percentage (fail-safe) in plaats van stilzwijgend een getal mét gasten
+// Kloppende cijfers (vervangt "opkomsttegel is fail-safe als de gast-query
+// faalt"): de dashboard-KPI heeft geen eigen gast-query meer — de gasten
+// vallen weg in de RPC zelf. Faalt de RPC, dan toont de tegel "—" (liever geen
+// getal dan een fout getal) en logt alleen het statische label plus de code.
 // ═══════════════════════════════════════════════════════════════════════
-describe('opkomsttegel is fail-safe als de gast-query faalt', () => {
+describe('opkomsttegel is fail-safe als de aanwezigheids-RPC faalt', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
@@ -767,35 +861,53 @@ describe('opkomsttegel is fail-safe als de gast-query faalt', () => {
   ]
   const guest = makePlayer({ id: 'g1', team_id: TEAM, name: 'Gast 1', type: 'guest' })
   // 1 aanwezige regulier + 1 afwezige regulier (= 50%) + 1 aanwezige gast.
-  // Zou de gast meetellen, dan werd het 67% — precies het verkeerde getal dat
-  // de tegel nooit mag tonen.
-  const attendance: Row[] = [
+  // Zou de gast meetellen, dan werd het 67%.
+  const attendance: Row[] = opVerledenEvent([
     { event_id: 'ev1', team_id: TEAM, player_id: 'r1', status: 'present' },
     { event_id: 'ev1', team_id: TEAM, player_id: 'r2', status: 'absent' },
     { event_id: 'ev1', team_id: TEAM, player_id: 'g1', status: 'present' },
-  ]
+  ])
   const players = [...regulars, guest]
+  const RPC_ERROR = {
+    code: 'PGRST301',
+    message: 'permission denied for function inzichten_aanwezigheid',
+    details: 'geheime-implementatiedetails',
+    hint: null,
+  }
 
-  it('slaagt de gast-query wél, dan staat er gewoon een percentage zonder de gast (sanity)', async () => {
+  it('slaagt de RPC, dan staat er een percentage zonder de gast (sanity)', async () => {
     await renderDashboard({ players, attendance })
     expect(attendancePercentage()).toBe('50%')
   })
 
-  it('faalt de gast-query, dan toont de tegel "—" in plaats van het te hoge percentage mét gast', async () => {
-    await renderDashboard({ players, attendance, failGuestQuery: true })
+  it('faalt de RPC, dan toont de tegel "—", nooit een getal', async () => {
+    await renderDashboard({ players, attendance, rpcError: RPC_ERROR })
     expect(attendancePercentage()).toBe('—')
-    expect(attendancePercentage()).not.toBe('67%')
   })
 
-  it('faalt de gast-query, dan wordt alleen het statische label plus de code gelogd — geen ruwe Supabase-melding', async () => {
-    await renderDashboard({ players, attendance, failGuestQuery: true })
+  it('faalt de RPC, dan wordt alleen het statische label plus de code gelogd — geen ruwe Supabase-melding', async () => {
+    await renderDashboard({ players, attendance, rpcError: RPC_ERROR })
 
     expect(errorSpy).toHaveBeenCalledTimes(1)
     const logged = String(errorSpy.mock.calls[0][0])
-    expect(logged).toContain('[dashboard.guestPlayers]')
-    expect(logged).toContain(GUEST_QUERY_ERROR.code)
-    expect(logged).not.toContain(GUEST_QUERY_ERROR.message)
-    expect(logged).not.toContain(GUEST_QUERY_ERROR.details)
+    expect(logged).toContain('[dashboard.aanwezigheid4w]')
+    expect(logged).toContain(RPC_ERROR.code)
+    expect(logged).not.toContain(RPC_ERROR.message)
+    expect(logged).not.toContain(RPC_ERROR.details)
+  })
+
+  it('zonder seizoen: "—" en géén RPC-call', async () => {
+    const { rpcCalls } = await renderDashboard({ players, attendance, settings: [] })
+    expect(attendancePercentage()).toBe('—')
+    expect(rpcCalls).toHaveLength(0)
+  })
+
+  it('de RPC krijgt het team uit de context en het venster laatste 4 weken t/m gisteren', async () => {
+    const { rpcCalls } = await renderDashboard({ players, attendance })
+    expect(rpcCalls).toEqual([{
+      name: 'inzichten_aanwezigheid',
+      args: { p_team_id: TEAM, p_start: '2026-07-23', p_end: '2026-08-18' },
+    }])
   })
 })
 
@@ -906,7 +1018,12 @@ describe('dashboardtegel "Actieve spelers" — gastspelers krijgen een eigen kle
 // lege <span>); de mobiele compacte tekst gebruikt het afwijkende formaat
 // "<n>/<squadSize> <label>" en botst dus niet met dit exacte-match-patroon.
 function heroLegendText(label: string): string {
-  return screen.getByText(new RegExp(`^\\d+ ${label}$`)).textContent ?? ''
+  // Alleen de eigen tekstnode: de geblesseerd-regel heeft ook een decoratief
+  // healing-icoon (aria-hidden) waarvan de ligatuurtekst in textContent staat.
+  return Array.from(screen.getByText(new RegExp(`^\\d+ ${label}$`)).childNodes)
+    .filter((n) => n.nodeType === Node.TEXT_NODE)
+    .map((n) => n.textContent)
+    .join('')
 }
 
 describe('AC1 — hero-tegel: afwezige/onbekende gasten tellen niet mee in "afwezig"/"geen reactie"', () => {
@@ -943,7 +1060,10 @@ describe('AC1 — hero-tegel: afwezige/onbekende gasten tellen niet mee in "afwe
     expect(heroLegendText(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
   })
 
-  it('6 aanwezige gasten: tellen wél mee bij "aanwezig" en de "van {n}"-noemer beweegt mee', async () => {
+  // Kloppende cijfers (besluit V2, AC1.4): bewust omgedraaid t.o.v. het
+  // eerdere besluit. Teller en noemer van de hero gaan UITSLUITEND over vaste
+  // spelers, zodat "x/y" en het opkomstpercentage bij elkaar horen.
+  it('6 aanwezige gasten: tellen NIET mee bij "aanwezig" en de "van {n}"-noemer blijft het aantal vaste spelers', async () => {
     const attendance: Row[] = [
       { event_id: 'ev1', team_id: TEAM, player_id: 'hr1', status: 'present' },
       { event_id: 'ev1', team_id: TEAM, player_id: 'hr2', status: 'present' },
@@ -954,10 +1074,10 @@ describe('AC1 — hero-tegel: afwezige/onbekende gasten tellen niet mee in "afwe
     ]
     await renderDashboard({ players: [...regulars, ...guests], attendance })
 
-    // present = 3 vast + 6 gast = 9; squadSize (heroSquadSize) = 5 vast + 6
-    // aanwezige gast = 11 → "van 11" in de ring, noResponse blijft 0.
-    expect(heroLegendText(nl.home.present)).toBe(`9 ${nl.home.present}`)
-    expect(screen.getByText(nl.home.ofCount.replace('{n}', '11'))).toBeInTheDocument()
+    // present = 3 vast (gasten tellen niet); squadSize = 5 vaste spelers →
+    // "van 5" in de ring, noResponse blijft 0.
+    expect(heroLegendText(nl.home.present)).toBe(`3 ${nl.home.present}`)
+    expect(screen.getByText(nl.home.ofCount.replace('{n}', '5'))).toBeInTheDocument()
     expect(heroLegendText(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
   })
 })
@@ -1087,7 +1207,7 @@ async function renderEventsPage(opts: {
   events?: Row[]
   attendance?: Row[]
   players?: Row[]
-  failGuestQuery?: boolean
+  failPlayersQuery?: boolean
 } = {}) {
   const user = opts.user === undefined ? { id: TEAM } : opts.user
   const tables: Record<string, Row[]> = {
@@ -1095,8 +1215,8 @@ async function renderEventsPage(opts: {
     attendance: opts.attendance ?? [],
     players: opts.players ?? [],
   }
-  const supabase = opts.failGuestQuery
-    ? withFailingGuestQuery(makeSupabase(user, tables))
+  const supabase = opts.failPlayersQuery
+    ? withFailingPlayersQuery(makeSupabase(user, tables))
     : makeSupabase(user, tables)
   vi.mocked(createClient).mockResolvedValue(
     supabase as unknown as Awaited<ReturnType<typeof createClient>>,
@@ -1134,13 +1254,15 @@ describe('AC7 — agendapagina (/events): rijteller sluit afwezige/onbekende gas
     expect(agendaRowStat()).toBe('15/20')
   })
 
-  it('(b) diezelfde 6 gasten op present => rij toont 21/26', async () => {
+  // Kloppende cijfers (besluit V2, AC1.4): bewust aangepast van 21/26 naar
+  // 15/20 — een aanwezige gast telt niet meer mee in teller of noemer.
+  it('(b) diezelfde 6 gasten op present => rij toont 15/20, niet 21/26', async () => {
     const attendance: Row[] = [
       ...regulars20.map((p, i) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: i < 15 ? 'present' : 'absent' })),
       ...guests6.map((p) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: p.id as string, status: 'present' })),
     ]
     await renderEventsPage({ players: [...regulars20, ...guests6], attendance })
-    expect(agendaRowStat()).toBe('21/26')
+    expect(agendaRowStat()).toBe('15/20')
   })
 
   it('(c) een gast met status "unknown" telt niet mee in de noemer', async () => {
@@ -1158,6 +1280,9 @@ describe('AC7 — agendapagina (/events): rijteller sluit afwezige/onbekende gas
     expect(agendaRowStat()).toBe('1/1')
   })
 
+  // Kloppende cijfers: de kalender heeft één spelersquery (id, type, active)
+  // i.p.v. aparte gast- en inactief-query's. Faalt die (AC1.7), dan valt de
+  // teller terug op de ongefilterde records-telling.
   it('(d) faalt de players-query, dan crasht de pagina niet, toont de ongefilterde noemer en logt uitsluitend het statische label', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const players = [
@@ -1171,7 +1296,7 @@ describe('AC7 — agendapagina (/events): rijteller sluit afwezige/onbekende gas
       ...Array.from({ length: 6 }, (_, i) => ({ event_id: 'agenda-e1', team_id: TEAM, player_id: `dg${i + 1}`, status: 'absent' })),
     ]
 
-    await renderEventsPage({ players, attendance, failGuestQuery: true })
+    await renderEventsPage({ players, attendance, failPlayersQuery: true })
 
     // Ongefilterde noemer (records.length): 2 present regulars + 6 absent
     // gasten = 8 records, present blijft 2 — géén crash.
@@ -1179,7 +1304,7 @@ describe('AC7 — agendapagina (/events): rijteller sluit afwezige/onbekende gas
 
     expect(errorSpy).toHaveBeenCalledTimes(1)
     const logged = String(errorSpy.mock.calls[0][0])
-    expect(logged).toContain('[events.guestPlayers]')
+    expect(logged).toContain('[events.players]')
     expect(logged).toContain(GUEST_QUERY_ERROR.code)
     expect(logged).not.toContain(GUEST_QUERY_ERROR.message)
     expect(logged).not.toContain(GUEST_QUERY_ERROR.details)
@@ -1234,13 +1359,12 @@ describe('AC7 — agendapagina (/events): rijteller sluit afwezige/onbekende gas
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Validator-punt 3 — het degradatiepad van de hero (de `gastIds`-fallback in
-// `app/page.tsx`): bij een gefaalde gast-query valt gastIds terug op de gasten uit players
-// i.p.v. een lege set. Bewijs met een AFWEZIGE gast dat de fallback-set
-// echt gevuld is (en niet leeg) — anders zou de hero deze gast alsnog
-// meetellen in "afwezig".
+// Validator-punt 3 (kloppende cijfers: bewust aangepast) — de hero had een
+// degradatiepad voor een gefaalde gast-query. Die query bestaat niet meer:
+// de hero leest het type uit de al opgehaalde actieve spelers
+// (telAanwezigheid). Een afwezige gast telt daardoor nooit mee in "afwezig".
 // ═══════════════════════════════════════════════════════════════════════
-describe('Validator-punt 3 — hero-degradatiepad bij gefaalde gast-query telt een afwezige gast nog steeds niet mee', () => {
+describe('Validator-punt 3 — hero telt een afwezige gast niet mee (type uit de actieve spelers)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-19T10:00:00'))
@@ -1249,8 +1373,7 @@ describe('Validator-punt 3 — hero-degradatiepad bij gefaalde gast-query telt e
     vi.useRealTimers()
   })
 
-  it('faalt de gast-query én staat een gast op afwezig, dan telt "afwezig" in de hero-legenda die gast nog steeds niet mee', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('staat een gast op afwezig, dan telt "afwezig" in de hero-legenda die gast niet mee', async () => {
     const regulars = [
       makePlayer({ id: 'vr1', team_id: TEAM, name: 'Val Reg 1', type: 'regular' }),
       makePlayer({ id: 'vr2', team_id: TEAM, name: 'Val Reg 2', type: 'regular' }),
@@ -1262,21 +1385,18 @@ describe('Validator-punt 3 — hero-degradatiepad bij gefaalde gast-query telt e
       { event_id: 'ev1', team_id: TEAM, player_id: 'vg1', status: 'absent' },
     ]
 
-    await renderDashboard({ players: [...regulars, guest], attendance, failGuestQuery: true })
+    await renderDashboard({ players: [...regulars, guest], attendance })
 
-    // Zou de fallback-set leeg zijn (het ongerepareerde gedrag), dan telt de
-    // gast mee en staat er "2 afwezig" i.p.v. "1 afwezig".
+    // Telde de gast mee, dan stond er "2 afwezig" i.p.v. "1 afwezig".
     expect(heroLegendText(nl.home.absent)).toBe(`1 ${nl.home.absent}`)
-
-    errorSpy.mockRestore()
   })
 })
 
 // ═══════════════════════════════════════════════════════════════════════
-// Blessure-status (story AC19, besluit 5) — op het dashboard telt een
-// 'injured'-rij als afwezig: opkomsttegel en hero-ring blijven gelijk aan de
-// situatie waarin dezelfde rij 'absent' was. Een geblesseerde gast telt, net als
-// een afwezige gast, nergens mee.
+// Blessure-status (story AC19, besluit 5) — de opkomsttegel (KPI via de RPC)
+// telt een 'injured'-rij als afwezig; de hero-legenda toont geblesseerden
+// sinds "kloppende cijfers" apart (eigen regel met healing-icoon). Een
+// geblesseerde gast telt, net als een afwezige gast, nergens mee.
 // ═══════════════════════════════════════════════════════════════════════
 describe('Blessure-status — dashboard telt injured als afwezig (AC19, besluit 5)', () => {
   beforeEach(() => {
@@ -1298,30 +1418,36 @@ describe('Blessure-status — dashboard telt injured als afwezig (AC19, besluit 
     { event_id: 'ev1', team_id: TEAM, player_id: 'b3', status: 'absent' },
   ]
 
+  // De KPI komt uit de RPC over afgelopen events: de rijen staan daarom op
+  // het verleden-event (opVerledenEvent), niet op het hero-event van vandaag.
   it('opkomsttegel: 1 aanwezig + 1 geblesseerd + 1 afwezig = 33%, gelijk aan de situatie met twee afwezigen', async () => {
-    const { unmount } = await renderDashboard({ players: regulars, attendance: attendanceMet('absent') })
+    const { unmount } = await renderDashboard({ players: regulars, attendance: opVerledenEvent(attendanceMet('absent')) })
     const metAbsent = attendancePercentage()
     unmount()
-    await renderDashboard({ players: regulars, attendance: attendanceMet('injured') })
+    await renderDashboard({ players: regulars, attendance: opVerledenEvent(attendanceMet('injured')) })
     expect(attendancePercentage()).toBe(metAbsent)
     expect(metAbsent).toBe('33%')
   })
 
-  it('hero-ring: geblesseerd telt bij "afwezig" (2) en niet bij "geen reactie" (0)', async () => {
+  it('hero-legenda: geblesseerd staat apart (1) en telt niet bij "afwezig" (1) of "geen reactie" (0)', async () => {
     await renderDashboard({ players: regulars, attendance: attendanceMet('injured') })
     expect(heroLegendText(nl.home.present)).toBe(`1 ${nl.home.present}`)
-    expect(heroLegendText(nl.home.absent)).toBe(`2 ${nl.home.absent}`)
+    expect(heroLegendText(nl.home.absent)).toBe(`1 ${nl.home.absent}`)
+    expect(heroLegendText(nl.home.injuredLegend)).toBe(`1 ${nl.home.injuredLegend}`)
     expect(heroLegendText(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
   })
 
   it('een geblesseerde GAST verandert opkomst en hero niet (telt nergens mee)', async () => {
     const gast = makePlayer({ id: 'bg', team_id: TEAM, name: 'Blessure Gast', type: 'guest' })
+    const rijen: Row[] = [...attendanceMet('injured'), { event_id: 'ev1', team_id: TEAM, player_id: 'bg', status: 'injured' }]
+    // Hero (vandaag) én KPI (verleden-event) met dezelfde situatie.
     await renderDashboard({
       players: [...regulars, gast],
-      attendance: [...attendanceMet('injured'), { event_id: 'ev1', team_id: TEAM, player_id: 'bg', status: 'injured' }],
+      attendance: [...rijen, ...opVerledenEvent(rijen)],
     })
     expect(attendancePercentage()).toBe('33%')
-    expect(heroLegendText(nl.home.absent)).toBe(`2 ${nl.home.absent}`)
+    expect(heroLegendText(nl.home.absent)).toBe(`1 ${nl.home.absent}`)
+    expect(heroLegendText(nl.home.injuredLegend)).toBe(`1 ${nl.home.injuredLegend}`)
   })
 
   it('Beschikbaarheid-tegel rendert een geblesseerde speler met het label "Geblesseerd" (geen crash)', async () => {

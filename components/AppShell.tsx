@@ -157,7 +157,7 @@ export default function AppShell({
 
       {/* ── Main content ── */}
       <div className="app-main md:ml-64">
-        <main className="min-h-screen pb-40 md:pb-8 pt-[calc(env(safe-area-inset-top)_+_3.5rem)] md:pt-0">
+        <main className="min-h-screen pb-[calc(env(safe-area-inset-bottom)_+_160px)] md:pb-8 pt-[calc(env(safe-area-inset-top)_+_3.5rem)] md:pt-0">
           {showEmptyState ? emptyState : <RouteTransition>{children}</RouteTransition>}
         </main>
       </div>

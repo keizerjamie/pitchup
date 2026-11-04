@@ -1,65 +1,91 @@
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { logError } from '@/lib/errors'
-import { FootballEvent } from '@/lib/types'
-import { teltMee } from '@/lib/aanwezigheid-telling'
+import type { AttendanceStatus, FootballEvent } from '@/lib/types'
+import { telAanwezigheid, vasteTelling, type TelbareSpeler } from '@/lib/aanwezigheid-telling'
+import { eventBatchGrootte, inBatches, TERUGVAL_BATCH_GROOTTE } from '@/lib/attendance-batches'
 import CalendarView from '@/components/CalendarView'
+
+// Eén rij uit de attendance-batches hieronder.
+interface AttendanceRij {
+  event_id: string
+  player_id: string
+  status: AttendanceStatus
+}
+
+interface SpelerRij extends TelbareSpeler {
+  active: boolean
+}
 
 export default async function EventsPage() {
   const supabase = await createClient()
   const ctx = await requireTeamContextOrLogin()
 
-  const [
-    { data: events },
-    { data: attendance },
-    { data: guestPlayerRows, error: guestPlayerError },
-    { data: inactivePlayerRows, error: inactivePlayerError },
-  ] = await Promise.all([
+  const [{ data: events }, { data: playerRows, error: playerError }] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').order('date', { ascending: false }),
-    // player_id is nodig om per rij te bepalen of het een gast is; zonder die
-    // kolom zou de noemer hieronder elke gast blind meetellen.
-    supabase.from('attendance').select('event_id, player_id, status').eq('team_id', ctx.teamId),
-    // Gast-ids, zelfde vorm en zelfde team-scoping als de gast-query van het
-    // dashboard (app/page.tsx, zie gastIds). Bewust zonder active-filter: de
-    // telling hieronder filtert inactieve spelers apart weg (inactiefIds).
-    supabase.from('players').select('id').eq('team_id', ctx.teamId).eq('type', 'guest'),
-    // Inactieve spelers houden hun attendance-rijen (vaak op 'present'); die
-    // tellen niet mee in "x aanwezig", net als in de inzichten-RPC's
-    // (p.active = true in supabase/inzichten.sql) en op het dashboard.
-    supabase.from('players').select('id').eq('team_id', ctx.teamId).eq('active', false),
+    // ALLE spelers van het team (actief en inactief, vast en gast): `active`
+    // en `type` bepalen wie er meetelt, en het totaal bepaalt hoe groot een
+    // attendance-batch hieronder mag zijn (een inactieve speler heeft ook rijen).
+    supabase.from('players').select('id, type, active').eq('team_id', ctx.teamId),
   ])
 
   const allEvents: FootballEvent[] = events ?? []
-  const allAttendance = attendance ?? []
 
-  // Faalt de gast-query, dan weten we niet wie gast is. Alleen een statisch
+  // Faalt de spelersquery, dan weten we niet wie actief of gast is. Terugval:
+  // de oude, ongefilterde telling op de records zelf (teller = aanwezig-rijen,
+  // noemer = alle rijen). Een informatieve teller op elke rij weghalen is een
+  // grotere regressie dan een zeldzaam afwijkend getal. Alleen een statisch
   // label naar de log, nooit de ruwe PostgREST-fout (lib/errors.ts, logError).
-  if (guestPlayerError) logError('events.guestPlayers', guestPlayerError)
-  const gastIds = new Set((guestPlayerRows ?? []).map((p: { id: string }) => p.id))
-  // Faalt de inactief-query, dan tellen we ongefilterd door (de oude telling):
-  // zelfde afweging als bij de gast-query hieronder — een informatieve teller
-  // op elke rij weghalen is een grotere regressie dan een zeldzaam te hoog getal.
-  if (inactivePlayerError) logError('events.inactivePlayers', inactivePlayerError)
-  const inactiefIds = new Set((inactivePlayerRows ?? []).map((p: { id: string }) => p.id))
+  if (playerError) logError('events.players', playerError)
+  const spelers: SpelerRij[] = playerError ? [] : (playerRows ?? [])
+  const actieveSpelers = spelers.filter((p) => p.active)
+
+  // Eén attendance-query voor álle events wordt door PostgREST afgekapt op
+  // 1000 rijen; dan tonen de oudste events stilzwijgend een te lage teller.
+  // Daarom per batch events, zo groot dat (events × spelers) onder die grens
+  // blijft (lib/attendance-batches.ts), en parallel.
+  const batchGrootte = playerError ? TERUGVAL_BATCH_GROOTTE : eventBatchGrootte(spelers.length)
+  const batches = inBatches(allEvents.map((e) => e.id), batchGrootte)
+  const batchResultaten = await Promise.all(
+    batches.map((ids) =>
+      supabase.from('attendance').select('event_id, player_id, status').eq('team_id', ctx.teamId).in('event_id', ids),
+    ),
+  )
+
+  // Per event: player_id → status. Een gefaalde batch levert géén entry op
+  // voor zijn events: liever geen teller (CalendarView toont er dan geen)
+  // dan een fout getal.
+  const statusPerEvent = new Map<string, Map<string, AttendanceStatus>>()
+  batchResultaten.forEach(({ data, error }, i) => {
+    if (error) {
+      logError('events.attendanceBatch', error)
+      return
+    }
+    for (const id of batches[i]) statusPerEvent.set(id, new Map())
+    for (const rij of (data ?? []) as AttendanceRij[]) {
+      statusPerEvent.get(rij.event_id)?.set(rij.player_id, rij.status)
+    }
+  })
 
   const attendanceMap: Record<string, { present: number; total: number }> = {}
   for (const event of allEvents) {
-    const records = allAttendance.filter(a => a.event_id === event.id && !inactiefIds.has(a.player_id))
-    attendanceMap[event.id] = {
-      // Aanwezig blijft ongewijzigd: ook een gast die op aanwezig staat telt mee.
-      present: records.filter(a => a.status === 'present').length,
-      // De noemer is het aantal MEETELLENDE spelers — de regel komt uit
-      // teltMee (lib/aanwezigheid-telling.ts), niet uit een tweede formulering
-      // hier. Bij een gefaalde gast-query vallen we bewust terug op de oude,
-      // ongefilterde telling: deze teller is informatief en staat op élke rij,
-      // dus elke rij zijn teller ontnemen is een grotere regressie dan een
-      // zeldzaam iets te hoog getal. Dit wijkt bewust af van de KPI-tegel op
-      // het dashboard (attendancePct in app/page.tsx), die wél — toont omdat
-      // daar één getal centraal staat.
-      total: guestPlayerError
-        ? records.length
-        : records.filter(a => teltMee(gastIds.has(a.player_id) ? 'guest' : 'regular', a.status === 'present')).length,
+    const statussen = statusPerEvent.get(event.id)
+    if (!statussen) continue
+    if (playerError) {
+      const records = [...statussen.values()]
+      attendanceMap[event.id] = { present: records.filter((s) => s === 'present').length, total: records.length }
+      continue
     }
+    // Dezelfde telling als de dashboardhero (app/page.tsx): over de ACTIEVE
+    // spelers, een speler zonder rij telt als 'unknown', en teller/noemer
+    // gaan UITSLUITEND over vaste spelers (vasteTelling). Inactieve spelers
+    // vallen weg omdat ze niet in actieveSpelers staan, ook al hebben ze nog
+    // rijen. Let op: de inzichten-RPC's filteren NIET op p.active (wel op
+    // gasten) — deze teller kijkt dus bewust naar de selectie van nu.
+    const { aanwezig, noemer } = vasteTelling(
+      telAanwezigheid(actieveSpelers, (p) => statussen.get(p.id) ?? 'unknown'),
+    )
+    attendanceMap[event.id] = { present: aanwezig, total: noemer }
   }
 
   return (

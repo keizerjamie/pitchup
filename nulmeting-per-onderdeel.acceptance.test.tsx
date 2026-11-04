@@ -29,6 +29,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined }),
+  headers: vi.fn().mockResolvedValue({ get: () => null }),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 // Nodig voor de schrijf-paden hieronder (AC 1,2,4,14-16,20,25-27, edge 13/14):

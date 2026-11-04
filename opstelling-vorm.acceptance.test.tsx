@@ -98,7 +98,7 @@ import { nl } from '@/messages/nl'
 import { FORM_MATCH_HORIZON } from '@/lib/lineup-form'
 
 vi.mock('@/app/actions/attendance', () => ({
-  saveLineup: vi.fn().mockResolvedValue(undefined),
+  saveLineup: vi.fn().mockResolvedValue({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false }),
 }))
 vi.mock('next/navigation', () => ({
   notFound: vi.fn(() => {

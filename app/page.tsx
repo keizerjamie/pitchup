@@ -1,3 +1,4 @@
+import { headers } from 'next/headers'
 import PageHeader from '@/components/ui/PageHeader'
 import { LinkButton } from '@/components/ui/Button'
 import { createClient } from '@/lib/supabase/server'
@@ -18,8 +19,10 @@ import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import JoinedBanner from '@/components/dashboard/JoinedBanner'
 import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
-import { OPKOMST_DOEL } from '@/lib/inzichten'
-import { teltMee } from '@/lib/aanwezigheid-telling'
+import { OPKOMST_DOEL, berekenAanwezigheidPercentage, periodeVenster, seizoensVenster, verledenSeizoensVenster, type AanwezigheidRij } from '@/lib/inzichten'
+import { teltMee, telAanwezigheid, vasteTelling } from '@/lib/aanwezigheid-telling'
+import { telOpstelling } from '@/lib/lineup-compleet'
+import Begroeting from '@/components/dashboard/Begroeting'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 // AANNAME A1 (goedgekeurd): backward-fetchhorizon voor To-do kandidaat-events —
@@ -44,16 +47,17 @@ export default async function DashboardPage() {
   const [
     { data: upcomingEvents },
     { data: playerRows },
-    { data: teamNameRow },
+    { data: settingsRows },
     { data: todoCandidateEvents },
     { data: trainingDateRows },
     { data: recentMatchRows },
-    { data: guestPlayerRows, error: guestPlayerError },
     { data: categorieMetingenRows },
   ] = await Promise.all([
     supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').gte('date', today).order('date', { ascending: true }).limit(10),
     supabase.from('players').select('id, name, position, jersey_number, injured, type').eq('team_id', ctx.teamId).eq('active', true).order('jersey_number', { ascending: true, nullsFirst: false }),
-    supabase.from('settings').select('value').eq('team_id', ctx.teamId).eq('key', 'team_name').maybeSingle(),
+    // Teamnaam plus het seizoensvenster voor de KPI-tegel "Aanwezigheid ·
+    // laatste 4 weken" (zelfde bron als /inzichten, zie aanwezigheid4w).
+    supabase.from('settings').select('key, value').eq('team_id', ctx.teamId).in('key', ['team_name', 'season_start', 'season_end']),
     // Kandidaat-events voor de To-do: alles binnen het venster, ongeacht status
     // (zichtbaarheid wordt verderop bepaald door isTaskVisible).
     supabase.from('events').select('*').eq('team_id', ctx.teamId).neq('type', 'meting').gte('date', fetchStart).lte('date', windowEnd).order('date', { ascending: true }),
@@ -71,13 +75,6 @@ export default async function DashboardPage() {
       .order('created_at', { ascending: false, nullsFirst: false })
       .order('id', { ascending: false })
       .limit(5),
-    // Gastspelers tellen niet mee in de opkomsttegel hieronder, zodat het
-    // dashboard hetzelfde percentage toont als /inzichten (dat de gasten in
-    // SQL wegfiltert — supabase/inzichten.sql). Een APARTE query zonder
-    // active-filter, zodat een fout hier apart herkenbaar blijft (guestPlayerError).
-    // Inactieve spelers vallen al weg via het filter op allAttendance
-    // (actieveSpelerIds) verderop.
-    supabase.from('players').select('id').eq('team_id', ctx.teamId).eq('type', 'guest'),
     // Periodisering per onderdeel (vervangt de vroegere alles-of-niets
     // count-query op `metingen`). Team-gescoped, nieuwste eerst — zelfde vorm
     // als backend-samenvatting §"Voor fase 2 relevant".
@@ -85,7 +82,17 @@ export default async function DashboardPage() {
       .order('datum', { ascending: false }).order('created_at', { ascending: false }),
   ])
 
-  const teamName = teamNameRow?.value?.trim() || null
+  const settings: Record<string, string | undefined> = {}
+  for (const r of (settingsRows ?? []) as { key: string; value: string }[]) settings[r.key] = r.value
+  const teamName = settings['team_name']?.trim() || null
+
+  // KPI-tegel "Aanwezigheid · laatste 4 weken": EXACT dezelfde keten als
+  // /inzichten met ?periode=4w (app/inzichten/page.tsx): seizoensVenster →
+  // periodeVenster('4w') → verledenSeizoensVenster (t/m gisteren) → RPC
+  // inzichten_aanwezigheid. Zo tonen beide schermen per definitie hetzelfde
+  // percentage. Zonder (geldig) seizoen geen RPC en geen getal.
+  const seizoen = seizoensVenster(settings)
+  const aanwezigheid4w = seizoen ? verledenSeizoensVenster(periodeVenster(seizoen, '4w', today), today) : null
 
   // ── Periodisering: status per onderdeel ──────────────────────────
   // Peildatum EXCLUSIEF = morgen: een meting van vandaag telt al mee (AC 13).
@@ -112,75 +119,22 @@ export default async function DashboardPage() {
   const recentForm: FormStripItem[] =
     (recentMatchRows ?? []).map((m) => ({ id: m.id, result: matchResult(m) }))
 
-  const allEventIds = upcoming.map((e) => e.id)
-  const { data: attendanceRows } = allEventIds.length > 0
-    ? await supabase.from('attendance').select('event_id, player_id, status').eq('team_id', ctx.teamId).in('event_id', allEventIds)
-    : { data: [] }
-  // Alleen rijen van ACTIEVE spelers tellen mee. Een speler die op inactief
-  // wordt gezet houdt zijn attendance-rijen voor komende events (vaak op
-  // 'present'), en zonder dit filter telden die mee in de hero-ring, de
-  // opkomsttegel en "geen reactie" — terwijl de noemer (heroSquadSize) hem al
-  // wegliet. `players` is al op active = true gefilterd, dus nul extra queries.
-  // Faalt die query, dan blijft er niets over en toont de opkomsttegel "—":
-  // liever geen getal dan een verkeerd getal (zelfde regel als bij de gasten).
-  const actieveSpelerIds = new Set(players.map((p) => p.id))
-  const allAttendance = (attendanceRows ?? []).filter((a) => actieveSpelerIds.has(a.player_id))
-
-  // Faalt de gast-query, dan weten we niet wie gast is. Doortellen zou de
-  // gasten stilzwijgend meerekenen en dus een te hoog percentage tonen dat
-  // bovendien afwijkt van /inzichten — zonder enig signaal aan de trainer.
-  // Daarom valt de tegel "Opkomst" verderop terug op "geen getal" (—): liever
-  // niets tonen dan een verkeerd getal. Alleen een statisch label naar de log,
-  // geen ruwe melding.
-  if (guestPlayerError) logError('dashboard.guestPlayers', guestPlayerError)
-  // De hero-tegel kán niet terugvallen op "geen getal": die toont altijd een
-  // ring. Bij een gefaalde gast-query valt hij daarom terug op de gasten uit de
-  // al opgehaalde actieve spelers — een benadering zonder extra query, in
-  // plaats van een lege set waardoor elke gast stilzwijgend zou meetellen.
-  const gastIds = guestPlayerError
-    ? new Set(players.filter((p) => p.type === 'guest').map((p) => p.id))
-    : new Set((guestPlayerRows ?? []).map((p: { id: string }) => p.id))
-
-  function statsFor(eventId: string) {
-    const records = allAttendance.filter((a) => a.event_id === eventId)
-    const present = records.filter((a) => a.status === 'present').length
-    // Een afwezige gast hoort niet in het afwezig-segment van de hero-ring — en
-    // via heroSquadSize ook niet in "geen reactie". `present` blijft bewust
-    // ongefilterd: een gast die op aanwezig staat telt juist wél mee. Dezelfde
-    // regel als teltMee in lib/aanwezigheid-telling.ts. 'injured' telt als
-    // afwezig (besluit 5), zodat de ring gelijk blijft aan vóór de blessure-status.
-    const absent = records.filter(
-      (a) => (a.status === 'absent' || a.status === 'injured') && !gastIds.has(a.player_id),
-    ).length
-    return { present, absent, total: records.length }
-  }
-
   // Hero = the chronologically next activity (training or match). The upcoming
   // list is already sorted ascending by date. The next match gets its own card.
   const nextMatch = upcoming.find((e) => e.type === 'match') ?? null
   const heroEvent = upcoming[0] ?? null
 
   // ── Greeting + date line ──
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? t.home.greetingMorning : hour < 18 ? t.home.greetingAfternoon : t.home.greetingEvening
+  // Servertijd-begroeting; op het apparaat corrigeert het inline script van
+  // de Begroeting-component dit vóór de eerste paint (lib/begroeting.ts).
+  const begroetingLabels = { morning: t.home.greetingMorning, afternoon: t.home.greetingAfternoon, evening: t.home.greetingEvening }
+  // Nonce voor het inline script van <Begroeting> (CSP; zie app/layout.tsx).
+  const nonce = (await headers()).get('x-nonce') ?? undefined
   const dateLine = (() => {
     const d = new Date(today + 'T00:00:00').toLocaleDateString(t.browserLocale, { weekday: 'long', day: 'numeric', month: 'long' })
     return d.charAt(0).toUpperCase() + d.slice(1)
   })()
 
-  // ── Stat cards (all real data) ──
-  let totalPresent = 0, totalAbsent = 0
-  for (const a of allAttendance) {
-    // Een gast telt in teller noch noemer mee — zelfde regel als
-    // inzichten_aanwezigheid, anders wijken de twee getallen van elkaar af.
-    if (gastIds.has(a.player_id)) continue
-    if (a.status === 'present') totalPresent++
-    // 'injured' telt als afwezig, net als in inzichten_aanwezigheid (besluit 5).
-    else if (a.status === 'absent' || a.status === 'injured') totalAbsent++
-  }
-  const attendancePct = guestPlayerError || totalPresent + totalAbsent === 0
-    ? null
-    : Math.round((totalPresent / (totalPresent + totalAbsent)) * 100)
   // ── To-do (open selectie/opstelling/analyse/trainingsplan-taken) ──
   const todoCandidates: FootballEvent[] = todoCandidateEvents ?? []
   const trainingDates: string[] = (trainingDateRows ?? []).map((r: { date: string }) => r.date)
@@ -189,6 +143,8 @@ export default async function DashboardPage() {
   const allCandidateIds = todoCandidates.map((e) => e.id)
 
   const [
+    { data: heroAttendanceRows },
+    aanwezigheid4wResult,
     { data: squadRows },
     { data: lineupRows },
     { data: matchRatingRows },
@@ -197,11 +153,20 @@ export default async function DashboardPage() {
     { data: overrideRows },
     trainingLogResult,
   ] = await Promise.all([
+    // Alleen de rijen van het hero-event: de KPI-tegel rekent niet meer op
+    // attendance-rijen van de komende events (die komt uit de RPC hieronder).
+    heroEvent
+      ? supabase.from('attendance').select('player_id, status').eq('team_id', ctx.teamId).eq('event_id', heroEvent.id)
+      : Promise.resolve({ data: [] }),
+    // p_team_id uit de teamcontext; de RPC doet zelf een lidmaatschapscheck.
+    aanwezigheid4w
+      ? supabase.rpc('inzichten_aanwezigheid', { p_team_id: ctx.teamId, p_start: aanwezigheid4w.start, p_end: aanwezigheid4w.end })
+      : Promise.resolve({ data: null, error: null }),
     matchCandidateIds.length > 0
       ? supabase.from('match_squad').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
-      ? supabase.from('lineups').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
+      ? supabase.from('lineups').select('event_id, formation, positions').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
       : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
       ? supabase.from('match_ratings').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
@@ -226,10 +191,29 @@ export default async function DashboardPage() {
 
   const periodiseringItems = onderdeelStatus(actueel, trainingLogResult.currentSteps)
 
+  // KPI: fout → statisch label naar de log en geen getal ("—"), net als een
+  // ontbrekend seizoen. berekenAanwezigheidPercentage geeft null bij 0/0, dus
+  // nooit NaN% — zelfde afronding als /inzichten.
+  if (aanwezigheid4wResult.error) logError('dashboard.aanwezigheid4w', aanwezigheid4wResult.error)
+  const aanwezigheid4wRij = aanwezigheid4wResult.error
+    ? null
+    : ((aanwezigheid4wResult.data as AanwezigheidRij[] | null)?.[0] ?? null)
+  const attendancePct = aanwezigheid4wRij
+    ? berekenAanwezigheidPercentage(aanwezigheid4wRij.aanwezig, aanwezigheid4wRij.afwezig)
+    : null
+
   // De aanwezigheid van minstens één match_squad-rij ÍS de selectie — zelfde
   // done-criterium als de selectie-ActionCard op de event-detailpagina.
   const squadSet = new Set<string>((squadRows ?? []).map((r: { event_id: string }) => r.event_id))
-  const lineupSet = new Set<string>((lineupRows ?? []).map((r: { event_id: string }) => r.event_id))
+  // Een opstelling is pas "gemaakt" als élke positie van de formatie een
+  // unieke speler heeft (telOpstelling, lib/lineup-compleet.ts) — een
+  // opgeslagen opstelling met lege posities laat de taak open. Dezelfde regel
+  // als de opstelling-ActionCard op de event-detailpagina.
+  const lineupSet = new Set<string>(
+    ((lineupRows ?? []) as { event_id: string; formation: unknown; positions: unknown }[])
+      .filter((r) => telOpstelling(r.formation, r.positions).compleet)
+      .map((r) => r.event_id),
+  )
   const manualSet = new Set<string>(
     (overrideRows ?? []).map((r: { event_id: string; task_type: string }) => `${r.event_id}:${r.task_type}`)
   )
@@ -317,17 +301,25 @@ export default async function DashboardPage() {
   }))
 
   // ── Availability for the next event ──
+  // Alleen rijen van ACTIEVE spelers bestaan voor de telling: `players` is al
+  // op active = true gefilterd en we tellen over die lijst. Een inactieve
+  // speler met nog een 'present'-rij telt dus niet mee.
   const heroAttendance = new Map<string, AttendanceStatus>()
-  if (heroEvent) {
-    for (const a of allAttendance) {
-      if (a.event_id === heroEvent.id && a.player_id) heroAttendance.set(a.player_id, a.status as AttendanceStatus)
-    }
+  for (const a of (heroAttendanceRows ?? []) as { player_id: string; status: AttendanceStatus }[]) {
+    if (a.player_id) heroAttendance.set(a.player_id, a.status)
   }
-  // Noemer van de hero: vaste spelers altijd, gasten alleen als ze aanwezig
-  // staan. DashboardHero rekent noResponse = squadSize - present - absent zelf
-  // uit (die formules wijzigen niet); door de noemer mee te laten bewegen valt
-  // een afwezige gast ook uit "geen reactie".
-  const heroSquadSize = players.filter((p) => teltMee(p.type, heroAttendance.get(p.id) === 'present')).length
+  // Eén telling per event, dezelfde als de kalender (app/events/page.tsx):
+  // telAanwezigheid over de actieve spelers, zonder rij = 'unknown'. Teller en
+  // noemer gaan UITSLUITEND over vaste spelers (vasteTelling); een aanwezige
+  // gast verhoogt "x/y" dus niet. Geblesseerd staat apart in de legenda.
+  const heroTelling = telAanwezigheid(players, (p) => heroAttendance.get(p.id) ?? 'unknown')
+  const heroVast = vasteTelling(heroTelling)
+  const hero = {
+    present: heroVast.aanwezig,
+    absent: heroTelling.afwezig,
+    injured: heroTelling.geblesseerd,
+    squadSize: heroVast.noemer,
+  }
 
   // Een afwezige of onbekende gast hoort niet in de Beschikbaarheid-tegel, die
   // er anders een chip "Afwezig"/"nog niet gereageerd" aan hangt. Filteren VÓÓR
@@ -347,7 +339,6 @@ export default async function DashboardPage() {
       injured: p.injured,
     }))
 
-  const heroStats = heroEvent ? statsFor(heroEvent.id) : { present: 0, absent: 0, total: 0 }
   const heroIsMatch = heroEvent?.type === 'match'
   const heroTitle = !heroEvent ? '' : heroIsMatch
     ? `${teamName ? `${teamName} ` : ''}${t.lineup.vsLabel} ${heroEvent.opponent ?? '?'}`
@@ -364,7 +355,7 @@ export default async function DashboardPage() {
           staat alleen vanaf md: op mobiel neemt de contextuele FAB hem over. */}
       <PageHeader
         eyebrow={dateLine}
-        title={<>{greeting} 👋</>}
+        title={<><Begroeting labels={begroetingLabels} nonce={nonce} /> 👋</>}
         actions={canEdit(ctx, 'agenda') ? (
           <LinkButton href="/events/new" icon="add" className="max-md:hidden">{t.home.newEvent}</LinkButton>
         ) : undefined}
@@ -376,9 +367,10 @@ export default async function DashboardPage() {
           kind={heroIsMatch ? 'match' : 'training'}
           title={heroTitle}
           t={t}
-          present={heroStats.present}
-          absent={heroStats.absent}
-          squadSize={heroSquadSize}
+          present={hero.present}
+          absent={hero.absent}
+          injured={hero.injured}
+          squadSize={hero.squadSize}
           primaryHref={heroIsMatch ? `/events/${heroEvent.id}/lineup` : `/events/${heroEvent.id}/training-plan`}
           primaryLabel={heroIsMatch ? t.home.makeLineup : t.home.makeTrainingPlan}
           primaryIcon={heroIsMatch ? 'sports' : 'assignment'}
@@ -415,7 +407,7 @@ export default async function DashboardPage() {
             <StatCard
               label={t.home.statAttendance}
               icon="trending_up"
-              href="/inzichten"
+              href="/inzichten?periode=4w"
               value={attendancePct !== null ? `${attendancePct}%` : '—'}
             >
               <div className="flex flex-col gap-2">

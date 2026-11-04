@@ -19,6 +19,7 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue({ get: () => undefined }),
+  headers: vi.fn().mockResolvedValue({ get: () => null }),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
@@ -95,11 +96,40 @@ function tableFactory(rows: Row[]) {
   }
 }
 
+// Emulatie van inzichten_aanwezigheid (supabase/blessure-status.sql), kopie
+// van rpcAanwezigheid in gastspelers.acceptance.test.tsx: alleen vaste
+// spelers, injured = afwezig, type <> 'meting', datum in [p_start, p_end] —
+// en bewust GEEN active-filter, precies zoals de echte functie (besluit V1).
+function rpcAanwezigheid(tables: Record<string, Row[]>, args: Row) {
+  const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
+  const events = new Map((tables.events ?? []).filter((e) => e.team_id === p_team_id).map((e) => [e.id as string, e]))
+  const players = new Map((tables.players ?? []).filter((p) => p.team_id === p_team_id).map((p) => [p.id as string, p]))
+  let aanwezig = 0
+  let afwezig = 0
+  for (const a of tables.attendance ?? []) {
+    if (a.team_id !== p_team_id) continue
+    const e = events.get(a.event_id as string)
+    if (!e || e.type === 'meting') continue
+    const datum = e.date as string
+    if (datum < p_start || datum > p_end) continue
+    const speler = players.get(a.player_id as string)
+    if (!speler || speler.type !== 'regular') continue
+    if (a.status === 'present') aanwezig++
+    else if (a.status === 'absent' || a.status === 'injured') afwezig++
+  }
+  return [{ aanwezig, afwezig }]
+}
+
 function makeSupabase(user: { id: string } | null, tables: Record<string, Row[]>) {
   return {
     auth: { getUser: async () => ({ data: { user } }) },
     from: (t: string) =>
       t === 'team_members' ? teamMembersChain(user?.id) : tableFactory(tables[t] ?? [])(),
+    rpc: (name: string, args: Row) => Promise.resolve(
+      name === 'inzichten_aanwezigheid'
+        ? { data: rpcAanwezigheid(tables, args), error: null }
+        : { data: [], error: null },
+    ),
   }
 }
 
@@ -168,12 +198,19 @@ function mockSupabase(tables: Record<string, Row[]>) {
   )
 }
 
+// De KPI-tegel komt sinds kloppende cijfers uit de RPC over de laatste 4
+// weken t/m gisteren. Daarom een seizoen en een afgelopen event: dezelfde
+// rijen staan ook op dat event, zodat hero (vandaag) en KPI (verleden) over
+// dezelfde situatie gaan.
 async function renderDashboard(players: Row[], attendance: Row[]) {
   mockSupabase({
-    events: [dashboardEventRow()],
+    events: [dashboardEventRow(), dashboardEventRow({ id: 'ev-verleden', date: '2026-08-12' })],
     players,
-    settings: [],
-    attendance,
+    settings: [
+      { team_id: TEAM, key: 'season_start', value: '2026-07-01' },
+      { team_id: TEAM, key: 'season_end', value: '2027-06-30' },
+    ],
+    attendance: [...attendance, ...attendance.map((r) => ({ ...r, event_id: 'ev-verleden' }))],
     training_oefeningen: [],
     task_overrides: [],
     lineups: [],
@@ -210,9 +247,13 @@ describe('dashboard: een inactieve speler telt niet mee', () => {
     { event_id: 'ev1', team_id: TEAM, player_id: 'i1', status: 'present' },
   ]
 
-  it('de opkomsttegel toont 50%, niet 67% met de inactieve speler erbij', async () => {
+  // Kloppende cijfers, besluit V1 (bewust aangepast): de opkomsttegel neemt
+  // de Inzichten-RPC exact over, en die filtert NIET op p.active. De
+  // inactieve speler telt in de KPI dus mee (67%), gelijk aan /inzichten. Het
+  // corrigeren van de RPC is een aparte vervolgstory.
+  it('de opkomsttegel volgt de inzichten-RPC (V1): de inactieve speler telt daar mee → 67%', async () => {
     await renderDashboard([actief1, actief2, inactief], attendance)
-    expect(attendancePercentage()).toBe('50%')
+    expect(attendancePercentage()).toBe('67%')
   })
 
   it('de hero toont 1/2 aanwezig — de inactieve speler zit niet in de teller', async () => {

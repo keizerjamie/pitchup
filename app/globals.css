@@ -507,8 +507,15 @@ body::after {
   border-radius: 9999px;
   box-shadow: 0 12px 30px -14px rgba(0, 0, 0, 0.35);
 }
-@media (min-width: 768px) {
-  .action-bar { bottom: 16px; }
+/* Mobiel: een gefocust veld (browser scrolt het "in beeld") mag niet onder de
+   plakkende balk of de onderbalk eindigen. Scroll-padding = onderbalk-offset
+   (zelfde som als .action-bar hierboven) + balkhoogte (p-2 + 48px knop + rand,
+   afgerond 66px) + 16px lucht. Alleen op pagina's mét ActionBar. Vanaf md is
+   de balk niet sticky (components/ui/ActionBar.tsx), dus daar niets nodig. */
+@media (max-width: 767px) {
+  html:has(.action-bar) {
+    scroll-padding-bottom: calc(max(env(safe-area-inset-bottom), 10px) + 62px + 10px + 66px + 16px);
+  }
 }
 
 /* Instellingen (app/settings/page.tsx): ankernavigatie plakt onder de

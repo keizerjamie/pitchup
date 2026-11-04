@@ -4,6 +4,7 @@ import {
   telAanwezigheid,
   splitsAanwezigheid,
   splitsAanwezigheidMetBlessure,
+  vasteTelling,
 } from '@/lib/aanwezigheid-telling'
 import type { TelbareSpeler } from '@/lib/aanwezigheid-telling'
 import type { AttendanceStatus, PlayerType } from '@/lib/types'
@@ -300,5 +301,44 @@ describe('splitsAanwezigheidMetBlessure', () => {
 
   it('lege invoer → drie lege lijsten', () => {
     expect(splitsAanwezigheidMetBlessure([], statusVan)).toEqual({ aanwezig: [], afwezig: [], geblesseerd: [] })
+  })
+})
+
+describe('vasteTelling — teller/noemer van hero en kalender (alleen vaste spelers)', () => {
+  function vast(aantal: number, status: AttendanceStatus, prefix: string): Speler[] {
+    return Array.from({ length: aantal }, (_, i) => speler(`${prefix}${i}`, 'regular', status))
+  }
+
+  it('30 vaste spelers 19/1/10 geblesseerd → 19/30 en 63%', () => {
+    const spelers = [...vast(19, 'present', 'p'), ...vast(1, 'absent', 'a'), ...vast(10, 'injured', 'b')]
+    const t = telAanwezigheid(spelers, statusVan)
+    expect(vasteTelling(t)).toEqual({ aanwezig: 19, noemer: 30 })
+    expect(t.opkomstPercentage).toBe(63)
+  })
+
+  it('20 records van 30 spelers → 10 onbekend, noemer blijft 30', () => {
+    const metRecord = [...vast(15, 'present', 'p'), ...vast(5, 'absent', 'a')]
+    const zonderRecord = vast(10, 'present', 'x') // status komt niet uit een rij
+    const records = new Map(metRecord.map((s) => [s.id, s.status]))
+    const t = telAanwezigheid([...metRecord, ...zonderRecord], (s) => records.get(s.id) ?? 'unknown')
+    expect(t.onbekend).toBe(10)
+    expect(vasteTelling(t)).toEqual({ aanwezig: 15, noemer: 30 })
+  })
+
+  it('een aanwezige gast telt niet mee: 19/30, niet 20/31', () => {
+    const spelers = [
+      ...vast(19, 'present', 'p'), ...vast(1, 'absent', 'a'), ...vast(10, 'injured', 'b'),
+      speler('g1', 'guest', 'present'),
+    ]
+    expect(vasteTelling(telAanwezigheid(spelers, statusVan))).toEqual({ aanwezig: 19, noemer: 30 })
+  })
+
+  it('een afwezige gast telt niet mee in de noemer', () => {
+    const spelers = [...vast(3, 'present', 'p'), speler('g1', 'guest', 'absent')]
+    expect(vasteTelling(telAanwezigheid(spelers, statusVan))).toEqual({ aanwezig: 3, noemer: 3 })
+  })
+
+  it('geen spelers → 0/0, zonder deling', () => {
+    expect(vasteTelling(telAanwezigheid([], statusVan))).toEqual({ aanwezig: 0, noemer: 0 })
   })
 })

@@ -13,6 +13,7 @@ export default function DashboardHero({
   t,
   present,
   absent,
+  injured,
   squadSize,
   primaryHref,
   primaryLabel,
@@ -26,6 +27,7 @@ export default function DashboardHero({
   t: Dict
   present: number
   absent: number
+  injured: number
   squadSize: number
   primaryHref: string
   primaryLabel: string
@@ -39,7 +41,7 @@ export default function DashboardHero({
     : diff > 1 && diff <= 7 ? t.dashboard.inDays.replace('{n}', String(diff))
     : null
 
-  const noResponse = Math.max(0, squadSize - present - absent)
+  const noResponse = Math.max(0, squadSize - present - absent - injured)
   const pct = squadSize > 0 ? Math.round((present / squadSize) * 100) : 0
   const kindLabel = kind === 'match' ? t.home.nextMatch : t.home.nextTraining
 
@@ -224,6 +226,7 @@ export default function DashboardHero({
             <div className="flex flex-col gap-2 flex-1">
               <LegendRow color="#4ade80" text={`${present} ${t.home.present}`} strong />
               <LegendRow color="#ef4444" text={`${absent} ${t.home.absent}`} />
+              <LegendRow icon="healing" iconColor="#fca5a5" text={`${injured} ${t.home.injuredLegend}`} />
               <LegendRow color="#f59e0b" text={`${noResponse} ${t.home.noResponse}`} />
             </div>
           </div>
@@ -233,13 +236,19 @@ export default function DashboardHero({
   )
 }
 
-function LegendRow({ color, text, strong }: { color: string; text: string; strong?: boolean }) {
+// Legenda-regel met een gekleurde stip, of (geblesseerd) een icoon. Het icoon
+// is decoratief: de tekst draagt de betekenis.
+function LegendRow({ color, icon, iconColor, text, strong }: { color?: string; icon?: string; iconColor?: string; text: string; strong?: boolean }) {
   return (
     <div
       className="flex items-center gap-2 text-[13px] font-semibold"
       style={{ color: strong ? '#eafff4' : '#cbe8e0' }}
     >
-      <span className="w-[9px] h-[9px] rounded-full" style={{ background: color }} />
+      {icon ? (
+        <span className="ms text-[13px] w-[9px] flex items-center justify-center overflow-visible" style={{ color: iconColor }} aria-hidden="true">{icon}</span>
+      ) : (
+        <span className="w-[9px] h-[9px] rounded-full" style={{ background: color }} />
+      )}
       {text}
     </div>
   )

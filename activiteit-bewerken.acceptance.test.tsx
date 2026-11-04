@@ -73,7 +73,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 vi.mock('@/app/actions/attendance', () => ({
   updateAttendance: vi.fn().mockResolvedValue(undefined),
   markAllPresent: vi.fn().mockResolvedValue(undefined),
-  saveLineup: vi.fn().mockResolvedValue(undefined),
+  saveLineup: vi.fn().mockResolvedValue({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false }),
 }))
 vi.mock('@/app/actions/players', () => ({
   markInjured: vi.fn().mockResolvedValue(undefined),
