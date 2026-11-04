@@ -4437,3 +4437,27 @@ Aanleiding: schermreview van 2026-11-04 (artifact `XdpgdVnoSdPTcnT8cZgVkQ`).
 - **Browsergeverifieerd** (1440×900 en 375×812, echte data). Niet getest: echte iPhone met notch, een onvolledige
   opstelling echt opslaan. Open: verouderd commentaar in `app/events/[id]/lineup/page.tsx` (verwijst naar
   `allEventIds` op het dashboard, bestaat niet meer).
+
+## Vervolgstory V1: inactieve spelers uit de team-aanwezigheids-RPC's (2026-11-04, `524fe17`, live)
+Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-inactief-inzichten/` (01–03).
+Lost het "Bekend (V1, geaccepteerd)"-punt van "Kloppende cijfers en meldingen" hierboven op.
+- **Wijziging:** `inzichten_aanwezigheid` en `inzichten_training_opkomst_per_maand` filteren nu op `p.active = true`.
+  Nieuwe SQL `supabase/inzichten-inactieve-spelers.sql` (alleen bodies, `create or replace`; signatuur, grants en
+  tenant-regels gelijk). Op 2026-11-04 via Supabase-MCP gedraaid; NÁ-controles: 1 overload per naam, filter aanwezig,
+  security invoker, grants authenticated ja / anon nee, tabelcijfers ongewijzigd.
+- **Besluiten Jamie:** filteren op `active` met **terugwerkend effect** (ook het actieve verleden van een nu-inactieve
+  speler valt weg; heractiveren zet hem terug). Geen inactief-sinds-kolom. W3 (`inzichten_training_opkomst_per_speler`)
+  en O4 (`inzichten_blessures_per_maand`) bewust ongemoeid. Geen UI-toelichting (stil weglaten).
+- **Oud besluit O3 vervalt** (team-kaart telde inactieven bewust mee "consistent met dashboard"; premisse achterhaald
+  sinds 68a0be1). Commentaar in `supabase/inzichten.sql`, `lib/inzichten.ts`, `app/actions/inzichten.ts`,
+  `app/events/page.tsx` bijgewerkt.
+- **Waarom geen benadering van de actieve periode:** er is geen inactief-sinds-datum, en trainingsrijen worden bij
+  aanmaak met standaardstatus 'aanwezig' gevuld (CSW 2: rijen van 2026-06-10, door tot 2026-11-03). "Laatste
+  registratie" zegt dus niets over het moment van inactief zetten.
+- **Gotcha (R1):** `blessure-status.sql` en `inzichten-team-id.sql` her-draaien zet de twee functies terug naar
+  "inactieven tellen mee". Beide koppen waarschuwen nu: draai daarna altijd `inzichten-inactieve-spelers.sql`.
+  Statische test `inzichten-inactieve-spelers-migratie.acceptance.test.ts` pint body-pariteit en waarschuwingen.
+- **Tests:** `inactieve-spelers-inzichten.acceptance.test.tsx` (25), emulaties in kloppende-cijfers / inactieve-spelers-
+  tellingen (KPI 67%→50%) / gastspelers / inzichten met active-filter. Gedrag: alleen inactieven → KPI-strook '—';
+  helemaal geen trainingsrijen → paginabrede "Nog geen data". Bekend rood los hiervan: `cyclusweek-correctie` AC1/AC12.
+- **Rooktest open:** CSW 2 dashboard-KPI en `/inzichten?periode=4w` ≈ 44% (was 45%); meting 2026-11-04: 157/360 vs 167/372.
