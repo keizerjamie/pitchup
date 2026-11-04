@@ -4397,3 +4397,43 @@ Geen feature-factory (kleine fix, optie A gekozen door Jamie).
 - **Tests:** `inactieve-spelers-tellingen.acceptance.test.tsx` (6; 3 falen zonder fix). Bekend rood los hiervan:
   `cyclusweek-correctie` AC1/AC12.
 - **Gotcha:** push faalde eerst door een GitHub-storing (500 "Internal Server Error"); niet de repo, gewoon opnieuw proberen.
+
+## Feature: Kloppende cijfers en meldingen — zes fouten uit de schermreview (2026-11-04, `af59fc5`, live)
+Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-kloppende-cijfers/` (00–06).
+Aanleiding: schermreview van 2026-11-04 (artifact `XdpgdVnoSdPTcnT8cZgVkQ`).
+- **Aanwezigheid één telling:** dashboard-hero, agenda en eventdetail tellen per event met `telAanwezigheid` +
+  `vasteTelling` (`lib/aanwezigheid-telling.ts`): teller = vast aanwezig, noemer = vaste actieve spelers
+  (aanwezig + afwezig + geblesseerd + onbekend; ontbrekende rij = onbekend). **Besluit V2: aanwezige gast telt
+  niet meer mee** in "x aanwezig" (omkering van eerder besluit). Hero toont geblesseerd apart (prop `injured`,
+  `healing`-icoon in de legenda). Vervangt de inactief-fix hierboven voor de agenda (één spelersquery `id, type, active`).
+- **Gotcha PostgREST 1000 rijen:** de agenda haalde álle attendance van het team op (CSW 2: 3.657 rijen / 110 events)
+  → stil afgekapt, tellers fout (12/14 i.p.v. 19/30). Nu per batch events via `lib/attendance-batches.ts`
+  (`eventBatchGrootte` = min(50, floor(1000/#spelers))), parallel. Batch faalt → geen teller op die rijen;
+  spelersquery faalt → terugval op records-telling. Elke nieuwe `.in()`/volledige-tabelquery op attendance: batchen.
+- **KPI-tegel:** "Aanwezigheid · laatste 4 weken" = RPC `inzichten_aanwezigheid` met exact de Inzichten-keten
+  (`seizoensVenster` → `periodeVenster('4w')` → `verledenSeizoensVenster`), link `/inzichten?periode=4w`, Doel 85%.
+  Geen seizoen of RPC-fout → "—". Bekend (V1, geaccepteerd): die RPC filtert inactieve spelers níet → vervolgstory.
+- **Analysekaart** op wedstrijddetail: vóór `datumBereikt` (`event.date <= todayLocal()`) een `ActionCard` met
+  `vergrendeld` ("Beschikbaar na de wedstrijd"), geen CTA/link.
+- **Opstelling "gemaakt"** = `telOpstelling(formation, positions).compleet` (`lib/lineup-compleet.ts`, aantal uit
+  `FORMATIONS`, unieke spelers, gooit nooit). Dashboard-taak en eventdetail-kaart gebruiken dit; `task_overrides`
+  blijft leidend. `saveLineup` → `SaveLineupResultaat { legePosities, selectieAutomatischGevuld, selectieFout }`,
+  nu met `assertOwnMatchEvent`; vult een **lege** `match_squad` met opgesteld + bank (aanwezig ∩ actief − opgesteld,
+  gasten mee) via upsert `ignoreDuplicates`; nooit overschrijven. Bankquery faalt → niets schrijven, `selectieFout`.
+  LineupBuilder: meldingen "n posities leeg" / auto-vullen mislukt (`role=status`-container altijd in de DOM) en
+  `saveError` (`role=alert`).
+- **Begroeting:** `components/dashboard/Begroeting.tsx` + `lib/begroeting.ts`: inline script met CSP-nonce
+  (`x-nonce`) zet de tekst vóór first paint op de apparaatklok (Next-docs "preventing flash before hydration"),
+  `suppressHydrationWarning`, script `text/plain` op de client. `todayLocal()`/C20 bewust ongemoeid.
+- **Mobiel/layout:** namen in MatchAnalysisEditor en TrainingAttendance `break-words` i.p.v. `truncate`;
+  `main` padding-bottom safe-area + 160px (FAB); `ActionBar` `sticky md:static` + `scroll-padding-bottom` < 768px.
+- **Backfill eventdetail:** `insert` → `upsert ignoreDuplicates` (geen fout bij gelijktijdig openen).
+- **Teksten:** 7 sleutels in nl/en/de/fr/es (Dict-type dwingt alle vijf af).
+- **Tests:** `kloppende-cijfers.acceptance.test.tsx` (63 + 5 todo: layout/flits alleen in browser), nieuwe unit-tests
+  voor lineup-compleet, attendance-batches, begroeting, DashboardHero, Begroeting; oude gast-/KPI-tests bewust
+  aangepast (o.a. gastspelers 21/26→15/20, inactieve-spelers-tellingen 50%→67% door V1). Bekend rood los hiervan:
+  `cyclusweek-correctie` AC1/AC12.
+- **Gotcha dev-server:** na wijzigen van `messages/*.ts` toonde de dev-server "undefined"/oude tekst tot een herstart.
+- **Browsergeverifieerd** (1440×900 en 375×812, echte data). Niet getest: echte iPhone met notch, een onvolledige
+  opstelling echt opslaan. Open: verouderd commentaar in `app/events/[id]/lineup/page.tsx` (verwijst naar
+  `allEventIds` op het dashboard, bestaat niet meer).
