@@ -4,7 +4,18 @@
 -- WANNEER DRAAIEN: VÓÓR de push van fase A, en daarna DIRECT pushen. Run dit
 -- eenmalig in de Supabase SQL Editor. Idempotent: veilig opnieuw te draaien,
 -- zowel vóór als ná A-2 (de dataconversie slaat zichzelf over zodra de kolom
--- injury_set is gedropt; CHECK en RPC's worden dan gewoon opnieuw gezet).
+-- injury_set is gedropt; CHECK en RPC's worden dan gewoon opnieuw gezet) —
+-- MAAR alleen als je daarna supabase/inzichten-inactieve-spelers.sql opnieuw
+-- draait (zie de waarschuwing hieronder).
+--
+-- !! VERVANGEN DOOR supabase/inzichten-inactieve-spelers.sql !! Dat bestand
+-- zet inzichten_aanwezigheid en inzichten_training_opkomst_per_maand opnieuw,
+-- met `and p.active = true` erbij. Dit bestand opnieuw draaien zet die twee
+-- RPC's stil terug naar een versie zónder active-filter, waardoor inactieve
+-- spelers weer meetellen in de team-aanwezigheid op /inzichten en het
+-- dashboard. Draai daarna ALTIJD supabase/inzichten-inactieve-spelers.sql.
+-- De bodies hieronder zijn bewust niet aangepast: zij zijn de
+-- terugdraaiversie van die migratie.
 --
 --   A-1 supabase/blessure-status.sql            vóór push (dit bestand)
 --       push fase A + rooktest in productie

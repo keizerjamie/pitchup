@@ -307,6 +307,10 @@ function inRange(date: string, start: string, end: string): boolean {
 // `db.players`; zonder deze players-lookup zou een verkeerd/ontbrekend
 // `p.type = 'regular'`-filter in de ECHTE SQL door deze mock-suite heen
 // glippen.
+//
+// Inactieve spelers tellen evenmin mee: de geldende versies van beide
+// team-RPC's (supabase/inzichten-inactieve-spelers.sql) filteren op
+// `p.active = true`, net als de per-speler-, rating- en dashboardcijfers.
 function rpcAanwezigheid(db: Db, args: Row) {
   const { p_start, p_end } = args as { p_start: string; p_end: string }
   const events = new Map(db.events.map((e) => [e.id as string, e]))
@@ -319,7 +323,7 @@ function rpcAanwezigheid(db: Db, args: Row) {
     if (!e || e.team_id !== TEAM || e.type === 'meting') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
     const p = players.get(a.player_id as string)
-    if (!p || p.team_id !== TEAM || p.type !== 'regular') continue
+    if (!p || p.team_id !== TEAM || p.active !== true || p.type !== 'regular') continue
     if (a.status === 'present') aanwezig++
     else if (a.status === 'absent' || a.status === 'injured') afwezig++ // besluit 5: injured = afwezig (blessure-status.sql) // besluit 5: injured = afwezig (blessure-status.sql)
   }
@@ -337,7 +341,7 @@ function rpcMaandOpkomst(db: Db, args: Row) {
     if (!e || e.team_id !== TEAM || e.type !== 'training') continue
     if (!inRange(e.date as string, p_start, p_end)) continue
     const p = players.get(a.player_id as string)
-    if (!p || p.team_id !== TEAM || p.type !== 'regular') continue
+    if (!p || p.team_id !== TEAM || p.active !== true || p.type !== 'regular') continue
     const maand = (e.date as string).slice(0, 7)
     const cur = byMaand.get(maand) ?? { aanwezig: 0, afwezig: 0 }
     if (a.status === 'present') cur.aanwezig++
@@ -434,10 +438,10 @@ function rpcRatingPerSpeler(db: Db, args: Row) {
     .sort((a, b) => String(a.naam).localeCompare(String(b.naam)))
 }
 
-// inzichten_aanwezigheid_per_speler — zoals rpcAanwezigheid (type <> 'meting'),
-// maar per speler én mét active-filter (bewust anders dan de team-brede kaart,
-// zie de comment in supabase/inzichten.sql). Voedt de top 5 / worst 5 op
-// aanwezigheidspercentage.
+// inzichten_aanwezigheid_per_speler — zoals rpcAanwezigheid (type <> 'meting',
+// active-filter, alleen vaste spelers), maar per speler. Zelfde filters als de
+// team-brede kaart (supabase/inzichten-inactieve-spelers.sql). Voedt de top 5
+// / worst 5 op aanwezigheidspercentage.
 function rpcAanwezigheidPerSpeler(db: Db, args: Row) {
   const { p_start, p_end } = args as { p_start: string; p_end: string }
   const events = new Map(db.events.map((e) => [e.id as string, e]))

@@ -31,8 +31,9 @@ import type {
 //
 // Een lege lijst is een geldige, verwachte uitkomst: geen seizoen ingesteld,
 // geen wedstrijden in het venster, nog geen ratings, of een inactieve speler
-// (die filtert de RPC weg, net als de teamgrafiek — zie O3 in
-// supabase/inzichten.sql).
+// (die filtert de RPC weg, net als de teamgrafiek: zowel inzichten_rating_speler
+// als inzichten_rating_team_per_wedstrijd filteren op `p.active = true`, zie
+// supabase/inzichten-team-id.sql).
 export async function getSpelerRatingReeks(playerId: string, periode?: string): Promise<SpelerRatingPunt[]> {
   const supabase = await createClient()
   const ctx = await requireTeamContext()

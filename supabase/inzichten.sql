@@ -152,14 +152,16 @@ $$;
 -- aanwezigheidslijst. De aanroeper geeft hier hetzelfde GECLAMPTE venster mee
 -- als aan inzichten_aanwezigheid (zie de venster-notitie bovenaan).
 --
--- BEWUST ANDERS dan inzichten_aanwezigheid: deze functie filtert WEL op
--- players.active. De team-brede aanwezigheidskaart telt bewust álle
--- registraties van actieve én inactieve spelers mee (O3, consistent met het
--- dashboard — zie lib/inzichten.ts:112-115), maar dit is een per-speler "wie
--- presteert"-lijst; een speler die niet meer in de selectie zit hoort daar
--- niet in te staan. Die asymmetrie geldt ALLEEN voor `active`: het filter
--- p.type = 'regular' zit in alle zes functies, dus een gastspeler telt nergens
--- mee.
+-- Deze functie filtert op players.active: een speler die niet meer in de
+-- selectie zit hoort niet in een per-speler "wie presteert"-lijst.
+-- HISTORIE (O3, achterhaald): in DIT bestand filteren inzichten_aanwezigheid
+-- en inzichten_training_opkomst_per_maand nog NIET op active; dat was ooit
+-- "consistent met het dashboard". Het dashboard filtert inactieven inmiddels
+-- wél weg, en de geldende versies van beide team-RPC's (met p_team_id) staan
+-- in supabase/inzichten-inactieve-spelers.sql, mét `p.active = true`. Zie het
+-- commentaar boven berekenAanwezigheidPercentage in lib/inzichten.ts. Het
+-- filter p.type = 'regular' zit in alle zes functies, dus een gastspeler telt
+-- nergens mee.
 --
 -- Een speler met uitsluitend status 'unknown' komt terug als 0/0. Die krijgt
 -- in JS percentage null en valt daar uit de top/worst — geen verzonnen 0%.

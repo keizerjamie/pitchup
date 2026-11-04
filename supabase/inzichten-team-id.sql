@@ -8,7 +8,10 @@
 -- Opnieuw draaien zet ze stil terug naar "alleen 'absent' is afwezig" en haalt
 -- elk geblesseerd event uit /inzichten, het spelersprofiel en het
 -- seizoensrapport. Moet dit bestand toch ooit opnieuw: draai daarna
--- blessure-status.sql nogmaals.
+-- blessure-status.sql nogmaals, en daarna supabase/inzichten-inactieve-spelers.sql
+-- (die zet het active-filter terug in inzichten_aanwezigheid en
+-- inzichten_training_opkomst_per_maand; zonder die stap tellen inactieve
+-- spelers stil weer mee in de team-aanwezigheid).
 --
 -- WANNEER DRAAIEN: VÓÓR deploy 1a (de deploy waarin app/inzichten/page.tsx en
 -- app/actions/inzichten.ts de nieuwe signatuur aanroepen). Run dit eenmalig in

@@ -211,11 +211,12 @@ function tableFactory(rows: Row[]) {
   }
 }
 
-// Emulatie van de RPC inzichten_aanwezigheid (supabase/blessure-status.sql),
-// zelfde precedent als rpcAanwezigheid in inzichten.acceptance.test.tsx:
-// attendance × events × players van p_team_id, type <> 'meting', datum binnen
-// [p_start, p_end], ALLEEN vaste spelers (p.type = 'regular', geen
-// active-filter), 'injured' telt als afwezig. Altijd precies één rij.
+// Emulatie van de RPC inzichten_aanwezigheid
+// (supabase/inzichten-inactieve-spelers.sql), zelfde precedent als
+// rpcAanwezigheid in inzichten.acceptance.test.tsx: attendance × events ×
+// players van p_team_id, type <> 'meting', datum binnen [p_start, p_end],
+// ALLEEN actieve vaste spelers (p.active = true en p.type = 'regular'),
+// 'injured' telt als afwezig. Altijd precies één rij.
 function rpcAanwezigheid(tables: Record<string, Row[]>, args: Row) {
   const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
   const events = new Map((tables.events ?? []).filter((e) => e.team_id === p_team_id).map((e) => [e.id as string, e]))
@@ -229,7 +230,7 @@ function rpcAanwezigheid(tables: Record<string, Row[]>, args: Row) {
     const datum = e.date as string
     if (datum < p_start || datum > p_end) continue
     const speler = players.get(a.player_id as string)
-    if (!speler || speler.type !== 'regular') continue
+    if (!speler || speler.active !== true || speler.type !== 'regular') continue
     if (a.status === 'present') aanwezig++
     else if (a.status === 'absent' || a.status === 'injured') afwezig++
   }

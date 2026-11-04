@@ -166,14 +166,22 @@ type UitslagRij = Pick<DoelpuntItem, 'goals_for' | 'goals_against'>
 // null bij noemer 0: zonder aanwezig- én afwezig-registraties is er geen
 // percentage. 0% teruggeven zou "iedereen afwezig" suggereren.
 //
-// LET OP (O3, bewuste asymmetrie): de aanwezigheidscijfers filteren NIET op
-// players.active — consistent met het bestaande dashboard, dat ook niet
-// filtert. Alleen de ratinggrafieken kijken naar actieve spelers
-// (supabase/inzichten.sql). Verzin dit niet stilzwijgend anders.
+// LET OP (O3, herzien): de team-aanwezigheids-RPC's (inzichten_aanwezigheid
+// en inzichten_training_opkomst_per_maand) tellen alleen ACTIEVE vaste
+// spelers — gelijk aan inzichten_aanwezigheid_per_speler, de ratinggrafieken,
+// en de hero en agenda (teltMee/telAanwezigheid in lib/aanwezigheid-telling.ts).
+// Bron: supabase/inzichten-inactieve-spelers.sql. Het oude besluit "de
+// team-kaart telt inactieven mee, net als het dashboard" is achterhaald sinds
+// het dashboard inactieven wegfiltert. Het effect is terugwerkend; een speler
+// heractiveren telt hem weer mee.
 //
-// Die asymmetrie geldt ALLEEN voor `active`. Gastspelers (players.type =
-// 'guest') worden wél overal weggefilterd: alle zes RPC's in
-// supabase/inzichten.sql filteren op p.type = 'regular', en het dashboard doet
+// BEWUST ZONDER active-filter blijven: inzichten_training_opkomst_per_speler
+// (W3) en inzichten_blessures_per_maand (O4). Verzin dit niet stilzwijgend
+// anders.
+//
+// Gastspelers (players.type = 'guest') worden overal weggefilterd: alle zes
+// RPC's in supabase/inzichten.sql (en hun opvolgers met p_team_id) filteren op
+// p.type = 'regular', en het dashboard doet
 // hetzelfde in JS (app/page.tsx). Een gast telt dus nergens mee in teller of
 // noemer.
 //

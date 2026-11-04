@@ -96,10 +96,10 @@ function tableFactory(rows: Row[]) {
   }
 }
 
-// Emulatie van inzichten_aanwezigheid (supabase/blessure-status.sql), kopie
-// van rpcAanwezigheid in gastspelers.acceptance.test.tsx: alleen vaste
-// spelers, injured = afwezig, type <> 'meting', datum in [p_start, p_end] —
-// en bewust GEEN active-filter, precies zoals de echte functie (besluit V1).
+// Emulatie van inzichten_aanwezigheid (supabase/inzichten-inactieve-spelers.sql),
+// kopie van rpcAanwezigheid in gastspelers.acceptance.test.tsx: alleen ACTIEVE
+// vaste spelers (p.active = true en p.type = 'regular'), injured = afwezig,
+// type <> 'meting', datum in [p_start, p_end] — precies zoals de echte functie.
 function rpcAanwezigheid(tables: Record<string, Row[]>, args: Row) {
   const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
   const events = new Map((tables.events ?? []).filter((e) => e.team_id === p_team_id).map((e) => [e.id as string, e]))
@@ -113,7 +113,7 @@ function rpcAanwezigheid(tables: Record<string, Row[]>, args: Row) {
     const datum = e.date as string
     if (datum < p_start || datum > p_end) continue
     const speler = players.get(a.player_id as string)
-    if (!speler || speler.type !== 'regular') continue
+    if (!speler || speler.active !== true || speler.type !== 'regular') continue
     if (a.status === 'present') aanwezig++
     else if (a.status === 'absent' || a.status === 'injured') afwezig++
   }
@@ -247,13 +247,13 @@ describe('dashboard: een inactieve speler telt niet mee', () => {
     { event_id: 'ev1', team_id: TEAM, player_id: 'i1', status: 'present' },
   ]
 
-  // Kloppende cijfers, besluit V1 (bewust aangepast): de opkomsttegel neemt
-  // de Inzichten-RPC exact over, en die filtert NIET op p.active. De
-  // inactieve speler telt in de KPI dus mee (67%), gelijk aan /inzichten. Het
-  // corrigeren van de RPC is een aparte vervolgstory.
-  it('de opkomsttegel volgt de inzichten-RPC (V1): de inactieve speler telt daar mee → 67%', async () => {
+  // De opkomsttegel neemt de Inzichten-RPC exact over, en die telt sinds
+  // supabase/inzichten-inactieve-spelers.sql alleen actieve vaste spelers
+  // (besluit V1 herzien). De inactieve speler telt dus ook in de KPI niet
+  // mee: 1 van 2 = 50%, gelijk aan /inzichten.
+  it('inactieve speler telt ook in de KPI niet mee (AC2) → 50%', async () => {
     await renderDashboard([actief1, actief2, inactief], attendance)
-    expect(attendancePercentage()).toBe('67%')
+    expect(attendancePercentage()).toBe('50%')
   })
 
   it('de hero toont 1/2 aanwezig — de inactieve speler zit niet in de teller', async () => {

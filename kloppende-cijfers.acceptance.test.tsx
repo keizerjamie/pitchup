@@ -223,9 +223,10 @@ function isTeamGescoped(q: QueryLog): boolean {
     || q.ins.some(([k, vals]) => k === 'team_id' && vals.length > 0 && vals.every((v) => v === TEAM))
 }
 
-// Emulatie van inzichten_aanwezigheid (supabase/blessure-status.sql): alleen
-// vaste spelers, injured = afwezig, type <> 'meting', datum in [p_start,
-// p_end], GEEN active-filter (besluit V1), alleen p_team_id.
+// Emulatie van inzichten_aanwezigheid (supabase/inzichten-inactieve-spelers.sql):
+// alleen ACTIEVE vaste spelers (p.active = true en p.type = 'regular'),
+// injured = afwezig, type <> 'meting', datum in [p_start, p_end], alleen
+// p_team_id.
 function rpcAanwezigheid(db: Db, args: Row) {
   const { p_team_id, p_start, p_end } = args as { p_team_id: string; p_start: string; p_end: string }
   const events = new Map(rowsVan(db, 'events').filter((e) => e.team_id === p_team_id).map((e) => [e.id as string, e]))
@@ -239,7 +240,7 @@ function rpcAanwezigheid(db: Db, args: Row) {
     const datum = e.date as string
     if (datum < p_start || datum > p_end) continue
     const speler = players.get(a.player_id as string)
-    if (!speler || speler.type !== 'regular') continue
+    if (!speler || speler.active !== true || speler.type !== 'regular') continue
     if (a.status === 'present') aanwezig++
     else if (a.status === 'absent' || a.status === 'injured') afwezig++
   }

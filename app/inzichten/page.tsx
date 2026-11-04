@@ -226,6 +226,9 @@ export default async function InzichtenPage({
     // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
     // functies kunnen het team niet zelf meer afleiden. Ze doen daarbovenop een
     // lidmaatschapscheck. Vereist supabase/inzichten-team-id.sql (M3a).
+    // inzichten_aanwezigheid en inzichten_training_opkomst_per_maand tellen
+    // alleen ACTIEVE vaste spelers (ook terugwerkend): zie
+    // supabase/inzichten-inactieve-spelers.sql.
     supabase.rpc('inzichten_aanwezigheid', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
     supabase.rpc('inzichten_training_opkomst_per_maand', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
     supabase.rpc('inzichten_rating_team_per_wedstrijd', { p_team_id: ctx.teamId, p_start: venster.start, p_end: venster.end }),

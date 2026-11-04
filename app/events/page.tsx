@@ -80,8 +80,10 @@ export default async function EventsPage() {
     // spelers, een speler zonder rij telt als 'unknown', en teller/noemer
     // gaan UITSLUITEND over vaste spelers (vasteTelling). Inactieve spelers
     // vallen weg omdat ze niet in actieveSpelers staan, ook al hebben ze nog
-    // rijen. Let op: de inzichten-RPC's filteren NIET op p.active (wel op
-    // gasten) — deze teller kijkt dus bewust naar de selectie van nu.
+    // rijen. De team-RPC's inzichten_aanwezigheid en
+    // inzichten_training_opkomst_per_maand filteren nu óók op actieve vaste
+    // spelers (supabase/inzichten-inactieve-spelers.sql); agenda en inzichten
+    // rekenen dus over dezelfde spelers.
     const { aanwezig, noemer } = vasteTelling(
       telAanwezigheid(actieveSpelers, (p) => statussen.get(p.id) ?? 'unknown'),
     )
