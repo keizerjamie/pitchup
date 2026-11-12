@@ -65,7 +65,7 @@ import { setActiveTeam } from '@/app/actions/team'
 import { ACTIVE_TEAM_COOKIE, TEAM_NAAM_METADATA_KEY, getTeamContext } from '@/lib/team-context'
 import { createPlayer } from '@/app/actions/players'
 import { createEvent, deleteEvent, updateGatherTime, updateTrainingstype } from '@/app/actions/events'
-import { createBulkMatches } from '@/app/actions/events-bulk'
+import { createBulkMatches, createRecurringTrainings } from '@/app/actions/events-bulk'
 import { markAllPresent, markAbsentForPeriod } from '@/app/actions/attendance'
 import { toggleSquadPlayer } from '@/app/actions/match-squad'
 import { saveMatchResult } from '@/app/actions/match-analysis'
@@ -783,6 +783,46 @@ describe('Validator punt 7 — events-bulk (createBulkMatches)', () => {
     // validatiemelding i.p.v. 'Geen toegang', dan is die volgorde omgedraaid.
     await expect(createBulkMatches([])).rejects.toThrow('Geen toegang')
     expect(schrijfCalls(m.calls, 'events')).toHaveLength(0)
+  })
+})
+
+describe('F1 AC14/AC21 — events-bulk (createRecurringTrainings)', () => {
+  function recurringForm(): FormData {
+    const fd = new FormData()
+    fd.set('date', '2026-11-02')
+    fd.set('time', '19:00')
+    fd.set('repeat_until', '2026-11-29')
+    fd.set('repeat_days', '2,4')
+    return fd
+  }
+
+  it('een assistent zonder agendarecht krijgt "Geen toegang" bij een directe actie-aanroep en er wordt niets in events of attendance geschreven', async () => {
+    const m = makeSupabase({
+      user: { id: TEAM_A },
+      members: [memberRow(TEAM_A, TEAM_A, 'assistent', { agenda: false })],
+      settings: [teamNameRow(TEAM_A, 'JO13-1')],
+      tables: { events: [], players: [{ id: 'p1', team_id: TEAM_A, active: true }], absence_periods: [] },
+    })
+    useSupabase(m)
+
+    await expect(createRecurringTrainings(recurringForm())).rejects.toThrow('Geen toegang')
+    expect(schrijfCalls(m.calls, 'events')).toHaveLength(0)
+    expect(schrijfCalls(m.calls, 'attendance')).toHaveLength(0)
+    expect(m.store.events).toHaveLength(0)
+  })
+
+  it('een assistent MET agendarecht (en verder niets) mag de reeks wel aanmaken: 8 trainingen op het eigen team', async () => {
+    const m = makeSupabase({
+      user: { id: TEAM_A },
+      members: [memberRow(TEAM_A, TEAM_A, 'assistent', { agenda: true })],
+      settings: [teamNameRow(TEAM_A, 'JO13-1')],
+      tables: { events: [], players: [], absence_periods: [] },
+    })
+    useSupabase(m)
+
+    const res = await createRecurringTrainings(recurringForm())
+    expect(res).toMatchObject({ ok: true, created: 8 })
+    expect(m.store.events.every((e) => e.team_id === TEAM_A && e.type === 'training')).toBe(true)
   })
 })
 

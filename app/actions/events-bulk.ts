@@ -4,10 +4,12 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getDefaultAttendance } from '@/app/actions/settings'
 import { genericError, logError } from '@/lib/errors'
-import { isDateString } from '@/lib/season-dates'
+import { isDateString, seasonTrainingDates } from '@/lib/season-dates'
 import {
   MAX_BULK_FILE_BYTES,
   MAX_BULK_MATCHES,
+  MAX_LOCATION_CHARS,
+  MAX_NOTES_CHARS,
   MAX_PREVIEW_ROWS,
   validateBulkRow,
   type BulkCreateResult,
@@ -22,9 +24,18 @@ import { todayLocal } from '@/lib/utils'
 import { parseMatchesFromCsv } from '@/lib/bulk-matches-csv'
 import { parseMatchesFromXlsx } from '@/lib/bulk-matches-xlsx'
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
+import { parseEventBaseInput } from '@/lib/event-input'
+import { VALID_TRAININGSTYPES, type TrainingsType } from '@/lib/types'
+import {
+  parseRepeatDays,
+  planRecurringTrainings,
+  resolveNewTrainingDefaults,
+  type NewTrainingDefaults,
+  type RecurringTrainingsResult,
+} from '@/lib/recurring-trainings'
 
 // Dit bestand exporteert UITSLUITEND async functies. Types, constanten en pure
-// functies staan in lib/bulk-matches*.ts: een export van iets anders dan een
+// functies staan in lib/bulk-matches*.ts en lib/recurring-trainings.ts: een export van iets anders dan een
 // async functie uit een 'use server'-bestand lekt in Turbopack als
 // runtime-verwijzing (zelfde reden als lib/logo-upload.ts:11-14).
 
@@ -238,6 +249,194 @@ export async function createBulkMatches(rows: BulkMatchInput[]): Promise<BulkCre
   return { created: events.length, attendanceFailed }
 }
 
+// ────────────────────────────────────────────────
+// Herhalende trainingen
+// ────────────────────────────────────────────────
+
+// Maakt een wekelijks herhalende training aan: één training per gekozen
+// weekdag van `date` t/m `repeat_until` (beide inclusief). Datums waarop het
+// team al een training heeft, worden overgeslagen (alleen op datum).
+//
+// FormData: date, time, location, notes, trainingstype, repeat_until
+// (YYYY-MM-DD) en repeat_days (kommalijst, 0 = zondag … 6 = zaterdag). `type`
+// en `team_id` worden bewust NIET gelezen: het type is altijd 'training' en het
+// team komt uit de sessie.
+//
+// Invoerfouten komen terug als { ok: false, error: <code> } (vertaald in de
+// UI); de eerste fout wint, in de volgorde hieronder. Niet ingelogd, geen recht
+// of een databasefout gooit (generieke melding, nooit de ruwe fout).
+//
+// Zelfde atomiciteit als createBulkMatches: de trainingen in één insert
+// (alles-of-niets), de aanwezigheid daarna los. Mislukt die, dan blijven de
+// trainingen staan en meldt het resultaat attendanceFailed.
+export async function createRecurringTrainings(formData: FormData): Promise<RecurringTrainingsResult> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'agenda')
+
+  // 1. Lengtes vóór parseEventBaseInput: die kapt te lange tekst stil af, en
+  //    bij tientallen trainingen tegelijk merkt niemand die verminking (zelfde
+  //    lijn als de bulk-wedstrijden, lib/bulk-matches.ts).
+  const rawLocation = formData.get('location')
+  if (typeof rawLocation === 'string' && rawLocation.length > MAX_LOCATION_CHARS) {
+    return { ok: false, error: 'location_too_long' }
+  }
+  const rawNotes = formData.get('notes')
+  if (typeof rawNotes === 'string' && rawNotes.length > MAX_NOTES_CHARS) {
+    return { ok: false, error: 'notes_too_long' }
+  }
+
+  // 2. Datum (= startdatum), tijd, locatie en notities: dezelfde regels als
+  //    createEvent.
+  const parsed = parseEventBaseInput(formData, 'training')
+  if (!parsed.ok) {
+    return { ok: false, error: parsed.code === 'invalid_time' ? 'invalid_time' : 'invalid_date' }
+  }
+  const { date: start, time, location, notes } = parsed.value
+
+  // 3. Ontbrekend trainingstype = VCT (de DB-default); een ONGELDIGE waarde wordt
+  //    geweigerd, nooit stil teruggevallen — zelfde lijn als createEvent.
+  const trainingstypeRaw = formData.get('trainingstype')
+  let trainingstype: TrainingsType = 'vct'
+  if (formData.has('trainingstype')) {
+    if (!VALID_TRAININGSTYPES.includes(trainingstypeRaw as TrainingsType)) {
+      return { ok: false, error: 'invalid_trainingstype' }
+    }
+    trainingstype = trainingstypeRaw as TrainingsType
+  }
+
+  // 4-6. Weekdagen, einddatum en bereik: dezelfde pure functie als de teller in
+  //      het formulier, dus client en server rekenen exact dezelfde datums.
+  const days = parseRepeatDays(formData.get('repeat_days'))
+  const until = formData.get('repeat_until')
+  const end = typeof until === 'string' ? until : ''
+  const plan = planRecurringTrainings(start, end, days)
+  if (!plan.ok) return { ok: false, error: plan.error }
+  // Geldig bereik zonder één gekozen weekdag erin (bijv. alleen dinsdag, van
+  // woensdag t/m maandag): niets aan te maken, geen database nodig.
+  if (plan.dates.length === 0) return { ok: true, created: 0, skipped: 0, attendanceFailed: false }
+
+  // Dubbel-detectie: bestaande trainingen van DIT team in het bereik. De
+  // datums zijn kale YYYY-MM-DD-strings, dus geen tijdzone die meebeslist.
+  const { data: existingRows, error: existingError } = await supabase
+    .from('events')
+    .select('date')
+    // Tenant-grens, expliciet naast de RLS-policy.
+    .eq('team_id', ctx.teamId)
+    .eq('type', 'training')
+    .gte('date', start)
+    .lte('date', end)
+
+  if (existingError) throw genericError('events.recurring.existing', existingError)
+
+  const existing = new Set(((existingRows ?? []) as { date: string }[]).map((row) => row.date))
+  const toCreate = plan.dates.filter((d) => !existing.has(d))
+  const skipped = plan.dates.length - toCreate.length
+
+  if (toCreate.length === 0) {
+    return { ok: true, created: 0, skipped, attendanceFailed: false }
+  }
+
+  const payloads = toCreate.map((d) => ({
+    // 'training' staat hardcoded: het type komt nooit uit de invoer.
+    type: 'training',
+    date: d,
+    time,
+    location,
+    notes,
+    trainingstype,
+    // Tenant-grens: altijd uit de sessie, nooit uit de payload.
+    team_id: ctx.teamId,
+  }))
+
+  const { data: inserted, error } = await supabase
+    .from('events')
+    .insert(payloads)
+    .select('id, date')
+
+  if (error) throw genericError('events.recurring', error)
+
+  const events = (inserted ?? []) as { id: string; date: string }[]
+  const attendanceFailed = await createAttendanceFor(
+    supabase,
+    ctx.teamId,
+    events,
+    'events.recurring.attendance',
+  )
+
+  revalidatePath('/events')
+  revalidatePath('/')
+
+  // Bewust geen redirect(): het formulier toont eerst de telling.
+  return { ok: true, created: events.length, skipped, attendanceFailed }
+}
+
+// Datums (YYYY-MM-DD, uniek, oplopend) waarop dit team in [from, to] al een
+// training heeft — voor de teller in het formulier. Onbruikbare invoer
+// (geen kalenderdatum, to < from, langer dan MAX_SEASON_DAYS) → [] zonder
+// databasevraag. Een databasefout gooit (generieke melding).
+export async function getExistingTrainingDates(from: string, to: string): Promise<string[]> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+
+  // Zelfde bereikregels als de herhaling zelf (kalenderdatums, to >= from,
+  // hooguit MAX_SEASON_DAYS dagen); zonder weekdagen rekent dit alleen de
+  // grenzen na en levert het geen datums op.
+  if (!seasonTrainingDates(from, to, []).ok) return []
+
+  const { data, error } = await supabase
+    .from('events')
+    .select('date')
+    // Tenant-grens, expliciet naast de RLS-policy.
+    .eq('team_id', ctx.teamId)
+    .eq('type', 'training')
+    .gte('date', from)
+    .lte('date', to)
+
+  if (error) throw genericError('events.getExistingTrainingDates', error)
+
+  const dates = ((data ?? []) as { date: string }[]).map((row) => row.date)
+  return [...new Set(dates)].sort()
+}
+
+// Voorinvulling voor /events/new: tijd en locatie van de laatst AANGEMAAKTE
+// training van dit team (created_at, niet de trainingsdatum), per veld
+// terugvallend op de teaminstellingen training_time/training_location, en het
+// seizoenseinde als voorgestelde einddatum. Alleen lezen, team-gescoped; elk
+// teamlid mag dit (de pagina zelf gate't op het agenda-recht).
+export async function getNewTrainingDefaults(): Promise<NewTrainingDefaults> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+
+  const [{ data: lastRows, error: lastError }, { data: settingRows, error: settingsError }] =
+    await Promise.all([
+      supabase
+        .from('events')
+        .select('time, location')
+        .eq('team_id', ctx.teamId)
+        .eq('type', 'training')
+        // created_at is nullable: een rij zonder tijdstempel mag nooit als
+        // "nieuwste" winnen (Postgres zet NULL bij DESC standaard vooraan).
+        .order('created_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false })
+        .limit(1),
+      supabase
+        .from('settings')
+        .select('key, value')
+        .eq('team_id', ctx.teamId)
+        .in('key', ['training_time', 'training_location', 'season_end']),
+    ])
+
+  if (lastError) throw genericError('events.getNewTrainingDefaults', lastError)
+  if (settingsError) throw genericError('events.getNewTrainingDefaults.settings', settingsError)
+
+  const settings: Record<string, string> = {}
+  for (const row of (settingRows ?? []) as { key: string; value: string }[]) settings[row.key] = row.value
+
+  const last = ((lastRows ?? []) as { time: string | null; location: string | null }[])[0] ?? null
+  return resolveNewTrainingDefaults(last, settings)
+}
+
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>
 
 // Zet voor elke nieuwe wedstrijd een aanwezigheidsrij per actieve speler klaar,
@@ -251,6 +450,9 @@ async function createAttendanceFor(
   // afspraak als de teamId-parameter van de guards in lib/authz.ts.
   teamId: string,
   events: { id: string; date: string }[],
+  // Statisch logcontext-label (nooit gebruikersdata), zodat een mislukte
+  // aanwezigheidsstap in de logs aan de juiste flow te koppelen is.
+  logLabel = 'events.bulkCreate.attendance',
 ): Promise<boolean> {
   if (events.length === 0) return false
 
@@ -289,7 +491,7 @@ async function createAttendanceFor(
       ])
 
     if (playersError) {
-      logError('events.bulkCreate.attendance', playersError)
+      logError(logLabel, playersError)
       return true
     }
     // Bewust ANDERS dan createEvent, dat hier hard faalt: daar staat het event
@@ -298,7 +500,7 @@ async function createAttendanceFor(
     // Dus hetzelfde attendanceFailed-signaal als bij een mislukte spelerslijst:
     // de UI meldt dan dat de aanwezigheid nagelopen moet worden.
     if (periodsError) {
-      logError('events.bulkCreate.attendance', periodsError)
+      logError(logLabel, periodsError)
       return true
     }
     if (!players || players.length === 0) return false
@@ -328,14 +530,14 @@ async function createAttendanceFor(
         .from('attendance')
         .insert(records.slice(i, i + ATTENDANCE_BATCH))
       if (error) {
-        logError('events.bulkCreate.attendance', error)
+        logError(logLabel, error)
         return true
       }
     }
 
     return false
   } catch (err) {
-    logError('events.bulkCreate.attendance', err)
+    logError(logLabel, err)
     return true
   }
 }

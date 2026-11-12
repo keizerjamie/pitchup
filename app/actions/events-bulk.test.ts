@@ -16,7 +16,14 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import { BULK_HEADERS, MAX_BULK_MATCHES, type BulkMatchInput } from '@/lib/bulk-matches'
-import { createBulkMatches, getExistingMatchKeys, parseBulkMatchFile } from '@/app/actions/events-bulk'
+import {
+  createBulkMatches,
+  createRecurringTrainings,
+  getExistingMatchKeys,
+  getExistingTrainingDates,
+  getNewTrainingDefaults,
+  parseBulkMatchFile,
+} from '@/app/actions/events-bulk'
 
 // ────────────────────────────────────────────────
 // Mocks (chainbuilder overgenomen uit app/actions/events.test.ts, uitgebreid
@@ -39,9 +46,17 @@ function teamMembersFixture(userId: string | undefined) {
 function makeSupabase(opts: {
   user?: { id: string } | null
   tables?: Record<string, TableResult>
+  // Per tabel een reeks resultaten, één per from()-aanroep in volgorde; is de
+  // reeks op, dan geldt `tables`. Nodig waar één action dezelfde tabel twee keer
+  // raakt (createRecurringTrainings: events lezen voor de dubbelcheck, dan
+  // events inserten).
+  sequences?: Record<string, TableResult[]>
 } = {}) {
   const user = opts.user === undefined ? { id: 'team-1' } : opts.user
   const tables = opts.tables ?? {}
+  const sequences = Object.fromEntries(
+    Object.entries(opts.sequences ?? {}).map(([table, results]) => [table, [...results]]),
+  )
   type Eq = { col: string; val: unknown }
   const calls = {
     select: [] as {
@@ -53,10 +68,14 @@ function makeSupabase(opts: {
       ltes: Eq[]
     }[],
     insert: [] as { table: string; payload: unknown }[],
+    order: [] as { table: string; col: string; opts: unknown }[],
+    limit: [] as { table: string; n: number }[],
   }
 
   function chain(table: string) {
-    const result = tables[table] ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
+    const result = sequences[table]?.shift()
+      ?? tables[table]
+      ?? (table === 'team_members' ? teamMembersFixture(user?.id) : { data: [], error: null })
     const eqs: Eq[] = []
     const ins: { col: string; vals: unknown[] }[] = []
     const gtes: Eq[] = []
@@ -69,7 +88,8 @@ function makeSupabase(opts: {
     // een verkeerd bereik zou stilzwijgend periodes missen.
     c.gte = (col: string, val: unknown) => { gtes.push({ col, val }); return c }
     c.lte = (col: string, val: unknown) => { ltes.push({ col, val }); return c }
-    c.order = () => c
+    c.order = (col: string, orderOpts?: unknown) => { calls.order.push({ table, col, opts: orderOpts }); return c }
+    c.limit = (n: number) => { calls.limit.push({ table, n }); return c }
     c.insert = (payload: unknown) => { calls.insert.push({ table, payload }); return c }
     c.single = () => Promise.resolve(result)
     ;(c as { then: unknown }).then = (res: (v: unknown) => unknown) => res(result)
@@ -882,5 +902,441 @@ describe('parseBulkMatchFile — weigeringen', () => {
 
     expect(result).toEqual({ ok: false, error: 'Dit bestand kon niet gelezen worden.' })
     expect(logged()).toContain('events.parseBulkMatchFile')
+  })
+})
+
+// ════════════════════════════════════════════════
+// Herhalende trainingen
+// ════════════════════════════════════════════════
+
+// Di + do van maandag 2030-11-04 t/m zondag 2030-11-17: vier datums.
+// (2030 zodat 'vandaag' er nooit na ligt.)
+const HERHAAL_DATUMS = ['2030-11-05', '2030-11-07', '2030-11-12', '2030-11-14']
+
+function herhaalForm(overrides: Record<string, string | null> = {}): FormData {
+  const values: Record<string, string | null> = {
+    date: '2030-11-04',
+    time: '19:30',
+    location: 'Veld 2',
+    notes: 'Pionnen mee',
+    trainingstype: 'teamtactisch',
+    repeat_until: '2030-11-17',
+    repeat_days: '2,4',
+    ...overrides,
+  }
+  const fd = new FormData()
+  for (const [key, value] of Object.entries(values)) if (value !== null) fd.set(key, value)
+  return fd
+}
+
+// Events: eerst de dubbelcheck (bestaande trainingen), dan de insert. Standaard
+// bestaat er niets en levert de insert een id per gevraagde datum op.
+function herhaalTeam(opts: {
+  existing?: TableResult
+  inserted?: TableResult
+  extra?: Record<string, TableResult>
+  team_members?: TableResult
+} = {}) {
+  return makeSupabase({
+    sequences: {
+      events: [
+        opts.existing ?? { data: [], error: null },
+        opts.inserted ?? {
+          data: HERHAAL_DATUMS.map((date, i) => ({ id: `t${i + 1}`, date })),
+          error: null,
+        },
+      ],
+    },
+    tables: {
+      players: { data: [{ id: 'p1', injured: false, type: 'regular' }], error: null },
+      attendance: { data: null, error: null },
+      absence_periods: { data: [], error: null },
+      ...(opts.team_members ? { team_members: opts.team_members } : {}),
+      ...opts.extra,
+    },
+  })
+}
+
+describe('createRecurringTrainings — opslaan', () => {
+  it('maakt één training per gekozen weekdag in één insert, met team en type uit de server', async () => {
+    const m = herhaalTeam()
+    use(m)
+    const fd = herhaalForm()
+    // Pogingen om type en team te sturen worden genegeerd.
+    fd.set('type', 'match')
+    fd.set('team_id', 'ander-team')
+
+    const result = await createRecurringTrainings(fd)
+
+    expect(result).toEqual({ ok: true, created: 4, skipped: 0, attendanceFailed: false })
+    expect(insertsOn(m, 'events')).toHaveLength(1)
+    expect(eventsPayloads(m)).toEqual(HERHAAL_DATUMS.map((date) => ({
+      type: 'training',
+      date,
+      time: '19:30',
+      location: 'Veld 2',
+      notes: 'Pionnen mee',
+      trainingstype: 'teamtactisch',
+      team_id: 'team-1',
+    })))
+  })
+
+  it('zoekt bestaande trainingen team-gescoped over het gekozen bereik', async () => {
+    const m = herhaalTeam()
+    use(m)
+
+    await createRecurringTrainings(herhaalForm())
+
+    const sel = m.calls.select.find((s) => s.table === 'events' && s.cols === 'date')!
+    expect(sel.eqs).toEqual([{ col: 'team_id', val: 'team-1' }, { col: 'type', val: 'training' }])
+    expect(sel.gtes).toEqual([{ col: 'date', val: '2030-11-04' }])
+    expect(sel.ltes).toEqual([{ col: 'date', val: '2030-11-17' }])
+  })
+
+  it('slaat datums met een bestaande training over en telt ze', async () => {
+    const m = herhaalTeam({
+      existing: { data: [{ date: '2030-11-07' }, { date: '2030-11-07' }, { date: '2030-11-12' }], error: null },
+      inserted: { data: [{ id: 't1', date: '2030-11-05' }, { id: 't4', date: '2030-11-14' }], error: null },
+    })
+    use(m)
+
+    const result = await createRecurringTrainings(herhaalForm())
+
+    expect(eventsPayloads(m).map((r) => r.date)).toEqual(['2030-11-05', '2030-11-14'])
+    expect(result).toEqual({ ok: true, created: 2, skipped: 2, attendanceFailed: false })
+  })
+
+  it('doet geen insert als alle datums al een training hebben', async () => {
+    const m = herhaalTeam({ existing: { data: HERHAAL_DATUMS.map((date) => ({ date })), error: null } })
+    use(m)
+
+    const result = await createRecurringTrainings(herhaalForm())
+
+    expect(result).toEqual({ ok: true, created: 0, skipped: 4, attendanceFailed: false })
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('doet geen databasewerk als het bereik geen gekozen weekdag bevat', async () => {
+    const m = herhaalTeam()
+    use(m)
+
+    // Woensdag t/m maandag met alleen dinsdag.
+    const result = await createRecurringTrainings(
+      herhaalForm({ date: '2030-11-06', repeat_until: '2030-11-11', repeat_days: '2' }),
+    )
+
+    expect(result).toEqual({ ok: true, created: 0, skipped: 0, attendanceFailed: false })
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('maakt van lege tijd, locatie en notities null en valt zonder trainingstype terug op vct', async () => {
+    const m = herhaalTeam()
+    use(m)
+
+    await createRecurringTrainings(herhaalForm({ time: '', location: '', notes: '', trainingstype: null }))
+
+    expect(eventsPayloads(m)[0]).toMatchObject({ time: null, location: null, notes: null, trainingstype: 'vct' })
+  })
+
+  it('zet een aanwezigheidsrij per training per actieve speler, met de periode op de eigen datum', async () => {
+    const m = herhaalTeam({
+      extra: {
+        players: { data: [{ id: 'p1', injured: false, type: 'regular' }, { id: 'p2', injured: false, type: 'guest' }], error: null },
+        absence_periods: {
+          data: [{ id: 'ap-1', player_id: 'p1', from_date: '2030-11-10', to_date: '2030-11-12' }],
+          error: null,
+        },
+      },
+    })
+    use(m)
+
+    await createRecurringTrainings(herhaalForm())
+
+    const rows = insertsOn(m, 'attendance')[0].payload as Record<string, unknown>[]
+    expect(rows).toHaveLength(8)
+    const p1 = rows.filter((r) => r.player_id === 'p1').map((r) => [r.event_id, r.status, r.absence_period_id])
+    expect(p1).toEqual([
+      ['t1', 'present', null],
+      ['t2', 'present', null],
+      ['t3', 'absent', 'ap-1'],
+      ['t4', 'present', null],
+    ])
+    expect(rows.filter((r) => r.player_id === 'p2').every((r) => r.status === 'absent')).toBe(true)
+    expect(rows.every((r) => r.team_id === 'team-1')).toBe(true)
+    // Periodes en spelers team-gescoped, periodes over het bereik van de batch.
+    const periods = m.calls.select.find((s) => s.table === 'absence_periods')!
+    expect(periods.eqs).toEqual([{ col: 'team_id', val: 'team-1' }])
+    expect(periods.ltes).toEqual([{ col: 'from_date', val: '2030-11-14' }])
+    expect(periods.gtes).toEqual([{ col: 'to_date', val: '2030-11-05' }])
+    expect(m.calls.select.find((s) => s.table === 'players')!.eqs).toEqual([
+      { col: 'active', val: true },
+      { col: 'team_id', val: 'team-1' },
+    ])
+  })
+
+  it('zet een geblesseerde speler op injured voor toekomstige trainingen', async () => {
+    const m = herhaalTeam({ extra: { players: { data: [{ id: 'p1', injured: true, type: 'regular' }], error: null } } })
+    use(m)
+
+    await createRecurringTrainings(herhaalForm())
+
+    const rows = insertsOn(m, 'attendance')[0].payload as Record<string, unknown>[]
+    expect(rows.every((r) => r.status === 'injured')).toBe(true)
+  })
+
+  it('werkt ook voor een team zonder spelers', async () => {
+    const m = herhaalTeam({ extra: { players: { data: [], error: null } } })
+    use(m)
+
+    const result = await createRecurringTrainings(herhaalForm())
+
+    expect(result).toEqual({ ok: true, created: 4, skipped: 0, attendanceFailed: false })
+    expect(insertsOn(m, 'attendance')).toHaveLength(0)
+  })
+
+  it('revalideert agenda en dashboard', async () => {
+    use(herhaalTeam())
+
+    await createRecurringTrainings(herhaalForm())
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events')
+    expect(revalidatePath).toHaveBeenCalledWith('/')
+  })
+})
+
+describe('createRecurringTrainings — invoerfouten', () => {
+  const gevallen: [string, Record<string, string | null>, string][] = [
+    ['een te lange locatie', { location: 'x'.repeat(201) }, 'location_too_long'],
+    ['te lange notities', { notes: 'x'.repeat(2001) }, 'notes_too_long'],
+    ['een ongeldige startdatum', { date: '2030-02-30' }, 'invalid_date'],
+    ['een ontbrekende startdatum', { date: null }, 'invalid_date'],
+    ['een ongeldige tijd', { time: '24:00' }, 'invalid_time'],
+    ['een ongeldig trainingstype', { trainingstype: 'conditie' }, 'invalid_trainingstype'],
+    ['een leeg trainingstype', { trainingstype: '' }, 'invalid_trainingstype'],
+    ['geen weekdagen', { repeat_days: '' }, 'no_weekdays'],
+    ['alleen onzin-weekdagen', { repeat_days: '7,a' }, 'no_weekdays'],
+    ['een ontbrekende einddatum', { repeat_until: null }, 'invalid_end_date'],
+    ['een niet-bestaande einddatum', { repeat_until: '2030-02-30' }, 'invalid_end_date'],
+    ['een einddatum vóór de start', { repeat_until: '2030-11-03' }, 'end_before_start'],
+    ['een te lange herhaling (801 dagen)', { date: '2030-01-01', repeat_until: '2032-03-11' }, 'too_long'],
+  ]
+
+  for (const [naam, overrides, code] of gevallen) {
+    it(`geeft ${code} bij ${naam}, zonder iets weg te schrijven`, async () => {
+      const m = herhaalTeam()
+      use(m)
+
+      const result = await createRecurringTrainings(herhaalForm(overrides))
+
+      expect(result).toEqual({ ok: false, error: code })
+      expect(m.calls.insert).toHaveLength(0)
+      expect(revalidatePath).not.toHaveBeenCalled()
+    })
+  }
+
+  it('accepteert precies 800 dagen', async () => {
+    use(herhaalTeam())
+    const result = await createRecurringTrainings(herhaalForm({ date: '2030-01-01', repeat_until: '2032-03-10' }))
+    expect(result.ok).toBe(true)
+  })
+
+  it('meldt de eerste fout: lengte vóór datum, datum vóór weekdagen', async () => {
+    use(herhaalTeam())
+    expect(await createRecurringTrainings(herhaalForm({ location: 'x'.repeat(201), date: 'x' })))
+      .toEqual({ ok: false, error: 'location_too_long' })
+    expect(await createRecurringTrainings(herhaalForm({ date: 'x', repeat_days: '' })))
+      .toEqual({ ok: false, error: 'invalid_date' })
+    expect(await createRecurringTrainings(herhaalForm({ repeat_days: '', repeat_until: 'x' })))
+      .toEqual({ ok: false, error: 'no_weekdays' })
+  })
+})
+
+describe('createRecurringTrainings — weigeringen en databasefouten', () => {
+  it('weigert zonder ingelogde gebruiker', async () => {
+    const m = makeSupabase({ user: null })
+    use(m)
+    await expect(createRecurringTrainings(herhaalForm())).rejects.toThrow('Niet ingelogd')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert een assistent zonder agenda-recht', async () => {
+    const m = herhaalTeam({
+      team_members: { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null },
+    })
+    use(m)
+    await expect(createRecurringTrainings(herhaalForm())).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('laat een assistent mét agenda-recht toe', async () => {
+    use(herhaalTeam({
+      team_members: {
+        data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent', mag_agenda_bewerken: true }],
+        error: null,
+      },
+    }))
+    expect((await createRecurringTrainings(herhaalForm())).ok).toBe(true)
+  })
+
+  it('geeft een generieke melding als de dubbelcheck faalt', async () => {
+    const m = herhaalTeam({ existing: { data: null, error: { code: '42P01', message: 'relation events secret' } } })
+    use(m)
+    await expect(createRecurringTrainings(herhaalForm())).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(m.calls.insert).toHaveLength(0)
+    expect(logged()).toContain('events.recurring.existing')
+    expect(logged()).not.toContain('secret')
+  })
+
+  it('geeft een generieke melding bij een mislukte insert en lekt niets', async () => {
+    const m = herhaalTeam({
+      inserted: { data: null, error: { code: '23514', message: 'Key (team_id)=(team-1) violates' } },
+    })
+    use(m)
+    await expect(createRecurringTrainings(herhaalForm())).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(logged()).toContain('[events.recurring]')
+    expect(logged()).toContain('23514')
+    expect(logged()).not.toContain('violates')
+    expect(insertsOn(m, 'attendance')).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  for (const [naam, extra] of [
+    ['de attendance-insert', { attendance: { data: null, error: { code: '42501', message: 'permission denied' } } }],
+    ['de spelersquery', { players: { data: null, error: { code: '42501' } } }],
+    ['de periodequery', { absence_periods: { data: null, error: { code: '42501' } } }],
+  ] as [string, Record<string, TableResult>][]) {
+    it(`laat de trainingen staan en meldt attendanceFailed als ${naam} faalt`, async () => {
+      const m = herhaalTeam({ extra })
+      use(m)
+
+      const result = await createRecurringTrainings(herhaalForm())
+
+      expect(result).toEqual({ ok: true, created: 4, skipped: 0, attendanceFailed: true })
+      expect(m.calls.insert.filter((i) => i.table === 'events')).toHaveLength(1)
+      // Geen compensatie: er wordt niets verwijderd, en de agenda ververst.
+      expect(revalidatePath).toHaveBeenCalledWith('/events')
+      expect(logged()).toContain('events.recurring.attendance')
+      expect(logged()).not.toContain('events.bulkCreate')
+      expect(logged()).not.toContain('permission denied')
+    })
+  }
+})
+
+describe('createBulkMatches — loglabel ongewijzigd', () => {
+  it('logt een mislukte aanwezigheidsstap nog steeds als events.bulkCreate.attendance', async () => {
+    use(eigenTeam({ attendance: { data: null, error: { code: '42501' } } }))
+    await createBulkMatches(TWEE_RIJEN)
+    expect(logged()).toContain('[events.bulkCreate.attendance]')
+  })
+})
+
+describe('getExistingTrainingDates', () => {
+  it('zoekt team-gescoped trainingen in het bereik en geeft unieke, gesorteerde datums', async () => {
+    const m = makeSupabase({
+      tables: {
+        events: { data: [{ date: '2030-11-12' }, { date: '2030-11-05' }, { date: '2030-11-12' }], error: null },
+      },
+    })
+    use(m)
+
+    expect(await getExistingTrainingDates('2030-11-04', '2030-11-17')).toEqual(['2030-11-05', '2030-11-12'])
+
+    const sel = m.calls.select.find((s) => s.table === 'events')!
+    expect(sel.cols).toBe('date')
+    expect(sel.eqs).toEqual([{ col: 'team_id', val: 'team-1' }, { col: 'type', val: 'training' }])
+    expect(sel.gtes).toEqual([{ col: 'date', val: '2030-11-04' }])
+    expect(sel.ltes).toEqual([{ col: 'date', val: '2030-11-17' }])
+  })
+
+  for (const [naam, from, to] of [
+    ['een ongeldige begindatum', '2030-02-30', '2030-03-10'],
+    ['een ongeldige einddatum', '2030-03-01', 'morgen'],
+    ['een einde vóór het begin', '2030-03-10', '2030-03-01'],
+    ['een te lang bereik', '2030-01-01', '2032-03-11'],
+  ]) {
+    it(`geeft [] zonder databasevraag bij ${naam}`, async () => {
+      const m = makeSupabase()
+      use(m)
+      expect(await getExistingTrainingDates(from, to)).toEqual([])
+      expect(m.calls.select.filter((s) => s.table === 'events')).toHaveLength(0)
+    })
+  }
+
+  it('weigert zonder ingelogde gebruiker', async () => {
+    use(makeSupabase({ user: null }))
+    await expect(getExistingTrainingDates('2030-11-04', '2030-11-17')).rejects.toThrow('Niet ingelogd')
+  })
+
+  it('geeft een generieke melding bij een databasefout', async () => {
+    use(makeSupabase({ tables: { events: { data: null, error: { code: '42501', message: 'geheim' } } } }))
+    await expect(getExistingTrainingDates('2030-11-04', '2030-11-17')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(logged()).not.toContain('geheim')
+  })
+})
+
+describe('getNewTrainingDefaults', () => {
+  const SETTINGS = {
+    data: [
+      { key: 'training_time', value: '20:00' },
+      { key: 'training_location', value: 'Sportpark Oost' },
+      { key: 'season_end', value: '2031-06-30' },
+    ],
+    error: null,
+  }
+
+  it('neemt de laatst aangemaakte training, team-gescoped en NULL created_at achteraan', async () => {
+    const m = makeSupabase({
+      tables: { events: { data: [{ time: '19:15:00', location: 'Veld 3' }], error: null }, settings: SETTINGS },
+    })
+    use(m)
+
+    expect(await getNewTrainingDefaults()).toEqual({ time: '19:15', location: 'Veld 3', seasonEnd: '2031-06-30' })
+
+    const sel = m.calls.select.find((s) => s.table === 'events')!
+    expect(sel.cols).toBe('time, location')
+    expect(sel.eqs).toEqual([{ col: 'team_id', val: 'team-1' }, { col: 'type', val: 'training' }])
+    expect(m.calls.order.filter((o) => o.table === 'events')).toEqual([
+      { table: 'events', col: 'created_at', opts: { ascending: false, nullsFirst: false } },
+      { table: 'events', col: 'id', opts: { ascending: false } },
+    ])
+    expect(m.calls.limit).toEqual([{ table: 'events', n: 1 }])
+    // De teamcontext leest zelf ook settings (team_name); hier gaat het om de
+    // query van getNewTrainingDefaults.
+    const settings = m.calls.select.find((s) => s.table === 'settings' && s.cols === 'key, value' && s.ins.length > 0)!
+    expect(settings.eqs).toEqual([{ col: 'team_id', val: 'team-1' }])
+    expect(settings.ins).toEqual([{ col: 'key', vals: ['training_time', 'training_location', 'season_end'] }])
+  })
+
+  it('valt per veld terug op de instellingen', async () => {
+    use(makeSupabase({
+      tables: { events: { data: [{ time: null, location: 'Veld 3' }], error: null }, settings: SETTINGS },
+    }))
+    expect(await getNewTrainingDefaults()).toEqual({ time: '20:00', location: 'Veld 3', seasonEnd: '2031-06-30' })
+  })
+
+  it('gebruikt de instellingen als er nog geen training is, en null als die ook leeg zijn', async () => {
+    use(makeSupabase({ tables: { events: { data: [], error: null }, settings: SETTINGS } }))
+    expect(await getNewTrainingDefaults()).toEqual({ time: '20:00', location: 'Sportpark Oost', seasonEnd: '2031-06-30' })
+
+    use(makeSupabase({ tables: { events: { data: [], error: null }, settings: { data: [], error: null } } }))
+    expect(await getNewTrainingDefaults()).toEqual({ time: null, location: null, seasonEnd: null })
+  })
+
+  it('schrijft niets weg', async () => {
+    const m = makeSupabase({ tables: { settings: SETTINGS } })
+    use(m)
+    await getNewTrainingDefaults()
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('weigert zonder ingelogde gebruiker', async () => {
+    use(makeSupabase({ user: null }))
+    await expect(getNewTrainingDefaults()).rejects.toThrow('Niet ingelogd')
+  })
+
+  it('geeft een generieke melding bij een databasefout', async () => {
+    use(makeSupabase({ tables: { events: { data: null, error: { code: '42501', message: 'geheim' } } } }))
+    await expect(getNewTrainingDefaults()).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(logged()).not.toContain('geheim')
   })
 })

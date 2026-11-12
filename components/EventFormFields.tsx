@@ -24,9 +24,11 @@ type Props = {
   }
   // Rendert na thuis/uit en vóór notities (alleen bij een wedstrijd).
   matchExtra?: React.ReactNode
+  // Meldt de gekozen datum (YYYY-MM-DD) bij elke wijziging; het veld blijft ongecontroleerd.
+  onDateChange?: (date: string) => void
 }
 
-export default function EventFormFields({ type, defaults = {}, matchExtra }: Props) {
+export default function EventFormFields({ type, defaults = {}, matchExtra, onDateChange }: Props) {
   const t = useDict()
   const uid = useId()
   const id = (name: string) => `${uid}-${name}`
@@ -39,6 +41,7 @@ export default function EventFormFields({ type, defaults = {}, matchExtra }: Pro
         <div>
           <label htmlFor={id('date')} className="block text-sm font-semibold text-muted mb-1.5">{t.event.date}</label>
           <input id={id('date')} name="date" type="date" required defaultValue={defaults.date}
+            onChange={onDateChange ? (e) => onDateChange(e.target.value) : undefined}
             className="w-full px-4 py-3 rounded-xl border border-[var(--border-soft)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-brand-light text-ink" />
         </div>
         <div>
