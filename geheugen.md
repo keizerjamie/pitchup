@@ -4461,3 +4461,31 @@ Lost het "Bekend (V1, geaccepteerd)"-punt van "Kloppende cijfers en meldingen" h
   tellingen (KPI 67%→50%) / gastspelers / inzichten met active-filter. Gedrag: alleen inactieven → KPI-strook '—';
   helemaal geen trainingsrijen → paginabrede "Nog geen data". Bekend rood los hiervan: `cyclusweek-correctie` AC1/AC12.
 - **Rooktest open:** CSW 2 dashboard-KPI en `/inzichten?periode=4w` ≈ 44% (was 45%); meting 2026-11-04: 157/360 vs 167/372.
+
+## Feature: Herhalende trainingen in /events/new (2026-11-12, `4aee026`, live)
+Snelle winst 1 uit de schermreview. Via feature-factory; ketenmap
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-snelle-winst/` (f1-01 t/m f1-05).
+- **Wat:** bij type training in `/events/new` een schakelaar "Herhaal wekelijks" → weekdagen ma–zo + verplichte
+  einddatum (standaard `settings.season_end` als die ≥ vandaag, anders leeg) + live teller. Herhalen uit = ongewijzigd
+  `createEvent` met redirect. Het Trainingsschema in Instellingen (`generateSeasonTrainings`) bestaat er los naast.
+- **Code:** puur `lib/recurring-trainings.ts` (`planRecurringTrainings` wikkelt `seasonTrainingDates` → teller en
+  server rekenen identiek; `parseRepeatDays`; `resolveNewTrainingDefaults`). Actions in `app/actions/events-bulk.ts`:
+  `createRecurringTrainings` (resultaat i.p.v. redirect, één multi-row insert, aanwezigheid via `createAttendanceFor`
+  met nieuwe optionele `logLabel`), `getExistingTrainingDates`, `getNewTrainingDefaults`. UI: `RecurrenceFields.tsx`,
+  `NewEventForm.tsx` (prop `trainingDefaults`, `key={type}` op `EventFormFields` → typewissel wist invoer).
+- **Besluiten Jamie:** tijd/locatie uit de laatst aangemaakte training (`created_at desc nullsFirst:false, id desc`),
+  **per veld** terugvallend op `training_time`/`training_location`; reeks start op eerste gekozen weekdag op/na start,
+  verleden mag; dubbel = zelfde team + zelfde datum (training) → overgeslagen en correct geteld; mislukte
+  aanwezigheid → events blijven + amber waarschuwing; losse events, geen serie-id, geen migratie; placeholder
+  'Sportpark de Meent' → 'Bijv. sportpark of veldnummer' (5 talen, ook Trainingsschema); `voorbeeld-wedstrijden.csv`
+  bewust ongemoeid; geen `maxLength` op velden (alleen serverweigering in de nieuwe flow).
+- **Foutcodes** (`RecurringTrainingsErrorCode`) vertaald in `event.recurring.errors`; enkelvoud via `…One`-sleutels.
+- **Tests:** `lib/recurring-trainings.test.ts`, `events-bulk.test.ts` (stub kreeg `sequences` voor tabellen die twee
+  keer geraakt worden), `herhalende-trainingen.acceptance.test.ts` (eigen tabel-engine met order/nullsFirst/limit/in)
+  en `.tsx` (UI), rechtencase in `assistent-fase1-fundament`. `npm run build` groen (R7: 'use server' alleen async).
+- **Gotchas:** de dev-server praat met de productie-DB (`.env.local`) → in de browser niets echt aanmaken. Teller toont
+  ±0,5 s het bruto aantal tot de bestaande-check terug is (server beslist alsnog). Klik vóór hydratie op de schakelaar
+  → vinkje aan maar geen sectie. Geen unique-constraint op events → twee gelijktijdige reeksen kunnen dubbelen geven
+  (geaccepteerd). `todayLocal()` op de server = UTC (bestaand, buiten scope).
+- **Open:** Jamie checkt of standaardtijd 10:00 / locatie CSW echt van zijn laatst aangemaakte training komt; rooktest
+  in productie (een reeks echt aanmaken).
