@@ -760,6 +760,7 @@ async function renderDashboard(opts: {
     attendance: opts.attendance ?? [],
     training_oefeningen: [],
     task_overrides: [],
+    trainer_zelfreviews: [],
     lineups: [],
     match_ratings: [],
     match_events: [],

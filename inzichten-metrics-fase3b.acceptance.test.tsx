@@ -407,6 +407,7 @@ const MET_DATA: Harness['handlers'] = {
   inzichten_training_koppelingen: hKoppelingen,
   inzichten_invul_discipline: hDiscipline,
   inzichten_training_evaluaties: hEvaluaties,
+  inzichten_eigen_zelfreviews: () => [],
 }
 // Geen enkele oudere kaart heeft data: alleen 3a/3b-bronnen kunnen de pagina "vullen".
 const LEEG: Harness['handlers'] = {
@@ -491,7 +492,7 @@ function leegDb(over: Partial<Db> = {}, seizoen: [string, string] = ['2026-08-01
     ],
     events: [], players: [], match_events: [], lineups: [], tegendoelpunten: [], match_squad: [], speelminuten: [],
     attendance: [], match_ratings: [], training_oefeningen: [], categorie_metingen: [], task_overrides: [], oefeningen: [],
-    metingen: [], absence_periods: [], training_evaluaties: [],
+    metingen: [], absence_periods: [], training_evaluaties: [], trainer_zelfreviews: [],
     ...over,
   }
 }
@@ -1247,8 +1248,10 @@ describe('AC-R.11 (O2) — eigen sectie onderaan de linkerkolom van de trainings
     expect(SEC().getByText(e.evaluatieUitleg)).toBeInTheDocument()
     const notitie = screen.getByText('Een notitie').closest('.surface-card')!
     expect(notitie.compareDocumentPosition(sectie) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    // laatste element van de linkerkolom
-    expect(sectie.parentElement!.lastElementChild).toBe(sectie)
+    // laatste element van de linkerkolom, op de privé zelfreview-sectie na (staat direct erna)
+    const zelfreview = screen.getByRole('region', { name: e.zelfreviewTitel })
+    expect(sectie.nextElementSibling).toBe(zelfreview)
+    expect(sectie.parentElement!.lastElementChild).toBe(zelfreview)
     expect(sectie.parentElement!.contains(notitie)).toBe(true)
     // de aanwezigheidskolom staat in een andere kolom
     expect(sectie.parentElement!.contains(screen.getByText('Piet Peters'))).toBe(false)
@@ -1922,7 +1925,7 @@ describe('AC-D — uitbreiding invul-discipline (D.1–D.8)', () => {
 describe('AC-A1 / AC-A15 — volgorde en bestaande kaarten ongewijzigd', () => {
   it('AC-A1: de laatste drie kaarten zijn discipline, sRPE, oordeel (in die volgorde), elk één keer; sRPE en oordeel half breed naast de discipline in het raster', async () => {
     await renderInzichten(srpeDb())
-    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent).filter((k) => k !== i.zelfreviewTitle) // de privé zelfreviewkaart staat los, ná het grid
     expect(koppen.slice(-3)).toEqual([i.disciplineTitle, i.srpeTitle, i.oordeelTitle])
     expect(koppen.slice(-5, -3)).toEqual([i.belastingTitle, i.periodiseringTitle])
     for (const t of NIEUWE_3B) expect(koppen.filter((x) => x === t)).toHaveLength(1)

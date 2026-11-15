@@ -17,7 +17,7 @@ import PeriodiseringStatus from '@/components/dashboard/PeriodiseringStatus'
 import FormStrip, { FormStripItem } from '@/components/dashboard/FormStrip'
 import ChartBarIcon from '@/components/icons/ChartBarIcon'
 import JoinedBanner from '@/components/dashboard/JoinedBanner'
-import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isTaskVisible, sortTasks } from '@/lib/todos.mjs'
+import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isSelfReviewVisible, isTaskVisible, selfReviewNextTraining, sortTasks } from '@/lib/todos.mjs'
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
 import { OPKOMST_DOEL, berekenAanwezigheidPercentage, periodeVenster, seizoensVenster, verledenSeizoensVenster, type AanwezigheidRij } from '@/lib/inzichten'
 import { teltMee, telAanwezigheid, vasteTelling } from '@/lib/aanwezigheid-telling'
@@ -141,6 +141,13 @@ export default async function DashboardPage() {
   const matchCandidateIds = todoCandidates.filter((e) => e.type === 'match').map((e) => e.id)
   const trainingCandidateIds = todoCandidates.filter((e) => e.type === 'training').map((e) => e.id)
   const allCandidateIds = todoCandidates.map((e) => e.id)
+  // Zelfreview-taak: alleen voor een trainer met trainingsrecht, en alleen voor
+  // trainingen die al zijn gehouden (datum <= vandaag). Zonder kandidaat of
+  // zonder recht gaat er geen query uit.
+  const magZelfreviewen = canEdit(ctx, 'training')
+  const zelfreviewKandidaatIds = magZelfreviewen
+    ? todoCandidates.filter((e) => e.type === 'training' && daysUntil(e.date) <= 0).map((e) => e.id)
+    : []
 
   const [
     { data: heroAttendanceRows },
@@ -152,6 +159,7 @@ export default async function DashboardPage() {
     { data: oefeningRows },
     { data: overrideRows },
     trainingLogResult,
+    zelfreviewResult,
   ] = await Promise.all([
     // Alleen de rijen van het hero-event: de KPI-tegel rekent niet meer op
     // attendance-rijen van de komende events (die komt uit de RPC hieronder).
@@ -187,6 +195,11 @@ export default async function DashboardPage() {
     heeftActueleMeting
       ? getTrainingLog(supabase, ctx.teamId, actueel, addDays(today, 1))
       : Promise.resolve({ log: [], lastByCategory: {}, occurrences: {}, currentSteps: computeCurrentSteps(actueel, {}) }),
+    // Eigen zelfreviews (privé): alleen de event-ids van de ingelogde trainer.
+    // Vereist supabase/trainer-zelfreview.sql.
+    zelfreviewKandidaatIds.length > 0
+      ? supabase.from('trainer_zelfreviews').select('event_id').eq('team_id', ctx.teamId).eq('user_id', ctx.userId).in('event_id', zelfreviewKandidaatIds)
+      : Promise.resolve({ data: [], error: null }),
   ])
 
   const periodiseringItems = onderdeelStatus(actueel, trainingLogResult.currentSteps)
@@ -225,6 +238,14 @@ export default async function DashboardPage() {
   const ratingCountMap = countByEvent(matchRatingRows)
   const matchEventCountMap = countByEvent(matchEventRows)
   const oefCountMap = countByEvent(oefeningRows)
+  // Een falende zelfreview-query laat de rest van het dashboard werken; er
+  // verschijnen dan simpelweg geen zelfreview-items (anders zouden ze ten
+  // onrechte als "open" getoond worden).
+  if (zelfreviewResult.error) logError('dashboard.zelfreviews', zelfreviewResult.error)
+  const zelfreviewFout = !!zelfreviewResult.error
+  const reviewSet = new Set<string>(
+    ((zelfreviewResult.data ?? []) as { event_id: string }[]).map((r) => r.event_id),
+  )
 
   interface RawTask {
     eventId: string
@@ -286,6 +307,24 @@ export default async function DashboardPage() {
           eventId: e.id, taskType: 'training_plan', opponent: null, deadline: e.date, eventDate: e.date,
           auto, manual, effective,
         })
+      }
+
+      // Zelfreview van een gehouden training: zichtbaar vanaf de trainingsdag
+      // tot de eerstvolgende training (strikt ná deze datum; twee trainingen
+      // op één dag geven dus twee items). Ingevuld = automatisch afgerond en
+      // niet handmatig af te vinken.
+      if (magZelfreviewen && !zelfreviewFout) {
+        const volgendeTraining = selfReviewNextTraining(e.date, trainingDates)
+        if (isSelfReviewVisible({
+          daysUntilEvent: daysUntil(e.date),
+          daysUntilNextTraining: volgendeTraining === null ? null : daysUntil(volgendeTraining),
+        })) {
+          const reviewAuto = reviewSet.has(e.id)
+          rawTasks.push({
+            eventId: e.id, taskType: 'self_review', opponent: null, deadline: e.date, eventDate: e.date,
+            auto: reviewAuto, manual: false, effective: reviewAuto,
+          })
+        }
       }
     }
   }
@@ -397,6 +436,7 @@ export default async function DashboardPage() {
             items={todoItems}
             canEditTask={{
               training_plan: canEdit(ctx, 'training'),
+              self_review: canEdit(ctx, 'training'),
               squad: canEdit(ctx, 'wedstrijd'),
               lineup: canEdit(ctx, 'wedstrijd'),
               analysis: canEdit(ctx, 'wedstrijd'),

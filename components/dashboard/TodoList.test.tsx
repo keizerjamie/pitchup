@@ -13,7 +13,7 @@ import { markTaskDone, reopenTask } from '@/app/actions/todos'
 const mockDone = markTaskDone as unknown as ReturnType<typeof vi.fn>
 const mockReopen = reopenTask as unknown as ReturnType<typeof vi.fn>
 
-const ALLE = { squad: true, lineup: true, analysis: true, training_plan: true }
+const ALLE = { squad: true, lineup: true, analysis: true, training_plan: true, self_review: true }
 
 function item(overrides: Partial<TodoItem> = {}): TodoItem {
   return {
@@ -120,5 +120,47 @@ describe('TodoList', () => {
     const { rerender } = render(view([item()]))
     rerender(view([item({ manual: true })]))
     expect(knop(nl.todo.taskSquad)).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  describe('zelfreview-item', () => {
+    const review = (o: Partial<TodoItem> = {}) =>
+      item({ taskType: 'self_review', opponent: null, deadline: '2020-01-01', eventDate: '2020-01-01', ...o })
+
+    it('toont label, context "Training" en linkt naar de zelfreview-sectie', () => {
+      render(view([review({ eventId: 'tr1' })]))
+      const link = screen.getByRole('link', { name: new RegExp(nl.todo.taskSelfReview) })
+      expect(link).toHaveAttribute('href', '/events/tr1#mijn-zelfreview')
+      expect(link).toHaveTextContent(nl.event.training)
+    })
+
+    it('het vinkje is altijd uitgeschakeld, ook mét recht, en roept geen action aan', async () => {
+      render(view([review()]))
+      const vink = knop(nl.todo.taskSelfReview)
+      expect(vink).toBeDisabled()
+      expect(vink).toHaveAttribute('title', nl.todo.selfReviewAutoDone)
+      await act(async () => { fireEvent.click(vink) })
+      expect(mockDone).not.toHaveBeenCalled()
+      expect(mockReopen).not.toHaveBeenCalled()
+    })
+
+    it('aria-pressed volgt auto: open = false, ingevuld = true en doorgestreept', () => {
+      const { rerender } = render(view([review()]))
+      expect(knop(nl.todo.taskSelfReview)).toHaveAttribute('aria-pressed', 'false')
+      rerender(view([review({ auto: true })]))
+      expect(knop(nl.todo.taskSelfReview)).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText(nl.todo.taskSelfReview)).toHaveClass('line-through')
+    })
+
+    it('toont nooit "Te laat", ook niet met een verstreken datum', () => {
+      render(view([review()]))
+      expect(screen.queryByText(nl.todo.overdue)).not.toBeInTheDocument()
+    })
+
+    it('telt een open review mee in de teller en een ingevulde niet', () => {
+      const { rerender } = render(view([review(), item()]))
+      expect(screen.getByText('2')).toBeInTheDocument()
+      rerender(view([review({ auto: true }), item()]))
+      expect(screen.getByText('1')).toBeInTheDocument()
+    })
   })
 })

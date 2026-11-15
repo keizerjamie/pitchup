@@ -434,6 +434,7 @@ function makeSupabaseMock(opts: {
     absence_periods: tableFactory(opts.absencePeriods ?? [], { error: opts.absencePeriodsError }),
     metingen: tableFactory([]),
     training_oefeningen: tableFactory([]),
+    trainer_zelfreviews: tableFactory([]),
     match_ratings: tableFactory([]),
     match_events: tableFactory([]),
   }

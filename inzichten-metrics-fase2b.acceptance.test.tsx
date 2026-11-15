@@ -315,6 +315,7 @@ const HANDLERS: Harness['handlers'] = {
   inzichten_training_koppelingen: () => [],
   inzichten_invul_discipline: () => [],
   inzichten_training_evaluaties: () => [],
+  inzichten_eigen_zelfreviews: () => [],
 }
 
 function setup(db: Db, over: Partial<Harness> = {}): Harness {
@@ -525,7 +526,7 @@ const zonderKaart = (container: HTMLElement, titel: string): string => {
 describe('AC-A1 — fase-1- en fase-2a-kaarten ongewijzigd; nieuwe kaart eronder', () => {
   it('AC-A1: de speelminutenkaart staat direct na "Blessures per maand" (laatste kaart van fase 2b; fase 3a komt daarna), in hetzelfde raster en half breed (O3)', async () => {
     await renderInzichten(hoofdDb())
-    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent).filter((k) => k !== i.zelfreviewTitle) // de privé zelfreviewkaart staat los, ná het grid
     // Fase 3a voegt drie kaarten toe NA de speelminuten, fase 3b er nog twee (sRPE en oordeel).
     expect(koppen.at(-6)).toBe(i.speelminutenTitle)
     expect(koppen.at(-7)).toBe(i.blessuresTitle)

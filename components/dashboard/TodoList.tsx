@@ -7,7 +7,7 @@ import { useDict } from '@/lib/i18n-context'
 import { useRijOpslag } from '@/lib/use-rij-opslag'
 import { daysUntil, formatDate } from '@/lib/utils'
 
-export type TaskType = 'squad' | 'lineup' | 'analysis' | 'training_plan'
+export type TaskType = 'squad' | 'lineup' | 'analysis' | 'training_plan' | 'self_review'
 
 export interface TodoItem {
   eventId: string
@@ -24,12 +24,19 @@ const manualVan = (items: TodoItem[]): Record<string, boolean> =>
   Object.fromEntries(items.map((item) => [taskKey(item), item.manual]))
 
 // Route per taak-type — zelfde paden als de ActionCard-hrefs op de event-detailpagina.
-const TASK_HREF: Record<TaskType, string> = {
+const TASK_HREF: Record<Exclude<TaskType, 'self_review'>, string> = {
   squad: 'squad',
   lineup: 'lineup',
   analysis: 'analysis',
   training_plan: 'training-plan',
 }
+
+// De zelfreview heeft geen eigen pagina: de link springt naar de sectie op de
+// eventpagina (id="mijn-zelfreview" in TrainerZelfreviewSectie).
+const taakHref = (item: TodoItem) =>
+  item.taskType === 'self_review'
+    ? `/events/${item.eventId}#mijn-zelfreview`
+    : `/events/${item.eventId}/${TASK_HREF[item.taskType]}`
 
 // Server-gesorteerde To-do-lijst: open wedstrijdselecties, opstellingen,
 // wedstrijdanalyses en trainingsplannen. Checkbox = optimistisch (lokale manual-state), auto-done
@@ -50,7 +57,7 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
       const item = items.find((i) => taskKey(i) === key)
       // Onbekende sleutel kan alleen als de lijst intussen is ververst; dan
       // is er niets meer op te slaan.
-      if (!item) return Promise.resolve()
+      if (!item || item.taskType === 'self_review') return Promise.resolve()
       return done ? markTaskDone(item.eventId, item.taskType) : reopenTask(item.eventId, item.taskType)
     },
     onFout: () => setSaveError(true),
@@ -66,6 +73,8 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
   }
 
   function toggle(item: TodoItem) {
+    // De zelfreview vinkt zichzelf af bij opslaan; nooit handmatig.
+    if (item.taskType === 'self_review') return
     const key = taskKey(item)
     const effective = item.auto || manual[key]
     setSaveError(false)
@@ -77,6 +86,7 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
     lineup: t.todo.taskLineup,
     analysis: t.todo.taskAnalysis,
     training_plan: t.todo.taskTraining,
+    self_review: t.todo.taskSelfReview,
   }
 
   // Teller = alleen ÓPEN taken (afgevinkt telt niet mee) en beweegt live mee
@@ -109,7 +119,9 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
         items.map((item) => {
           const key = taskKey(item)
           const checked = item.auto || manual[key]
-          const overdue = !checked && daysUntil(item.deadline) < 0
+          const isReview = item.taskType === 'self_review'
+          // Geen "Te laat" bij de zelfreview: het item verdwijnt vanzelf bij de volgende training.
+          const overdue = !isReview && !checked && daysUntil(item.deadline) < 0
           const context = item.opponent ? `${t.lineup.vsLabel} ${item.opponent}` : t.event.training
 
           return (
@@ -121,10 +133,10 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
               <button
                 type="button"
                 onClick={() => toggle(item)}
-                disabled={!canEditTask[item.taskType]}
+                disabled={isReview || !canEditTask[item.taskType]}
                 aria-pressed={checked}
                 aria-label={label[item.taskType]}
-                title={canEditTask[item.taskType] ? undefined : t.errors.noPermission}
+                title={isReview ? t.todo.selfReviewAutoDone : canEditTask[item.taskType] ? undefined : t.errors.noPermission}
                 className="relative hit-slop w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
                 style={checked
                   ? { background: 'var(--primary)', color: '#fff' }
@@ -134,7 +146,7 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
               </button>
 
               <Link
-                href={`/events/${item.eventId}/${TASK_HREF[item.taskType]}`}
+                href={taakHref(item)}
                 className="flex-1 flex flex-col gap-0.5"
                 style={{ minWidth: 0 }}
               >

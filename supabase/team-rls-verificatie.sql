@@ -83,6 +83,19 @@
 --                               en blok 22 de tabel training_evaluaties; zonder
 --                               inzichten-metrics-fase3b.sql falen die met
 --                               "relation does not exist".
+--   * blok 31                 — vereist supabase/trainer-zelfreview.sql
+--                               (tabel trainer_zelfreviews + 1 RPC); maakt zijn
+--                               eigen testdata in mei 1990 (jan.–april 1990
+--                               zijn al bezet door blok 27/28/29/30) en zet
+--                               binnen de transactie de rechten van
+--                               ASSISTENT_A (eerst met, dan zonder
+--                               trainingsrecht); verwijdert aan het eind diens
+--                               lidmaatschap van TEAM_A (de rollback zet het
+--                               terug), dus blok 31 moet het laatste blok zijn
+--                               LET OP: sinds die migratie noemen ook blok 2
+--                               en blok 22 de tabel trainer_zelfreviews; zonder
+--                               trainer-zelfreview.sql falen die met
+--                               "relation does not exist".
 --
 -- Bestaat er nog geen assistent (dat kan tot de eerste uitnodiging is
 -- geaccepteerd), maak er dan tijdelijk een aan met:
@@ -173,7 +186,9 @@ begin
   if n <> 0 then raise exception 'LEK: niet-lid ziet speelminuten van een vreemd team'; end if;
   select count(*) into n from training_evaluaties where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet trainingsevaluaties van een vreemd team'; end if;
-  select count(*) into n from match_squad        where team_id = 'TEAM_B_UUID';
+  select count(*) into n from trainer_zelfreviews where team_id = 'TEAM_B_UUID';
+  if n <> 0 then raise exception 'LEK: niet-lid ziet trainer-zelfreviews van een vreemd team'; end if;
+  select count(*) into n from match_squad       where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet de wedstrijdselectie van een vreemd team'; end if;
   select count(*) into n from task_overrides     where team_id = 'TEAM_B_UUID';
   if n <> 0 then raise exception 'LEK: niet-lid ziet afgevinkte taken van een vreemd team'; end if;
@@ -1157,9 +1172,18 @@ begin
   values ('ASSISTENT_A_UUID', 'RLS-controle assistent-oefening', 'overig') returning id into v_oef;
   insert into training_oefeningen (team_id, event_id, oefening_id)
   values (v_team, v_event, v_oef);
+  -- Een privé zelfreview van de assistent (supabase/trainer-zelfreview.sql).
+  -- trainer_zelfreviews staat BEWUST NIET in TEAM_TABELLEN: de hoofdtrainer
+  -- kan deze rij niet zien en dus niet wissen; hij verdwijnt via de cascade
+  -- (training, lidmaatschap of team weg).
+  insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                   score_coaching, score_sfeer, score_tijdsbewaking)
+  values (v_team, 'ASSISTENT_A_UUID', v_event, 4, 4, 4, 4, 4);
 
   -- deleteTeam, uitgevoerd onder de rol van de hoofdtrainer.
   set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  select count(*) into n from trainer_zelfreviews where team_id = v_team;
+  if n <> 0 then raise exception 'LEK: de hoofdtrainer ziet % zelfreview(s) van zijn assistent', n; end if;
   -- TEAM_TABELLEN
   foreach v_tabel in array array['training_oefeningen','task_overrides','match_squad','match_events','tegendoelpunten','speelminuten','training_evaluaties','match_ratings','lineups','attendance','absence_periods','categorie_metingen','metingen','events','players','settings'] loop
     execute format('delete from public.%I where team_id = $1', v_tabel) using v_team;
@@ -1193,6 +1217,10 @@ begin
   end loop;
   select count(*) into n from teams where id = v_team;
   if n <> 0 then raise exception 'KAPOT: de teams-rij staat er nog'; end if;
+  select count(*) into n from trainer_zelfreviews where team_id = v_team;
+  if n <> 0 then
+    raise exception 'KAPOT: na deleteTeam staan er nog % zelfreview(s) — de cascade werkt niet', n;
+  end if;
 
   select count(*) into n from oefeningen where id = v_oef;
   if n <> 1 then
@@ -2511,6 +2539,334 @@ begin
   raise notice 'OK blok 30: anon mag de RPC niet uitvoeren; stable, invoker, RLS aan met 4 policies';
 end $$;
 
+-- ── Blok 31: trainer-zelfreview (privé per trainer per training) ──
+-- Vereist supabase/trainer-zelfreview.sql (tabel trainer_zelfreviews + 1 RPC).
+-- Maakt binnen deze transactie (de rollback ruimt alles op) in TEAM_A testdata
+-- in MEI 1990 aan — een maand zonder echte data; januari t/m april 1990 zijn
+-- al bezet door blok 27 t/m 30. Daarom eerst de opzetcheck op events van
+-- TEAM_A in mei 1990. Plus twee trainingen rond vandaag (Nederlandse
+-- kalenderdag): TV vandaag (mag) en TM morgen (mag niet).
+-- ASSISTENT_A krijgt eerst Trainingsrecht (a, h), daarna niet meer (b). Aan het
+-- eind verdwijnt zijn lidmaatschap van TEAM_A (i); daarom is dit het LAATSTE
+-- blok vóór de rollback.
+-- Testdata: T1 (ma 7-5), T2 (ma 14-5) en T3 (ma 21-5) trainingen, M1 wedstrijd
+-- (8-5), TB een training van TEAM_B (7-5). Zelfreviews: OWNER_A op T1 (alle
+-- 3) en T2 (alle 4), ASSISTENT_A op T1 (alle 5), de hoofdtrainer van TEAM_B
+-- op TB.
+--   a. OWNER_A en ASSISTENT_A zien elkaars zelfreview niet (ook niet op
+--      dezelfde training), en OWNER_A ziet niets van TEAM_B; andermans rij
+--      wijzigen raakt 0 rijen;
+--   b. ASSISTENT_A zonder trainingsrecht: insert 42501, update 0 rijen, maar
+--      zijn eigen rij en de RPC blijven leesbaar (alleen-lezen, V5);
+--   c. een niet-lid (BUITENSTAANDER, sinds blok 23) ziet niets en mag niets;
+--   d. een vervalste user_id (insert, of de eigen rij omhangen): 42501;
+--   e. een training van morgen (NL), een wedstrijd en een training van TEAM_B
+--      (met team_id TEAM_A én TEAM_B): 42501; een training van vandaag mag;
+--   f. score 0, score 6 en een tekst van 1001 tekens: 23514 (1000 mag);
+--   g. een tweede gewone insert op T1: 23505; de upsert van de app
+--      (on conflict (event_id, user_id)) overschrijft de eigen rij; delete
+--      raakt 0 rijen (geen delete-policy);
+--   h. de RPC geeft alleen de eigen zelfreviews: OWNER_A precies T1 en T2
+--      (totaal 2), ASSISTENT_A alleen T1, TEAM_B 0 rijen;
+--   i. een training of een lidmaatschap verwijderen neemt de zelfreviews mee;
+--   j. anon mag de RPC niet uitvoeren; stable en invoker; RLS aan met precies
+--      3 policies en geen delete-policy.
+-- RLS-weigeringen worden gevangen op sqlstate '42501' en CHECK-fouten op
+-- sqlstate '23514' met `when` op een eigen regel: de structuurtests van blok
+-- 28 en 30 tellen hun eigen exception-regels in hun stuk tot de rollback, en
+-- dat stuk omvat dit blok.
+do $$
+declare
+  v_start date := date '1990-05-01';
+  v_end   date := date '1990-05-31';
+  v_vandaag date := (now() at time zone 'Europe/Amsterdam')::date;
+  v_t1 uuid; v_t2 uuid; v_t3 uuid; v_m1 uuid; v_tb uuid; v_tv uuid; v_tm uuid;
+  v_lid_b uuid;
+  n int; r record;
+begin
+  reset role;
+  if to_regclass('public.trainer_zelfreviews') is null
+     or to_regprocedure('public.inzichten_eigen_zelfreviews(uuid, date, date)') is null then
+    raise exception 'TRAINER-ZELFREVIEW ONTBREEKT: draai eerst supabase/trainer-zelfreview.sql';
+  end if;
+  select count(*) into n from events where team_id = 'TEAM_A_UUID' and date between v_start and v_end;
+  if n <> 0 then
+    raise exception 'FOUT IN DE OPZET: TEAM_A heeft al events in mei 1990 — kies in blok 31 een andere testmaand';
+  end if;
+  select user_id into v_lid_b from team_members where team_id = 'TEAM_B_UUID' and rol = 'owner';
+  if v_lid_b is null then
+    raise exception 'FOUT IN DE OPZET: TEAM_B heeft geen hoofdtrainer (zie blok 13)';
+  end if;
+
+  -- Assistent MET Trainingsrecht: bestaande rij bijwerken, of tijdelijk invoegen.
+  insert into team_members (team_id, user_id, rol, mag_training_bewerken)
+  values ('TEAM_A_UUID', 'ASSISTENT_A_UUID', 'assistent', true)
+  on conflict (team_id, user_id) do update
+    set mag_training_bewerken = true
+   where team_members.rol = 'assistent';
+
+  -- Opzet als postgres (buiten RLS).
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'training', date '1990-05-07') returning id into v_t1;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'training', date '1990-05-14') returning id into v_t2;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'training', date '1990-05-21') returning id into v_t3;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'match',    date '1990-05-08') returning id into v_m1;
+  insert into events (team_id, type, date) values ('TEAM_B_UUID', 'training', date '1990-05-07') returning id into v_tb;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'training', v_vandaag)          returning id into v_tv;
+  insert into events (team_id, type, date) values ('TEAM_A_UUID', 'training', v_vandaag + 1)      returning id into v_tm;
+  insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                   score_coaching, score_sfeer, score_tijdsbewaking, meeneem) values
+    ('TEAM_A_UUID', 'OWNER_A_UUID',     v_t1, 3, 3, 3, 3, 3, 'RLS-31 eigen tekst'),
+    ('TEAM_A_UUID', 'OWNER_A_UUID',     v_t2, 4, 4, 4, 4, 4, null),
+    ('TEAM_A_UUID', 'ASSISTENT_A_UUID', v_t1, 5, 5, 5, 5, 5, 'RLS-31 assistent'),
+    ('TEAM_B_UUID', v_lid_b,            v_tb, 2, 2, 2, 2, 2, null);
+
+  set local role authenticated;
+
+  -- a. Privé: niemand ziet andermans zelfreview.
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  if not is_team_member('TEAM_A_UUID') or is_team_owner('TEAM_A_UUID') or not can_edit('TEAM_A_UUID', 'training') then
+    raise exception 'FOUT IN DE OPZET: ASSISTENT_A is geen assistent met Trainingsrecht in TEAM_A';
+  end if;
+  select count(*) into n from trainer_zelfreviews where event_id in (v_t1, v_t2);
+  if n <> 1 then raise exception 'LEK: ASSISTENT_A ziet % zelfreviews op T1/T2 (verwacht alleen de eigen)', n; end if;
+  select count(*) into n from trainer_zelfreviews where user_id = 'OWNER_A_UUID';
+  if n <> 0 then raise exception 'LEK: een assistent ziet % zelfreview(s) van de hoofdtrainer', n; end if;
+
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_B_UUID') then
+    raise exception 'FOUT IN DE OPZET: OWNER_A is wél lid van TEAM_B — kies een ander TEAM_B';
+  end if;
+  select count(*) into n from trainer_zelfreviews where event_id in (v_t1, v_t2);
+  if n <> 2 then raise exception 'KAPOT/LEK: OWNER_A ziet % zelfreviews op T1/T2 (verwacht precies de eigen 2)', n; end if;
+  select count(*) into n from trainer_zelfreviews where user_id = 'ASSISTENT_A_UUID';
+  if n <> 0 then raise exception 'LEK: de hoofdtrainer ziet % zelfreview(s) van zijn assistent', n; end if;
+  select count(*) into n from trainer_zelfreviews where team_id = 'TEAM_B_UUID' or event_id = v_tb;
+  if n <> 0 then raise exception 'LEK: OWNER_A ziet % zelfreview(s) van TEAM_B', n; end if;
+  update trainer_zelfreviews set score_uitleg = 1 where user_id = 'ASSISTENT_A_UUID' and event_id = v_t1;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: de hoofdtrainer kon de zelfreview van zijn assistent wijzigen'; end if;
+  raise notice 'OK blok 31: hoofdtrainer en assistent zien en wijzigen alleen hun eigen zelfreview';
+
+  -- h. De RPC: alleen de eigen zelfreviews.
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_B_UUID', current_date - 20000, current_date + 400);
+  if n <> 0 then raise exception 'LEK: inzichten_eigen_zelfreviews geeft % rijen van TEAM_B', n; end if;
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end) where event_id = v_tb;
+  if n <> 0 then raise exception 'LEK: een training van TEAM_B staat in inzichten_eigen_zelfreviews(TEAM_A)'; end if;
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end);
+  if n <> 2 then raise exception 'KAPOT/LEK: inzichten_eigen_zelfreviews(TEAM_A, mei 1990) geeft % rijen voor OWNER_A (verwacht 2: T1 en T2)', n; end if;
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end) where totaal <> 2;
+  if n <> 0 then raise exception 'KAPOT: totaal is niet 2 op % rijen (count(*) over () vóór de limit)', n; end if;
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end) where score_uitleg = 5;
+  if n <> 0 then raise exception 'LEK: de RPC geeft OWNER_A de scores van zijn assistent'; end if;
+  select * into r from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end) where event_id = v_t1;
+  if not found or r.datum <> date '1990-05-07' or r.score_uitleg <> 3 or r.score_tijdsbewaking <> 3 then
+    raise exception 'KAPOT: T1 geeft % (verwacht 7-5 met alle scores 3)', r;
+  end if;
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end);
+  if n <> 1 then raise exception 'KAPOT/LEK: inzichten_eigen_zelfreviews geeft ASSISTENT_A % rijen (verwacht alleen T1)', n; end if;
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end) where score_uitleg <> 5;
+  if n <> 0 then raise exception 'LEK: de RPC geeft ASSISTENT_A de scores van de hoofdtrainer'; end if;
+  raise notice 'OK blok 31: inzichten_eigen_zelfreviews geeft alleen de eigen zelfreviews, niets van TEAM_B';
+
+  -- d. Vervalste user_id.
+  set local request.jwt.claims = '{"sub":"OWNER_A_UUID","role":"authenticated"}';
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'ASSISTENT_A_UUID', v_t3, 3, 3, 3, 3, 3);
+    raise exception 'LEK: OWNER_A kon een zelfreview op naam van zijn assistent maken';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: een zelfreview met een vervalste user_id wordt geweigerd';
+  end;
+  begin
+    update trainer_zelfreviews set user_id = 'ASSISTENT_A_UUID' where user_id = 'OWNER_A_UUID' and event_id = v_t2;
+    raise exception 'LEK: OWNER_A kon zijn eigen zelfreview op naam van zijn assistent zetten';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: de eigen zelfreview omhangen naar een andere user_id wordt geweigerd';
+  end;
+
+  -- e. Toekomst (NL-kalenderdag), wedstrijd en een ander team.
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_tm, 3, 3, 3, 3, 3);
+    raise exception 'LEK: een zelfreview kon aan een training van morgen gehangen worden';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: een training van morgen (NL) wordt geweigerd';
+  end;
+  begin
+    update trainer_zelfreviews set event_id = v_tm where user_id = 'OWNER_A_UUID' and event_id = v_t2;
+    raise exception 'LEK: een update kon een zelfreview naar een training van morgen verplaatsen';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: een update naar een training van morgen wordt geweigerd';
+  end;
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_m1, 3, 3, 3, 3, 3);
+    raise exception 'LEK: een zelfreview kon aan een wedstrijd gehangen worden';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: een wedstrijd wordt geweigerd';
+  end;
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_tb, 3, 3, 3, 3, 3);
+    raise exception 'LEK: OWNER_A kon een zelfreview aan een training van TEAM_B hangen (team_id TEAM_A)';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: een event_id van een ander team wordt geweigerd';
+  end;
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_B_UUID', 'OWNER_A_UUID', v_tb, 3, 3, 3, 3, 3);
+    raise exception 'LEK: OWNER_A kon een zelfreview in TEAM_B maken';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: een zelfreview in een vreemd team wordt geweigerd';
+  end;
+  insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                   score_coaching, score_sfeer, score_tijdsbewaking)
+  values ('TEAM_A_UUID', 'OWNER_A_UUID', v_tv, 3, 3, 3, 3, 3);
+  raise notice 'OK blok 31: een training van vandaag (NL) mag';
+
+  -- f. De CHECKs (op de eigen training T3, zonder rij).
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_t3, 0, 3, 3, 3, 3);
+    raise exception 'KAPOT: score 0 werd geaccepteerd';
+  exception
+    when sqlstate '23514' then raise notice 'OK blok 31: score 0 geeft 23514';
+  end;
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_t3, 3, 3, 3, 6, 3);
+    raise exception 'KAPOT: score 6 werd geaccepteerd';
+  exception
+    when sqlstate '23514' then raise notice 'OK blok 31: score 6 geeft 23514';
+  end;
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking, meeneem)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_t3, 3, 3, 3, 3, 3, repeat('x', 1001));
+    raise exception 'KAPOT: een tekst van 1001 tekens werd geaccepteerd';
+  exception
+    when sqlstate '23514' then raise notice 'OK blok 31: een tekst van 1001 tekens geeft 23514';
+  end;
+  insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                   score_coaching, score_sfeer, score_tijdsbewaking, meeneem)
+  values ('TEAM_A_UUID', 'OWNER_A_UUID', v_t3, 1, 2, 3, 4, 5, repeat('x', 1000));
+  raise notice 'OK blok 31: scores 1..5 en een tekst van 1000 tekens mogen';
+
+  -- g. Eén rij per trainer per training; de upsert van de app overschrijft.
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'OWNER_A_UUID', v_t1, 2, 2, 2, 2, 2);
+    raise exception 'KAPOT: een tweede zelfreview van dezelfde trainer op dezelfde training werd geaccepteerd';
+  exception when unique_violation then
+    raise notice 'OK blok 31: een tweede zelfreview op dezelfde training geeft 23505';
+  end;
+  insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                   score_coaching, score_sfeer, score_tijdsbewaking, meeneem, updated_at)
+  values ('TEAM_A_UUID', 'OWNER_A_UUID', v_t1, 1, 1, 1, 1, 1, null, now())
+  on conflict (event_id, user_id) do update
+    set score_uitleg = excluded.score_uitleg, score_organisatie = excluded.score_organisatie,
+        score_coaching = excluded.score_coaching, score_sfeer = excluded.score_sfeer,
+        score_tijdsbewaking = excluded.score_tijdsbewaking, meeneem = excluded.meeneem,
+        updated_at = excluded.updated_at;
+  select count(*) into n from trainer_zelfreviews where event_id = v_t1;
+  if n <> 1 then raise exception 'KAPOT: na de upsert ziet OWNER_A % eigen rijen op T1 (verwacht 1)', n; end if;
+  select * into r from trainer_zelfreviews where event_id = v_t1;
+  if r.score_uitleg <> 1 or r.meeneem is not null then
+    raise exception 'KAPOT: de upsert op T1 overschreef niet (score_uitleg %, meeneem %)', r.score_uitleg, r.meeneem;
+  end if;
+  delete from trainer_zelfreviews where event_id = v_t1;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'KAPOT: een zelfreview kon verwijderd worden (er hoort geen delete-policy te zijn)'; end if;
+  reset role;
+  select count(*) into n from trainer_zelfreviews where event_id = v_t1;
+  if n <> 2 then raise exception 'KAPOT: op T1 staan % zelfreviews (verwacht 2: hoofdtrainer en assistent)', n; end if;
+  raise notice 'OK blok 31: één rij per trainer per training, upsert overschrijft, delete raakt 0 rijen';
+
+  -- b. Assistent ZONDER Trainingsrecht: alleen-lezen (V5).
+  update team_members set mag_training_bewerken = false
+   where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID' and rol = 'assistent';
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub":"ASSISTENT_A_UUID","role":"authenticated"}';
+  if can_edit('TEAM_A_UUID', 'training') then
+    raise exception 'FOUT IN DE OPZET: ASSISTENT_A heeft nog Trainingsrecht';
+  end if;
+  begin
+    insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                     score_coaching, score_sfeer, score_tijdsbewaking)
+    values ('TEAM_A_UUID', 'ASSISTENT_A_UUID', v_t2, 3, 3, 3, 3, 3);
+    raise exception 'LEK: een assistent zonder trainingsrecht kon een zelfreview maken';
+  exception when sqlstate '42501' then
+    raise notice 'OK blok 31: insert op trainer_zelfreviews geweigerd zonder trainingsrecht';
+  end;
+  update trainer_zelfreviews set score_uitleg = 1 where event_id = v_t1;
+  get diagnostics n = row_count;
+  if n <> 0 then raise exception 'LEK: een assistent zonder trainingsrecht kon zijn zelfreview wijzigen'; end if;
+  select count(*) into n from trainer_zelfreviews where event_id = v_t1;
+  if n <> 1 then raise exception 'KAPOT (V5): een assistent zonder trainingsrecht ziet zijn eigen zelfreview niet meer (%)', n; end if;
+  select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end);
+  if n <> 1 then raise exception 'KAPOT (V5): de RPC geeft een assistent zonder trainingsrecht % rijen (verwacht 1)', n; end if;
+  raise notice 'OK blok 31: zonder trainingsrecht alleen-lezen: eigen zelfreview en RPC zichtbaar, schrijven geweigerd';
+
+  -- c. Een niet-lid van TEAM_A.
+  set local request.jwt.claims = '{"sub":"BUITENSTAANDER_UUID","role":"authenticated"}';
+  if is_team_member('TEAM_A_UUID') then
+    raise notice 'OVERGESLAGEN blok 31c: BUITENSTAANDER is (weer) lid van TEAM_A';
+  else
+    select count(*) into n from inzichten_eigen_zelfreviews('TEAM_A_UUID', v_start, v_end);
+    if n <> 0 then raise exception 'LEK: een niet-lid krijgt % rijen uit inzichten_eigen_zelfreviews(TEAM_A)', n; end if;
+    select count(*) into n from trainer_zelfreviews where team_id = 'TEAM_A_UUID';
+    if n <> 0 then raise exception 'LEK: een niet-lid ziet % zelfreviews van TEAM_A', n; end if;
+    begin
+      insert into trainer_zelfreviews (team_id, user_id, event_id, score_uitleg, score_organisatie,
+                                       score_coaching, score_sfeer, score_tijdsbewaking)
+      values ('TEAM_A_UUID', 'BUITENSTAANDER_UUID', v_t2, 3, 3, 3, 3, 3);
+      raise exception 'LEK: een niet-lid kon een zelfreview in TEAM_A maken';
+    exception when sqlstate '42501' then
+      raise notice 'OK blok 31: een niet-lid kan geen zelfreview in TEAM_A maken';
+    end;
+    raise notice 'OK blok 31: een niet-lid krijgt 0 rijen voor TEAM_A';
+  end if;
+
+  -- i. Cascade (als postgres: de FK werkt los van RLS).
+  reset role;
+  delete from events where id = v_t2;
+  select count(*) into n from trainer_zelfreviews where event_id = v_t2;
+  if n <> 0 then raise exception 'KAPOT: na het verwijderen van de training staan er nog % zelfreviews', n; end if;
+  delete from team_members where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID' and rol = 'assistent';
+  select count(*) into n from trainer_zelfreviews where team_id = 'TEAM_A_UUID' and user_id = 'ASSISTENT_A_UUID';
+  if n <> 0 then raise exception 'KAPOT: na het verwijderen van het lidmaatschap staan er nog % zelfreviews van de assistent', n; end if;
+  select count(*) into n from trainer_zelfreviews where event_id = v_t1 and user_id = 'OWNER_A_UUID';
+  if n <> 1 then raise exception 'KAPOT: het verwijderen van de assistent nam ook de zelfreview van de hoofdtrainer mee'; end if;
+  raise notice 'OK blok 31: training of lidmaatschap verwijderen neemt de zelfreviews mee (cascade)';
+
+  -- j. Rechten en vorm.
+  if has_function_privilege('anon', 'public.inzichten_eigen_zelfreviews(uuid, date, date)', 'execute') then
+    raise exception 'LEK: anon mag inzichten_eigen_zelfreviews uitvoeren';
+  end if;
+  select count(*) into n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+   where ns.nspname = 'public' and p.proname = 'inzichten_eigen_zelfreviews'
+     and p.provolatile = 's' and not p.prosecdef;
+  if n <> 1 then raise exception 'KAPOT: inzichten_eigen_zelfreviews is niet stable en security invoker'; end if;
+  if not (select relrowsecurity from pg_class where oid = 'public.trainer_zelfreviews'::regclass) then
+    raise exception 'LEK: RLS staat uit op trainer_zelfreviews';
+  end if;
+  select count(*) into n from pg_policies where schemaname = 'public' and tablename = 'trainer_zelfreviews';
+  if n <> 3 then raise exception 'KAPOT: trainer_zelfreviews heeft % policies (verwacht 3)', n; end if;
+  select count(*) into n from pg_policies
+   where schemaname = 'public' and tablename = 'trainer_zelfreviews' and cmd in ('DELETE', 'ALL');
+  if n <> 0 then raise exception 'KAPOT: trainer_zelfreviews heeft een delete-policy'; end if;
+  raise notice 'OK blok 31: anon mag de RPC niet uitvoeren; stable, invoker, RLS aan met 3 policies, geen delete';
+end $$;
+
 rollback;
 
 -- ============================================================
@@ -2543,7 +2899,8 @@ rollback;
 -- inzichten-metrics (tabel tegendoelpunten + 4 RPC's) in blok 26, fase 2a
 -- (4 speler-RPC's) in blok 27, fase 2b (tabel speelminuten + 1 RPC) in blok
 -- 28, fase 3a (2 lees-RPC's: trainingskoppelingen en invul-discipline) in blok
--- 29, fase 3b (tabel training_evaluaties + 1 RPC) in blok 30. Accountverwijdering zelf
+-- 29, fase 3b (tabel training_evaluaties + 1 RPC) in blok 30, de
+-- trainer-zelfreview (tabel trainer_zelfreviews + 1 RPC) in blok 31. Accountverwijdering zelf
 -- (auth.admin.deleteUser) is hier niet na te bootsen; de onderdelen ervan
 -- wel: de team-opruiming is blok 22, het opzeggen van een lidmaatschap blok
 -- 23, en de cascade van een verwijderde oefening naar elk trainingsplan blok

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { requireTeamContextOrLogin } from '@/lib/team-context'
+import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { getAllSettings } from '@/app/actions/settings'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
@@ -52,10 +52,12 @@ import {
   telInvulDiscipline,
   evaluatiesPerWeek,
   telEvaluatieDiscipline,
+  zelfreviewsPerWeek,
   periodiseringOndergrens,
   type TrainingKoppelingRij,
   type InvulDisciplineRij,
   type TrainingEvaluatieRij,
+  type ZelfreviewRij,
   type SpeelminutenRij,
   type SpeelkansenRij,
   type RatingVormRij,
@@ -98,6 +100,7 @@ import BelastingKaart from '@/components/inzichten/BelastingKaart'
 import PeriodiseringVoortgangKaart from '@/components/inzichten/PeriodiseringVoortgangKaart'
 import InvulDisciplineKaart from '@/components/inzichten/InvulDisciplineKaart'
 import SrpeKaart from '@/components/inzichten/SrpeKaart'
+import ZelfreviewKaart from '@/components/inzichten/ZelfreviewKaart'
 import DoelstellingOordeelKaart from '@/components/inzichten/DoelstellingOordeelKaart'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
@@ -221,6 +224,7 @@ export default async function InzichtenPage({
     disciplineResult,
     evaluatieResult,
     metingenResult,
+    zelfreviewResult,
   ] = await Promise.all([
     // Alle vijf RPC's krijgen p_team_id VOORAAN uit de teamcontext. Sinds de
     // assistent-trainers is auth.uid() niet meer gelijk aan het team, dus de
@@ -317,6 +321,11 @@ export default async function InzichtenPage({
       .eq('team_id', ctx.teamId)
       .order('datum')
       .order('id'),
+    // Eigen zelfreviews van de ingelogde trainer (privé, supabase/
+    // trainer-zelfreview.sql): de RPC filtert zelf op auth.uid(). `verleden`,
+    // zoals de evaluaties: een review van vandaag telt morgen mee. Wordt altijd
+    // aangeroepen; of de kaart zichtbaar is bepaalt de render hieronder.
+    supabase.rpc('inzichten_eigen_zelfreviews', { p_team_id: ctx.teamId, p_start: verleden.start, p_end: verleden.end }),
   ])
 
   // Elke bron faalt onafhankelijk: bij een fout logt de pagina de context en
@@ -473,6 +482,11 @@ export default async function InzichtenPage({
     : periodiseringResult === null
       ? { rijen: [], fout: false }
       : unwrapBron<TrainingKoppelingRij>('inzichten.periodiseringKoppelingen', periodiseringResult)
+  // Zelfreview: faalt los van de rest (bronFout in alleen deze kaart) en telt
+  // niet mee in geenEnkeleData, KPI's, signalen of het rapport.
+  const zelfreviewBron = unwrapBron<ZelfreviewRij>('inzichten.zelfreviews', zelfreviewResult)
+  const zelfreviews = zelfreviewsPerWeek(zelfreviewBron.rijen, verleden)
+  const toonZelfreviewKaart = canEdit(ctx, 'training') || zelfreviewBron.rijen.length > 0
   const belasting = belastingPerWeek(belastingBron.rijen, verleden)
   const voortgang = periodiseringVoortgang(periodiseringBron.rijen, metingenTotGisteren, seizoenVerleden, today)
   const discipline = telInvulDiscipline(disciplineBron.rijen)
@@ -676,6 +690,13 @@ export default async function InzichtenPage({
         <SrpeKaart data={evaluaties} fout={evaluatieBron.fout || belastingBron.fout} t={t} />
         <DoelstellingOordeelKaart data={evaluaties} fout={evaluatieBron.fout} t={t} />
       </div>
+
+      {/* Privé: alleen de eigen zelfreviews van deze trainer, niet in het rapport. */}
+      {toonZelfreviewKaart && (
+        <div>
+          <ZelfreviewKaart data={zelfreviews} fout={zelfreviewBron.fout} t={t} />
+        </div>
+      )}
       </div>
 
       <SeizoensrapportPrint

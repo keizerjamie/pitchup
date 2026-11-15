@@ -166,7 +166,7 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════════════════
 // OU — Optimistic updates
 // ═══════════════════════════════════════════════════════════════════════
-const ALLE_TAKEN = { squad: true, lineup: true, analysis: true, training_plan: true }
+const ALLE_TAKEN = { squad: true, lineup: true, analysis: true, training_plan: true, self_review: true }
 function todoItem(o: Partial<TodoItem> = {}): TodoItem {
   return {
     eventId: 'e1', taskType: 'squad', opponent: 'FC Test', deadline: '2099-01-01',

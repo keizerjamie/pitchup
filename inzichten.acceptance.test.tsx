@@ -900,6 +900,7 @@ const RPC_HANDLERS: Record<string, (db: Db, args: Row) => Row[]> = {
   inzichten_training_koppelingen: rpcTrainingKoppelingen,
   inzichten_invul_discipline: rpcInvulDiscipline,
   inzichten_training_evaluaties: rpcTrainingEvaluaties,
+  inzichten_eigen_zelfreviews: () => [],
 }
 
 function makeSupabaseMock(opts: {

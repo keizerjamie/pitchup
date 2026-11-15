@@ -297,7 +297,7 @@ function dertigSpelers(): { players: Row[]; attendance: Row[] } {
 const BASIS_TABELLEN = [
   'events', 'players', 'settings', 'attendance', 'match_squad', 'lineups', 'match_ratings', 'match_events',
   'training_oefeningen', 'task_overrides', 'categorie_metingen', 'metingen', 'absence_periods',
-  'training_evaluaties', 'tegendoelpunten', 'speelminuten',
+  'training_evaluaties', 'trainer_zelfreviews', 'tegendoelpunten', 'speelminuten',
 ]
 function basisDb(tables: Record<string, Row[]>): Db {
   const alles: Record<string, Row[]> = {}

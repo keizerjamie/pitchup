@@ -3267,3 +3267,171 @@ describe('telEvaluatieDiscipline', () => {
     expect(telEvaluatieDiscipline(evaluaties).trainingen).toBe(telInvulDiscipline(discipline).trainingen)
   })
 })
+
+// ═══════════════════════════════════════════════════════════════════════
+// Trainer-zelfreview — eigen scores per ISO-week
+// ═══════════════════════════════════════════════════════════════════════
+import { MAX_FASE3_RIJEN as MAX_RIJEN_ZELFREVIEW, zelfreviewsPerWeek, type ZelfreviewRij } from '@/lib/inzichten'
+import { ZELFREVIEW_STELLINGEN, ZELFREVIEW_TREND_MIN } from '@/lib/trainer-zelfreview'
+
+// Eén rij van inzichten_eigen_zelfreviews; standaard alle scores `s`.
+function zRij(eventId: string, datum: string, s: number | Partial<ZelfreviewRij> = 3): ZelfreviewRij {
+  const basis = typeof s === 'number' ? s : 3
+  return {
+    event_id: eventId,
+    datum,
+    score_uitleg: basis,
+    score_organisatie: basis,
+    score_coaching: basis,
+    score_sfeer: basis,
+    score_tijdsbewaking: basis,
+    totaal: 0,
+    ...(typeof s === 'number' ? {} : s),
+  }
+}
+function zTotaal(rijen: ZelfreviewRij[]): ZelfreviewRij[] {
+  return rijen.map((r) => ({ ...r, totaal: rijen.length }))
+}
+// Venster do 1 okt t/m za 31 okt 2026: eerste en laatste week zijn deelweken.
+const Z_OKT = { start: '2026-10-01', end: '2026-10-31' }
+
+describe('zelfreviewsPerWeek', () => {
+  const week = (o: ReturnType<typeof zelfreviewsPerWeek>, maandag: string) => o.weken.find((w) => w.maandag === maandag)!
+
+  it('elke ISO-week van het venster aanwezig, chronologisch, met deelweken aan begin en eind', () => {
+    const o = zelfreviewsPerWeek([], Z_OKT)
+    expect(o.weken.map((w) => w.maandag)).toEqual(['2026-09-28', '2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26'])
+    expect(o.weken[0]).toMatchObject({ isoJaar: 2026, isoWeek: 40, deelweekBegin: true, deelweekEind: false })
+    expect(o.weken[4]).toMatchObject({ deelweekBegin: false, deelweekEind: true })
+    expect(o.weken.slice(1, 4).every((w) => !w.deelweekBegin && !w.deelweekEind)).toBe(true)
+    // Lege week: aantal 0, alle gemiddelden en het totaal null (lijn onderbroken).
+    for (const w of o.weken) {
+      expect(w.aantal).toBe(0)
+      expect(w.totaal).toBeNull()
+      expect(Object.values(w.gemiddelde).every((v) => v === null)).toBe(true)
+    }
+    expect(o).toMatchObject({ aantalReviews: 0, afgekapt: false, genoegVoorTrend: false })
+  })
+
+  it('gemiddelde per stelling en totaal per week, NIET afgerond', () => {
+    const o = zelfreviewsPerWeek(
+      zTotaal([
+        zRij('t1', '2026-10-06', { score_uitleg: 4, score_organisatie: 2, score_coaching: 5, score_sfeer: 3, score_tijdsbewaking: 1 }),
+        zRij('t2', '2026-10-08', { score_uitleg: 5, score_organisatie: 3, score_coaching: 5, score_sfeer: 4, score_tijdsbewaking: 2 }),
+        zRij('t3', '2026-10-11', { score_uitleg: 5, score_organisatie: 3, score_coaching: 4, score_sfeer: 4, score_tijdsbewaking: 2 }),
+      ]),
+      Z_OKT,
+    )
+    const w = week(o, '2026-10-05')
+    expect(w.aantal).toBe(3)
+    expect(w.gemiddelde.uitleg).toBeCloseTo(14 / 3, 10)
+    expect(w.gemiddelde.organisatie).toBeCloseTo(8 / 3, 10)
+    expect(w.gemiddelde.coaching).toBeCloseTo(14 / 3, 10)
+    expect(w.gemiddelde.sfeer).toBeCloseTo(11 / 3, 10)
+    expect(w.gemiddelde.tijdsbewaking).toBeCloseTo(5 / 3, 10)
+    // Totaal = alle 15 scores / 15 = gemiddelde van de vijf stellingsgemiddelden.
+    expect(w.totaal).toBeCloseTo(52 / 15, 10)
+    const gemVanGem = ZELFREVIEW_STELLINGEN.reduce((s, k) => s + w.gemiddelde[k]!, 0) / ZELFREVIEW_STELLINGEN.length
+    expect(w.totaal).toBeCloseTo(gemVanGem, 10)
+    expect(o.aantalReviews).toBe(3)
+  })
+
+  it('zondag hoort bij de week ervóór, maandag start een nieuwe week', () => {
+    const o = zelfreviewsPerWeek(zTotaal([zRij('t1', '2026-10-11', 2), zRij('t2', '2026-10-12', 4)]), Z_OKT)
+    expect(week(o, '2026-10-05')).toMatchObject({ aantal: 1, totaal: 2 })
+    expect(week(o, '2026-10-12')).toMatchObject({ aantal: 1, totaal: 4 })
+  })
+
+  it('twee zelfreviews op één dag tellen allebei', () => {
+    const o = zelfreviewsPerWeek(zTotaal([zRij('t1', '2026-10-06', 2), zRij('t2', '2026-10-06', 4)]), Z_OKT)
+    expect(week(o, '2026-10-05')).toMatchObject({ aantal: 2, totaal: 3 })
+  })
+
+  it(`genoegVoorTrend vanaf ZELFREVIEW_TREND_MIN (${ZELFREVIEW_TREND_MIN}) geldige reviews in het venster`, () => {
+    expect(ZELFREVIEW_TREND_MIN).toBe(3)
+    const twee = zelfreviewsPerWeek(zTotaal([zRij('t1', '2026-10-06'), zRij('t2', '2026-10-20')]), Z_OKT)
+    expect(twee).toMatchObject({ aantalReviews: 2, genoegVoorTrend: false })
+    const drie = zelfreviewsPerWeek(
+      zTotaal([zRij('t1', '2026-10-06'), zRij('t2', '2026-10-20'), zRij('t3', '2026-10-27')]),
+      Z_OKT,
+    )
+    expect(drie).toMatchObject({ aantalReviews: 3, genoegVoorTrend: true })
+  })
+
+  it('rijen buiten het venster tellen niet (ook niet voor de trend)', () => {
+    const o = zelfreviewsPerWeek(
+      zTotaal([zRij('t0', '2026-09-30'), zRij('t1', '2026-10-01'), zRij('t2', '2026-10-31'), zRij('t3', '2026-11-01')]),
+      Z_OKT,
+    )
+    expect(o.aantalReviews).toBe(2)
+    expect(o.genoegVoorTrend).toBe(false)
+    // 30 sep valt in de deelweek van 28 sep, maar ligt vóór het venster.
+    expect(week(o, '2026-09-28').aantal).toBe(1)
+    expect(week(o, '2026-10-26').aantal).toBe(1)
+  })
+
+  it.each([
+    ['score 0', { score_uitleg: 0 }],
+    ['score 6', { score_sfeer: 6 }],
+    ['decimaal', { score_coaching: 2.5 }],
+    ['string', { score_organisatie: '3' as unknown as number }],
+    ['null', { score_tijdsbewaking: null as unknown as number }],
+    ['NaN', { score_uitleg: NaN }],
+    ['geen datum', { datum: '2026-10-32' }],
+    ['leeg event-id', { event_id: '' }],
+  ])('een rij met %s telt niet mee; nooit NaN', (_l, extra) => {
+    const o = zelfreviewsPerWeek(zTotaal([zRij('t1', '2026-10-06', 4), zRij('t2', '2026-10-07', extra)]), Z_OKT)
+    const w = week(o, '2026-10-05')
+    expect(w).toMatchObject({ aantal: 1, totaal: 4 })
+    expect(Object.values(w.gemiddelde)).toEqual([4, 4, 4, 4, 4])
+    expect(o.aantalReviews).toBe(1)
+  })
+
+  it('null/undefined-rijen en een niet-array worden genegeerd', () => {
+    const o = zelfreviewsPerWeek([null, undefined, zRij('t1', '2026-10-06', 5)] as unknown as ZelfreviewRij[], Z_OKT)
+    expect(o.aantalReviews).toBe(1)
+    expect(zelfreviewsPerWeek(null as unknown as ZelfreviewRij[], Z_OKT)).toMatchObject({ aantalReviews: 0, afgekapt: false })
+  })
+
+  it('afgekapt (meer dan MAX_FASE3_RIJEN, of totaal > ontvangen) → geen weken, geen trend', () => {
+    const veel = Array.from({ length: MAX_RIJEN_ZELFREVIEW + 1 }, (_, i) => zRij(`t${i}`, '2026-10-06'))
+    const o = zelfreviewsPerWeek(zTotaal(veel), Z_OKT)
+    expect(o).toMatchObject({ weken: [], afgekapt: true, genoegVoorTrend: false })
+    expect(o.aantalReviews).toBe(MAX_RIJEN_ZELFREVIEW + 1)
+
+    const halfAf = zelfreviewsPerWeek(
+      [zRij('t1', '2026-10-06', { totaal: 5 }), zRij('t2', '2026-10-07', { totaal: 5 }), zRij('t3', '2026-10-08', { totaal: 5 })],
+      Z_OKT,
+    )
+    expect(halfAf).toMatchObject({ weken: [], afgekapt: true, genoegVoorTrend: false })
+  })
+
+  it('ongeldig venster → geen weken, 0 reviews', () => {
+    const rijen = zTotaal([zRij('t1', '2026-10-06')])
+    expect(zelfreviewsPerWeek(rijen, { start: '2026-10-31', end: '2026-10-01' })).toMatchObject({ weken: [], aantalReviews: 0 })
+    expect(zelfreviewsPerWeek(rijen, null as unknown as { start: string; end: string })).toMatchObject({ weken: [], aantalReviews: 0 })
+  })
+
+  it('muteert de invoer niet', () => {
+    const rijen = zTotaal([zRij('t1', '2026-10-06', 2), zRij('t2', '2026-10-13', 4)])
+    const kopie = structuredClone(rijen)
+    zelfreviewsPerWeek(rijen, Z_OKT)
+    expect(rijen).toEqual(kopie)
+  })
+
+  describe('tijdzone-onafhankelijk (datums zijn strings)', () => {
+    const oorspronkelijk = process.env.TZ
+    afterEach(() => {
+      if (oorspronkelijk === undefined) delete process.env.TZ
+      else process.env.TZ = oorspronkelijk
+    })
+
+    it.each(['Europe/Amsterdam', 'UTC', 'Pacific/Kiritimati'])('TZ %s geeft dezelfde weken rond de zomertijdwissel', (tz) => {
+      process.env.TZ = tz
+      // 25 okt 2026 (zondag) = einde zomertijd in NL.
+      const o = zelfreviewsPerWeek(zTotaal([zRij('t1', '2026-10-25', 2), zRij('t2', '2026-10-26', 4)]), Z_OKT)
+      expect(week(o, '2026-10-19')).toMatchObject({ aantal: 1, totaal: 2, isoWeek: 43 })
+      expect(week(o, '2026-10-26')).toMatchObject({ aantal: 1, totaal: 4, isoWeek: 44 })
+    })
+  })
+})

@@ -112,6 +112,7 @@ interface TeamData {
   koppelingen: Row[]
   discipline: Row[]
   evaluaties: Row[]
+  zelfreviews: Row[]
   // tabellen
   events: Row[]
   players: Row[]
@@ -137,18 +138,19 @@ const RPC_BRON: Record<string, keyof TeamData> = {
   inzichten_training_koppelingen: 'koppelingen',
   inzichten_invul_discipline: 'discipline',
   inzichten_training_evaluaties: 'evaluaties',
+  inzichten_eigen_zelfreviews: 'zelfreviews',
 }
 // Bronnen met een `datum`-kolom: de handler filtert op p_start/p_end, zoals de SQL.
-const MET_DATUM = new Set<keyof TeamData>(['teamRating', 'uitslagen', 'koppelingen', 'discipline', 'evaluaties'])
+const MET_DATUM = new Set<keyof TeamData>(['teamRating', 'uitslagen', 'koppelingen', 'discipline', 'evaluaties', 'zelfreviews'])
 // Bronnen met een `totaal`-kolom (afkap-detectie fase 3, SQL: count(*) over ()).
-const MET_TOTAAL = new Set<keyof TeamData>(['koppelingen', 'discipline', 'evaluaties'])
+const MET_TOTAAL = new Set<keyof TeamData>(['koppelingen', 'discipline', 'evaluaties', 'zelfreviews'])
 
 function leegTeam(): TeamData {
   return {
     aanwezigheid: [], maandOpkomst: [], teamRating: [], ratingPerSpeler: [], aanwezigheidPerSpeler: [],
     uitslagen: [], spelerMomenten: [], doelpuntMinuten: [], tegendoelpunten: [], speelkansen: [],
     ratingVorm: [], trainingOpkomst: [], blessures: [], speelminuten: [], koppelingen: [], discipline: [],
-    evaluaties: [], events: [], players: [], metingen: [], trainingOefeningen: [],
+    evaluaties: [], zelfreviews: [], events: [], players: [], metingen: [], trainingOefeningen: [],
   }
 }
 
@@ -813,13 +815,14 @@ describe('AC8 — scherm en rapport tonen dezelfde zin', () => {
 // dataset: zie het rapport (07-test-verifier-rapport.md).
 // ═══════════════════════════════════════════════════════════════════════
 const VOOR = {
-  rpcAantal: 18, // 17 verschillende RPC's + de tweede ronde inzichten_training_koppelingen (periodisering)
+  rpcAantal: 19, // 18 verschillende RPC's (incl. inzichten_eigen_zelfreviews, trainer-zelfreview) + de tweede ronde inzichten_training_koppelingen (periodisering)
   fromAantal: 10,
   rpcNamen: [
     'inzichten_aanwezigheid',
     'inzichten_aanwezigheid_per_speler',
     'inzichten_blessures_per_maand',
     'inzichten_doelpunten_per_minuut',
+    'inzichten_eigen_zelfreviews',
     'inzichten_invul_discipline',
     'inzichten_rating_per_speler',
     'inzichten_rating_team_per_wedstrijd',
@@ -1716,7 +1719,7 @@ describe('Rapport — fout gaat voor afgekapt, DOM-regels', () => {
     expect(rapportSectie(container, 'Ratings per speler')!.parentElement).toBe(rapportSectie(container, 'Aanwezigheid per speler')!.parentElement)
   })
 
-  it('AC41/AC9: het aantal queries is ongewijzigd met alle rapportsecties gevuld (18 rpc, 17 namen, 10 from)', async () => {
+  it('AC41/AC9: het aantal queries is ongewijzigd met alle rapportsecties gevuld (19 rpc, 18 namen, 10 from)', async () => {
     const { rpcCalls, fromCalls } = await renderInzichten(
       merge(rijkRapport(), uitbreidingData(), {
         events: [...vormEvents(), { id: 'tr1', team_id: TEAM, type: 'training', date: '2026-10-01', trainingstype: 'vct' }],
@@ -1857,6 +1860,7 @@ describe('AC28 — vensters en periodekiezer', () => {
     'inzichten_aanwezigheid', 'inzichten_training_opkomst_per_maand', 'inzichten_aanwezigheid_per_speler',
     'inzichten_speelkansen', 'inzichten_training_opkomst_per_speler', 'inzichten_blessures_per_maand',
     'inzichten_training_koppelingen', 'inzichten_invul_discipline', 'inzichten_training_evaluaties',
+    'inzichten_eigen_zelfreviews',
   ]
   const VENSTER = [
     'inzichten_rating_team_per_wedstrijd', 'inzichten_rating_per_speler', 'inzichten_wedstrijd_uitslagen',
@@ -1867,7 +1871,7 @@ describe('AC28 — vensters en periodekiezer', () => {
   it.each(['seizoen', '4w', '8w'])('AC28: periode %s → elke RPC krijgt zijn bestaande venster en p_team_id (verleden / gekozen venster / hele seizoen)', async (periode) => {
     const v = venstersPer[periode]
     const { rpcCalls } = await renderInzichten(rijk(), { periode: periode === 'seizoen' ? undefined : periode })
-    expect(rpcCalls).toHaveLength(17)
+    expect(rpcCalls).toHaveLength(18)
     for (const c of rpcCalls) {
       expect(c.args.p_team_id).toBe(TEAM)
       expect(Object.keys(c.args)).not.toContain('p_player')

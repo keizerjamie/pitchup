@@ -380,6 +380,7 @@ const HANDLERS: Harness['handlers'] = {
   inzichten_training_koppelingen: () => [],
   inzichten_invul_discipline: () => [],
   inzichten_training_evaluaties: () => [],
+  inzichten_eigen_zelfreviews: () => [],
 }
 const NIEUWE_RPCS = [
   'inzichten_speelkansen',

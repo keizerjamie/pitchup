@@ -316,7 +316,7 @@ async function renderAgenda(tables: Record<string, Row[]>) {
 function basis(over: Record<string, Row[]> = {}): Record<string, Row[]> {
   return {
     events: EVENTS, players: [A1, A2, I1], attendance: ATTENDANCE, settings: SEIZOEN,
-    training_oefeningen: [], task_overrides: [], lineups: [], match_ratings: [], match_events: [],
+    training_oefeningen: [], task_overrides: [], trainer_zelfreviews: [], lineups: [], match_ratings: [], match_events: [],
     categorie_metingen: [], ...over,
   }
 }

@@ -17,6 +17,13 @@ import { berekenTijdlijn, effectieveDuurMin } from '@/lib/sessie-tijdlijn'
 import { actueleMetingen, computeCurrentSteps } from '@/lib/periodization'
 import { heeftDoelstelling, isTrainingOordeel, isValidRpe } from '@/lib/training-evaluatie'
 import {
+  ZELFREVIEW_STELLINGEN,
+  ZELFREVIEW_TREND_MIN,
+  isZelfreviewScore,
+  kolomVoor,
+  type ZelfreviewStelling,
+} from '@/lib/trainer-zelfreview'
+import {
   MEETBARE_CATEGORIES,
   PERIODIZATION_CATEGORIES,
   POSITIONS,
@@ -2464,4 +2471,126 @@ export function telEvaluatieDiscipline(rijen: TrainingEvaluatieRij[]): Evaluatie
     }
   }
   return uitkomst
+}
+
+// ── Trainer-zelfreview: eigen scores per ISO-week (supabase/trainer-zelfreview.sql) ──
+// inzichten_eigen_zelfreviews geeft alleen de zelfreviews van de INGELOGDE
+// trainer (privé, AC12/AC21), één rij per gereviewde training in het venster.
+// meeneem zit er bewust niet in. Telt NIET mee in geenEnkeleData, KPI's,
+// signalen of het seizoensrapport (AC22, V4).
+export interface ZelfreviewRij {
+  event_id: string
+  datum: string
+  score_uitleg: number
+  score_organisatie: number
+  score_coaching: number
+  score_sfeer: number
+  score_tijdsbewaking: number
+  totaal: number
+}
+
+export interface ZelfreviewWeek {
+  // Maandag van de ISO-week ('YYYY-MM-DD'); weken lopen maandag–zondag.
+  maandag: string
+  isoJaar: number
+  isoWeek: number
+  // De week begint vóór resp. eindigt ná het venster: een deelweek.
+  deelweekBegin: boolean
+  deelweekEind: boolean
+  // Geldige zelfreviews in deze week.
+  aantal: number
+  // Gemiddelde score per stelling (1..5, NIET afgerond: afronden alleen bij
+  // weergave). null = geen zelfreview in deze week.
+  gemiddelde: Record<ZelfreviewStelling, number | null>
+  // Gemiddelde over alle scores van alle zelfreviews in deze week (= het
+  // gemiddelde van de vijf stellingsgemiddelden). null = geen zelfreview.
+  totaal: number | null
+}
+
+export interface ZelfreviewOverzicht {
+  // Chronologisch, elke week van het venster aanwezig (ook zonder review),
+  // zodat de lijn bij een lege week onderbroken kan worden. [] bij een
+  // ongeldig venster of afgekapte invoer.
+  weken: ZelfreviewWeek[]
+  // Geldige zelfreviews binnen het venster (ook bij afgekapt: wat er binnenkwam).
+  aantalReviews: number
+  afgekapt: boolean
+  // aantalReviews >= ZELFREVIEW_TREND_MIN (en niet afgekapt).
+  genoegVoorTrend: boolean
+}
+
+function legeZelfreviewGemiddelden(): Record<ZelfreviewStelling, number | null> {
+  const gemiddelde = {} as Record<ZelfreviewStelling, number | null>
+  for (const stelling of ZELFREVIEW_STELLINGEN) gemiddelde[stelling] = null
+  return gemiddelde
+}
+
+// Bruikbare zelfreview: een niet-leeg event-id, een echte kalenderdatum en vijf
+// geldige scores. Eén ongeldige score = de hele rij telt niet.
+function isBruikbareZelfreview(rij: ZelfreviewRij | null | undefined): rij is ZelfreviewRij {
+  return (
+    !!rij &&
+    typeof rij.event_id === 'string' &&
+    rij.event_id !== '' &&
+    isDateString(rij.datum) &&
+    ZELFREVIEW_STELLINGEN.every((s) => isZelfreviewScore(rij[kolomVoor(s)]))
+  )
+}
+
+// Gemiddelde eigen zelfreviewscore per stelling en totaal per ISO-week over
+// `venster` (beslissing 5: per stelling + totaal, geen norm). Puur: de invoer
+// wordt nooit gemuteerd, nooit NaN. Rijen buiten het venster of met een
+// ongeldige score tellen niet mee.
+export function zelfreviewsPerWeek(rijen: ZelfreviewRij[], venster: Seizoensvenster): ZelfreviewOverzicht {
+  const afgekapt = isAfgekapt(rijen)
+  if (!isGeldigVenster(venster)) return { weken: [], aantalReviews: 0, afgekapt, genoegVoorTrend: false }
+
+  const geldig = (Array.isArray(rijen) ? rijen : []).filter(
+    (r) => isBruikbareZelfreview(r) && r.datum >= venster.start && r.datum <= venster.end,
+  )
+  const aantalReviews = geldig.length
+  // Afgekapt: geen gedeeltelijke cijfers (de nieuwste week kan ontbreken).
+  if (afgekapt) return { weken: [], aantalReviews, afgekapt, genoegVoorTrend: false }
+
+  const sommen = new Map<string, { aantal: number; perStelling: Record<ZelfreviewStelling, number> }>()
+  for (const rij of geldig) {
+    const maandag = maandagVanWeek(rij.datum)
+    if (!maandag) continue
+    let som = sommen.get(maandag)
+    if (!som) {
+      som = { aantal: 0, perStelling: {} as Record<ZelfreviewStelling, number> }
+      for (const stelling of ZELFREVIEW_STELLINGEN) som.perStelling[stelling] = 0
+      sommen.set(maandag, som)
+    }
+    som.aantal++
+    for (const stelling of ZELFREVIEW_STELLINGEN) som.perStelling[stelling] += rij[kolomVoor(stelling)]
+  }
+
+  const weken: ZelfreviewWeek[] = wekenInVenster(venster.start, venster.end).map((maandag) => {
+    const iso = isoWeek(maandag)!
+    const zondag = fromUtcMs(toUtcMs(maandag)! + 6 * DAG_MS)
+    const som = sommen.get(maandag)
+    const gemiddelde = legeZelfreviewGemiddelden()
+    let totaal: number | null = null
+    if (som && som.aantal > 0) {
+      let alles = 0
+      for (const stelling of ZELFREVIEW_STELLINGEN) {
+        gemiddelde[stelling] = som.perStelling[stelling] / som.aantal
+        alles += som.perStelling[stelling]
+      }
+      totaal = alles / (som.aantal * ZELFREVIEW_STELLINGEN.length)
+    }
+    return {
+      maandag,
+      isoJaar: iso.jaar,
+      isoWeek: iso.week,
+      deelweekBegin: maandag < venster.start,
+      deelweekEind: zondag > venster.end,
+      aantal: som?.aantal ?? 0,
+      gemiddelde,
+      totaal,
+    }
+  })
+
+  return { weken, aantalReviews, afgekapt, genoegVoorTrend: aantalReviews >= ZELFREVIEW_TREND_MIN }
 }

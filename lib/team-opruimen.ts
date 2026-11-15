@@ -27,6 +27,13 @@ import { TEAM_LOGO_BUCKET, teamLogoPath } from '@/lib/logo-upload'
 // het verdwijnen van een team. Alleen hun KOPPELINGEN aan dit team
 // (training_oefeningen) gaan mee.
 //
+// `trainer_zelfreviews` staat hier BEWUST OOK NIET in: die rijen zijn privé
+// per trainer (select-policy user_id = auth.uid()), dus de hoofdtrainer kan de
+// zelfreviews van zijn assistenten niet zien en ook niet expliciet wissen. Ze
+// verdwijnen via de cascades op teams, events en team_members
+// (supabase/trainer-zelfreview.sql; blok 22 en 31 van
+// supabase/team-rls-verificatie.sql bewijzen dat).
+//
 // supabase/team-rls-verificatie.sql (blok 22) draait dezelfde lijst als echte
 // deletes onder de rol van een hoofdtrainer; een structuurtest in
 // assistent-fase1-fundament.acceptance.test.ts houdt die twee gelijk.

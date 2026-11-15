@@ -213,6 +213,7 @@ async function renderDashboard(players: Row[], attendance: Row[]) {
     attendance: [...attendance, ...attendance.map((r) => ({ ...r, event_id: 'ev-verleden' }))],
     training_oefeningen: [],
     task_overrides: [],
+    trainer_zelfreviews: [],
     lineups: [],
     match_ratings: [],
     match_events: [],

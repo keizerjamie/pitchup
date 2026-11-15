@@ -12,6 +12,8 @@ import {
   effectiveDone,
   hasTrainingPlanDone,
   isTaskVisible,
+  selfReviewNextTraining,
+  isSelfReviewVisible,
   compareTasks,
   sortTasks,
 } from '../lib/todos.mjs'
@@ -65,6 +67,66 @@ test('analysisDeadline: geen training ná wedstrijd → fallback wedstrijddag', 
   assert.equal(analysisDeadline('2026-07-26', ['2026-07-20', '2026-07-26']), '2026-07-26')
   assert.equal(analysisDeadline('2026-07-26', []), '2026-07-26')
   assert.equal(analysisDeadline('2026-07-26', null), '2026-07-26')
+})
+
+// ── selfReviewNextTraining (trainer-zelfreview) ─────────────────────────────
+
+test('selfReviewNextTraining: eerste training STRIKT ná de training, ongesorteerde input', () => {
+  assert.equal(selfReviewNextTraining('2026-11-10', ['2026-11-17', '2026-11-12', '2026-11-03']), '2026-11-12')
+})
+
+test('selfReviewNextTraining: een tweede training op dezelfde dag telt NIET als volgende', () => {
+  assert.equal(selfReviewNextTraining('2026-11-10', ['2026-11-10', '2026-11-10']), null)
+  assert.equal(selfReviewNextTraining('2026-11-10', ['2026-11-10', '2026-11-14']), '2026-11-14')
+})
+
+test('selfReviewNextTraining: geen latere training → null (geen terugval op de eigen datum)', () => {
+  assert.equal(selfReviewNextTraining('2026-11-10', ['2026-11-01', '2026-11-10']), null)
+  assert.equal(selfReviewNextTraining('2026-11-10', []), null)
+  assert.equal(selfReviewNextTraining('2026-11-10', null), null)
+  assert.equal(selfReviewNextTraining('2026-11-10', undefined), null)
+})
+
+test('selfReviewNextTraining: niet-string datums worden genegeerd; ongeldige eigen datum → null', () => {
+  assert.equal(selfReviewNextTraining('2026-11-10', [null, 20261111, undefined, '2026-11-20']), '2026-11-20')
+  assert.equal(selfReviewNextTraining(null, ['2026-11-20']), null)
+})
+
+// ── isSelfReviewVisible (trainer-zelfreview) ────────────────────────────────
+
+test('isSelfReviewVisible: toekomstige training → NIET zichtbaar (AC4)', () => {
+  for (const daysUntilNextTraining of [null, 3, 0, -1]) {
+    assert.equal(isSelfReviewVisible({ daysUntilEvent: 1, daysUntilNextTraining }), false)
+    assert.equal(isSelfReviewVisible({ daysUntilEvent: 7, daysUntilNextTraining }), false)
+  }
+})
+
+test('isSelfReviewVisible: training vandaag of eerder, volgende training nog niet bereikt → zichtbaar (AC1)', () => {
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: 0, daysUntilNextTraining: 2 }), true)
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: -3, daysUntilNextTraining: 1 }), true)
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: -1, daysUntilNextTraining: 5 }), true)
+})
+
+test('isSelfReviewVisible: op de dag van de volgende training of later → NIET zichtbaar (AC5)', () => {
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: -2, daysUntilNextTraining: 0 }), false)
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: -9, daysUntilNextTraining: -2 }), false)
+})
+
+test('isSelfReviewVisible: geen volgende training (null/undefined) → zichtbaar vanaf de trainingsdag', () => {
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: 0, daysUntilNextTraining: null }), true)
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: -30, daysUntilNextTraining: null }), true)
+  assert.equal(isSelfReviewVisible({ daysUntilEvent: -5, daysUntilNextTraining: undefined }), true)
+})
+
+test('isSelfReviewVisible: ongeldige daysUntilEvent → NIET zichtbaar', () => {
+  for (const daysUntilEvent of [NaN, undefined, null, '0']) {
+    assert.equal(isSelfReviewVisible({ daysUntilEvent, daysUntilNextTraining: null }), false)
+  }
+})
+
+test('TASK_TYPES en isTaskVisible blijven ongewijzigd: self_review is geen taaktype', () => {
+  assert.equal(isValidTaskType('self_review'), false)
+  assert.equal(TASK_TYPES.includes('self_review'), false)
 })
 
 // ── effectiveDone ───────────────────────────────────────────────────────────

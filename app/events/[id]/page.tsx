@@ -6,6 +6,7 @@ import { Player, AttendanceStatus } from '@/lib/types'
 import { formatDateLong, formatTime, todayLocal } from '@/lib/utils'
 import TrainingAttendance from '@/components/TrainingAttendance'
 import TrainingEvaluatieSectie from '@/components/TrainingEvaluatieSectie'
+import TrainerZelfreviewSectie from '@/components/TrainerZelfreviewSectie'
 import MetingEditor from '@/components/MetingEditor'
 import PageHeader from '@/components/ui/PageHeader'
 import { LinkButton } from '@/components/ui/Button'
@@ -19,6 +20,7 @@ import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { genericError, logError } from '@/lib/errors'
 import { isTrainingOordeel, isValidRpe } from '@/lib/training-evaluatie'
 import type { TrainingEvaluatie } from '@/lib/types'
+import { zelfreviewUitRij } from '@/lib/trainer-zelfreview'
 import { telOpstelling } from '@/lib/lineup-compleet'
 
 interface Props {
@@ -30,7 +32,7 @@ export default async function EventDetailPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }, { data: evaluatieRij, error: evaluatieError }] = await Promise.all([
+  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }, { data: evaluatieRij, error: evaluatieError }, { data: zelfreviewRij, error: zelfreviewError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('players').select('*').eq('team_id', ctx.teamId).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', ctx.teamId),
@@ -44,6 +46,11 @@ export default async function EventDetailPage({ params }: Props) {
     // extra roundtrip) maar wordt alleen gebruikt en gelogd bij een training.
     // Vereist supabase/inzichten-metrics-fase3b.sql.
     supabase.from('training_evaluaties').select('rpe, oordeel').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
+    // Privé zelfreview van de ingelogde trainer: alleen de eigen rij (RLS borgt
+    // dat ook). Vereist supabase/trainer-zelfreview.sql.
+    supabase.from('trainer_zelfreviews')
+      .select('score_uitleg, score_organisatie, score_coaching, score_sfeer, score_tijdsbewaking, meeneem')
+      .eq('event_id', id).eq('team_id', ctx.teamId).eq('user_id', ctx.userId).maybeSingle(),
   ])
 
   if (!event) notFound()
@@ -190,6 +197,15 @@ export default async function EventDetailPage({ params }: Props) {
     rpe: isValidRpe(evaluatieRij?.rpe) ? evaluatieRij.rpe : null,
     oordeel: isTrainingOordeel(evaluatieRij?.oordeel) ? evaluatieRij.oordeel : null,
   }
+  // Zelfde regel voor de zelfreview: een falende query (bv. zonder migratie)
+  // laat de pagina werken, alleen de sectie meldt het. Een rij met een
+  // ongeldige score telt als "geen review" (zelfreviewUitRij).
+  let zelfreviewFout = false
+  if (isTraining && zelfreviewError) {
+    logError('eventDetail.zelfreview', zelfreviewError)
+    zelfreviewFout = true
+  }
+  const zelfreview = zelfreviewError ? null : zelfreviewUitRij(zelfreviewRij)
   // Is de datum van het event bereikt (vandaag of eerder)? Eén expressie voor
   // de trainingsevaluatie én de analysekaart van een wedstrijd: vóór de
   // wedstrijddag valt er niets te analyseren. Servertijd (todayLocal), zelfde
@@ -271,6 +287,17 @@ export default async function EventDetailPage({ params }: Props) {
               canEdit={canEdit(ctx, 'training')}
               trainingGehouden={trainingGehouden}
               bronFout={evaluatieFout}
+            />
+          )}
+          {/* Privé zelfreview van de trainer: alleen met trainingsrecht, of
+              (alleen-lezen) als er al een eigen review is. */}
+          {isTraining && (canEdit(ctx, 'training') || zelfreview !== null) && (
+            <TrainerZelfreviewSectie
+              eventId={id}
+              initial={zelfreview}
+              canEdit={canEdit(ctx, 'training')}
+              trainingGehouden={trainingGehouden}
+              bronFout={zelfreviewFout}
             />
           )}
         </div>

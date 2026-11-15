@@ -289,6 +289,7 @@ const MET_DATA: Harness['handlers'] = {
   inzichten_training_koppelingen: hKoppelingen,
   inzichten_invul_discipline: hDiscipline,
   inzichten_training_evaluaties: () => [],
+  inzichten_eigen_zelfreviews: () => [],
 }
 const LEEG: Harness['handlers'] = {
   ...MET_DATA,
@@ -665,7 +666,7 @@ const NIEUWE_TITELS = [i.belastingTitle, i.periodiseringTitle, i.disciplineTitle
 describe('AC-A1 — kaarten onder de fase-2b-kaarten in vaste volgorde; bestaande kaarten ongewijzigd', () => {
   it('AC-A1: laatste drie kaarten zijn belasting, periodisering, discipline; direct na de speelminutenkaart; belasting volle breedte, de andere twee half breed naast elkaar', async () => {
     await renderInzichten(belastingDb())
-    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent).filter((k) => k !== i.zelfreviewTitle) // de privé zelfreviewkaart staat los, ná het grid
     expect(koppen.slice(-5, -2)).toEqual([i.belastingTitle, i.periodiseringTitle, i.disciplineTitle])  // fase 3b voegt daarna sRPE en oordeel toe
     expect(koppen.at(-6)).toBe(i.speelminutenTitle)
     for (const t of NIEUWE_TITELS) expect(koppen.filter((x) => x === t)).toHaveLength(1)
