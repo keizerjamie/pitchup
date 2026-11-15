@@ -4521,3 +4521,35 @@ Snelle winst 2 uit de schermreview. Via feature-factory; ketenmap
   (`checkout-index --prefix`) en daar typecheck + tests gedraaid.
 - **Open:** rooktest in productie (een voorstel echt maken en een blok wisselen); ES/DE-knoptekst op 320px niet in
   browser gezien.
+
+## Feature: Trainer-zelfreview — to-do "vorige training reviewen" + eigen progressie in Inzichten (2026-11-15, `9b7457c`, live)
+Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-trainer-review/` (01 t/m 07).
+- **Wat:** afgeleide to-do `self_review` ("Vorige training reviewen") → `/events/{id}#mijn-zelfreview`. Zichtbaar als
+  `daysUntil(training) <= 0` en de eerstvolgende training (strikt ná die dag, `selfReviewNextTraining`) nog niet is
+  begonnen (`isSelfReviewVisible`); twee trainingen op één dag = twee items. **Niet afvinkbaar** (geen
+  `task_overrides`-wijziging, `TASK_TYPES` ongewijzigd, `markTaskDone(…,'self_review')` → 'Ongeldige taak');
+  `auto` = eigen review bestaat, blijft doorgestreept tot de volgende training. Query/item alleen bij
+  `canEdit(ctx,'training')`; queryfout → geen items (nooit vals "open").
+- **Sectie `TrainerZelfreviewSectie`** na `TrainingEvaluatieSectie`: vijf verplichte stellingen 1–5
+  (`ZELFREVIEW_STELLINGEN`: uitleg, organisatie, coaching, sfeer, tijdsbewaking) + optioneel `meeneem` (≤1000).
+  Geen autosave; staten bronFout → toekomst → alleen-lezen (geen recht maar wel review, V5) → formulier.
+- **Infra:** tabel **`trainer_zelfreviews`** (unique `(event_id,user_id)`, FK's met cascade op teams, events én
+  samengestelde `(team_id,user_id)` → `team_members`) + RPC **`inzichten_eigen_zelfreviews`** (zonder `meeneem`,
+  limit 901) in `supabase/trainer-zelfreview.sql`. RLS: select **alleen `user_id = auth.uid()`** (ook owner leest
+  niet mee), insert/update met `can_edit(...,'training')` + event zelfde team + type training + **NL-datum ≤
+  vandaag in RLS** (bewuste afwijking van 3b; app `todayLocal()` is gelijk of strenger), **geen delete-policy**.
+  Gedraaid op productie 2026-11-15 via Supabase-MCP; verificatieblok 2, 22 en 31 (mei 1990) geslaagd.
+- **Bewust niet in `TEAM_TABELLEN`:** owner kan privé-rijen niet zien/wissen (blok 22 zou rood worden); opruimen via
+  cascade. Commentaar staat bij `TEAM_TABELLEN` in `lib/team-opruimen.ts`.
+- **Inzichten:** `ZelfreviewKaart` ná het grid binnen `print:hidden` (niet in `SeizoensrapportPrint`, KPI's,
+  signalen of `geenEnkeleData`), venster `verleden`, trend vanaf `ZELFREVIEW_TREND_MIN` = 3, `zelfreviewsPerWeek` in
+  `lib/inzichten.ts`. Pagina telt nu 19 `.rpc(` (conclusielaag-test); alle inzichten-harnassen kennen de nieuwe RPC.
+- **Tests:** `trainer-zelfreview.acceptance.test.tsx` (30), `trainer-zelfreview-story.acceptance.test.tsx` (80, alle
+  27 AC's), `trainer-zelfreview-migratie.acceptance.test.ts`, unit-tests action/lib/componenten.
+- **Gotchas:** een nieuw blok in `team-rls-verificatie.sql` valt in de tellingen van blok 28/30 tot `rollback` →
+  `when sqlstate '42501'`/`'23514'` op een eigen regel. `aria-invalid` mag niet op `role=group` (lint) →
+  `aria-describedby` naar de alert. `lock`-icoon zit niet in de gesubsette font. Testaccount `e541e67b…` heeft een
+  eigen team zonder teamnaam (bruikbaar als ASSISTENT_A in verificatie, binnen de rollback). Gedeelde werkmap met
+  de trainingsvoorstel-sessie: commit via privé-index en `commit-tree` + `update-ref` met old-sha-check (pre-commit
+  hook draait dan niet → handmatige secret-check gedaan).
+- **Open:** rooktest in productie door Jamie (review invullen, to-do doorgestreept, kaart na 3 reviews).
