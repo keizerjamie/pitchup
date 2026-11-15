@@ -14,6 +14,7 @@ import {
   serializeCyclusCorrectie,
   actieveCorrectie,
   effectieveCyclusWeek,
+  cyclusStandVoorTraining,
   CYCLUS_CORRECTIE_KEY,
   type ActueleMeting,
   type CyclusCorrectie,
@@ -813,6 +814,109 @@ describe('effectieveCyclusWeek', () => {
     try {
       const c = correctie(3, '2026-03-25', null)
       expect(effectieveCyclusWeek({ anker: null, actieveCorrectie: c, onDate: '2026-04-01' })).toBe(4)
+    } finally {
+      process.env.TZ = oorspronkelijkeTz
+    }
+  })
+})
+
+describe('cyclusStandVoorTraining', () => {
+  const groot = (datum: string, stap = 3) => meetRij('partijen_groot', datum, stap)
+
+  it('geeft zonder metingen en zonder correctie geen anker en geen cyclusweek', () => {
+    expect(cyclusStandVoorTraining({ metingen: [], correctieWaarde: undefined, trainingDatum: D, vandaag: D }))
+      .toEqual({ actueel: {}, anker: null, cycleWeek: null })
+  })
+
+  it('leidt het anker af uit de vroegste actuele meting en rekent de week vanaf daar', () => {
+    const stand = cyclusStandVoorTraining({
+      metingen: [groot('2026-08-31'), meetRij('partijen_midden', '2026-09-02', 4)],
+      correctieWaarde: null,
+      trainingDatum: D, // 2026-09-08
+      vandaag: '2026-09-01',
+    })
+    expect(stand.anker).toBe('2026-08-31')
+    expect(Object.keys(stand.actueel).sort()).toEqual(['partijen_groot', 'partijen_midden'])
+    expect(stand.cycleWeek).toBe(2)
+  })
+
+  it('telt een meting op de trainingsdag zelf nog niet mee (peildatum exclusief)', () => {
+    const metingen = [groot(D)]
+    expect(cyclusStandVoorTraining({ metingen, correctieWaarde: null, trainingDatum: D, vandaag: D }))
+      .toEqual({ actueel: {}, anker: null, cycleWeek: null })
+    const dagErna = cyclusStandVoorTraining({ metingen, correctieWaarde: null, trainingDatum: '2026-09-09', vandaag: D })
+    expect(dagErna.anker).toBe(D)
+    expect(dagErna.cycleWeek).toBe(1)
+  })
+
+  it('past een actieve correctie toe vanaf de correctiedatum en rolt daarna door', () => {
+    const metingen = [groot('2026-08-31')]
+    const correctieWaarde = serializeCyclusCorrectie({ week: 6, datum: D, ankerBijCorrectie: '2026-08-31' })
+    const op = (trainingDatum: string) =>
+      cyclusStandVoorTraining({ metingen, correctieWaarde, trainingDatum, vandaag: D }).cycleWeek
+    expect(op(D)).toBe(6)
+    expect(op('2026-09-15')).toBe(1)
+  })
+
+  it('houdt een training vóór de correctiedatum op het afgeleide anker', () => {
+    const correctieWaarde = serializeCyclusCorrectie({ week: 6, datum: D, ankerBijCorrectie: '2026-08-31' })
+    const stand = cyclusStandVoorTraining({
+      metingen: [groot('2026-08-31')], correctieWaarde, trainingDatum: '2026-09-07', vandaag: D,
+    })
+    expect(stand.cycleWeek).toBe(cycleWeekFor('2026-08-31', '2026-09-07'))
+    expect(stand.cycleWeek).toBe(2)
+  })
+
+  it('negeert een vervallen correctie (het vandaag-anker is verzet)', () => {
+    // Nieuwe meting op 2026-09-10 verzet het anker; de snapshot (2026-08-31)
+    // klopt niet meer ⇒ de correctie vervalt en het afgeleide anker telt.
+    const metingen = [groot('2026-08-31'), groot('2026-09-10', 5)]
+    const correctieWaarde = serializeCyclusCorrectie({ week: 6, datum: D, ankerBijCorrectie: '2026-08-31' })
+    const stand = cyclusStandVoorTraining({ metingen, correctieWaarde, trainingDatum: '2026-09-12', vandaag: '2026-09-10' })
+    expect(stand.anker).toBe('2026-09-10')
+    expect(stand.cycleWeek).toBe(1) // niet 6 (correctie) maar het afgeleide anker
+  })
+
+  it('toetst de vervalregel tegen het vandaag-anker, niet tegen het anker van de training', () => {
+    // Vandaag (2026-09-10) bestaat de meting van 2026-09-20 nog niet als
+    // actueel: het vandaag-anker is nog 2026-08-31 ⇒ correctie actief, ook voor
+    // een training ná die latere meting.
+    const metingen = [groot('2026-08-31'), groot('2026-09-20', 5)]
+    const correctieWaarde = serializeCyclusCorrectie({ week: 6, datum: D, ankerBijCorrectie: '2026-08-31' })
+    const stand = cyclusStandVoorTraining({ metingen, correctieWaarde, trainingDatum: '2026-09-22', vandaag: '2026-09-10' })
+    expect(stand.anker).toBe('2026-09-20')
+    expect(stand.cycleWeek).toBe(effectieveCyclusWeek({
+      anker: '2026-09-20', actieveCorrectie: parseCyclusCorrectie(correctieWaarde), onDate: '2026-09-22',
+    }))
+    // D = week 6 ⇒ D+14 = week 2; het afgeleide trainingsanker zou week 1 geven.
+    expect(stand.cycleWeek).toBe(2)
+    expect(cycleWeekFor('2026-09-20', '2026-09-22')).toBe(1)
+  })
+
+  it('behandelt een correctie op de meetdag van vandaag als actief (peildatum morgen)', () => {
+    // Meting vandaag: telt via peildatum morgen mee in het vandaag-anker.
+    const metingen = [groot(D)]
+    const correctieWaarde = serializeCyclusCorrectie({ week: 4, datum: D, ankerBijCorrectie: D })
+    const stand = cyclusStandVoorTraining({ metingen, correctieWaarde, trainingDatum: D, vandaag: D })
+    expect(stand.anker).toBeNull() // trainingspeil: meting op de dag zelf telt niet
+    expect(stand.cycleWeek).toBe(4)
+  })
+
+  it('negeert een ongeldige opgeslagen correctiewaarde', () => {
+    const stand = cyclusStandVoorTraining({
+      metingen: [groot('2026-08-31')], correctieWaarde: 'kapot', trainingDatum: D, vandaag: D,
+    })
+    expect(stand.cycleWeek).toBe(2)
+  })
+
+  it('telt over de zomertijdovergang heen: 25 maart → 1 april is week 2', () => {
+    const oorspronkelijkeTz = process.env.TZ
+    process.env.TZ = 'Europe/Amsterdam'
+    try {
+      const stand = cyclusStandVoorTraining({
+        metingen: [groot('2026-03-25')], correctieWaarde: null, trainingDatum: '2026-04-01', vandaag: '2026-03-28',
+      })
+      expect(stand.cycleWeek).toBe(2)
     } finally {
       process.env.TZ = oorspronkelijkeTz
     }

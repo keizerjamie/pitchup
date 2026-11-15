@@ -16,6 +16,7 @@ import { blokkenVanKoppelingen, blokLabel } from '@/lib/parallel-groep'
 import { berekenTijdlijn, clampDuurMin, effectieveDuurMin, DUUR_MIN_MAX } from '@/lib/sessie-tijdlijn'
 import SessieTijdlijn from '@/components/SessieTijdlijn'
 import KopieerVorigeTraining, { type KopieerOptie } from '@/components/KopieerVorigeTraining'
+import TrainingsvoorstelKnop from '@/components/TrainingsvoorstelKnop'
 import { berekenDuurUitStap, clampStapOverride, heeftStapInhoud, maxStapVoor, stapInhoud } from '@/lib/periodization-stappen'
 import { bereikVoorNeutralen, teamBereikLabel, vormLabel, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
 import FormationField from '@/components/FormationField'
@@ -138,6 +139,9 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
 
   const [showPicker, setShowPicker] = useState(false)
   const [pickerPresetCategorie, setPickerPresetCategorie] = useState<OefeningCategorie | undefined>(undefined)
+  // Wissel-modus van de picker: één bestaand blok vervangen door een andere
+  // oefening uit dezelfde categorie. null = gewone toevoeg-modus.
+  const [wisselDoel, setWisselDoel] = useState<{ koppelingId: string; huidigeOefeningId: string; categorie: OefeningCategorie } | null>(null)
   // Snapshot van de te bewerken bibliotheek-oefening, geen afgeleide waarde —
   // de editor mag na openen blijven staan met de waarden van het moment van
   // openen, ook als `koppelingen` intussen elders wijzigt.
@@ -255,13 +259,21 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
   }
 
   function openPicker() {
+    setWisselDoel(null)
     setPickerPresetCategorie(undefined)
     setEditingOefening(null)
     setShowPicker(true)
   }
 
   function openSuggestedPicker(categorie: OefeningCategorie) {
+    setWisselDoel(null)
     setPickerPresetCategorie(categorie)
+    setEditingOefening(null)
+    setShowPicker(true)
+  }
+
+  function openWisselPicker(koppelingId: string, huidigeOefeningId: string, categorie: OefeningCategorie) {
+    setWisselDoel({ koppelingId, huidigeOefeningId, categorie })
     setEditingOefening(null)
     setShowPicker(true)
   }
@@ -682,9 +694,20 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
             <p className="text-sm text-faint mt-1">{t.trainingPlan.noExercisesHint}</p>
             {/* Alleen hier: kopiëren plakt achter wat er staat, en dat is bij
                 een half gevuld plan zelden de bedoeling. */}
-            {canEdit && kopieerOpties.length > 0 && (
-              <div className="mt-4 max-w-xs mx-auto">
-                <KopieerVorigeTraining eventId={eventId} opties={kopieerOpties} />
+            {canEdit && (trainingstype === 'vct' || kopieerOpties.length > 0) && (
+              <div className="mt-4 max-w-xs mx-auto flex flex-col gap-2">
+                {/* Eén-tik-voorstel eerst (alleen VCT: teamtactisch heeft geen
+                    cyclusweek), de kopieerknop daaronder. */}
+                {trainingstype === 'vct' && (
+                  <TrainingsvoorstelKnop
+                    eventId={eventId}
+                    heeftCyclusweek={suggestion !== null}
+                    bibliotheekLeeg={library.length === 0}
+                  />
+                )}
+                {kopieerOpties.length > 0 && (
+                  <KopieerVorigeTraining eventId={eventId} opties={kopieerOpties} />
+                )}
               </div>
             )}
           </div>
@@ -855,6 +878,18 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => openWisselPicker(k.id, o.id, o.categorie)}
+                      aria-label={t.trainingPlan.wisselAria.replace('{name}', o.naam)}
+                      className="relative hit-slop w-8 h-8 rounded-lg flex items-center justify-center text-faint hover:bg-surface-sunken hover:text-muted transition-colors active:scale-95"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h12m0 0l-4-4m4 4l-4 4M17 17H5m0 0l4-4m-4 4l4 4" />
                       </svg>
                     </button>
                   )}
@@ -1348,7 +1383,8 @@ export default function TrainingPlanEditor({ eventId, initialDoelstelling, initi
         <OefeningPicker
           eventId={eventId}
           library={library}
-          presetCategorie={pickerPresetCategorie}
+          presetCategorie={wisselDoel?.categorie ?? pickerPresetCategorie}
+          wissel={wisselDoel ?? undefined}
           onClose={() => setShowPicker(false)}
           aanwezigAantal={presentPlayerIds.length}
         />

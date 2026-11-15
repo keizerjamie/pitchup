@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PERIODIZATION_CATEGORIES, berekenStap, type CategorieMeting } from '@/lib/types'
 import { fromUtcMs, isDateString, toUtcMs } from '@/lib/season-dates'
+import { addDays } from '@/lib/utils'
 
 export const CYCLE_LENGTH_WEEKS = 6
 
@@ -456,4 +457,39 @@ export function computeCurrentSteps(
     currentSteps[cat.key] = meting ? berekenStap(meting.stap, occurrences[cat.key] ?? 0) : null
   }
   return currentSteps
+}
+
+// ────────────────────────────────────────────────
+// Cyclusstand voor één training
+// ────────────────────────────────────────────────
+// Eén rekenpad voor "welke cyclusweek geldt voor deze training", gedeeld door
+// de trainingsplanner-pagina en de action stelTrainingVoor. Zonder deze helper
+// zouden twee kopieën van dezelfde vier stappen uit elkaar kunnen lopen, en dan
+// stelt de knop iets anders voor dan de suggestiekaart toont.
+//
+// - `actueel`/`anker` peilen op de TRAININGSDATUM, exclusief: een meting op de
+//   trainingsdag zelf telt nog niet mee.
+// - De vervalregel van de correctie meet ALTIJD tegen het vandaag-anker
+//   (peildatum morgen), net als /periodisering — zie actieveCorrectie.
+// - `correctieWaarde` is de ruwe settings-waarde onder CYCLUS_CORRECTIE_KEY.
+// - Alle datums zijn kale 'YYYY-MM-DD'-strings; `vandaag` levert de aanroeper
+//   (todayLocal()), zodat deze functie puur en testbaar blijft.
+export function cyclusStandVoorTraining(input: {
+  metingen: CategorieMeting[]
+  correctieWaarde: string | null | undefined
+  trainingDatum: string
+  vandaag: string
+}): { actueel: Record<string, ActueleMeting>; anker: string | null; cycleWeek: number | null } {
+  const actueel = actueleMetingen(input.metingen, input.trainingDatum)
+  const anker = ankerDatum(actueel)
+  const opgeslagenCorrectie = parseCyclusCorrectie(input.correctieWaarde)
+  // Het extra rekenwerk gebeurt alleen als er echt een correctie is opgeslagen.
+  const correctie = opgeslagenCorrectie === null
+    ? null
+    : actieveCorrectie(
+        opgeslagenCorrectie,
+        ankerDatum(actueleMetingen(input.metingen, addDays(input.vandaag, 1))),
+      )
+  const cycleWeek = effectieveCyclusWeek({ anker, actieveCorrectie: correctie, onDate: input.trainingDatum })
+  return { actueel, anker, cycleWeek }
 }

@@ -10,6 +10,7 @@ import OefeningPicker from '@/components/OefeningPicker'
 vi.mock('@/app/actions/training-plan', () => ({
   addOefeningToTraining: vi.fn().mockResolvedValue(undefined),
   createAndAddOefening: vi.fn(),
+  wisselOefening: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Verplichte mock voor de nieuwe inline-bewerken-feature (zoals
@@ -20,7 +21,8 @@ vi.mock('@/app/actions/oefening-library', () => ({
   deleteOefening: vi.fn(),
 }))
 
-import { addOefeningToTraining } from '@/app/actions/training-plan'
+import { addOefeningToTraining, wisselOefening } from '@/app/actions/training-plan'
+const mockWissel = wisselOefening as unknown as ReturnType<typeof vi.fn>
 import { updateOefening } from '@/app/actions/oefening-library'
 const mockUpdateOefening = updateOefening as unknown as ReturnType<typeof vi.fn>
 
@@ -466,5 +468,73 @@ describe('OefeningPicker — oefening bewerken vanaf een rij', () => {
 
     fireEvent.click(screen.getByLabelText(nl.oefeningen.editAriaNamed.replace('{name}', 'Oefening B')))
     expect(screen.getByLabelText(`${nl.trainingPlan.exerciseName} *`)).toHaveValue('Oefening B')
+  })
+
+  describe('wissel-modus', () => {
+    function renderWissel(library: Oefening[], onClose = vi.fn(), dict: Dict = nl) {
+      render(
+        <DictProvider dict={dict}>
+          <OefeningPicker
+            eventId="event-1"
+            library={library}
+            onClose={onClose}
+            presetCategorie="partijen_klein"
+            aanwezigAantal={0}
+            wissel={{ koppelingId: 'k1', huidigeOefeningId: 'o1' }}
+          />
+        </DictProvider>,
+      )
+      return { onClose }
+    }
+    const lib = [
+      makeOefening({ id: 'o1', naam: 'Rondo' }),
+      makeOefening({ id: 'o2', naam: 'Vierkant' }),
+      makeOefening({ id: 'o3', naam: 'Sprintreeks', categorie: 'sprints_weinig_rust' }),
+    ]
+
+    it('toont wisseltitel en hint, geen "nieuw maken", huidige oefening eruit, categorie voorgefilterd', () => {
+      renderWissel(lib)
+      expect(screen.getByText(nl.oefeningen.wisselTitel)).toBeTruthy()
+      expect(screen.getByText(nl.oefeningen.wisselHint)).toBeTruthy()
+      expect(screen.queryByText(nl.oefeningen.pickerCreateNew)).toBeNull()
+      expect(screen.queryByText('Rondo')).toBeNull()
+      expect(screen.getByText('Vierkant')).toBeTruthy()
+      expect(screen.queryByText('Sprintreeks')).toBeNull()
+      expect((screen.getByLabelText(nl.oefeningen.filterCategoryLabel) as HTMLSelectElement).value).toBe('partijen_klein')
+    })
+
+    it('categoriefilter is aanpasbaar: andere categorie toont ook die oefeningen', () => {
+      renderWissel(lib)
+      fireEvent.change(screen.getByLabelText(nl.oefeningen.filterCategoryLabel), { target: { value: '' } })
+      expect(screen.getByText('Sprintreeks')).toBeTruthy()
+    })
+
+    it('tik roept wisselOefening(koppeling, event, oefening) aan en sluit de sheet; addOefeningToTraining niet', async () => {
+      const { onClose } = renderWissel(lib)
+      fireEvent.click(screen.getByText('Vierkant'))
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+      expect(mockWissel).toHaveBeenCalledWith('k1', 'event-1', 'o2')
+      expect(addOefeningToTraining).not.toHaveBeenCalled()
+    })
+
+    it('fout: toont generieke wisselFout (nooit de servertekst), sheet blijft open', async () => {
+      mockWissel.mockRejectedValueOnce(new Error('Koppeling niet gevonden'))
+      const { onClose } = renderWissel(lib)
+      fireEvent.click(screen.getByText('Vierkant'))
+      expect(await screen.findByText(nl.oefeningen.wisselFout)).toBeTruthy()
+      expect(screen.queryByText('Koppeling niet gevonden')).toBeNull()
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('geen alternatief in de categorie: toont wisselGeenAlternatief', () => {
+      renderWissel([makeOefening({ id: 'o1', naam: 'Rondo' })])
+      expect(screen.getByText(nl.oefeningen.wisselGeenAlternatief)).toBeTruthy()
+    })
+
+    it('Engelse dictionary: titel en hint', () => {
+      renderWissel(lib, vi.fn(), en)
+      expect(screen.getByText(en.oefeningen.wisselTitel)).toBeTruthy()
+      expect(screen.getByText(en.oefeningen.wisselHint)).toBeTruthy()
+    })
   })
 })

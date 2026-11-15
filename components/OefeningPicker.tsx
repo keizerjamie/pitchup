@@ -5,7 +5,7 @@ import { Oefening, OefeningCategorie, Veldzone, OEFENING_CATEGORIES, VALID_VELDZ
 import type { OefeningInput } from '@/lib/oefening'
 import { filterOefeningen, EMPTY_OEFENING_FILTERS, type OefeningFilters } from '@/lib/oefening-filter'
 import { isFlexibel, sorteerOpPassendheid, bereikLabel } from '@/lib/oefening-bezetting'
-import { addOefeningToTraining, createAndAddOefening } from '@/app/actions/training-plan'
+import { addOefeningToTraining, createAndAddOefening, wisselOefening } from '@/app/actions/training-plan'
 import { updateOefening } from '@/app/actions/oefening-library'
 import OefeningEditor from '@/components/OefeningEditor'
 import BottomSheet from '@/components/ui/BottomSheet'
@@ -22,12 +22,17 @@ interface Props {
    *  Verplicht (geen `?? 0`-fallback): voedt de "past bij aanwezigen"-chip,
    *  die pas verschijnt bij minstens één aanwezige. */
   aanwezigAantal: number
+  /** Wissel-modus: één bestaand blok vervangen i.p.v. toevoegen. De huidige
+   *  oefening valt uit de lijst, "nieuw maken" verdwijnt en een tik wisselt en
+   *  sluit de sheet. Het categoriefilter komt via `presetCategorie` voorgezet
+   *  maar blijft aanpasbaar. */
+  wissel?: { koppelingId: string; huidigeOefeningId: string }
 }
 
 // "Kies uit bibliotheek"-sheet voor de trainingsplanner. Voegt een bestaande
 // bibliotheek-oefening aan de training toe, of opent OefeningEditor om
 // meteen een nieuwe oefening te maken én te koppelen.
-export default function OefeningPicker({ eventId, library, onClose, presetCategorie, aanwezigAantal }: Props) {
+export default function OefeningPicker({ eventId, library, onClose, presetCategorie, aanwezigAantal, wissel }: Props) {
   const t = useDict()
   const [isPending, startTransition] = useTransition()
   // Een periodiseringssuggestie opent de bibliotheek VOORGEFILTERD op die
@@ -52,9 +57,13 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
 
   // Exact eerst, daarna oplopende bereikbreedte (alleen hier — de
   // bibliotheekpagina zelf blijft op created_at desc, eigenaarsbesluit).
+  const bron = useMemo(
+    () => (wissel ? library.filter((o) => o.id !== wissel.huidigeOefeningId) : library),
+    [library, wissel],
+  )
   const filtered = useMemo(
-    () => sorteerOpPassendheid(filterOefeningen(library, filters)),
-    [library, filters],
+    () => sorteerOpPassendheid(filterOefeningen(bron, filters)),
+    [bron, filters],
   )
 
   const aantalToegevoegd = (id: string) => toegevoegd.filter((x) => x === id).length
@@ -66,6 +75,16 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
   function handlePick(oefeningId: string) {
     setError(null)
     startTransition(async () => {
+      if (wissel) {
+        try {
+          await wisselOefening(wissel.koppelingId, eventId, oefeningId)
+          onClose()
+        } catch {
+          // Altijd de generieke melding: de serverteksten zijn geen UI-copy.
+          setError(t.oefeningen.wisselFout)
+        }
+        return
+      }
       try {
         await addOefeningToTraining(eventId, oefeningId)
         setToegevoegd((eerder) => [...eerder, oefeningId])
@@ -117,7 +136,7 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
   }
 
   return (
-    <BottomSheet onClose={onClose} titel={t.oefeningen.pickerTitle} sluitLabel={t.common.close} className="flex flex-col">
+    <BottomSheet onClose={onClose} titel={wissel ? t.oefeningen.wisselTitel : t.oefeningen.pickerTitle} sluitLabel={t.common.close} className="flex flex-col">
       <div className="p-5 space-y-4">
         {error && (
           <div className="rounded-xl bg-panel-red border border-panel-red-edge text-panel-red-ink text-sm px-4 py-3">
@@ -125,7 +144,9 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
           </div>
         )}
 
-        {presetCategorie && (
+        {wissel ? (
+          <p className="text-xs font-semibold text-faint">{t.oefeningen.wisselHint}</p>
+        ) : presetCategorie && (
           <p className="text-xs font-semibold text-faint">{t.oefeningen.pickerSuggestionHint}</p>
         )}
 
@@ -253,13 +274,15 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          className="w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
-        >
-          {t.oefeningen.pickerCreateNew}
-        </button>
+        {!wissel && (
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="w-full py-3 rounded-xl border-2 border-dashed border-warning/30 text-warning-text hover:border-warning/50 hover:bg-warning/10 font-semibold text-sm transition active:scale-[0.98]"
+          >
+            {t.oefeningen.pickerCreateNew}
+          </button>
+        )}
 
         {/* "Past bij aanwezigen"-chip: verborgen bij N=0 (eigenaarsbesluit 4)
             — er is dan nog geen zinvol aantal om op te filteren. Zelfde
@@ -284,7 +307,9 @@ export default function OefeningPicker({ eventId, library, onClose, presetCatego
         {library.length === 0 ? (
           <p className="text-center text-faint text-sm py-6">{t.oefeningen.pickerEmptyLibrary}</p>
         ) : filtered.length === 0 ? (
-          <p className="text-center text-faint text-sm py-6">{t.oefeningen.pickerEmpty}</p>
+          <p className="text-center text-faint text-sm py-6">
+            {wissel ? t.oefeningen.wisselGeenAlternatief : t.oefeningen.pickerEmpty}
+          </p>
         ) : (
           <div className="space-y-2">
             {filtered.map((o) => (

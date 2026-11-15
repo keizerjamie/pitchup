@@ -3,8 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { AttendanceStatus, Oefening, Player, TrainingOefeningWithData, normalizeOefeningTeams, CategorieMeting } from '@/lib/types'
 import { concretiseerBezetting, type TrainingOefeningMetBezetting } from '@/lib/oefening-bezetting'
-import { actueleMetingen, ankerDatum, getTrainingLog, dueCategories, actieveCorrectie, parseCyclusCorrectie, effectieveCyclusWeek, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
-import { addDays, formatDateLong, todayLocal } from '@/lib/utils'
+import { cyclusStandVoorTraining, getTrainingLog, dueCategories, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
+import { formatDateLong, todayLocal } from '@/lib/utils'
 import { resolveClubColors, readableAccentOnWhite } from '@/lib/club-colors'
 import { HeaderBackButton } from '@/components/ui/PageHeader'
 import TrainingPlanEditor from '@/components/TrainingPlanEditor'
@@ -85,24 +85,19 @@ export default async function TrainingPlanPage({ params }: Props) {
   ])
 
   const metingen: CategorieMeting[] = categorieMetingenResult.data ?? []
-  // Peildatum EXCLUSIEF = de datum van DEZE training (strikt vóór — AC 18,
-  // edge 11): een meting op de trainingsdag zelf telt nog niet mee.
-  const actueel = actueleMetingen(metingen, event.date)
-  const anker = ankerDatum(actueel)
-  // Handmatig gezette cyclusweek (settings-rij uit de batch hierboven, dus geen
-  // extra roundtrip). De vervalregel meet ALTIJD tegen het vandaag-anker —
-  // peildatum morgen, net als op /periodisering — en nooit tegen `anker`
-  // hierboven, dat op de trainingsdatum peilt. Eén canonieke peildatum houdt
-  // beide pagina's het eens over "vervallen of niet"; zie actieveCorrectie in
-  // lib/periodization.ts. Het extra rekenwerk gebeurt alleen als er echt een
-  // correctie is opgeslagen.
-  const opgeslagenCorrectie = parseCyclusCorrectie(settingsMap[CYCLUS_CORRECTIE_KEY])
-  const correctie = opgeslagenCorrectie === null
-    ? null
-    : actieveCorrectie(
-        opgeslagenCorrectie,
-        ankerDatum(actueleMetingen(metingen, addDays(todayLocal(), 1))),
-      )
+  // Cyclusstand via de gedeelde helper (cyclusStandVoorTraining in
+  // lib/periodization.ts), die ook de action stelTrainingVoor gebruikt — zo
+  // stellen knop en suggestiekaart nooit een andere week voor. `actueel` en
+  // `anker` peilen EXCLUSIEF op de datum van DEZE training (AC 18, edge 11);
+  // de vervalregel van de handmatige correctie meet daarbinnen altijd tegen
+  // het vandaag-anker (peildatum morgen), net als /periodisering. De
+  // correctiewaarde komt uit de settings-batch hierboven (geen extra roundtrip).
+  const { actueel, cycleWeek } = cyclusStandVoorTraining({
+    metingen,
+    correctieWaarde: settingsMap[CYCLUS_CORRECTIE_KEY],
+    trainingDatum: event.date,
+    vandaag: todayLocal(),
+  })
   // Koppelingen aan deze training, elk met de gejoinde bibliotheek-oefening.
   // Dual-read: bestaande rijen bevatten nog de legacy vorm {grootte, formatie};
   // normaliseer naar {grootte, formaties} vóórdat de UI de data ziet — zowel op
@@ -178,9 +173,9 @@ export default async function TrainingPlanPage({ params }: Props) {
   const { currentSteps } = await getTrainingLog(supabase, ctx.teamId, actueel, event.date)
 
   // ── Cycle-week suggestion: which categories are due this week ──
-  // Een training vóór de correctiedatum blijft op het afgeleide anker; vanaf de
-  // correctiedatum telt de gecorrigeerde cyclus door (na week 6 weer week 1).
-  const cycleWeek = effectieveCyclusWeek({ anker, actieveCorrectie: correctie, onDate: event.date })
+  // `cycleWeek` komt uit cyclusStandVoorTraining hierboven: een training vóór
+  // de correctiedatum blijft op het afgeleide anker; vanaf de correctiedatum
+  // telt de gecorrigeerde cyclus door (na week 6 weer week 1).
   const suggestion = cycleWeek !== null
     ? {
         week: cycleWeek,
@@ -223,7 +218,9 @@ export default async function TrainingPlanPage({ params }: Props) {
         <PrintButton pdf={{ doel: 'trainingsplan', eventId: id, datum: event.date }} />
       </div>
 
-      {/* Desktop: planner left, attendance overview right (sticky). Mobile: overview on top.
+      {/* Desktop: planner left, attendance overview right (sticky). Mobile: planner on top,
+          overview below (visueel via order-*; de DOM-volgorde blijft aanwezigheid → editor,
+          want print leunt daarop).
           Op papier ("kladblok"-model, op verzoek van de eigenaar): aanwezigheid
           als smalle kolom LINKS, oefeningen ernaast en — zodra die kolom op is —
           eronder doorlopend naar volgende pagina's. `print-plan-layout` +
@@ -234,8 +231,8 @@ export default async function TrainingPlanPage({ params }: Props) {
           matcht `lg:grid` niet, bij liggend A4 (~1032 CSS-px) wél — de
           `display:block`-override in `.print-plan-layout` dwingt in beide
           gevallen de normale block-flow af die `float` nodig heeft. */}
-      <div className="print-plan-layout lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start space-y-6 lg:space-y-0">
-        <div className="lg:order-2">
+      <div className="print-plan-layout flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_19rem] lg:gap-8 lg:items-start">
+        <div className="order-2">
           <AttendanceSummary
             present={presentPlayers}
             absent={absentPlayers}
@@ -246,7 +243,7 @@ export default async function TrainingPlanPage({ params }: Props) {
           />
         </div>
 
-        <div className="lg:order-1 min-w-0">
+        <div className="order-1 min-w-0">
           <TrainingPlanEditor
             eventId={id}
             initialDoelstelling={event.doelstelling ?? null}

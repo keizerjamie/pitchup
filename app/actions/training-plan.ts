@@ -8,8 +8,10 @@ import { validateOefening, oefeningRow, type OefeningInput } from '@/lib/oefenin
 import { validateSpelerindeling } from '@/lib/spelerindeling'
 import { validateParallelSpelers, assertGeenOverlap } from '@/lib/parallel-groep'
 import { valideerAantallenOverride, type BezettingBasis } from '@/lib/oefening-bezetting'
-import { normalizeOefeningTeams, type AantallenOverride } from '@/lib/types'
-import { joinedCategorie } from '@/lib/periodization'
+import { normalizeOefeningTeams, type AantallenOverride, type CategorieMeting, type Oefening, type OefeningCategorie } from '@/lib/types'
+import { joinedCategorie, cyclusStandVoorTraining, getTrainingLog, CYCLUS_CORRECTIE_KEY } from '@/lib/periodization'
+import { todayLocal } from '@/lib/utils'
+import { maakTrainingsvoorstel, type TrainingsvoorstelResultaat } from '@/lib/trainingsvoorstel'
 import { clampDuurMin } from '@/lib/sessie-tijdlijn'
 import { clampStapOverride, berekenDuurUitStap } from '@/lib/periodization-stappen'
 import { errorCode, genericError, logError, rpcEventError } from '@/lib/errors'
@@ -1272,4 +1274,180 @@ export async function kopieerTrainingsplan(
 
   revalidatePath(`/events/${doelEventId}/training-plan`)
   return { aantal: nieuw.length }
+}
+
+// ────────────────────────────────────────────────
+// Trainingsvoorstel in één tik
+// ────────────────────────────────────────────────
+
+// Vult een LEGE vct-training met één oefening per categorie die deze
+// cyclusweek aan de beurt is. De client stuurt alleen het event-id: cyclusweek,
+// stappen, aanwezigen en bibliotheek leest de server zelf (tenant-gescoped), en
+// elke oefening komt uit de eigen bibliotheek (ctx.userId) — een client-id wordt
+// nergens vertrouwd. Het algoritme zelf staat puur in lib/trainingsvoorstel.ts.
+//
+// Verwachte afwijzingen komen terug als `{ ok: false, error: <code> }` (de
+// client vertaalt de code); echte fouten gooien, en een databasefout altijd
+// generiek (genericError).
+//
+// Check-dan-insert zijn twee statements (net als kopieerTrainingsplan): een
+// dubbeltik in twee tabbladen tegelijk kan in theorie twee voorstellen
+// opleveren. Geaccepteerd; de UI verbergt de knop zodra er koppelingen zijn en
+// schakelt hem uit tijdens de transitie.
+export async function stelTrainingVoor(eventId: string): Promise<TrainingsvoorstelResultaat> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
+
+  const { data: event } = await supabase
+    .from('events')
+    .select('id, type, date, trainingstype')
+    .eq('id', eventId)
+    .eq('team_id', ctx.teamId)
+    .maybeSingle()
+  const ev = event as { id: string; type: string; date: string; trainingstype: string | null } | null
+  if (!ev || ev.type !== 'training') throw new Error('Event niet gevonden')
+  // Zelfde default als de pagina (`event.trainingstype ?? 'vct'`).
+  if (ev.trainingstype === 'teamtactisch') return { ok: false, error: 'teamtactisch' }
+
+  const [koppelingRes, metingRes, settingRes, attendanceRes, libraryRes] = await Promise.all([
+    supabase.from('training_oefeningen').select('id')
+      .eq('event_id', eventId).eq('team_id', ctx.teamId).limit(1),
+    supabase.from('categorie_metingen').select('*').eq('team_id', ctx.teamId),
+    supabase.from('settings').select('key, value')
+      .eq('team_id', ctx.teamId).eq('key', CYCLUS_CORRECTIE_KEY),
+    supabase.from('attendance').select('player_id, status')
+      .eq('event_id', eventId).eq('team_id', ctx.teamId),
+    // oefeningen.team_id is de EIGENAAR-USER, geen teams.id (lib/authz.ts,
+    // assertOwnOefening): een assistent krijgt zijn EIGEN bibliotheek.
+    supabase.from('oefeningen').select('*').eq('team_id', ctx.userId),
+  ])
+  // Een mislukte lees-query mag nooit stil als "leeg" doorgaan: een lege
+  // koppelinglijst zou een vol plan laten aanvullen, een lege metinglijst een
+  // valse "geen cyclusweek" geven.
+  for (const res of [koppelingRes, metingRes, settingRes, attendanceRes, libraryRes]) {
+    if (res.error) throw genericError('trainingPlan.stelTrainingVoor.lezen', res.error)
+  }
+
+  const asArray = <T,>(data: unknown): T[] => (Array.isArray(data) ? (data as T[]) : [])
+
+  if (asArray(koppelingRes.data).length > 0) return { ok: false, error: 'plan_niet_leeg' }
+
+  const correctieRij = asArray<{ key: string; value: string }>(settingRes.data)
+    .find((r) => r.key === CYCLUS_CORRECTIE_KEY)
+  // todayLocal() draait server-side in UTC — hetzelfde (bestaande) gedrag als
+  // de pagina, zodat knop en suggestiekaart dezelfde week zien.
+  const { actueel, cycleWeek } = cyclusStandVoorTraining({
+    metingen: asArray<CategorieMeting>(metingRes.data),
+    correctieWaarde: correctieRij?.value,
+    trainingDatum: ev.date,
+    vandaag: todayLocal(),
+  })
+  if (cycleWeek === null) return { ok: false, error: 'geen_cyclusweek' }
+
+  const library: Oefening[] = asArray<Oefening>(libraryRes.data).map((o) => ({
+    ...o,
+    teams: normalizeOefeningTeams(o.teams),
+  }))
+  if (library.length === 0) return { ok: false, error: 'lege_bibliotheek' }
+
+  // Zelfde definitie als de pagina: aanwezig = status 'present'.
+  const aanwezigen = asArray<{ player_id: string; status: string }>(attendanceRes.data)
+    .filter((a) => a.status === 'present').length
+
+  const { currentSteps } = await getTrainingLog(supabase, ctx.teamId, actueel, ev.date)
+
+  const uitkomst = maakTrainingsvoorstel({ cycleWeek, currentSteps, library, aanwezigen })
+  if (!uitkomst.ok) return uitkomst
+
+  // Eén statement: alle blokken of geen. Het plan is leeg, dus de volgorde
+  // begint bij 0.
+  const { error } = await supabase.from('training_oefeningen').insert(
+    uitkomst.blokken.map((blok, i) => ({
+      team_id: ctx.teamId,
+      event_id: eventId,
+      oefening_id: blok.oefeningId,
+      volgorde: i,
+      // Besluit V-A: geen vastgezette stap — het blok volgt de periodisering.
+      stap_override: blok.stapOverride,
+      duur_min: blok.duurMin,
+    })),
+  )
+  if (error) throw genericError('trainingPlan.stelTrainingVoor', error)
+
+  revalidatePath(`/events/${eventId}/training-plan`)
+  return { ok: true, aantal: uitkomst.blokken.length, overgeslagen: uitkomst.overgeslagen }
+}
+
+// Vervangt de oefening van één koppeling door een andere uit de eigen
+// bibliotheek. Bewust een UPDATE op dezelfde rij en geen delete + insert: id,
+// volgorde, created_at, parallel_groep_id, parallel_spelers en geneste kinderen
+// (genest_in wijst naar dit id) blijven zo intact. Een delete zou via ON DELETE
+// SET NULL de kinderen loskoppelen.
+//
+// Wat wél meeverandert:
+// - stap_override: bij gelijke categorie blijft hij staan (opnieuw geclampt op
+//   die categorie), bij een andere categorie wordt hij null (besluit V-A);
+// - duur_min: berekenDuurUitStap(nieuwe categorie, stap) ?? de bibliotheekduur
+//   van de nieuwe oefening — een handmatige duur gaat bewust verloren (V-D);
+// - spelerindeling [] en aantallen_override null: die horen bij de teamvorm van
+//   de OUDE oefening en zouden bij een andere vorm naar verkeerde teams wijzen.
+export async function wisselOefening(
+  koppelingId: string,
+  eventId: string,
+  oefeningId: string,
+): Promise<void> {
+  const supabase = await createClient()
+  const ctx = await requireTeamContext()
+  assertCanEdit(ctx, 'training')
+
+  // Niet-onthullend: een kapot id is van buitenaf niet te onderscheiden van een
+  // onbekende koppeling.
+  if (!isUuid(koppelingId) || !isUuid(eventId) || !isUuid(oefeningId)) {
+    throw new Error('Koppeling niet gevonden')
+  }
+
+  const [, koppelingRes, oefeningRes] = await Promise.all([
+    assertOwnEvent(supabase, eventId, ctx.teamId),
+    supabase.from('training_oefeningen')
+      .select('id, oefening_id, stap_override, oefeningen(categorie)')
+      .eq('id', koppelingId).eq('event_id', eventId).eq('team_id', ctx.teamId)
+      .maybeSingle(),
+    // Eigen bibliotheek: oefeningen.team_id is de eigenaar-user (ctx.userId).
+    supabase.from('oefeningen').select('id, categorie, duur_min')
+      .eq('id', oefeningId).eq('team_id', ctx.userId)
+      .maybeSingle(),
+  ])
+
+  const koppeling = koppelingRes.data as
+    | { id: string; oefening_id: string; stap_override: number | null; oefeningen?: unknown }
+    | null
+  if (!koppeling) throw new Error('Koppeling niet gevonden')
+  const nieuw = oefeningRes.data as { id: string; categorie: OefeningCategorie; duur_min: number | null } | null
+  if (!nieuw) throw new Error('Oefening niet gevonden')
+
+  // Dezelfde oefening: niets te doen (en de teamindeling blijft staan).
+  if (koppeling.oefening_id === nieuw.id) return
+
+  const oudeCategorie = joinedCategorie(koppeling)
+  const stap = oudeCategorie === nieuw.categorie
+    ? clampStapOverride(koppeling.stap_override ?? null, nieuw.categorie)
+    : null
+  const duur = berekenDuurUitStap(nieuw.categorie, stap) ?? clampDuurMin(nieuw.duur_min)
+
+  const { error } = await supabase
+    .from('training_oefeningen')
+    .update({
+      oefening_id: nieuw.id,
+      stap_override: stap,
+      duur_min: duur,
+      spelerindeling: [],
+      aantallen_override: null,
+    })
+    .eq('id', koppelingId)
+    .eq('event_id', eventId)
+    .eq('team_id', ctx.teamId)
+
+  if (error) throw genericError('trainingPlan.wisselOefening', error)
+  revalidatePath(`/events/${eventId}/training-plan`)
 }

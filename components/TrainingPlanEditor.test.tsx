@@ -23,6 +23,8 @@ vi.mock('@/app/actions/training-plan', () => ({
   voegToeAanParallelGroep: vi.fn().mockResolvedValue(undefined),
   haalUitParallelGroep: vi.fn().mockResolvedValue(undefined),
   saveParallelIndeling: vi.fn().mockResolvedValue(undefined),
+  stelTrainingVoor: vi.fn().mockResolvedValue({ ok: true, aantal: 2, overgeslagen: [] }),
+  wisselOefening: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Verplichte mock voor de nieuwe inline-bewerken-feature (zoals
@@ -36,7 +38,7 @@ vi.mock('@/app/actions/oefening-library', () => ({
   kopieerOefeningNaarBibliotheek: vi.fn(),
 }))
 
-import { removeOefeningFromTraining, saveSpelerindeling, updateKoppeling, reorderKoppelingen, vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
+import { wisselOefening, stelTrainingVoor, removeOefeningFromTraining, saveSpelerindeling, updateKoppeling, reorderKoppelingen, vormParallelGroep, voegToeAanParallelGroep, haalUitParallelGroep } from '@/app/actions/training-plan'
 import { updateOefening } from '@/app/actions/oefening-library'
 import { en } from '@/messages/en'
 const mockRemove = removeOefeningFromTraining as unknown as ReturnType<typeof vi.fn>
@@ -787,5 +789,74 @@ describe('TrainingPlanEditor — verwijderen van een koppeling die op de server 
     fireEvent.click(screen.getByLabelText(nl.trainingPlan.unlink))
     await waitFor(() => expect(mockRemove).toHaveBeenCalled())
     expect(refreshMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('TrainingPlanEditor — trainingsvoorstel (lege staat) en wissel', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const bib = [
+    { id: 'o1', team_id: 'team1', naam: 'Positiespel', beschrijving: null, categorie: 'positiespel', duur_min: 10, breedte_m: null, lengte_m: null, orientatie: 'vrij', veldzone: null, teams: [], aantal_neutralen: 0, diagram: null, created_at: '2024-01-01T00:00:00Z' },
+    { id: 'o2', team_id: 'team1', naam: 'Tweede spel', beschrijving: null, categorie: 'positiespel', duur_min: 10, breedte_m: null, lengte_m: null, orientatie: 'vrij', veldzone: null, teams: [], aantal_neutralen: 0, diagram: null, created_at: '2024-01-01T00:00:00Z' },
+  ] as Oefening[]
+
+  function renderLeeg(opts: { canEdit?: boolean; type?: 'vct' | 'teamtactisch'; suggestion?: { week: number; items: { key: string; step: number | null }[] } | null; library?: Oefening[]; koppelingen?: TrainingOefeningMetBezetting[] } = {}) {
+    return render(
+      <DictProvider dict={nl}>
+        <TrainingPlanEditor
+          eventId="e1"
+          initialDoelstelling={null}
+          initialOefeningen={opts.koppelingen ?? []}
+          library={opts.library ?? bib}
+          currentSteps={{}}
+          hasNulmeting={true}
+          suggestion={opts.suggestion === undefined ? { week: 1, items: [] } : opts.suggestion}
+          players={players}
+          presentPlayerIds={['p1']} startTijd={null} kopieerOpties={[]} initialTrainingstype={opts.type ?? 'vct'}
+          canEdit={opts.canEdit ?? true}
+          userId="team1"
+        />
+      </DictProvider>,
+    )
+  }
+
+  it('lege VCT-staat met recht: voorstelknop zichtbaar; tik roept stelTrainingVoor aan', async () => {
+    renderLeeg()
+    fireEvent.click(screen.getByRole('button', { name: nl.trainingPlan.voorstelKnop }))
+    await waitFor(() => expect(stelTrainingVoor).toHaveBeenCalledWith('e1'))
+  })
+
+  it('teamtactisch of zonder recht: geen voorstelknop', () => {
+    const { unmount } = renderLeeg({ type: 'teamtactisch' })
+    expect(screen.queryByRole('button', { name: nl.trainingPlan.voorstelKnop })).toBeNull()
+    unmount()
+    renderLeeg({ canEdit: false })
+    expect(screen.queryByRole('button', { name: nl.trainingPlan.voorstelKnop })).toBeNull()
+  })
+
+  it('zonder cyclusweek: uitleg i.p.v. knop; lege bibliotheek: link naar bibliotheek', () => {
+    const { unmount } = renderLeeg({ suggestion: null })
+    expect(screen.getByText(nl.trainingPlan.voorstelGeenCyclusweek)).toBeInTheDocument()
+    unmount()
+    renderLeeg({ library: [] })
+    expect(screen.getByText(nl.trainingPlan.voorstelLegeBibliotheek)).toBeInTheDocument()
+  })
+
+  it('gevuld plan: geen voorstelknop', () => {
+    renderLeeg({ koppelingen: [makeKoppeling()] })
+    expect(screen.queryByRole('button', { name: nl.trainingPlan.voorstelKnop })).toBeNull()
+  })
+
+  it('wisselknop per blok opent de picker in wissel-modus; kiezen roept wisselOefening(k1, e1, o2) aan', async () => {
+    renderLeeg({ koppelingen: [makeKoppeling()] })
+    fireEvent.click(screen.getByLabelText(nl.trainingPlan.wisselAria.replace('{name}', 'Positiespel')))
+    expect(screen.getByText(nl.oefeningen.wisselTitel)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Tweede spel'))
+    await waitFor(() => expect(wisselOefening).toHaveBeenCalledWith('k1', 'e1', 'o2'))
+  })
+
+  it('zonder recht: geen wisselknop', () => {
+    renderLeeg({ koppelingen: [makeKoppeling()], canEdit: false })
+    expect(screen.queryByLabelText(nl.trainingPlan.wisselAria.replace('{name}', 'Positiespel'))).toBeNull()
   })
 })

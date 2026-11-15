@@ -22,6 +22,8 @@ import {
   verplaatsParallelSpeler,
   saveDoelstelling,
   herstelKoppeling,
+  stelTrainingVoor,
+  wisselOefening,
 } from '@/app/actions/training-plan'
 import type { HerstelKoppeling } from '@/lib/herstel'
 
@@ -2162,5 +2164,314 @@ describe('saveDoelstelling', () => {
       { col: 'id', val: 'e1' },
       { col: 'team_id', val: 'team-1' },
     ])
+  })
+})
+
+// ════════════════════════════════════════════════
+// Trainingsvoorstel in één tik
+// ════════════════════════════════════════════════
+
+describe('stelTrainingVoor', () => {
+  // Training op 2026-09-08 met een meting op 2026-08-31 ⇒ cyclusweek 2 ⇒
+  // partijen_groot + steigerungs.
+  const EVENT = { id: 'e1', type: 'training', date: '2026-09-08', trainingstype: 'vct' }
+  const METING = { id: 'm1', team_id: 'team-1', categorie: 'partijen_groot', datum: '2026-08-31', stap: 3, notes: null, created_at: '' }
+  const bib = (id: string, categorie: string, extra: Record<string, unknown> = {}) => ({
+    id, team_id: 'team-1', naam: id, beschrijving: null, categorie, duur_min: 15, breedte_m: null, lengte_m: null,
+    orientatie: 'vrij', veldzone: null, teams: [], aantal_neutralen: 0, aantal_neutralen_max: null, diagram: null,
+    created_at: '', ...extra,
+  })
+  const BIBLIOTHEEK = [bib('o-groot', 'partijen_groot'), bib('o-steig', 'steigerungs', { duur_min: 10 }), bib('o-wu', 'warming_up')]
+
+  function voorstelMock(over: {
+    event?: unknown
+    koppelingen?: unknown[]
+    metingen?: unknown[]
+    bibliotheek?: unknown[]
+    insertError?: unknown
+    user?: { id: string }
+    teamMembers?: TableResult
+    settings?: TableResult
+    leesFout?: string
+  } = {}) {
+    return makeSupabase({
+      user: over.user,
+      tables: {
+        categorie_metingen: over.leesFout === 'categorie_metingen'
+          ? { data: null, error: { message: 'boom' } }
+          : { data: over.metingen ?? [METING], error: null },
+        attendance: { data: [
+          { player_id: 'p1', status: 'present' }, { player_id: 'p2', status: 'absent' },
+        ], error: null },
+        oefeningen: { data: over.bibliotheek ?? BIBLIOTHEEK, error: null },
+        ...(over.settings ? { settings: over.settings } : {}),
+        ...(over.teamMembers ? { team_members: over.teamMembers } : {}),
+      },
+      queues: {
+        // 1) event zelf, 2) getTrainingLog: geen eerdere trainingen.
+        events: [{ data: over.event === undefined ? EVENT : over.event, error: null }, { data: [], error: null }],
+        // 1) bestaande koppelingen, 2) insert-resultaat.
+        training_oefeningen: [
+          over.leesFout === 'training_oefeningen'
+            ? { data: null, error: { message: 'boom' } }
+            : { data: over.koppelingen ?? [], error: null },
+          { error: over.insertError ?? null },
+        ],
+      },
+    })
+  }
+
+  it('schrijft één bulk-insert met de juiste rijvorm en revalideert de planner', async () => {
+    const m = voorstelMock()
+    use(m)
+    const uitkomst = await stelTrainingVoor('e1')
+
+    expect(uitkomst).toEqual({ ok: true, aantal: 2, overgeslagen: [] })
+    const inserts = m.calls.insert.filter((i) => i.table === 'training_oefeningen')
+    expect(inserts).toHaveLength(1)
+    const rijen = inserts[0].payload as unknown as Record<string, unknown>[]
+    expect(rijen).toEqual([
+      // Stap 3 ⇒ duur uit de stappentabel (12 × 2 + 2 = 26), niet de 15 van de bibliotheek.
+      { team_id: 'team-1', event_id: 'e1', oefening_id: 'o-groot', volgorde: 0, stap_override: null, duur_min: 26 },
+      { team_id: 'team-1', event_id: 'e1', oefening_id: 'o-steig', volgorde: 1, stap_override: null, duur_min: 10 },
+    ])
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/training-plan')
+  })
+
+  it('scoped alle leesqueries op het team, en de bibliotheek op de eigen user', async () => {
+    const m = voorstelMock()
+    use(m)
+    await stelTrainingVoor('e1')
+    const eqsVan = (table: string) => m.calls.select.filter((s) => s.table === table).map((s) => s.eqs)
+    for (const table of ['events', 'training_oefeningen', 'categorie_metingen', 'attendance']) {
+      for (const eqs of eqsVan(table)) expect(eqs).toContainEqual({ col: 'team_id', val: 'team-1' })
+    }
+    const oef = eqsVan('oefeningen')
+    expect(oef).toHaveLength(1)
+    expect(oef[0]).toContainEqual({ col: 'team_id', val: 'team-1' })
+    const settings = m.calls.select.filter((s) => s.table === 'settings' && s.eqs.some((e) => e.col === 'key' && e.val === 'cyclus_week_correctie'))
+    expect(settings).toHaveLength(1)
+    expect(settings[0].eqs).toContainEqual({ col: 'team_id', val: 'team-1' })
+  })
+
+  it('een assistent krijgt een voorstel uit zijn EIGEN bibliotheek, opgeslagen op het team', async () => {
+    const m = voorstelMock({
+      user: { id: 'assist-1' },
+      teamMembers: { data: [{ team_id: 'team-1', user_id: 'assist-1', rol: 'assistent', mag_training_bewerken: true }], error: null },
+    })
+    use(m)
+    expect(await stelTrainingVoor('e1')).toMatchObject({ ok: true })
+    const oef = m.calls.select.find((s) => s.table === 'oefeningen')!
+    expect(oef.eqs).toContainEqual({ col: 'team_id', val: 'assist-1' })
+    const rijen = m.calls.insert[0].payload as unknown as Record<string, unknown>[]
+    expect(rijen.every((r) => r.team_id === 'team-1')).toBe(true)
+  })
+
+  it('weigert zonder Training-recht met "Geen toegang" en schrijft niets', async () => {
+    const m = voorstelMock({
+      teamMembers: { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null },
+    })
+    use(m)
+    await expect(stelTrainingVoor('e1')).rejects.toThrow('Geen toegang')
+    expect(m.calls.insert).toHaveLength(0)
+  })
+
+  it('gooit "Event niet gevonden" bij een onbekend event of een wedstrijd', async () => {
+    for (const event of [null, { ...EVENT, type: 'match' }]) {
+      const m = voorstelMock({ event })
+      use(m)
+      await expect(stelTrainingVoor('e1')).rejects.toThrow('Event niet gevonden')
+      expect(m.calls.insert).toHaveLength(0)
+    }
+  })
+
+  it.each([
+    ['teamtactisch', { event: { ...EVENT, trainingstype: 'teamtactisch' } }],
+    ['plan_niet_leeg', { koppelingen: [{ id: 'k1' }] }],
+    ['geen_cyclusweek', { metingen: [] }],
+    ['lege_bibliotheek', { bibliotheek: [] }],
+    ['niets_passend', { bibliotheek: [bib('o-wu', 'warming_up')] }],
+  ])('geeft { ok: false, error: %s } zonder insert en zonder revalidatie', async (code, over) => {
+    const m = voorstelMock(over as Parameters<typeof voorstelMock>[0])
+    use(m)
+    expect(await stelTrainingVoor('e1')).toEqual({ ok: false, error: code })
+    expect(m.calls.insert).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('meldt een overgeslagen categorie', async () => {
+    const m = voorstelMock({ bibliotheek: [bib('o-groot', 'partijen_groot')] })
+    use(m)
+    expect(await stelTrainingVoor('e1')).toEqual({ ok: true, aantal: 1, overgeslagen: ['steigerungs'] })
+  })
+
+  it('gebruikt een actieve handmatige correctie uit de settings', async () => {
+    // Correctie: op 2026-09-08 zit het team in week 5 (snapshot = anker
+    // 2026-08-31, dat ook vandaag nog geldt) ⇒ partijen_klein + sprints_veel_rust.
+    const m = voorstelMock({
+      settings: { data: [{ team_id: 'team-1', key: 'cyclus_week_correctie', value: '5|2026-09-08|2026-08-31' }], error: null },
+      bibliotheek: [bib('o-klein', 'partijen_klein'), bib('o-svr', 'sprints_veel_rust'), bib('o-groot', 'partijen_groot')],
+    })
+    use(m)
+    expect(await stelTrainingVoor('e1')).toEqual({ ok: true, aantal: 2, overgeslagen: [] })
+    const rijen = m.calls.insert[0].payload as unknown as Record<string, unknown>[]
+    expect(rijen.map((r) => r.oefening_id)).toEqual(['o-klein', 'o-svr'])
+  })
+
+  it('maakt van een insert-fout een generieke melding', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = voorstelMock({ insertError: { message: 'duplicate key secret detail' } })
+    use(m)
+    await expect(stelTrainingVoor('e1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(revalidatePath).not.toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
+  it.each(['training_oefeningen', 'categorie_metingen'])(
+    'gaat bij een mislukte lees-query op %s niet stil door maar gooit generiek',
+    async (tabel) => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const m = voorstelMock({ leesFout: tabel })
+      use(m)
+      await expect(stelTrainingVoor('e1')).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+      expect(m.calls.insert).toHaveLength(0)
+      consoleError.mockRestore()
+    },
+  )
+})
+
+describe('wisselOefening', () => {
+  const K = '11111111-1111-4111-8111-111111111111'
+  const E = '22222222-2222-4222-8222-222222222222'
+  const O_OUD = '33333333-3333-4333-8333-333333333333'
+  const O_NIEUW = '44444444-4444-4444-8444-444444444444'
+
+  function wisselMock(over: {
+    koppeling?: unknown
+    oefening?: unknown
+    event?: unknown
+    updateError?: unknown
+    teamMembers?: TableResult
+  } = {}) {
+    return makeSupabase({
+      tables: {
+        events: { data: over.event === undefined ? { id: E } : over.event, error: null },
+        oefeningen: { data: over.oefening === undefined
+          ? { id: O_NIEUW, categorie: 'partijen_groot', duur_min: 40 }
+          : over.oefening, error: null },
+        ...(over.teamMembers ? { team_members: over.teamMembers } : {}),
+      },
+      queues: {
+        training_oefeningen: [
+          { data: over.koppeling === undefined
+            ? { id: K, oefening_id: O_OUD, stap_override: 30, oefeningen: { categorie: 'partijen_groot' } }
+            : over.koppeling, error: null },
+          { error: over.updateError ?? null },
+        ],
+      },
+    })
+  }
+
+  it('werkt bij gelijke categorie dezelfde rij bij: stap blijft (geclampt), duur uit de stap', async () => {
+    const m = wisselMock()
+    use(m)
+    await wisselOefening(K, E, O_NIEUW)
+
+    expect(m.calls.delete).toHaveLength(0)
+    expect(m.calls.insert).toHaveLength(0)
+    const updates = m.calls.update.filter((u) => u.table === 'training_oefeningen')
+    expect(updates).toHaveLength(1)
+    // stap 30 > maxStap 21 ⇒ 21 ⇒ 15 × 6 + 2 × 5 = 100 minuten.
+    expect(updates[0].payload).toEqual({
+      oefening_id: O_NIEUW, stap_override: 21, duur_min: 100, spelerindeling: [], aantallen_override: null,
+    })
+    expect(updates[0].eqs).toEqual([
+      { col: 'id', val: K }, { col: 'event_id', val: E }, { col: 'team_id', val: 'team-1' },
+    ])
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${E}/training-plan`)
+  })
+
+  it('bij een andere categorie wordt de stap null en komt de duur uit de bibliotheek', async () => {
+    const m = wisselMock({ oefening: { id: O_NIEUW, categorie: 'steigerungs', duur_min: 12 } })
+    use(m)
+    await wisselOefening(K, E, O_NIEUW)
+    expect(m.calls.update[0].payload).toEqual({
+      oefening_id: O_NIEUW, stap_override: null, duur_min: 12, spelerindeling: [], aantallen_override: null,
+    })
+  })
+
+  it('gelijke categorie zonder vastgezette stap: duur uit de bibliotheek (V-D)', async () => {
+    const m = wisselMock({ koppeling: { id: K, oefening_id: O_OUD, stap_override: null, oefeningen: { categorie: 'partijen_groot' } } })
+    use(m)
+    await wisselOefening(K, E, O_NIEUW)
+    expect(m.calls.update[0].payload).toMatchObject({ stap_override: null, duur_min: 40 })
+  })
+
+  it('valideert de nieuwe oefening op de eigen user en de koppeling op het team', async () => {
+    const m = wisselMock()
+    use(m)
+    await wisselOefening(K, E, O_NIEUW)
+    const oef = m.calls.select.find((s) => s.table === 'oefeningen')!
+    expect(oef.eqs).toEqual([{ col: 'id', val: O_NIEUW }, { col: 'team_id', val: 'team-1' }])
+    const kop = m.calls.select.find((s) => s.table === 'training_oefeningen')!
+    expect(kop.eqs).toEqual([{ col: 'id', val: K }, { col: 'event_id', val: E }, { col: 'team_id', val: 'team-1' }])
+  })
+
+  it('een oefening uit een vreemde bibliotheek → "Oefening niet gevonden", geen update', async () => {
+    const m = wisselMock({ oefening: null })
+    use(m)
+    await expect(wisselOefening(K, E, O_NIEUW)).rejects.toThrow('Oefening niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('een onbekende koppeling → "Koppeling niet gevonden", geen update', async () => {
+    const m = wisselMock({ koppeling: null })
+    use(m)
+    await expect(wisselOefening(K, E, O_NIEUW)).rejects.toThrow('Koppeling niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('een event van een ander team → "Event niet gevonden", geen update', async () => {
+    const m = wisselMock({ event: null })
+    use(m)
+    await expect(wisselOefening(K, E, O_NIEUW)).rejects.toThrow('Event niet gevonden')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it.each([
+    ['koppelingId', ['geen-uuid', E, O_NIEUW]],
+    ['eventId', [K, 'geen-uuid', O_NIEUW]],
+    ['oefeningId', [K, E, 'geen-uuid']],
+  ])('een ongeldig %s → "Koppeling niet gevonden" zonder enige query', async (_naam, args) => {
+    const m = wisselMock()
+    use(m)
+    await expect(wisselOefening(...(args as [string, string, string]))).rejects.toThrow('Koppeling niet gevonden')
+    expect(m.calls.select.filter((s) => s.table !== 'team_members' && s.table !== 'settings')).toHaveLength(0)
+  })
+
+  it('dezelfde oefening is een no-op', async () => {
+    const m = wisselMock({ oefening: { id: O_OUD, categorie: 'partijen_groot', duur_min: 40 } })
+    use(m)
+    await wisselOefening(K, E, O_OUD)
+    expect(m.calls.update).toHaveLength(0)
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('weigert zonder Training-recht met "Geen toegang"', async () => {
+    const m = wisselMock({
+      teamMembers: { data: [{ team_id: 'team-1', user_id: 'team-1', rol: 'assistent' }], error: null },
+    })
+    use(m)
+    await expect(wisselOefening(K, E, O_NIEUW)).rejects.toThrow('Geen toegang')
+    expect(m.calls.update).toHaveLength(0)
+  })
+
+  it('maakt van een update-fout een generieke melding', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const m = wisselMock({ updateError: { message: 'interne details' } })
+    use(m)
+    await expect(wisselOefening(K, E, O_NIEUW)).rejects.toThrow(GENERIC_ERROR_MESSAGE)
+    expect(revalidatePath).not.toHaveBeenCalled()
+    consoleError.mockRestore()
   })
 })
