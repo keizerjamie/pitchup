@@ -4489,3 +4489,35 @@ Snelle winst 1 uit de schermreview. Via feature-factory; ketenmap
   (geaccepteerd). `todayLocal()` op de server = UTC (bestaand, buiten scope).
 - **Open:** Jamie checkt of standaardtijd 10:00 / locatie CSW echt van zijn laatst aangemaakte training komt; rooktest
   in productie (een reeks echt aanmaken).
+
+## Feature: Trainingsvoorstel in één tik + plannen bovenaan op mobiel (2026-11-15, `dcd9d0a`, live)
+Snelle winst 2 uit de schermreview. Via feature-factory; ketenmap
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-snelle-winst/` (f2-01 t/m f2-05).
+- **Wat:** in een lege planner (alleen `vct`, alleen met training-recht) knop "Stel een training voor" boven
+  "Kopieer van vorige training". Zonder cyclusweek → uitlegregel; lege eigen bibliotheek → melding + link
+  `/oefeningen`. Elk blok heeft een Wissel-knop (inline SVG) die `OefeningPicker` in wissel-modus opent.
+- **Algoritme (`lib/trainingsvoorstel.ts`, puur, deterministisch):** één blok per categorie uit
+  `dueCategories(cyclusweek)` (dus max. 2 blokken, partijvorm eerst); duur = `berekenDuurUitStap(cat, geclampte
+  currentStep) ?? clampDuurMin(duur_min)`, null telt als 0; voorkeur `matchesOefeningFilters({bevatAantal})` dan
+  `sorteerOpPassendheid`, tiebreak naam (code-point) + id; budget `STANDAARD_SESSIEDUUR_MIN` (90).
+- **Actions (`app/actions/training-plan.ts`):** `stelTrainingVoor(eventId)` — server leest event/metingen/correctie/
+  aanwezigheid ('present')/bibliotheek (`ctx.userId`) zelf, foutcodes teamtactisch → plan_niet_leeg →
+  geen_cyclusweek → lege_bibliotheek → niets_passend, leesfouten nooit als "leeg" (generiek gooien), één
+  bulk-insert met **`stap_override = null`** (besluit V-A: geen "(handmatig)"-label, blok volgt de periodisering).
+  `wisselOefening(koppelingId, eventId, oefeningId)` — **UPDATE op dezelfde rij** (id/volgorde/genest/parallel blijven),
+  spelerindeling `[]`, aantallen_override null, stap geclampt bij zelfde categorie anders null, duur uit stap of
+  bibliotheek. Gedeelde helper `cyclusStandVoorTraining` in `lib/periodization.ts` (page + action).
+- **Mobiel:** wrapper `print-plan-layout flex flex-col gap-6 lg:grid …`, aanwezigheid `order-2`, editor `order-1`;
+  DOM-volgorde ongewijzigd. Print blijft gelijk doordat `.print-plan-layout { display:block !important }` flex/grid
+  (en dus `order`) uitzet. Geen `space-y` meer (marge zou op het DOM-eerste kind vallen).
+- **Besluiten Jamie:** 90 min vast; alleen cyclus-onderdelen (geen warming-up/afsluiter); direct opslaan; inactieven
+  met 'present' tellen mee (zoals de chip); wissel-duur = die van de nieuwe oefening (≠ voorstel dat uit de stap
+  rekent — mogelijk vervolg).
+- **Tests:** `lib/trainingsvoorstel.test.ts`, `trainingsvoorstel.acceptance.test.ts(x)` + eigen
+  `trainingsvoorstel.tabel-engine.ts` (filters, join, insert-hold voor dubbeltik), component-tests.
+- **Gotchas:** dev-server toont gewijzigde `messages/*.ts` pas na herstart (opnieuw gezien). **Gedeelde werkmap met
+  een andere sessie:** die stagede alles tegelijk; commit gedaan met een privé-index (`GIT_INDEX_FILE` + `read-tree
+  HEAD` + `git apply --cached --unidiff-zero` voor alleen de eigen hunks in `messages/*.ts`), boom eerst geëxporteerd
+  (`checkout-index --prefix`) en daar typecheck + tests gedraaid.
+- **Open:** rooktest in productie (een voorstel echt maken en een blok wisselen); ES/DE-knoptekst op 320px niet in
+  browser gezien.
