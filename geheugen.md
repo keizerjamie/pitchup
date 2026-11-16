@@ -4623,3 +4623,44 @@ Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-
   guard AC22 in `trainer-zelfreview-story` faalt bij elk nieuw bestand dat "zelfreview" noemt → lijst bijwerken.
 - **Browsergeverifieerd** (CSW 2, 1440×900 en 375×812, licht en donker). **Open:** rooktest op iPhone door Jamie
   (afvinken → hoofdkaart verschuift; middernachtgedrag).
+
+## Feature: Wedstrijd als één flow — stapper Beschikbaar → Selectie → Opstelling → Analyse (2026-11-16, `500eec3`, live)
+Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-wedstrijdflow/` (01–08). Uit de schermreview van 2026-11-04.
+- **Routes ongewijzigd** (besluit Jamie): `/events/[id]` (= stap 1 Beschikbaar), `/squad`, `/lineup`, `/analysis` krijgen elk
+  `components/wedstrijd/WedstrijdStapper` (server, `<ol>` + `aria-current="step"`, `print:hidden`) en `VolgendeStap` (niet sticky;
+  niet op analyse). Op het detail vervangen ze de drie wedstrijd-ActionCards; training/meting ongewijzigd. Deeplinks/PDF ongewijzigd.
+- **Pure modules:** `lib/wedstrijd-stappen.ts` (`bouwStapperData`, `stapHref`, `volgendeStap`, `telBeschikbaarheid`,
+  **`wedstrijdDatumBereikt` = de ene regel voor "gespeeld"** — eventdetail, analysepagina, stapper, lineup-kandidaten; servertijd
+  `todayLocal()`, middernachtgat t.o.v. Amsterdam-startscherm bewust open), `lib/wedstrijd-selectie-info.ts` (`groepeerSelectie`,
+  `bouwRecenteMinuten`, `RECENTE_WEDSTRIJDEN=3`), `lib/vorige-opstelling.ts` (`bepaalVorigeOpstelling`).
+- **Stapperstatus = alleen data** (besluit): selectie ≥1 `match_squad`-rij, opstelling `telOpstelling().compleet`, analyse
+  `analyseBestaat`; `task_overrides` telt NIET mee (handmatig afgevinkte To-do blijft in stapper open). Queryfout → `'onbekend'`
+  (geen vinkje). Beschikbaar krijgt nooit een vinkje, wel "x aanwezig · y geen reactie" (gasten niet in aanwezig).
+- **Selectie toont nu alle actieve spelers** in drie groepen (aanwezig / geen reactie / afwezig+geblesseerd+inactief in
+  `<details>`, auto-open met geselecteerde speler erin), gast-regel `teltMee`. Rij: positie · status, chip = `players.injured`,
+  3 minutenwaarden nieuwste eerst, "–" = geen rij (≠ 0). Alles in de `print:hidden`-div; `MatchSquadPrintList` onaangeroerd.
+  Laatste 3 = eerdere datum (`.lt('date', event.date)`, tweede wedstrijd op dezelfde dag telt niet) én `<= todayLocal()`.
+  Squad-vormquery staat letterlijk (broncontract-test); de nieuwe query mag `.lt('date', todayLocal())` niet bevatten.
+- **Opstelling:** "Opstelling vorige wedstrijd overnemen" — bron = nieuwste eerdere gespeelde wedstrijd met lineups-rij binnen
+  `FORM_MATCH_HORIZON`; onleesbaar → geen fallback naar oudere. Slots alleen met beschikbare spelers (bank-set, actief, status niet
+  absent/injured), dubbel → één keer. Alleen clientstate; opslaan via bestaande `saveLineup` (hervalideert ids). Bevestiging bij
+  gevuld veld. **Onopgeslagen-bewaking** `lib/use-onopgeslagen-bewaking.ts`: capture-klik op interne links + `beforeunload` +
+  terugpijl via `data-onopgeslagen-terug` op `BackButton` (sentinel `TERUG_DOEL`, gedeelde helper `gaTerug`); browser-terug/veeg
+  bewust ongedekt. `components/ui/BevestigBlad.tsx` (op BottomSheet, prop `nadruk`: verlaten-blad heeft "Blijven" primair).
+  Mobiel: knop "Bank (n)" (`sm:hidden`) → BottomSheet; inline bank `max-sm:hidden`.
+- **Revalidatie uitgebreid:** aanwezigheid-acties → ook `/lineup` + `/analysis`; `toggleSquadPlayer` → `/lineup` + `/analysis`;
+  `saveLineup` → `/analysis` + `('/events/[id]/lineup','page')`; match-analysis → `/squad` + `/lineup`; speelminuten →
+  `('/events/[id]/squad','page')`. `saveMatchRating` revalideert nog steeds bewust niets.
+- **Tests:** `wedstrijdflow.acceptance.test.tsx` (130), unit-tests per lib-module, component-tests. Bewust aangepast:
+  kloppende-cijfers Punt 3/4 (kaarten → stapper), wedstrijdselectie Story-AC1–3 + aanwezigheidsfilter-blok, afmeldperiode AC3,
+  blessure-status; fixtures met `match_events`/`lineups`/`match_squad` in opstelling-*- en inzichten-metrics-mocks. Eindrun 7707
+  groen, rood alleen cyclusweek AC1/AC12 (+ flaky timeout inzichten-metrics AC-6.7, los groen); test:node 113; build groen.
+- **Bewust geaccepteerd:** AC30 letterlijk niet gehaald — selectie en verzameltijd rollen na een fout terug naar de opgeslagen stand
+  (bestaand patroon). Attendance-queryfout op squad → iedereen 'geen reactie'. Analysepagina inhoudelijk ongewijzigd (114 knoppen
+  blijft een aparte story). Livemodus/beoordelingsronde (concept C) later. Pitch-slotknoppen hebben geen aria-label (testfeedback).
+- **Gotchas:** (1) een volledige `npm test` naast een draaiende dev-server/andere agent geeft valse timeouts — gefaald bestand los
+  nadraaien. (2) `npm run build` conflicteert met een draaiende `next dev` (zelfde `.next`) — server eerst stoppen. (3) Next 16
+  weigert een tweede `next dev` in dezelfde map ("Another next dev server is already running"). (4) getByRole op rijen in een
+  ingeklapte `<details>` vergt `hidden: true`. (5) messages-wijziging → dev-server herstarten (weer gecrasht: `stapBeschikbaar`).
+- **Browsergeverifieerd** (CSW 2, 1440×900 + 375×812, niets opgeslagen). **Open:** iPhone-rooktest door Jamie (bank-sheet,
+  verlaten-blad, minutenkolommen), dark mode visueel.
