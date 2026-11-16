@@ -4579,6 +4579,47 @@ Snelle winst 3 uit de schermreview. Via feature-factory; ketenmap
 - **Testgotchas:** kaart in Wat valt op staat binnen `[data-conclusielaag]` → helpers lezen `[data-signaal-tekst]` /
   `[data-signaal-teken]`; selector `details tbody tr` matchte ook het thema-details → `tbody details tbody tr`;
   jsdom verbergt dichte `<details>` niet (toets het `open`-attribuut, geen toBeVisible).
-- **Open:** zelfreview-tabel bestaat niet in productie (PGRST205 op `trainer_zelfreviews`) → migratie
-  `supabase/trainer-zelfreview.sql` van de zelfreview-feature lijkt niet gedraaid; sticky-kolom-fade daardoor niet
-  met echte data gezien. Rooktest door Jamie.
+- **Open:** sticky-kolom-fade van de zelfreview-tabel nog niet met echte data gezien. Rooktest door Jamie.
+  (Eerder genoteerd "PGRST205, tabel bestaat niet" is achterhaald: op 2026-11-16 gecontroleerd dat
+  `trainer_zelfreviews` en RPC `inzichten_eigen_zelfreviews` in productie bestaan.)
+
+## Feature: Vandaag-scherm — concept A uit de schermreview (2026-11-16, `a23bb4f`, live)
+Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-vandaag/` (01 t/m 08).
+- **Wat:** startscherm = PageHeader → rij "Vandaag" (hoofdkaart links, `WeekRegels` rechts vanaf lg, mobiel eronder;
+  zonder regels hero volle breedte) → het bestaande grid (To-do met afvinken, KPI's, Beschikbaarheid, Periodisering)
+  ongewijzigd daaronder.
+- **"Vandaag" = Europe/Amsterdam voor het hele startscherm** (besluit Jamie): `lib/amsterdam-dag.ts`
+  (`TIJDZONE_STARTSCHERM`, `vandaagIn` via Intl.formatToParts, `dagenTussen` via Date.UTC, ongeldige datum → NaN).
+  `app/page.tsx` rekent alles vanuit één `today`; TodoList, NextMatch, DashboardHero en WeekRegels krijgen
+  `vandaag` als prop en lezen zelf geen klok. **Andere pagina's houden `todayLocal()`** (C20 bewust open): tussen
+  00:00 en 01:00/02:00 NL kan het startscherm een dag vóór lopen op eventdetail/analyse (`datumBereikt`).
+- **Begroeting:** rekent `lokaalUur(new Date(), TIJDZONE_STARTSCHERM)` op server én client; inline nonce-script,
+  `begroetingScript` en `veiligJson` zijn weg (`x-nonce` in layout/proxy blijft voor andere scripts).
+- **Hoofdkaart = uitgebreide `DashboardHero`** (props `vandaag`, `eyebrow`, `tone`, `telling | null`). Logica puur in
+  `lib/vandaag-scherm.ts` (`bepaalVandaag`, `taakHref`, `WEEKREGEL_DAGEN = 7`): eerste open taak volgens
+  `sortTasks`/`compareTasks` → anders `volgend_event` ("Alles klaar") → anders lege staat. Open `lineup` met
+  `telOpstelling().compleet === false` → `lineup_onvolledig` (oranje chip "Opstelling mist n posities"; ontbrekende
+  selectie bewust neutraal). Teksten per soort in `components/dashboard/vandaag-teksten.ts`.
+- **Weekregels:** event krijgt een regel als `dagenTussen(vandaag, date)` in 0..7 óf als het nog ≥1 open taak heeft
+  (aangescherpt na browsercontrole: afgeronde items van vorige week verschenen onder "Komende week"). Volgorde =
+  compareTasks. Titel `break-words` (geen truncate), tijd in subregel.
+- **Telling:** `vasteTelling.aanwezig` ("aanwezig", ook bij wedstrijden; gasten niet) + onbekend. Aanwezigheid via
+  `lib/dashboard-aanwezigheid.ts` (`haalStatussenPerEvent`): batches `eventBatchGrootte`, filter `team_id` +
+  `event_id` + `player_id` (actieve spelers) → ≤1000 rijen; gefaalde batch → geen telling (geen fout getal).
+- **Besluiten Jamie:** To-do blijft (lager, met afvinken); hoofdkaart verschuift na de action-roundtrip
+  (`revalidatePath('/')`, ~0,5 s), geen gedeelde client-state; Beschikbaarheid-tegel blijft eerstvolgend event;
+  kaarten zichtbaar voor iedereen (doelpagina regelt canEdit), zelfreview alleen met trainingsrecht.
+- **Bekend gedrag:** training van vandaag heeft open `training_plan` én `self_review` → na plan afvinken blijft hij
+  hoofdkaart als "Zelfreview invullen". `taakHref` bestaat dubbel (lib/vandaag-scherm en TodoList `TASK_HREF`) —
+  later samenvoegen.
+- **Tests:** `lib/{amsterdam-dag,vandaag-scherm,dashboard-aanwezigheid}.test.ts`, `WeekRegels.test`,
+  `vandaag-teksten.test`, `vandaag-scherm.acceptance.test.tsx` + `vandaag-scherm-story.acceptance.test.tsx` (engine
+  kapt op 1000 rijen af; middernacht winter/zomer, TZ=UTC en America/Los_Angeles). Bewust aangepast: Begroeting-,
+  DashboardHero-, TodoList-tests, kloppende-cijfers (AC6-begroeting), AC22-guardlijst in trainer-zelfreview-story.
+  Eindrun: 7444 groen, rood alleen `cyclusweek-correctie` AC1/AC12 (bekend); build groen.
+- **Gotchas:** (1) dev-server toont gewijzigde `messages/*.ts` pas na herstart — hier gaf dat een harde crash
+  (`Cannot read properties of undefined (reading 'trainingTitle')`), `touch` hielp niet. (2) Volledige vitest-suite
+  parallel met een andere agent → tientallen valse timeouts (inzichten/cyclusweek); rustig draaien. (3) Structurele
+  guard AC22 in `trainer-zelfreview-story` faalt bij elk nieuw bestand dat "zelfreview" noemt → lijst bijwerken.
+- **Browsergeverifieerd** (CSW 2, 1440×900 en 375×812, licht en donker). **Open:** rooktest op iPhone door Jamie
+  (afvinken → hoofdkaart verschuift; middernachtgedrag).
