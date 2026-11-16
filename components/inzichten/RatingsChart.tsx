@@ -9,6 +9,7 @@ import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Rond op 1 decimaal — de RPC levert een float8-gemiddelde.
 function round1(n: number): number {
@@ -101,9 +102,9 @@ export default function RatingsChart({
               AT negeert alles eronder en leest alleen aria-label. De sr-only
               ChartDataTable staat daarom BUITEN deze wrapper (sibling), net als
               VormChart.tsx, zodat schermlezers de volledige cijfers wél bereiken. */}
-          <div role="img" aria-label={teamSummary} className="overflow-x-auto">
+          <ScrollFade role="img" ariaLabel={teamSummary}>
             <RatingLine data={teamChartData} dataKey="team" height={190} />
-          </div>
+          </ScrollFade>
           <ChartDataTable
             caption={teamSummary}
             headers={[t.insights.matchLabel, t.insights.ratingLabel]}
@@ -135,9 +136,9 @@ export default function RatingsChart({
                   <InsightEmpty text={t.insights.spelerEmpty} />
                 ) : (
                   <>
-                    <div role="img" aria-label={spelerSummary} className="overflow-x-auto">
+                    <ScrollFade role="img" ariaLabel={spelerSummary}>
                       <RatingLine data={spelerChartData} dataKey="rating" height={170} />
-                    </div>
+                    </ScrollFade>
                     <ChartDataTable
                       caption={spelerSummary}
                       headers={[t.insights.matchLabel, t.insights.ratingLabel]}

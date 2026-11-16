@@ -2,6 +2,7 @@ import type { Dict } from '@/messages/nl'
 import type { NaastElkaarRegel } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import { round1 } from './TopWorstRatings'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Opkomst, selectie en rating per speler naast elkaar. Geen rangorde, geen
 // samenvattend label en geen verband (W4): alleen cijfers per kolom.
@@ -26,7 +27,7 @@ export default function OpkomstSelectieRatingKaart({ regels, fout, t }: { regels
   const cel = 'py-2 pl-3 align-top text-faint font-semibold tabular-nums'
   return (
     <InsightCard title={i.naastElkaarTitle} description={i.naastElkaarDescription} empty={empty}>
-      <div className="overflow-x-auto">
+      <ScrollFade>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs font-bold text-muted">
@@ -62,7 +63,7 @@ export default function OpkomstSelectieRatingKaart({ regels, fout, t }: { regels
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollFade>
     </InsightCard>
   )
 }

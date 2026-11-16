@@ -74,6 +74,7 @@ import AnalysisPage from '@/app/events/[id]/analysis/page'
 import { addTegendoelpunt, deleteTegendoelpunt, herstelTegendoelpunt } from '@/app/actions/tegendoelpunten'
 import { GENERIC_ERROR_MESSAGE } from '@/lib/errors'
 import { MAX_SEIZOEN_WEDSTRIJDEN } from '@/lib/inzichten'
+import { koppelSignalen, type KaartSleutel } from '@/lib/inzichten-indeling'
 import { TEAM_TABELLEN } from '@/lib/team-opruimen'
 import type { HerstelTegendoelpunt } from '@/lib/herstel'
 
@@ -501,9 +502,25 @@ const NIEUWE_RPCS = [
 describe('AC-A1 — nieuwe kaarten voor het gekozen venster, naast de bestaande', () => {
   it('AC-A1: de zes nieuwe kaarten staan er, in de afgesproken volgorde, na de bestaande kaarten', async () => {
     await renderInzichten(hoofdDb())
-    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    // F3: kaarten die bij een signaal horen verhuizen naar "Wat valt op". Strikt: de koppen
+    // buiten [data-conclusielaag] staan in afgesproken volgorde, en precies de kaarten die de
+    // koppeling (lib/inzichten-indeling) aan de signalen van deze fixture hangt staan erbinnen.
+    const alleKoppen = screen.getAllByRole('heading', { level: 2 })
+    const inLaag = alleKoppen.filter((h) => h.closest('[data-conclusielaag]')).map((h) => h.textContent)
+    const koppen = alleKoppen.filter((h) => !h.closest('[data-conclusielaag]')).map((h) => h.textContent)
+    const signaalIds = Array.from(document.querySelectorAll('[data-conclusielaag="signalen"] li[data-signaal]')).map((li) => li.getAttribute('data-signaal')!)
+    expect(signaalIds.length).toBeGreaterThan(0)
+    const titelPerKaart: Partial<Record<KaartSleutel, string>> = {
+      thuisUit: T.thuisUit, opkomstPerMaand: i.opkomstTitle, ratings: i.ratingsTitle,
+      topWorstAanwezigheid: i.topWorstAanwezigheidTitle, stijgersDalers: i.stijgersTitle, positiedekking: i.dekkingTitle,
+    }
+    const verwachtVerhuisd = [...koppelSignalen(signaalIds.map((id) => ({ id }))).verhuisd].map((k) => titelPerKaart[k]!)
+    expect(verwachtVerhuisd.length).toBeGreaterThan(0)
+    expect(inLaag.filter((t) => t !== i.signalenTitle).sort()).toEqual([...verwachtVerhuisd].sort())
     const nieuw = [T.thuisUit, T.formatie, T.top, T.kaarten, T.kwartier, T.tegen]
-    const idx = nieuw.map((t) => koppen.indexOf(t))
+    const nieuwInThema = nieuw.filter((t) => !verwachtVerhuisd.includes(t))
+    for (const t of verwachtVerhuisd) expect(koppen).not.toContain(t)
+    const idx = nieuwInThema.map((t) => koppen.indexOf(t))
     expect(idx.every((n) => n >= 0)).toBe(true)
     expect([...idx].sort((a, b) => a - b)).toEqual(idx) // volgorde O3
     // bestaande kaarten blijven aanwezig en staan vóór de nieuwe

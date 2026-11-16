@@ -6,6 +6,7 @@ import { maandLabel } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Eén reeks: verschillende geblesseerde spelers per maand. Geen alarmkleur en
 // geen normlijn — dit is geen oordeel. Een maand zonder gegevens (null) krijgt
@@ -37,7 +38,7 @@ export default function BlessuresPerMaandChart({
     <InsightCard title={i.blessuresTitle} description={i.blessuresDescription} empty={empty}>
       {/* role="img" maakt kinderen presentational: ChartDataTable staat als sibling NA de wrapper. */}
       <>
-        <div role="img" aria-label={summary} className="overflow-x-auto">
+        <ScrollFade role="img" ariaLabel={summary}>
           <BarChart width={Math.max(280, rijen.length * 64) + 20} height={200} data={rijen} margin={{ top: 16, right: 20, left: 0, bottom: 0 }}>
             <CartesianGrid vertical={false} stroke={GRID_STROKE} className="chart-grid" />
             <XAxis dataKey="maand" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={AXIS_TICK_LINE} className="chart-axis" interval={0} />
@@ -46,7 +47,7 @@ export default function BlessuresPerMaandChart({
               <LabelList dataKey="label" position="top" fill="var(--faint)" className="chart-axis" fontSize={10} />
             </Bar>
           </BarChart>
-        </div>
+        </ScrollFade>
         <ChartDataTable
           caption={summary}
           headers={[i.monthLabel, i.kolomGeblesseerd]}

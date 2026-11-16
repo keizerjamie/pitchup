@@ -2,6 +2,7 @@ import type { Dict } from '@/messages/nl'
 import type { EvaluatieOverzicht } from '@/lib/inzichten'
 import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Oordeel van de trainer over de doelstelling: alleen aantallen (ja / deels /
 // nee / zonder oordeel) per periode en per week, in een tabel. Bewust geen
@@ -49,7 +50,7 @@ export default function DoelstellingOordeelKaart({
           ))}
         </dl>
 
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs font-bold text-muted">
@@ -86,7 +87,7 @@ export default function DoelstellingOordeelKaart({
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
 
         <div className="flex flex-col gap-1 text-[12.5px] text-faint">
           <p>{i.oordeelZonderUitleg}</p>

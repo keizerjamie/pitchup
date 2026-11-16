@@ -392,7 +392,7 @@ const tegelTekst = (c: HTMLElement, id: string) =>
 const strook = (c: HTMLElement) => c.querySelector('[data-conclusielaag="kpi"]') as HTMLElement | null
 const blok = (c: HTMLElement) => c.querySelector('[data-conclusielaag="signalen"]') as HTMLElement | null
 const signalen = (c: HTMLElement) =>
-  Array.from(blok(c)?.querySelectorAll('li p') ?? []).map((p) => p.textContent ?? '')
+  Array.from(blok(c)?.querySelectorAll('li [data-signaal-tekst]') ?? []).map((p) => p.textContent ?? '')
 const melding = (c: HTMLElement) =>
   Array.from(blok(c)?.children ?? []).filter((e) => e.tagName === 'P').map((e) => e.textContent)
 const printBlok = (c: HTMLElement) => c.querySelector('[data-print-only]') as HTMLElement
@@ -591,7 +591,8 @@ describe('AC6 — volgorde en MAX_SIGNALEN', () => {
       'Voor Keeper is op dit moment geen fitte speler.',
     ])
     // de vier complimenten zijn er wel degelijk, maar vallen buiten de top 3
-    expect(blok(container)!.textContent).not.toContain('Sven Stijger')
+    // F3: het blok bevat nu ook de verhuisde kaarten; de signaaltekst is waar dit om draait
+    expect(signalen(container).join(' ')).not.toContain('Sven Stijger')
     expect(blok(container)!.textContent).not.toContain('haalt de norm')
   })
 
@@ -663,7 +664,7 @@ describe('AC7 — nieuwe signalen: stijger, daler, positie', () => {
       'Sven Stijger stijgt: de laatste 5 wedstrijden liggen 0.6 boven het eigen seizoensgemiddelde.',
     ])
     // toon: let-op krijgt het ↓-teken, goed het ↑-teken
-    const tekens = Array.from(blok(container)!.querySelectorAll('li span[aria-hidden]')).map((s) => s.textContent)
+    const tekens = Array.from(blok(container)!.querySelectorAll('li [data-signaal-teken]')).map((s) => s.textContent)
     expect(tekens).toEqual(['↓', '↑'])
   })
 
@@ -698,8 +699,8 @@ describe('AC7 — nieuwe signalen: stijger, daler, positie', () => {
       }),
     )
     expect(signalen(meer.container)).toEqual(['Voor 3 posities is op dit moment geen fitte speler.'])
-    expect(blok(meer.container)!.textContent).not.toContain('Spits')
-    expect(blok(meer.container)!.textContent).not.toContain('Keeper')
+    expect(signalen(meer.container).join(' ')).not.toContain('Spits')
+    expect(signalen(meer.container).join(' ')).not.toContain('Keeper')
   })
 
   it('AC7 / O3-b: alleen posities die het team bezet — een team zonder spelers heeft geen positiesignaal en vult niet alle 12 posities', async () => {
@@ -2049,7 +2050,7 @@ describe('AC29 — vijf talen', () => {
 describe('AC30 — geen oordeel in de kaarten', () => {
   it('AC30: het kaartengebied bevat geen conclusielaag, geen signaalzinnen en geen onvolledig-melding', async () => {
     const { container } = await renderInzichten(rijk(), { rpcErrors: { inzichten_rating_vorm_per_speler: FOUT } })
-    const grid = container.querySelector('.print\\:hidden > .grid.grid-cols-1') as HTMLElement
+    const grid = container.querySelector('.print\\:hidden > [data-themagroepen]') as HTMLElement
     expect(grid).not.toBeNull()
     expect(grid.querySelector('[data-conclusielaag]')).toBeNull()
     expect(grid.querySelector('[data-kpi]')).toBeNull()

@@ -2,6 +2,7 @@ import type { Dict } from '@/messages/nl'
 import type { EvaluatieOverzicht } from '@/lib/inzichten'
 import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Ervaren trainingsbelasting (sRPE = RPE × geplande duur) in AU per week: één
 // reeks als staafjes (één tint, geen as-getallen, geen hover-tooltip; de
@@ -32,7 +33,7 @@ export default function SrpeKaart({
   return (
     <InsightCard title={i.srpeTitle} description={i.srpeDescription} empty={empty}>
       <div className="flex flex-col gap-4">
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <div
             role="img"
             aria-label={i.srpeGrafiekLabel.replace('{n}', String(data.weken.length))}
@@ -54,9 +55,9 @@ export default function SrpeKaart({
               </div>
             ))}
           </div>
-        </div>
+        </ScrollFade>
 
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs font-bold text-muted">
@@ -93,7 +94,7 @@ export default function SrpeKaart({
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
 
         <div className="flex flex-col gap-1 text-[12.5px] text-faint">
           {zonderRpe > 0 && <p>{i.srpeZonderRpe.replace('{n}', String(zonderRpe))}</p>}

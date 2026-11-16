@@ -9,6 +9,7 @@ import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Vaste, gevalideerde filterwaarden — filterDoelpunten() geeft [] terug bij
 // een onbekende waarde (lib/inzichten.ts), dus alleen deze vier komen ooit in
@@ -71,7 +72,7 @@ export default function DoelpuntenChart({ items, t }: { items: DoelpuntItem[]; t
             // ChartDataTable staat daarom BUITEN deze wrapper (sibling), net als
             // VormChart.tsx, zodat schermlezers de volledige cijfers wél bereiken.
             <>
-              <div role="img" aria-label={summary} className="overflow-x-auto">
+              <ScrollFade role="img" ariaLabel={summary}>
                 <BarChart width={Math.max(320, chartData.length * 76)} height={230} data={chartData}>
                   <CartesianGrid vertical={false} stroke={GRID_STROKE} className="chart-grid" />
                   <XAxis
@@ -93,7 +94,7 @@ export default function DoelpuntenChart({ items, t }: { items: DoelpuntItem[]; t
                     <LabelList dataKey="tegen" position="top" fill="var(--faint)" className="chart-axis" fontSize={10} />
                   </Bar>
                 </BarChart>
-              </div>
+              </ScrollFade>
               <ChartDataTable
                 caption={summary}
                 headers={[t.insights.matchLabel, t.insights.doelpuntenVoor, t.insights.doelpuntenTegen]}

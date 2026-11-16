@@ -3,6 +3,7 @@ import { PERIODIZATION_CATEGORIES } from '@/lib/types'
 import type { BelastingOverzicht } from '@/lib/inzichten'
 import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Trainingsbelasting in minuten per week: één reeks (het trainingstotaal per
 // week, zoals de planner het telt) als staafjes, en daaronder een tabel week ×
@@ -36,7 +37,7 @@ export default function BelastingKaart({
   return (
     <InsightCard title={i.belastingTitle} description={i.belastingDescription} empty={empty}>
       <div className="flex flex-col gap-4">
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <div
             role="img"
             aria-label={i.belastingGrafiekLabel.replace('{n}', String(data.weken.length))}
@@ -58,9 +59,9 @@ export default function BelastingKaart({
               </div>
             ))}
           </div>
-        </div>
+        </ScrollFade>
 
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs font-bold text-muted">
@@ -103,7 +104,7 @@ export default function BelastingKaart({
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
 
         <div className="flex flex-col gap-1 text-[12.5px] text-faint">
           {zonderOefeningen > 0 && <p>{i.belastingZonderOefeningen.replace('{n}', String(zonderOefeningen))}</p>}

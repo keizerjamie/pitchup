@@ -2,6 +2,7 @@ import type { Dict } from '@/messages/nl'
 import type { ThuisUitSplitsing } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import { ResultaatKoppen, ResultaatCellen } from './ResultaatTabel'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Thuis / uit / [onbekend] / totaal als semantische tabel — geen grafiek: het
 // zijn weinig, exacte cijfers. Bewust geen percentages (eerlijk bij ≤1
@@ -34,7 +35,7 @@ export default function ThuisUitKaart({
   return (
     <InsightCard title={i.thuisUitTitle} description={i.thuisUitDescription} empty={empty}>
       <div className="flex flex-col gap-3">
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <table className="w-full text-sm">
             <ResultaatKoppen eersteKolom={i.locatieKolom} t={t} />
             <tbody>
@@ -50,7 +51,7 @@ export default function ThuisUitKaart({
               </tr>
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
         <div className="flex flex-col gap-1 text-xs font-semibold text-faint">
           <p>{i.cleanSheets.replace('{n}', String(data.totaal.cleanSheets)).replace('{totaal}', String(data.totaal.wedstrijden))}</p>
           <p>{i.zonderEigenDoelpunt.replace('{n}', String(data.totaal.zonderEigenDoelpunt)).replace('{totaal}', String(data.totaal.wedstrijden))}</p>

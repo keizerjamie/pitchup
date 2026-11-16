@@ -632,7 +632,7 @@ function onderdeel(sleutel: string, k: HTMLElement = PER()): OnderdeelRij {
     nulmeting: tds[0] ?? '',
     huidig: tds[1] ?? '',
     voortgang: tds[2] ?? '',
-    punten: [...tbody.querySelectorAll('details tbody tr')].map((tr2) => [...tr2.querySelectorAll('td')].map((td) => td.textContent ?? '')),
+    punten: [...tbody.querySelectorAll('tbody details tbody tr')].map((tr2) => [...tr2.querySelectorAll('td')].map((td) => td.textContent ?? '')),
     heeftSvg: tbody.querySelector('svg') !== null,
     heeftDetails: tbody.querySelector('details') !== null,
   }
@@ -671,14 +671,20 @@ describe('AC-A1 — kaarten onder de fase-2b-kaarten in vaste volgorde; bestaand
     expect(koppen.at(-6)).toBe(i.speelminutenTitle)
     for (const t of NIEUWE_TITELS) expect(koppen.filter((x) => x === t)).toHaveLength(1)
     const smk = kaart(i.speelminutenTitle)
-    expect(smk.nextElementSibling).toBe(BEL().parentElement) // wrapper om belasting
+    // F3: de kaarten staan nu per thema. Speelminuten sluit het Spelers-raster af en
+    // Belasting (in zijn wrapper) opent het Training-raster; de volgorde over de pagina
+    // (koppen hierboven) en de rest van de rij-indeling blijven gelijk.
+    expect(smk.nextElementSibling).toBeNull()
+    expect(smk.parentElement!.parentElement!.getAttribute('data-thema')).toBe('spelers')
+    expect(BEL().parentElement!.parentElement!.parentElement!.getAttribute('data-thema')).toBe('training')
+    expect(BEL().parentElement!.previousElementSibling).toBeNull() // wrapper om belasting is het eerste kind
     expect(BEL().parentElement!.className).toContain('lg:col-span-2')
     expect(BEL().parentElement!.nextElementSibling).toBe(PER())
     expect(PER().nextElementSibling).toBe(DIS())
     expect(PER().className).not.toContain('col-span-2')
     expect(DIS().className).not.toContain('col-span-2')
-    expect(PER().parentElement).toBe(smk.parentElement)
-    expect(DIS().parentElement).toBe(smk.parentElement)
+    expect(PER().parentElement).toBe(BEL().parentElement!.parentElement)
+    expect(DIS().parentElement).toBe(BEL().parentElement!.parentElement)
   })
 
   it('AC-A1: alle overige kaarten zijn byte-voor-byte gelijk met en zonder metingen en handmatige afvinkingen (bestaande kaarten ongewijzigd)', async () => {
@@ -980,7 +986,7 @@ describe('AC-A7 — grafiek met tekstvariant; kleuren uit tokens', () => {
     const stijl = k.innerHTML
     expect(stijl).toContain('var(--brand-accent)')
     expect(stijl).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgb\(|hsl\(/)
-    const kop = [...k.querySelectorAll('details thead th')].map((th) => th.textContent)
+    const kop = [...k.querySelectorAll('tbody details thead th')].map((th) => th.textContent)
     expect(kop.slice(0, 3)).toEqual([i.kolomDatum, i.kolomStap, i.kolomBron])
   })
 

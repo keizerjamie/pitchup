@@ -1,6 +1,7 @@
 import type { Dict } from '@/messages/nl'
 import type { SpeelkansRegel } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Eén cel: "x van y wedstrijden" (of "geen gegevens" bij noemer 0) met eronder
 // een meter. De tekst is de waarheid; de meter is decoratie (aria-hidden) en
@@ -33,7 +34,7 @@ export default function SpeelkansenKaart({ regels, fout, t }: { regels: Speelkan
   return (
     <InsightCard title={i.speelkansenTitle} description={i.speelkansenDescription} empty={empty}>
       <div className="flex flex-col gap-3">
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs font-bold text-muted">
@@ -57,7 +58,7 @@ export default function SpeelkansenKaart({ regels, fout, t }: { regels: Speelkan
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
         <p className="text-xs font-semibold text-faint">{i.speelkansenUitleg}</p>
       </div>
     </InsightCard>

@@ -6,6 +6,7 @@ import { KWARTIER_BAKKEN, type TegendoelpuntTelling } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Gegroepeerd (niet gestapeld) kolomdiagram: standaardsituatie naast open spel
 // per kwartier. De legenda is HTML (geen recharts-Legend: die zet een hex-
@@ -41,7 +42,7 @@ export default function TegendoelpuntenChart({ telling, fout, t }: { telling: Te
             {soortLabel.open_play}
           </li>
         </ul>
-        <div role="img" aria-label={summary} className="overflow-x-auto">
+        <ScrollFade role="img" ariaLabel={summary}>
           <BarChart width={336} height={200} data={data}>
             <CartesianGrid vertical={false} stroke={GRID_STROKE} className="chart-grid" />
             <XAxis dataKey="bak" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={AXIS_TICK_LINE} className="chart-axis" interval={0} />
@@ -53,7 +54,7 @@ export default function TegendoelpuntenChart({ telling, fout, t }: { telling: Te
               <LabelList dataKey="open" position="top" fill="var(--faint)" className="chart-axis" fontSize={10} />
             </Bar>
           </BarChart>
-        </div>
+        </ScrollFade>
         <ChartDataTable
           caption={summary}
           headers={[i.minutenKolom, soortLabel.set_piece, soortLabel.open_play, i.totaalLabel]}

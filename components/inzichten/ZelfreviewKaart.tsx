@@ -3,6 +3,7 @@ import type { ZelfreviewOverzicht, ZelfreviewWeek } from '@/lib/inzichten'
 import { ZELFREVIEW_STELLINGEN, ZELFREVIEW_SCORE_MAX, ZELFREVIEW_SCORE_MIN, type ZelfreviewStelling } from '@/lib/trainer-zelfreview'
 import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Eigen ontwikkeling als trainer: het gemiddelde van de eigen zelfreviews per
 // week als lijn met punten (weektotaal, schaal 1-5) en daaronder een weektabel
@@ -94,7 +95,7 @@ export default function ZelfreviewKaart({
               </span>
             ))}
           </div>
-          <div className="flex-1 min-w-0 overflow-x-auto">
+          <ScrollFade wrapperClassName="flex-1 min-w-0">
             <svg
               role="img"
               aria-label={i.zelfreviewGrafiekLabel.replace('{n}', String(data.weken.length))}
@@ -107,13 +108,13 @@ export default function ZelfreviewKaart({
               ))}
               <Lijn weken={data.weken} />
             </svg>
-          </div>
+          </ScrollFade>
         </div>
 
         {rijen.length === 0 ? (
           <p className="text-sm font-semibold text-faint">{i.geenGegevens}</p>
         ) : (
-          <div className="overflow-x-auto">
+          <ScrollFade vasteStartkolom>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs font-bold text-muted">
@@ -148,7 +149,7 @@ export default function ZelfreviewKaart({
                 })}
               </tbody>
             </table>
-          </div>
+          </ScrollFade>
         )}
 
         <div className="flex flex-col gap-1 text-[12.5px] text-faint">

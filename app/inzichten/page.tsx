@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
@@ -102,6 +103,14 @@ import InvulDisciplineKaart from '@/components/inzichten/InvulDisciplineKaart'
 import SrpeKaart from '@/components/inzichten/SrpeKaart'
 import ZelfreviewKaart from '@/components/inzichten/ZelfreviewKaart'
 import DoelstellingOordeelKaart from '@/components/inzichten/DoelstellingOordeelKaart'
+import ThemaGroep from '@/components/inzichten/ThemaGroep'
+import {
+  BREDE_KAARTEN,
+  koppelSignalen,
+  verdeelOverThemas,
+  type KaartSleutel,
+  type ThemaSleutel,
+} from '@/lib/inzichten-indeling'
 import PrintButton from '@/components/PrintButton'
 import PageHeader from '@/components/ui/PageHeader'
 import { resolveClubColors } from '@/lib/club-colors'
@@ -619,6 +628,63 @@ export default async function InzichtenPage({
   const periodeLabel =
     periode === '4w' ? t.insights.periode4w : periode === '8w' ? t.insights.periode8w : t.insights.periodeSeizoen
 
+  // Elke kaart één keer opgebouwd, met dezelfde props en bronfout-vlag als in
+  // het oude grid. Of een kaart in "Wat valt op" of in een thema staat bepaalt
+  // koppelSignalen; nooit allebei.
+  const kaartMap: Record<KaartSleutel, { node: ReactNode; fout: boolean }> = {
+    vorm: { node: <VormChart items={vormItems} telling={vormTelling} t={t} />, fout: false },
+    opkomstPerMaand: { node: <OpkomstPerMaandChart data={maandOpkomst} t={t} />, fout: false },
+    aanwezigheid: { node: <AanwezigheidChart data={aanwezigheidData} t={t} />, fout: false },
+    ratings: { node: <RatingsChart teamData={teamRating} spelers={spelers} periode={periode} t={t} />, fout: false },
+    doelpunten: { node: <DoelpuntenChart items={doelpunten} t={t} />, fout: false },
+    topWorstRatings: { node: <TopWorstRatings data={ratingTopWorst} t={t} />, fout: false },
+    topWorstAanwezigheid: { node: <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />, fout: false },
+    trainingsinhoud: { node: <TrainingsinhoudChart tellingen={inhoudTellingen} t={t} />, fout: false },
+    thuisUit: { node: <ThuisUitKaart data={thuisUit} fout={uitslagen.fout} afgekapt={uitslagenAfgekapt} t={t} />, fout: uitslagen.fout },
+    formatie: { node: <FormatieKaart rijen={formaties} fout={uitslagen.fout} afgekapt={uitslagenAfgekapt} t={t} />, fout: uitslagen.fout },
+    topscorers: { node: <TopscorersKaart data={topscorers} fout={spelerMomenten.fout} t={t} />, fout: spelerMomenten.fout },
+    geleRodeKaarten: { node: <GeleRodeKaartenLijst rijen={kaarten} fout={spelerMomenten.fout} t={t} />, fout: spelerMomenten.fout },
+    kwartier: { node: <KwartierChart telling={kwartieren} fout={doelpuntMinuten.fout} t={t} />, fout: doelpuntMinuten.fout },
+    tegendoelpunten: { node: <TegendoelpuntenChart telling={tegenKwartieren} fout={tegendoelpuntRijen.fout} t={t} />, fout: tegendoelpuntRijen.fout },
+    speelkansen: { node: <SpeelkansenKaart regels={speelkansen} fout={speelkansenBron.fout} t={t} />, fout: speelkansenBron.fout },
+    stijgersDalers: { node: <StijgersDalersKaart data={stijgersDalers} fout={ratingVormBron.fout} t={t} />, fout: ratingVormBron.fout },
+    positiedekking: {
+      node: <PositiedekkingKaart dekking={dekking} heeftSpelers={positiesBron.rijen.length > 0} fout={positiesBron.fout} t={t} />,
+      fout: positiesBron.fout,
+    },
+    opkomstSelectieRating: { node: <OpkomstSelectieRatingKaart regels={naastElkaar} fout={naastElkaarFout} t={t} />, fout: naastElkaarFout },
+    blessuresPerMaand: { node: <BlessuresPerMaandChart maanden={blessureMaanden} fout={blessuresBron.fout} t={t} />, fout: blessuresBron.fout },
+    speelminuten: { node: <SpeelminutenKaart data={speelminuten} fout={speelminutenBron.fout} t={t} />, fout: speelminutenBron.fout },
+    belasting: { node: <BelastingKaart data={belasting} fout={belastingBron.fout} t={t} />, fout: belastingBron.fout },
+    periodiseringVoortgang: {
+      node: <PeriodiseringVoortgangKaart data={voortgang} fout={periodiseringBron.fout} t={t} />,
+      fout: periodiseringBron.fout,
+    },
+    invulDiscipline: {
+      node: (
+        <InvulDisciplineKaart
+          data={discipline}
+          fout={disciplineBron.fout}
+          evaluatie={{ data: evaluatieDiscipline, fout: evaluatieBron.fout }}
+          t={t}
+        />
+      ),
+      fout: disciplineBron.fout || evaluatieBron.fout,
+    },
+    srpe: { node: <SrpeKaart data={evaluaties} fout={evaluatieBron.fout || belastingBron.fout} t={t} />, fout: evaluatieBron.fout || belastingBron.fout },
+    doelstellingOordeel: { node: <DoelstellingOordeelKaart data={evaluaties} fout={evaluatieBron.fout} t={t} />, fout: evaluatieBron.fout },
+  }
+  const { conclusies, verhuisd } = koppelSignalen(signalen)
+  const themas = verdeelOverThemas(verhuisd)
+  const themaTitel: Record<ThemaSleutel, string> = {
+    team: t.insights.themaTeam,
+    wedstrijden: t.insights.themaWedstrijden,
+    spelers: t.insights.themaSpelers,
+    training: t.insights.themaTraining,
+  }
+  const bijlageKaarten: Partial<Record<KaartSleutel, ReactNode>> = {}
+  for (const k of verhuisd) bijlageKaarten[k] = kaartMap[k].node
+
   return (
     <>
       {/* Dual-markup: het scherm drukt niet mee. Wat er uit de printer komt is
@@ -645,58 +711,54 @@ export default async function InzichtenPage({
         t={t}
       />
 
-      <SignalenBlok signalen={signalen} onvolledig={signalenOnvolledig} t={t} />
+      <SignalenBlok
+        signalen={signalen}
+        onvolledig={signalenOnvolledig}
+        bijlagen={{ conclusies, kaarten: bijlageKaarten }}
+        t={t}
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* De vorm-strook staat boven de detailgrafieken en over de volle
-            breedte: het is de meest bekeken regel van de pagina en stond
-            eerder helemaal onderaan. */}
-        <div className="lg:col-span-2">
-          <VormChart items={vormItems} telling={vormTelling} t={t} />
-        </div>
-        <OpkomstPerMaandChart data={maandOpkomst} t={t} />
-        <AanwezigheidChart data={aanwezigheidData} t={t} />
-        <RatingsChart teamData={teamRating} spelers={spelers} periode={periode} t={t} />
-        <DoelpuntenChart items={doelpunten} t={t} />
-        <TopWorstRatings data={ratingTopWorst} t={t} />
-        <TopWorstAanwezigheid data={aanwezigheidTopWorst} t={t} />
-        <TrainingsinhoudChart tellingen={inhoudTellingen} t={t} />
-        <ThuisUitKaart data={thuisUit} fout={uitslagen.fout} afgekapt={uitslagenAfgekapt} t={t} />
-        <FormatieKaart rijen={formaties} fout={uitslagen.fout} afgekapt={uitslagenAfgekapt} t={t} />
-        <TopscorersKaart data={topscorers} fout={spelerMomenten.fout} t={t} />
-        <GeleRodeKaartenLijst rijen={kaarten} fout={spelerMomenten.fout} t={t} />
-        <KwartierChart telling={kwartieren} fout={doelpuntMinuten.fout} t={t} />
-        <TegendoelpuntenChart telling={tegenKwartieren} fout={tegendoelpuntRijen.fout} t={t} />
-        <div className="lg:col-span-2">
-          <SpeelkansenKaart regels={speelkansen} fout={speelkansenBron.fout} t={t} />
-        </div>
-        <StijgersDalersKaart data={stijgersDalers} fout={ratingVormBron.fout} t={t} />
-        <PositiedekkingKaart dekking={dekking} heeftSpelers={positiesBron.rijen.length > 0} fout={positiesBron.fout} t={t} />
-        <div className="lg:col-span-2">
-          <OpkomstSelectieRatingKaart regels={naastElkaar} fout={naastElkaarFout} t={t} />
-        </div>
-        <BlessuresPerMaandChart maanden={blessureMaanden} fout={blessuresBron.fout} t={t} />
-        <SpeelminutenKaart data={speelminuten} fout={speelminutenBron.fout} t={t} />
-        <div className="lg:col-span-2">
-          <BelastingKaart data={belasting} fout={belastingBron.fout} t={t} />
-        </div>
-        <PeriodiseringVoortgangKaart data={voortgang} fout={periodiseringBron.fout} t={t} />
-        <InvulDisciplineKaart
-          data={discipline}
-          fout={disciplineBron.fout}
-          evaluatie={{ data: evaluatieDiscipline, fout: evaluatieBron.fout }}
-          t={t}
-        />
-        <SrpeKaart data={evaluaties} fout={evaluatieBron.fout || belastingBron.fout} t={t} />
-        <DoelstellingOordeelKaart data={evaluaties} fout={evaluatieBron.fout} t={t} />
+      <div data-themagroepen className="flex flex-col gap-3">
+        {themas.map((thema) => (
+          <ThemaGroep
+            key={thema.sleutel}
+            sleutel={thema.sleutel}
+            titel={themaTitel[thema.sleutel]}
+            aantal={thema.kaarten.length}
+            onvolledig={thema.kaarten.filter((k) => kaartMap[k].fout).length}
+            standaardOpen={thema.standaardOpen}
+            resetSleutel={periode}
+            t={t}
+          >
+            {thema.kaarten.map((k) =>
+              BREDE_KAARTEN.has(k) ? (
+                <div key={k} className="lg:col-span-2">
+                  {kaartMap[k].node}
+                </div>
+              ) : (
+                <Fragment key={k}>{kaartMap[k].node}</Fragment>
+              ),
+            )}
+          </ThemaGroep>
+        ))}
+
+        {/* Privé: alleen de eigen zelfreviews van deze trainer, niet in het rapport. */}
+        {toonZelfreviewKaart && (
+          <ThemaGroep
+            sleutel="zelfreview"
+            titel={t.insights.themaZelfreview}
+            aantal={1}
+            onvolledig={zelfreviewBron.fout ? 1 : 0}
+            standaardOpen={false}
+            resetSleutel={periode}
+            t={t}
+          >
+            <div className="lg:col-span-2">
+              <ZelfreviewKaart data={zelfreviews} fout={zelfreviewBron.fout} t={t} />
+            </div>
+          </ThemaGroep>
+        )}
       </div>
-
-      {/* Privé: alleen de eigen zelfreviews van deze trainer, niet in het rapport. */}
-      {toonZelfreviewKaart && (
-        <div>
-          <ZelfreviewKaart data={zelfreviews} fout={zelfreviewBron.fout} t={t} />
-        </div>
-      )}
       </div>
 
       <SeizoensrapportPrint

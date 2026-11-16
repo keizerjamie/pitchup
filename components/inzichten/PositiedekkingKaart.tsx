@@ -1,6 +1,7 @@
 import type { Dict } from '@/messages/nl'
 import type { PositieDekking } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 function fitTekst(n: number, t: Dict): string {
   const i = t.insights
@@ -31,7 +32,7 @@ export default function PositiedekkingKaart({
 
   return (
     <InsightCard title={i.dekkingTitle} description={i.dekkingDescription} empty={empty}>
-      <div className="overflow-x-auto">
+      <ScrollFade>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs font-bold text-muted">
@@ -60,7 +61,7 @@ export default function PositiedekkingKaart({
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollFade>
     </InsightCard>
   )
 }

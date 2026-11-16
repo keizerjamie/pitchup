@@ -1,6 +1,7 @@
 import type { Dict } from '@/messages/nl'
 import type { SpeelminutenVerdeling } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Speelminuten en wissels per speler. Semantische tabel met een meter (meer dan
 // 7 spelers en meerdere maten per speler); omdat de tabel zelf de tekstvariant
@@ -23,7 +24,7 @@ export default function SpeelminutenKaart({
 
   return (
     <InsightCard title={i.speelminutenTitle} description={i.speelminutenDescription} empty={empty}>
-      <div className="overflow-x-auto">
+      <ScrollFade>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs font-bold text-muted">
@@ -67,7 +68,7 @@ export default function SpeelminutenKaart({
             })}
           </tbody>
         </table>
-      </div>
+      </ScrollFade>
     </InsightCard>
   )
 }

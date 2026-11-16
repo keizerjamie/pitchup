@@ -2,6 +2,7 @@ import type { Dict } from '@/messages/nl'
 import type { OnderdeelVoortgang, PeriodiseringVoortgang, StapPunt } from '@/lib/inzichten'
 import { formatDateShort } from '@/lib/utils'
 import InsightCard, { InsightEmpty } from './InsightCard'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Periodisering: voortgang per meetbaar onderdeel. Per onderdeel de nulmeting
 // (eerste meting ooit), de huidige stap (stand t/m gisteren) en het verschil in
@@ -166,7 +167,7 @@ export default function PeriodiseringVoortgangKaart({
   return (
     <InsightCard title={i.periodiseringTitle} description={i.periodiseringDescription} empty={empty}>
       <div className="flex flex-col gap-3">
-        <div className="overflow-x-auto">
+        <ScrollFade>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-xs font-bold text-muted">
@@ -180,7 +181,7 @@ export default function PeriodiseringVoortgangKaart({
               <Onderdeel key={o.key} o={o} t={t} toonReeks={!data.seizoenNogNietBegonnen} />
             ))}
           </table>
-        </div>
+        </ScrollFade>
         {data.seizoenNogNietBegonnen && (
           <p className="text-[12.5px] text-faint">{i.seizoenNogNietBegonnen}</p>
         )}

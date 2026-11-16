@@ -2,6 +2,7 @@ import type { Dict } from '@/messages/nl'
 import type { FormatieResultaat } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import { ResultaatKoppen, ResultaatCellen } from './ResultaatTabel'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Resultaten per formatie. De formatie is de ruwe opgeslagen waarde (vrije
 // tekst ≤20 tekens), dus ook onbekende schrijfwijzen staan letterlijk in de rij.
@@ -24,7 +25,7 @@ export default function FormatieKaart({
 
   return (
     <InsightCard title={i.formatieTitle} description={i.formatieDescription} empty={empty}>
-      <div className="overflow-x-auto">
+      <ScrollFade>
         <table className="w-full text-sm">
           <ResultaatKoppen eersteKolom={i.formatieKolom} t={t} />
           <tbody>
@@ -36,7 +37,7 @@ export default function FormatieKaart({
             ))}
           </tbody>
         </table>
-      </div>
+      </ScrollFade>
     </InsightCard>
   )
 }

@@ -6,6 +6,7 @@ import { OPKOMST_DOEL, maandLabel, type MaandOpkomst } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 export default function OpkomstPerMaandChart({ data, t }: { data: MaandOpkomst[]; t: Dict }) {
   const isEmpty = data.length === 0
@@ -38,7 +39,7 @@ export default function OpkomstPerMaandChart({ data, t }: { data: MaandOpkomst[]
         // ChartDataTable staat daarom BUITEN deze wrapper (sibling), net als
         // VormChart.tsx, zodat schermlezers de volledige cijfers wél bereiken.
         <>
-          <div role="img" aria-label={summary} className="overflow-x-auto">
+          <ScrollFade role="img" ariaLabel={summary}>
             <BarChart width={Math.max(280, chartData.length * 64) + 70} height={220} data={chartData} margin={{ top: 8, right: 70, left: 0, bottom: 0 }}>
               <CartesianGrid vertical={false} stroke={GRID_STROKE} className="chart-grid" />
               <XAxis dataKey="maand" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={AXIS_TICK_LINE} className="chart-axis" />
@@ -85,7 +86,7 @@ export default function OpkomstPerMaandChart({ data, t }: { data: MaandOpkomst[]
                 ))}
               </Bar>
             </BarChart>
-          </div>
+          </ScrollFade>
           <ChartDataTable
             caption={summary}
             headers={[t.insights.monthLabel, t.insights.percentageLabel]}

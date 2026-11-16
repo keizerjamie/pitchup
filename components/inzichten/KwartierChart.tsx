@@ -6,6 +6,7 @@ import { KWARTIER_BAKKEN, type KwartierTelling } from '@/lib/inzichten'
 import InsightCard, { InsightEmpty } from './InsightCard'
 import ChartDataTable from './ChartDataTable'
 import { GRID_STROKE, AXIS_LINE, AXIS_TICK_LINE, AXIS_TICK } from './chartTheme'
+import ScrollFade from '@/components/inzichten/ScrollFade'
 
 // Eén reeks: eigen doelpunten per kwartier. Doelpunten zonder minuut staan niet
 // als kolom maar in de tekstregel "x van y met minuut" — een kolom "onbekend"
@@ -25,7 +26,7 @@ export default function KwartierChart({ telling, fout, t }: { telling: KwartierT
       <div className="flex flex-col gap-3">
         {/* role="img" maakt kinderen presentational: de ChartDataTable staat
             daarom als sibling NA deze wrapper (zie DoelpuntenChart). */}
-        <div role="img" aria-label={summary} className="overflow-x-auto">
+        <ScrollFade role="img" ariaLabel={summary}>
           <BarChart width={336} height={200} data={data}>
             <CartesianGrid vertical={false} stroke={GRID_STROKE} className="chart-grid" />
             <XAxis dataKey="bak" tick={AXIS_TICK} axisLine={AXIS_LINE} tickLine={AXIS_TICK_LINE} className="chart-axis" interval={0} />
@@ -34,7 +35,7 @@ export default function KwartierChart({ telling, fout, t }: { telling: KwartierT
               <LabelList dataKey="aantal" position="top" fill="var(--faint)" className="chart-axis" fontSize={10} />
             </Bar>
           </BarChart>
-        </div>
+        </ScrollFade>
         <ChartDataTable
           caption={summary}
           headers={[i.minutenKolom, i.countLabel]}
