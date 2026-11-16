@@ -33,11 +33,17 @@ const EVENT_NIET_GEVONDEN = 'Event niet gevonden'
 const NIET_GESPEELD = 'Wedstrijd nog niet gespeeld'
 const NIET_GEVONDEN = 'Speelminuten niet gevonden'
 
-// Kopie van revalidateEvent in app/actions/match-analysis.ts: een synchrone
-// helper kan niet uit een 'use server'-bestand geëxporteerd worden.
+// Zelfde basis als revalidateEvent in app/actions/match-analysis.ts (een
+// synchrone helper kan niet uit een 'use server'-bestand geëxporteerd worden),
+// maar bewust niet meer identiek: speelminuten voeden ook de "laatste 3"-
+// minuten op de selectiepagina van latere wedstrijden.
 function revalidateEvent(eventId: string) {
   revalidatePath(`/events/${eventId}/analysis`)
   revalidatePath(`/events/${eventId}`)
+  // De selectiepagina van elke LATERE wedstrijd toont de minuten van de laatste
+  // gespeelde wedstrijden. Welke dat zijn weten we hier niet, dus alle
+  // squad-pagina's (precedent: training-plan in app/actions/events.ts).
+  revalidatePath('/events/[id]/squad', 'page')
 }
 
 type Supabase = Awaited<ReturnType<typeof createClient>>

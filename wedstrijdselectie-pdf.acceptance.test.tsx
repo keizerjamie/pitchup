@@ -403,7 +403,7 @@ describe('Live-update — verzameltijd-wijziging beweegt het print-blok direct m
           eventId="e1"
           players={basePlayers}
           initialSelectedIds={['p1']}
-          presentPlayerIds={['p1']}
+          statusPerSpeler={{}} recenteMinuten={{ wedstrijden: [], perSpeler: {} }}
           hasAnyActivePlayers
           opponent="FC Rivalen"
           eventDate="2026-08-09"

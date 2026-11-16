@@ -32,7 +32,7 @@
 // acceptatiecriteria uit de goedgekeurde user story.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { randomUUID } from 'node:crypto'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
@@ -454,8 +454,11 @@ describe('AC2 — nieuwe wedstrijd binnen een geregistreerde periode → speler 
 // AC3 — speler X (auto-absent) staat NIET in de selecteerbare lijst op
 // /events/[id]/squad
 // ═══════════════════════════════════════════════════════════════════════
-describe('AC3 — automatisch afgemelde speler staat niet in de selecteerbare lijst op de squad-pagina', () => {
-  it('speler X (auto-absent door periode) ontbreekt op /events/[id]/squad; speler Y (aanwezig) staat er wél', async () => {
+// De wedstrijd als één flow: de selectiepagina toont nu ALLE actieve spelers
+// (aanwezig / nog geen reactie / afwezig). Speler X staat er dus wél, maar als
+// niet aanwezig — de periode-afmelding werkt nog steeds door.
+describe('AC3 — automatisch afgemelde speler staat op de squad-pagina als niet aanwezig', () => {
+  it('speler X (auto-absent door periode) staat op /events/[id]/squad als niet aanwezig; speler Y (aanwezig) zonder dat label', async () => {
     const x = playerRow({ id: 'px', name: 'Speler X' })
     const y = playerRow({ id: 'py', name: 'Speler Y' })
     const db = makeDb({ players: [x, y] })
@@ -473,8 +476,12 @@ describe('AC3 — automatisch afgemelde speler staat niet in de selecteerbare li
     const el = await MatchSquadPage({ params: Promise.resolve({ id: eventId }) })
     render(<DictProvider dict={nl}>{el}</DictProvider>)
 
-    expect(screen.queryByRole('button', { name: `${nl.matchSquad.toggleLabel}: Speler X` })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Speler Y` })).toBeInTheDocument()
+    const toggleX = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Speler X`, hidden: true })
+    const toggleY = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Speler Y`, hidden: true })
+    // Statuslabel per rij (de wedstrijd als één flow): X is afgemeld, Y aanwezig.
+    expect(within(toggleX.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.event.absentStat}$`))).toBeInTheDocument()
+    expect(within(toggleX.parentElement as HTMLElement).queryByText(new RegExp(` · ${nl.event.presentStat}$`))).not.toBeInTheDocument()
+    expect(within(toggleY.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.event.presentStat}$`))).toBeInTheDocument()
   })
 })
 

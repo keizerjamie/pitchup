@@ -218,7 +218,7 @@ describe('wedstrijdselectie: delen wacht op de opslag', () => {
           eventId="e1"
           players={players}
           initialSelectedIds={[]}
-          presentPlayerIds={['p1']}
+          statusPerSpeler={{}} recenteMinuten={{ wedstrijden: [], perSpeler: {} }}
           hasAnyActivePlayers={true}
           opponent="FC Rivalen"
           eventDate="2026-08-09"
@@ -412,7 +412,7 @@ function renderSquadEditor(o: { selected?: string[]; canEdit?: boolean; dict?: t
   return render(
     <DictProvider dict={o.dict ?? nl}>
       <MatchSquadEditor
-        eventId="e1" players={players} initialSelectedIds={o.selected ?? ['p1']} presentPlayerIds={['p1']}
+        eventId="e1" players={players} initialSelectedIds={o.selected ?? ['p1']} statusPerSpeler={{}} recenteMinuten={{ wedstrijden: [], perSpeler: {} }}
         hasAnyActivePlayers={true} opponent="FC Rivalen" eventDate="2026-08-09" dateLabel="zondag 9 augustus 2026"
         teamName={null} teamLogoUrl={null} homeAway={null} kickoffTime={null} location={null} initialGatherTime={null}
         formItems={[]} primaryColor="#004f3b" secondaryColor="#009966" canEdit={o.canEdit ?? true}

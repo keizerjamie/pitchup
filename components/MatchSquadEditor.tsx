@@ -5,7 +5,8 @@ import { useOpslagTransition } from '@/lib/opslag-wachtrij'
 import Link from 'next/link'
 import { toggleSquadPlayer } from '@/app/actions/match-squad'
 import { updateGatherTime } from '@/app/actions/events'
-import { Player } from '@/lib/types'
+import { Player, POSITION_ABBREVIATIONS, type AttendanceStatus } from '@/lib/types'
+import { groepeerSelectie, type RecenteMinuten } from '@/lib/wedstrijd-selectie-info'
 import type { MatchFormItem } from '@/lib/match-form'
 import { useDict } from '@/lib/i18n-context'
 import PrintButton from '@/components/PrintButton'
@@ -16,7 +17,12 @@ interface Props {
   eventId: string
   players: Player[]
   initialSelectedIds: string[]
-  presentPlayerIds: string[]
+  // Aanwezigheidsstatus per zichtbare speler (key = elke player.id in
+  // `players`); een ontbrekende key telt als 'unknown'. Alleen voor het
+  // scherm: de print-lijst krijgt hier niets van (AC20).
+  statusPerSpeler: Record<string, AttendanceStatus>
+  // Speelminuten van de laatste ≤3 eerdere wedstrijden; null = niet te laden.
+  recenteMinuten: RecenteMinuten | null
   hasAnyActivePlayers: boolean
   opponent: string | null
   dateLabel: string
@@ -51,7 +57,8 @@ export default function MatchSquadEditor({
   eventId,
   players,
   initialSelectedIds,
-  presentPlayerIds,
+  statusPerSpeler,
+  recenteMinuten,
   hasAnyActivePlayers,
   opponent,
   dateLabel,
@@ -69,14 +76,29 @@ export default function MatchSquadEditor({
   canEdit,
 }: Props) {
   const [selected, setSelected] = useState(() => new Set(initialSelectedIds))
-  // Zuiver een zichtbaarheidsfilter (zie page.tsx): welke spelers voor dit
-  // event als aanwezig geregistreerd staan. Geen koppeling met match_squad
-  // zelf — enkel gebruikt om een niet-aanwezige, al-geselecteerde speler een
-  // duidelijk label te geven i.p.v. hem stilzwijgend te verbergen.
-  const presentIds = new Set(presentPlayerIds)
   const [isPending, startTransition] = useOpslagTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
   const t = useDict()
+
+  // Groepen op het scherm (in invoervolgorde): aanwezig, nog geen reactie,
+  // afwezig/geblesseerd/inactief. Alleen weergave: toggle en selectie kennen
+  // geen groepen.
+  const groepen = groepeerSelectie(players, (p) => statusPerSpeler[p.id] ?? 'unknown')
+  // De afwezig-groep is standaard dicht, behalve als er al een geselecteerde
+  // speler in zit (AC16). Lokale state met onToggle-sync, bewust GEEN
+  // `open={groep bevat geselecteerd}`: dat klapt dicht zodra je de laatste
+  // geselecteerde speler uit de groep haalt.
+  const [afwezigOpen, setAfwezigOpen] = useState(() => {
+    const start = new Set(initialSelectedIds)
+    return groepeerSelectie(players, (p) => statusPerSpeler[p.id] ?? 'unknown').afwezig.some((p) => start.has(p.id))
+  })
+  // Datumkoppen van de minutenkolommen: kale YYYY-MM-DD, daarom in UTC
+  // opmaken (anders schuift de dag in tijdzones achter UTC).
+  const datumFormatter = new Intl.DateTimeFormat(t.browserLocale, { day: 'numeric', month: 'numeric', timeZone: 'UTC' })
+  const kolommen = (recenteMinuten?.wedstrijden ?? []).map((w) => ({
+    id: w.id,
+    datum: datumFormatter.format(new Date(`${w.date}T00:00:00Z`)),
+  }))
 
   // Laatst bevestigde (succesvol opgeslagen) selectie. Bij een mislukte
   // toggle draaien we terug naar DEZE referentie — niet naar een snapshot uit
@@ -136,6 +158,85 @@ export default function MatchSquadEditor({
     })
   }
 
+  // Statuslabel op regel 2: inactief weegt zwaarder dan de eventstatus (een
+  // speler toont nooit beide tegelijk).
+  function statusLabel(player: Player): string {
+    if (!player.active) return t.players.inactiveLabel
+    switch (statusPerSpeler[player.id] ?? 'unknown') {
+      case 'present': return t.event.presentStat
+      case 'absent': return t.event.absentStat
+      case 'injured': return t.event.injuredStat
+      default: return t.matchSquad.geenReactieLabel
+    }
+  }
+
+  function renderRij(player: Player, i: number) {
+    const isSelected = selected.has(player.id)
+    const minuten = recenteMinuten?.perSpeler[player.id]
+    return (
+      <div key={player.id} className="flex items-center justify-between gap-3 px-4 py-2.5"
+        style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
+        <div className="min-w-0 flex-1">
+          <div className="text-[14.5px] font-bold text-ink break-words">
+            {player.name}
+            {player.type === 'guest' && (
+              <span className="ml-2 text-[11px] font-semibold text-faint">({t.players.guestBadge})</span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] text-faint">
+            <span>{POSITION_ABBREVIATIONS[player.position] ?? '–'} · {statusLabel(player)}</span>
+            {player.injured && (
+              <span className="rounded-full bg-panel-red text-panel-red-ink text-[10.5px] font-bold px-1.5">{t.players.injuredBadge}</span>
+            )}
+          </div>
+        </div>
+        {kolommen.length > 0 && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {kolommen.map((k, idx) => {
+              const waarde = minuten?.[idx] ?? null
+              return (
+                <span key={k.id} className="w-8 text-right tabular-nums text-[12.5px] font-semibold">
+                  <span aria-hidden="true" className={waarde === null ? 'text-faint' : 'text-ink'}>{waarde ?? '–'}</span>
+                  <span className="sr-only">
+                    {waarde === null
+                      ? t.matchSquad.minutenGeenSr.replace('{datum}', k.datum)
+                      : t.matchSquad.minutenSr.replace('{minuten}', String(waarde)).replace('{datum}', k.datum)}
+                  </span>
+                </span>
+              )
+            })}
+          </div>
+        )}
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => toggle(player.id)}
+            disabled={isPending}
+            aria-pressed={isSelected}
+            aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
+            className="relative hit-slop w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
+            style={isSelected
+              ? { background: 'var(--primary)', color: '#fff' }
+              : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
+          >
+            <span className="ms text-[18px]">{isSelected ? 'check' : 'add'}</span>
+          </button>
+        ) : (
+          // Read-only: alleen de huidige selectiestatus, geen knop.
+          <span
+            aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
+            className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
+            style={isSelected
+              ? { background: 'var(--primary)', color: '#fff' }
+              : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
+          >
+            <span className="ms text-[18px]">{isSelected ? 'check' : 'remove'}</span>
+          </span>
+        )}
+      </div>
+    )
+  }
+
   if (players.length === 0) {
     // Twee wezenlijk verschillende lege staten: geen (actieve) spelers in het
     // team vs. wel spelers maar niemand voor dit event als aanwezig gemeld.
@@ -188,58 +289,62 @@ export default function MatchSquadEditor({
           canEdit={canEdit}
         />
 
-        <div className="surface-card overflow-hidden">
-          {players.map((player, i) => {
-            const isSelected = selected.has(player.id)
-            return (
-              <div key={player.id} className="flex items-center justify-between gap-3 px-4 py-2.5"
-                style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
-                <span className="text-[14.5px] font-bold text-ink truncate">
-                  {player.name}
-                  {player.type === 'guest' && (
-                    <span className="ml-2 text-[11px] font-semibold text-faint">({t.players.guestBadge})</span>
-                  )}
-                  {/* Eén statuslabel tegelijk: inactief weegt zwaarder dan
-                      niet-aanwezig (zie page.tsx-comment) — een speler toont
-                      nooit beide statuslabels tegelijk, dat zou verwarrend
-                      zijn. De gast-tag hierboven staat daarbuiten: die toont
-                      altijd, naast een eventueel statuslabel (besluit 24). */}
-                  {!player.active ? (
-                    <span className="ml-2 text-[11px] font-semibold text-faint">({t.players.inactiveLabel})</span>
-                  ) : !presentIds.has(player.id) ? (
-                    <span className="ml-2 text-[11px] font-semibold text-faint">({t.matchSquad.notPresentLabel})</span>
-                  ) : null}
-                </span>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    onClick={() => toggle(player.id)}
-                    disabled={isPending}
-                    aria-pressed={isSelected}
-                    aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
-                    className="relative hit-slop w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-colors disabled:opacity-60"
-                    style={isSelected
-                      ? { background: 'var(--primary)', color: '#fff' }
-                      : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
-                  >
-                    <span className="ms text-[18px]">{isSelected ? 'check' : 'add'}</span>
-                  </button>
-                ) : (
-                  // Read-only: alleen de huidige selectiestatus, geen knop.
-                  <span
-                    aria-label={`${t.matchSquad.toggleLabel}: ${player.name}`}
-                    className="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
-                    style={isSelected
-                      ? { background: 'var(--primary)', color: '#fff' }
-                      : { background: 'var(--surface-sunken)', color: 'var(--muted)', border: '1px solid var(--border-soft)' }}
-                  >
-                    <span className="ms text-[18px]">{isSelected ? 'check' : 'remove'}</span>
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </div>
+        {recenteMinuten === null && (
+          <p className="text-[12px] font-semibold text-faint">{t.matchSquad.minutenFout}</p>
+        )}
+
+        {/* Minutenkop: één kop boven alle groepen, met de drie datums
+            uitgelijnd op de minutenkolommen van de rijen (rechts, vóór de
+            toggle-ruimte). De transparante rand spiegelt de 1px rand van
+            surface-card, flex justify-end laat een te brede datum naar links
+            overlopen i.p.v. de kolom naar rechts te schuiven. Zonder eerdere wedstrijden geen kolommen. */}
+        {kolommen.length > 0 && (
+          <div className="flex items-center gap-3 px-4 -mb-2 border border-transparent">
+            <span className="min-w-0 flex-1 break-words text-[11px] font-extrabold uppercase tracking-wider text-faint">
+              {t.matchSquad.minutenKop}
+            </span>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {kolommen.map((k) => (
+                <span key={k.id} className="w-8 flex-shrink-0 flex justify-end tabular-nums whitespace-nowrap text-[10.5px] font-bold text-faint">{k.datum}</span>
+              ))}
+            </div>
+            <span aria-hidden="true" className="w-9 flex-shrink-0" />
+          </div>
+        )}
+
+        <section aria-labelledby="selectie-groep-aanwezig" className="flex flex-col gap-2">
+          <h2 id="selectie-groep-aanwezig" className="text-[13px] font-bold text-muted">
+            {t.matchSquad.groepAanwezig.replace('{n}', String(groepen.aanwezig.length))}
+          </h2>
+          {groepen.aanwezig.length > 0 ? (
+            <div className="surface-card overflow-hidden">{groepen.aanwezig.map(renderRij)}</div>
+          ) : (
+            <div className="surface-card p-4 text-center">
+              <p className="text-faint text-sm mb-1">{t.matchSquad.geenAanwezigen}</p>
+              <p className="text-faint text-sm">
+                <Link href={`/events/${eventId}`} className="text-brand-accent font-bold">{t.matchSquad.emptyNoAttendanceLink}</Link>
+              </p>
+            </div>
+          )}
+        </section>
+
+        {groepen.geenReactie.length > 0 && (
+          <section aria-labelledby="selectie-groep-geen-reactie" className="flex flex-col gap-2">
+            <h2 id="selectie-groep-geen-reactie" className="text-[13px] font-bold text-muted">
+              {t.matchSquad.groepGeenReactie.replace('{n}', String(groepen.geenReactie.length))}
+            </h2>
+            <div className="surface-card overflow-hidden">{groepen.geenReactie.map(renderRij)}</div>
+          </section>
+        )}
+
+        {groepen.afwezig.length > 0 && (
+          <details open={afwezigOpen} onToggle={(e) => setAfwezigOpen(e.currentTarget.open)} className="flex flex-col gap-2">
+            <summary className="min-h-11 flex items-center cursor-pointer text-[13px] font-bold text-muted">
+              {t.matchSquad.groepAfwezig.replace('{n}', String(groepen.afwezig.length))}
+            </summary>
+            <div className="surface-card overflow-hidden">{groepen.afwezig.map(renderRij)}</div>
+          </details>
+        )}
       </div>
 
       {/* Print-only, gevoed door dezelfde live `selected`-state (niet door de

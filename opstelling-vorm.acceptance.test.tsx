@@ -423,6 +423,8 @@ function makeSupabaseMock(opts: {
   const ratingsFactory = tableFactory(opts.ratings ?? [], { error: opts.ratingsError })
   const matchSquadFactory = tableFactory(opts.matchSquad ?? [])
   const settingsFactory = tableFactory(opts.settings ?? [])
+  // Wedstrijdstapper: bestaan-check op analyse (match_events, limit 1).
+  const matchEventsFactory = tableFactory([])
   return {
     auth: { getUser: async () => ({ data: { user } }) },
     from: (table: string) => {
@@ -434,6 +436,7 @@ function makeSupabaseMock(opts: {
       if (table === 'match_ratings') return ratingsFactory()
       if (table === 'match_squad') return matchSquadFactory()
       if (table === 'settings') return settingsFactory()
+      if (table === 'match_events') return matchEventsFactory()
       throw new Error(`Onverwachte tabel in test: ${table}`)
     },
   }

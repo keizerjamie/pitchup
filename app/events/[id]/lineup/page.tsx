@@ -2,8 +2,10 @@ import { notFound } from 'next/navigation'
 import PageHeader from '@/components/ui/PageHeader'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
-import { Player } from '@/lib/types'
+import { Player, AttendanceStatus } from '@/lib/types'
 import LineupBuilder from '@/components/LineupBuilder'
+import WedstrijdStapper from '@/components/wedstrijd/WedstrijdStapper'
+import VolgendeStap from '@/components/wedstrijd/VolgendeStap'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
 import { isDateString } from '@/lib/season-dates'
@@ -11,6 +13,9 @@ import { buildPlayerForms, FORM_MATCH_HORIZON } from '@/lib/lineup-form'
 import { CLUB_COLOR_KEYS, resolveKitColors } from '@/lib/club-colors'
 import { splitsAanwezigheid } from '@/lib/aanwezigheid-telling'
 import type { FormMatchRow, FormRatingRow } from '@/lib/lineup-form'
+import { todayLocal } from '@/lib/utils'
+import { bouwStapperData, telBeschikbaarheid, wedstrijdDatumBereikt } from '@/lib/wedstrijd-stappen'
+import { bepaalVorigeOpstelling, type VorigeOpstelling } from '@/lib/vorige-opstelling'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -21,7 +26,7 @@ export default async function LineupPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: attendance }, { data: lineup }, { data: squad }, { data: settingsRows }] = await Promise.all([
+  const [{ data: event }, { data: attendance }, { data: lineup, error: lineupError }, { data: squad, error: squadError }, { data: settingsRows }, { data: ratingCheck, error: ratingError }, { data: matchEventCheck, error: matchEventError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('lineups').select('*').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
@@ -32,6 +37,9 @@ export default async function LineupPage({ params }: Props) {
     // ook team_logo_url en season_start in leven.
     supabase.from('settings').select('key, value').eq('team_id', ctx.teamId)
       .in('key', [CLUB_COLOR_KEYS.primary, CLUB_COLOR_KEYS.secondary]),
+    // Statusbronnen voor de wedstrijdstapper: bestaat er al analyse?
+    supabase.from('match_ratings').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
+    supabase.from('match_events').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
   ])
 
   if (!event || event.type !== 'match') notFound()
@@ -118,18 +126,37 @@ export default async function LineupPage({ params }: Props) {
   const formMatches: FormMatchRow[] = formMatchError ? [] : (formMatchRows ?? [])
   const formMatchIds = formMatches.map((m) => m.id)
 
-  // Ronde 3 — beoordelingen, afhankelijk van ronde 2. Nooit een open select op
-  // match_ratings: de in()-lijst is per constructie hooguit FORM_MATCH_HORIZON
-  // team-eigen event-ids vóór de peildatum. Zonder eerdere wedstrijden slaan we
-  // de rondtrip helemaal over (zelfde vorm als de attendanceRows-query in
+  // Kandidaten voor "opstelling vorige wedstrijd overnemen": dezelfde eerdere
+  // wedstrijden als het vormvenster (nieuwste eerst, ≤ FORM_MATCH_HORIZON),
+  // maar alleen die al gespeeld zijn (wedstrijdDatumBereikt, servertijd).
+  const vandaag = todayLocal()
+  const kandidaten = formMatches
+    .filter((m) => typeof m.id === 'string' && wedstrijdDatumBereikt(m.date, vandaag))
+    .map((m) => ({ id: m.id, date: m.date }))
+  const kandidaatIds = kandidaten.map((k) => k.id)
+
+  // Ronde 3 — beoordelingen én vorige opstellingen, parallel en afhankelijk
+  // van ronde 2. Nooit een open select op match_ratings of lineups: de
+  // in()-lijsten zijn per constructie hooguit FORM_MATCH_HORIZON team-eigen
+  // event-ids vóór de peildatum. Zonder eerdere wedstrijden slaan we de
+  // rondtrip helemaal over (zelfde vorm als de attendanceRows-query in
   // app/page.tsx, die bij een lege allEventIds ook niets ophaalt).
-  const { data: formRatingRows, error: formRatingError } = formMatchIds.length > 0
-    ? await supabase
-        .from('match_ratings')
-        .select('event_id, player_id, rating')
-        .eq('team_id', ctx.teamId)
-        .in('event_id', formMatchIds)
-    : { data: [] as FormRatingRow[], error: null }
+  const [{ data: formRatingRows, error: formRatingError }, { data: vorigeRijen, error: vorigeError }] = await Promise.all([
+    formMatchIds.length > 0
+      ? supabase
+          .from('match_ratings')
+          .select('event_id, player_id, rating')
+          .eq('team_id', ctx.teamId)
+          .in('event_id', formMatchIds)
+      : Promise.resolve({ data: [] as FormRatingRow[], error: null }),
+    kandidaatIds.length > 0
+      ? supabase
+          .from('lineups')
+          .select('event_id, formation, positions')
+          .eq('team_id', ctx.teamId)
+          .in('event_id', kandidaatIds)
+      : Promise.resolve({ data: [] as { event_id: unknown; formation: unknown; positions: unknown }[], error: null }),
+  ])
 
   if (formRatingError) logError('lineup-form', formRatingError)
   const formRatings: FormRatingRow[] = formRatingError ? [] : (formRatingRows ?? [])
@@ -160,6 +187,46 @@ export default async function LineupPage({ params }: Props) {
   const { aanwezig: presentPlayers, afwezig: absentPlayers } =
     splitsAanwezigheid(players, (p) => presentPlayerIds.has(p.id))
 
+  const statusMap = new Map<string, AttendanceStatus>()
+  for (const a of attendance ?? []) statusMap.set(a.player_id, a.status as AttendanceStatus)
+  const statusVan = (p: Player): AttendanceStatus => statusMap.get(p.id) ?? 'unknown'
+
+  // Vorige opstelling: wie mag er bij overnemen op het veld komen? Actief
+  // (`players` is al active=true), in de bank-set (eligiblePlayerIds) en voor
+  // dit event niet afgemeld of geblesseerd. Een geselecteerde speler zonder
+  // reactie komt dus wél terug. De eventstatus is leidend, niet players.injured.
+  // Bij een fout in het vormvenster of de lineups-query: 'fout' (nooit stil
+  // "geen vorige opstelling", dat zou iets anders betekenen).
+  if (vorigeError) logError('lineup.vorigeOpstelling', vorigeError)
+  const beschikbareSpelerIds = new Set(
+    players
+      .filter((p) => eligiblePlayerIds.has(p.id))
+      .filter((p) => { const st = statusVan(p); return st !== 'absent' && st !== 'injured' })
+      .map((p) => p.id),
+  )
+  const vorigeOpstelling: VorigeOpstelling = formMatchError || vorigeError
+    ? { beschikbaar: false, reden: 'fout' }
+    : bepaalVorigeOpstelling({ kandidaten, lineupRijen: vorigeRijen ?? [], beschikbareSpelerIds })
+
+  // Wedstrijdstapper (stap 3 "opstelling"). Een gefaalde statusquery geeft
+  // 'onbekend', nooit een vals vinkje. De samenvatting telt actieve spelers.
+  if (lineupError) logError('lineup.stapper.lineup', lineupError)
+  if (squadError) logError('lineup.stapper.selectie', squadError)
+  if (ratingError) logError('lineup.stapper.ratings', ratingError)
+  if (matchEventError) logError('lineup.stapper.events', matchEventError)
+  const stapper = bouwStapperData({
+    eventId: id,
+    huidig: 'opstelling',
+    aanwezigheid: telBeschikbaarheid(players, statusVan),
+    selectieRijen: squadError ? null : (squad?.length ?? 0),
+    lineup: lineupError ? undefined : (lineup ?? null),
+    uitslag: event,
+    ratingCount: ratingError ? null : (ratingCheck?.length ?? 0),
+    eventCount: matchEventError ? null : (matchEventCheck?.length ?? 0),
+    eventDate: event.date,
+    vandaag,
+  })
+
   const overviewGroups = [
     { label: 'GK',   positions: ['Keeper'] },
     { label: 'Verd', positions: ['Linksachter', 'Centrale verdediger', 'Rechtsachter'] },
@@ -174,6 +241,8 @@ export default async function LineupPage({ params }: Props) {
         title={t.lineup.title}
         subtitle={`${t.lineup.vsLabel} ${event.opponent} · ${presentPlayers.length} ${t.lineup.presentCount}`}
       />
+
+      <WedstrijdStapper data={stapper} t={t} />
 
       {/* Desktop: builder left, player overview right */}
       <div className="lg:grid lg:grid-cols-[minmax(0,26rem)_1fr] lg:gap-10 lg:items-start flex flex-col gap-5">
@@ -221,10 +290,13 @@ export default async function LineupPage({ params }: Props) {
             initialFormation={lineup?.formation}
             initialPositions={lineup?.positions}
             canEdit={canEdit(ctx, 'wedstrijd')}
+            vorigeOpstelling={vorigeOpstelling}
           />
         </div>
 
       </div>
+
+      <VolgendeStap data={stapper} t={t} />
     </div>
   )
 }

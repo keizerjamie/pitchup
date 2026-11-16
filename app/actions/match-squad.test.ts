@@ -127,6 +127,9 @@ describe('toggleSquadPlayer — selecteren', () => {
 
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+    // Bank = selectie op de opstellingspagina; stapper op opstelling en analyse.
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
   })
 
   it('crasht niet als dezelfde speler twee keer wordt toegevoegd (onConflict)', async () => {
@@ -166,6 +169,9 @@ describe('toggleSquadPlayer — deselecteren', () => {
 
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+    // Bank = selectie op de opstellingspagina; stapper op opstelling en analyse.
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
   })
 })
 

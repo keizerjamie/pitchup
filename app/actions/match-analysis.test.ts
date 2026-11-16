@@ -143,6 +143,17 @@ describe('saveMatchResult', () => {
     expect(m.calls.update.filter((u) => u.table === 'events')).toHaveLength(0)
   })
 
+  it('revalideert analyse, eventdetail én de stapper op selectie en opstelling', async () => {
+    use(eigenTeam())
+
+    await saveMatchResult('e1', 3, 1)
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+  })
+
   it('klemt de doelpunten vóór de RPC — clampGoals blijft de enige bron van waarheid', async () => {
     const m = eigenTeam()
     use(m)
@@ -365,7 +376,11 @@ describe('deleteMatchEvent', () => {
     await deleteMatchEvent(MOMENT_ID, 'iets-anders')
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/analysis`)
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}`)
+    // De stapper op selectie en opstelling toont de analysestatus.
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/squad`)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/lineup`)
     expect(revalidatePath).not.toHaveBeenCalledWith('/events/iets-anders')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/events/iets-anders/squad')
   })
 
   it('gooit "Gebeurtenis niet gevonden" bij een onbekende of vreemde rij, zonder delete', async () => {
@@ -488,6 +503,8 @@ describe('herstelWedstrijdMoment', () => {
     await herstelWedstrijdMoment(SNAPSHOT)
     expect(m.calls.insert).toHaveLength(0)
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}`)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/squad`)
+    expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT_E1}/lineup`)
   })
 
   it('23505 en de rij bestaat in dit team → succes', async () => {

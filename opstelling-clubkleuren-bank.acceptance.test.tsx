@@ -241,6 +241,8 @@ function makeSupabaseMock(opts: {
     match_squad: tableFactory(opts.matchSquad ?? []),
     settings: tableFactory(opts.settings ?? []),
     match_ratings: tableFactory([]),
+    // Wedstrijdstapper: bestaan-check op analyse (match_events, limit 1).
+    match_events: tableFactory([]),
   }
   return {
     auth: { getUser: async () => ({ data: { user } }) },

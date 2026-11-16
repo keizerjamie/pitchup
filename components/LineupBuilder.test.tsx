@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
@@ -6,6 +6,16 @@ import type { Player } from '@/lib/types'
 import type { PlayerForm } from '@/lib/lineup-form'
 import LineupBuilder from '@/components/LineupBuilder'
 import { saveLineup } from '@/app/actions/attendance'
+import { FORMATIONS, type LineupPosition } from '@/lib/types'
+import type { VorigeOpstelling } from '@/lib/vorige-opstelling'
+import BackButton from '@/components/BackButton'
+import Link from 'next/link'
+
+const routerPush = vi.fn()
+const routerBack = vi.fn()
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: routerPush, back: routerBack }),
+}))
 
 vi.mock('@/app/actions/attendance', () => ({
   saveLineup: vi.fn().mockResolvedValue({ legePosities: 0, selectieAutomatischGevuld: false, selectieFout: false }),
@@ -216,5 +226,286 @@ describe('LineupBuilder — meldingen na opslaan (SaveLineupResultaat)', () => {
     await screen.findByText(nl.lineup.savedIncompleteMany.replace('{n}', '2'))
     fireEvent.click(screen.getByText(nl.lineup.autoLineup))
     await waitFor(() => expect(screen.getByRole('status')).toBeEmptyDOMElement())
+  })
+})
+
+// ---------------------------------------------------------------------------
+// De wedstrijd als één flow: overnemen, onopgeslagen-bewaking, mobiele bank.
+// ---------------------------------------------------------------------------
+
+const spelers = [
+  player({ id: 'p1', name: 'Anna Bakker', position: 'Keeper', jersey_number: 1 }),
+  player({ id: 'p2', name: 'Bram Claes', position: 'Spits', jersey_number: 9 }),
+  player({ id: 'p3', name: 'Carla Dijk', position: 'Centrale middenvelder', jersey_number: 8 }),
+]
+const alleForm = { p1: form(), p2: form(), p3: form() }
+
+// 4-3-3 uit de bron-formaties, met de opgegeven spelers op de eerste slots.
+function vorigePosities(ids: (string | null)[]): LineupPosition[] {
+  return FORMATIONS['4-3-3'].positions.map((p, i) => ({ ...p, player_id: ids[i] ?? null }))
+}
+
+function beschikbaar(overrides: Partial<Extract<VorigeOpstelling, { beschikbaar: true }>> = {}): VorigeOpstelling {
+  return {
+    beschikbaar: true,
+    bronEventId: 'e0',
+    bronDatum: '2026-07-19',
+    formation: '4-3-3',
+    positions: vorigePosities(['p1', 'p2']),
+    leegGelaten: 0,
+    ...overrides,
+  }
+}
+
+function renderMet(extra: Partial<React.ComponentProps<typeof LineupBuilder>> = {}) {
+  return render(
+    <DictProvider dict={nl}>
+      <Link href="/events/event-1/analysis">naar analyse</Link>
+      <BackButton fallback="/events/event-1">terug</BackButton>
+      <LineupBuilder eventId="event-1" players={spelers} playerForm={alleForm} {...extra} />
+    </DictProvider>,
+  )
+}
+
+// Slots bevatten de positielabel-tekst of de voornaam van de speler.
+const slotMet = (naam: string) => screen.queryByText(naam)
+
+describe('LineupBuilder — vorige opstelling overnemen', () => {
+  beforeEach(() => vi.mocked(saveLineup).mockClear())
+
+  it('toont geen overnemen-knop zonder vorigeOpstelling-prop', () => {
+    renderMet()
+    expect(screen.queryByRole('button', { name: nl.lineup.vorigeOvernemen })).not.toBeInTheDocument()
+  })
+
+  it('toont geen overnemen-knop zonder wedstrijd-recht (canEdit=false)', () => {
+    renderMet({ canEdit: false, vorigeOpstelling: beschikbaar() })
+    expect(screen.queryByRole('button', { name: nl.lineup.vorigeOvernemen })).not.toBeInTheDocument()
+  })
+
+  it('toont de bronwedstrijd (datum) onder de knop', () => {
+    renderMet({ vorigeOpstelling: beschikbaar() })
+    expect(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen })).toBeEnabled()
+    expect(screen.getByText(/^Van /)).toBeInTheDocument()
+  })
+
+  it('op een leeg veld: direct overnemen, zonder bevestigingsblad en zonder saveLineup', () => {
+    renderMet({ vorigeOpstelling: beschikbaar() })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(slotMet('Anna')).toBeInTheDocument()
+    expect(slotMet('Bram')).toBeInTheDocument()
+    expect(saveLineup).not.toHaveBeenCalled()
+    expect(screen.getByRole('status')).toHaveTextContent(nl.lineup.overgenomenMelding)
+  })
+
+  it('neemt ook de formatie over', () => {
+    renderMet({
+      vorigeOpstelling: beschikbaar({
+        formation: '4-4-2',
+        positions: FORMATIONS['4-4-2'].positions.map((p, i) => ({ ...p, player_id: i === 0 ? 'p1' : null })),
+      }),
+    })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    expect(screen.getByRole('button', { name: /4-4-2/ })).toBeInTheDocument()
+  })
+
+  it('meldt het aantal leeg gelaten slots (enkelvoud en meervoud)', () => {
+    const { unmount } = renderMet({ vorigeOpstelling: beschikbaar({ leegGelaten: 1 }) })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    expect(screen.getByRole('status')).toHaveTextContent(nl.lineup.overgenomenLeegOne)
+    unmount()
+    renderMet({ vorigeOpstelling: beschikbaar({ leegGelaten: 3 }) })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    expect(screen.getByRole('status')).toHaveTextContent(nl.lineup.overgenomenLeegMany.replace('{n}', '3'))
+  })
+
+  it('op een gevuld veld: eerst een bevestigingsblad; annuleren laat het veld gelijk', () => {
+    renderMet({ vorigeOpstelling: beschikbaar({ positions: vorigePosities(['p3']) }) })
+    // Veld vullen via auto-opstelling.
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    const voor = document.querySelector('.relative[style*="padding-top"]')?.textContent
+    expect(voor).toContain('Anna')
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    expect(screen.getByRole('dialog', { name: nl.lineup.vervangenVraag })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: nl.common.cancel }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(document.querySelector('.relative[style*="padding-top"]')?.textContent).toBe(voor)
+    expect(screen.queryByText(nl.lineup.overgenomenMelding)).not.toBeInTheDocument()
+  })
+
+  it('bevestigen vervangt de opstelling, nog steeds zonder saveLineup', () => {
+    renderMet({ vorigeOpstelling: beschikbaar({ positions: vorigePosities(['p2']) }) })
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vervangenBevestig }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(nl.lineup.overgenomenMelding)
+    expect(saveLineup).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['geen', nl.lineup.vorigeGeen],
+    ['onleesbaar', nl.lineup.vorigeOnleesbaar],
+    ['fout', nl.lineup.vorigeFout],
+  ] as const)('reden %s: knop uitgeschakeld met uitleg', (reden, tekst) => {
+    renderMet({ vorigeOpstelling: { beschikbaar: false, reden } })
+    expect(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen })).toBeDisabled()
+    expect(screen.getByText(tekst)).toBeInTheDocument()
+  })
+
+  it('een volgende wijziging wist de overgenomen-melding', () => {
+    renderMet({ vorigeOpstelling: beschikbaar() })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    expect(screen.getByRole('status')).toHaveTextContent(nl.lineup.overgenomenMelding)
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  })
+})
+
+describe('LineupBuilder — onopgeslagen-bewaking', () => {
+  beforeEach(() => {
+    routerPush.mockClear()
+    routerBack.mockClear()
+    vi.mocked(saveLineup).mockClear()
+  })
+  // jsdom "navigeert" niet echt; vang gewone link-klikken af zodat een niet
+  // onderschepte klik geen "not implemented"-ruis geeft.
+  const vang = (e: MouseEvent) => e.preventDefault()
+  beforeEach(() => document.addEventListener('click', vang))
+  afterEach(() => document.removeEventListener('click', vang))
+
+  it('geen blad bij een link-klik zolang er niets gewijzigd is', () => {
+    renderMet()
+    fireEvent.click(screen.getByText('naar analyse'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('na een wijziging onderschept een link-klik met het verlaten-blad', () => {
+    renderMet()
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    fireEvent.click(screen.getByText('naar analyse'))
+    const blad = screen.getByRole('dialog', { name: nl.lineup.verlatenTitel })
+    expect(blad).toHaveTextContent(nl.lineup.verlatenTekst)
+    expect(screen.getByRole('button', { name: nl.lineup.blijven })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: nl.lineup.tochVerlaten })).toBeInTheDocument()
+  })
+
+  it('Blijven sluit het blad zonder te navigeren; Toch verlaten navigeert naar het doel', () => {
+    renderMet()
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    fireEvent.click(screen.getByText('naar analyse'))
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.blijven }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(routerPush).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByText('naar analyse'))
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.tochVerlaten }))
+    expect(routerPush).toHaveBeenCalledWith('/events/event-1/analysis')
+  })
+
+  it('de terugpijl in de paginakop wordt ook bewaakt: Toch verlaten gaat pas dan terug', () => {
+    vi.spyOn(window.history, 'length', 'get').mockReturnValue(3)
+    renderMet()
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    fireEvent.click(screen.getByRole('button', { name: nl.nav.back }))
+    expect(screen.getByRole('dialog', { name: nl.lineup.verlatenTitel })).toBeInTheDocument()
+    expect(routerBack).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.tochVerlaten }))
+    expect(routerBack).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it('de terugpijl is niet bewaakt zolang er niets gewijzigd is', () => {
+    vi.spyOn(window.history, 'length', 'get').mockReturnValue(3)
+    renderMet()
+    fireEvent.click(screen.getByRole('button', { name: nl.nav.back }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(routerBack).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it('na een geslaagde save is de bewaking weer uit', async () => {
+    renderMet()
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.save }))
+    await screen.findByText(nl.lineup.saved)
+    fireEvent.click(screen.getByText('naar analyse'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('na een mislukte save blijft de bewaking aan', async () => {
+    vi.mocked(saveLineup).mockRejectedValueOnce(new Error('boom'))
+    renderMet()
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.save }))
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByText('naar analyse'))
+    expect(screen.getByRole('dialog', { name: nl.lineup.verlatenTitel })).toBeInTheDocument()
+  })
+
+  it('overnemen telt als wijziging: link-klik geeft het blad, ook zonder aanraken van het veld', () => {
+    renderMet({ vorigeOpstelling: beschikbaar() })
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.vorigeOvernemen }))
+    fireEvent.click(screen.getByText('naar analyse'))
+    expect(screen.getByRole('dialog', { name: nl.lineup.verlatenTitel })).toBeInTheDocument()
+  })
+
+  it('zet beforeunload alleen bij niet-opgeslagen wijzigingen', () => {
+    renderMet()
+    const schoon = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(schoon)
+    expect(schoon.defaultPrevented).toBe(false)
+    fireEvent.click(screen.getByText(nl.lineup.autoLineup))
+    const vuil = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(vuil)
+    expect(vuil.defaultPrevented).toBe(true)
+  })
+
+  it('zonder wedstrijd-recht is er niets om te verliezen: geen bewaking', () => {
+    renderMet({ canEdit: false })
+    fireEvent.click(screen.getByText('naar analyse'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
+describe('LineupBuilder — bank op mobiel', () => {
+  const metOpstelling = () => renderMet({ initialPositions: vorigePosities(['p1']) })
+
+  it('toont de knop "Bank (n)" met het aantal beschikbare spelers, alleen op mobiel (sm:hidden)', () => {
+    metOpstelling()
+    const knop = screen.getByRole('button', { name: nl.lineup.bankKnop.replace('{n}', '2') })
+    expect(knop.className).toContain('sm:hidden')
+    expect(knop.className).toContain('hit-slop')
+  })
+
+  it('de inline bank onder het veld is op mobiel verborgen (max-sm:hidden)', () => {
+    metOpstelling()
+    const kop = screen.getByRole('heading', { name: `${nl.lineup.bench} (2)` })
+    expect(kop.parentElement?.className).toContain('max-sm:hidden')
+  })
+
+  it('opent een onderblad met rugnummer, naam en positie-afkorting; sluiten kan', () => {
+    metOpstelling()
+    fireEvent.click(screen.getByRole('button', { name: nl.lineup.bankKnop.replace('{n}', '2') }))
+    const blad = screen.getByRole('dialog', { name: `${nl.lineup.bench} (2)` })
+    expect(blad).toHaveTextContent('Bram Claes')
+    expect(blad).toHaveTextContent('ST')
+    expect(blad).toHaveTextContent('Carla Dijk')
+    expect(blad).toHaveTextContent('CM')
+    expect(blad).toHaveTextContent('9')
+    expect(blad).not.toHaveTextContent('Anna Bakker')
+    fireEvent.click(screen.getByRole('button', { name: nl.common.close }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('toont geen bankknop zolang niemand is opgesteld', () => {
+    renderMet()
+    expect(screen.queryByRole('button', { name: /^Bank \(/ })).not.toBeInTheDocument()
+  })
+
+  it('toont geen bankknop als iedereen is opgesteld', () => {
+    renderMet({ players: [spelers[0]], initialPositions: vorigePosities(['p1']) })
+    expect(screen.queryByRole('button', { name: /^Bank \(/ })).not.toBeInTheDocument()
   })
 })

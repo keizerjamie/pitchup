@@ -2,11 +2,13 @@ import { notFound } from 'next/navigation'
 import PageHeader from '@/components/ui/PageHeader'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
-import { Player, MatchRating, MatchEvent, Tegendoelpunt, Speelminuten } from '@/lib/types'
+import { Player, MatchRating, MatchEvent, Tegendoelpunt, Speelminuten, AttendanceStatus } from '@/lib/types'
 import MatchAnalysisEditor from '@/components/MatchAnalysisEditor'
+import WedstrijdStapper from '@/components/wedstrijd/WedstrijdStapper'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
 import { todayLocal } from '@/lib/utils'
+import { bouwStapperData, telBeschikbaarheid, wedstrijdDatumBereikt } from '@/lib/wedstrijd-stappen'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -17,7 +19,7 @@ export default async function AnalysisPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: attendance }, { data: ratings }, { data: matchEvents }, { data: teamNameRow }, { data: tegendoelpunten, error: tegendoelpuntenError }, { data: speelminutenRijen, error: speelminutenError }] = await Promise.all([
+  const [{ data: event }, { data: attendance }, { data: ratings, error: ratingsError }, { data: matchEvents, error: matchEventsError }, { data: teamNameRow }, { data: tegendoelpunten, error: tegendoelpuntenError }, { data: speelminutenRijen, error: speelminutenError }, { data: squadCheck, error: squadError }, { data: lineup, error: lineupError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('attendance').select('player_id, status').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('match_ratings').select('id,event_id,player_id,rating,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
@@ -25,6 +27,9 @@ export default async function AnalysisPage({ params }: Props) {
     supabase.from('settings').select('value').eq('team_id', ctx.teamId).eq('key', 'team_name').maybeSingle(),
     supabase.from('tegendoelpunten').select('id,event_id,soort,minute,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
     supabase.from('speelminuten').select('id,event_id,player_id,minuten,wissels,created_at').eq('event_id', id).eq('team_id', ctx.teamId),
+    // Statusbronnen voor de wedstrijdstapper: selectie (≥1 rij) en opstelling.
+    supabase.from('match_squad').select('id').eq('event_id', id).eq('team_id', ctx.teamId).limit(1),
+    supabase.from('lineups').select('formation, positions').eq('event_id', id).eq('team_id', ctx.teamId).maybeSingle(),
   ])
 
   // Een falende tegendoelpunten-query (bv. migratie nog niet gedraaid) mag de
@@ -55,8 +60,9 @@ export default async function AnalysisPage({ params }: Props) {
   const presentPlayers = players.filter((p) => presentPlayerIds.has(p.id))
 
   // Speelminuten bestaan pas vanaf de wedstrijddag (M5). Stringvergelijking op
-  // YYYY-MM-DD, zoals de server-actions (fail-safe op een UTC-klok).
-  const wedstrijdGespeeld = typeof event.date === 'string' && event.date <= todayLocal()
+  // YYYY-MM-DD, zoals de server-actions (fail-safe op een UTC-klok). Dezelfde
+  // regel als de stapper en de eventdetailpagina (wedstrijdDatumBereikt).
+  const wedstrijdGespeeld = wedstrijdDatumBereikt(event.date, todayLocal())
   const speelminuten: Speelminuten[] = speelminutenError ? [] : ((speelminutenRijen ?? []) as Speelminuten[])
 
   // Namen voor rijen van spelers buiten presentPlayers: eerst de actieve
@@ -80,9 +86,32 @@ export default async function AnalysisPage({ params }: Props) {
     for (const p of (inactief ?? []) as { id: string; name: string }[]) speelminutenNamen[p.id] = p.name
   }
 
+  // Wedstrijdstapper (stap 4 "analyse"). Een gefaalde statusquery geeft
+  // 'onbekend', nooit een vals vinkje. De samenvatting telt actieve spelers.
+  if (squadError) logError('analysis.stapper.selectie', squadError)
+  if (lineupError) logError('analysis.stapper.lineup', lineupError)
+  if (ratingsError) logError('analysis.stapper.ratings', ratingsError)
+  if (matchEventsError) logError('analysis.stapper.events', matchEventsError)
+  const statusMap = new Map<string, AttendanceStatus>()
+  for (const a of attendance ?? []) statusMap.set(a.player_id, a.status as AttendanceStatus)
+  const stapper = bouwStapperData({
+    eventId: id,
+    huidig: 'analyse',
+    aanwezigheid: telBeschikbaarheid(players, (p) => statusMap.get(p.id) ?? 'unknown'),
+    selectieRijen: squadError ? null : (squadCheck?.length ?? 0),
+    lineup: lineupError ? undefined : (lineup ?? null),
+    uitslag: event,
+    ratingCount: ratingsError ? null : (ratings?.length ?? 0),
+    eventCount: matchEventsError ? null : (matchEvents?.length ?? 0),
+    eventDate: event.date,
+    vandaag: todayLocal(),
+  })
+
   return (
     <div className="max-w-2xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
       <PageHeader backFallback={`/events/${id}`} title={t.analysis.title} subtitle={`${t.lineup.vsLabel} ${event.opponent}`} />
+
+      <WedstrijdStapper data={stapper} t={t} />
 
       <MatchAnalysisEditor
         eventId={id}

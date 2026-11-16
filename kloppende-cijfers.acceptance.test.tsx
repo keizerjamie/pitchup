@@ -738,23 +738,27 @@ describe('Punt 3 — analysekaart vóór de wedstrijd (klok: 2026-08-19 10:00 lo
   function wedstrijdDb(date: string, o: Row = {}): Db {
     return basisDb({ events: [evenement('m1', date, { type: 'match', opponent: 'FC Test', ...o })] })
   }
-  const kaartTitel = () => screen.queryByText(nl.event.analysis)
+  // De actiekaarten zijn sinds de wedstrijd als één flow vervangen door de
+  // stapper: de analysestap is een link (open of klaar) of, vóór de
+  // wedstrijddag zonder analyse, een vergrendelde span (geen link).
   const analyseLink = () => document.querySelector('a[href="/events/m1/analysis"]')
+  const analyseStap = () => screen.getByRole('link', { name: new RegExp(nl.wedstrijdFlow.stapAnalyse) })
 
-  it('AC3.1 — wedstrijd na vandaag zonder analyse: grijze, vergrendelde kaart met "Beschikbaar na de wedstrijd"; geen oranje oproep, geen link', async () => {
+  it('AC3.1 — wedstrijd na vandaag zonder analyse: vergrendelde analysestap met "Beschikbaar na de wedstrijd"; geen link', async () => {
     gebruik(wedstrijdDb('2026-08-20'))
     const { container } = await renderEventDetail('m1')
     expect(screen.getByText(nl.event.analysisAfterMatch)).toBeInTheDocument()
     expect(nl.event.analysisAfterMatch).toBe('Beschikbaar na de wedstrijd')
-    expect(screen.queryByText(nl.event.analysisCta)).not.toBeInTheDocument()
     expect(analyseLink()).toBeNull()
-    const kaart = kaartTitel()!.closest('[aria-disabled="true"]') as HTMLElement
-    expect(kaart).not.toBeNull()
-    // Grijs: geen oranje accent (--warning) en geen CTA-balk / chevron op deze kaart.
-    expect(kaart.outerHTML).not.toContain('--warning')
-    expect(within(kaart).queryByText('bolt')).not.toBeInTheDocument()
-    expect(within(kaart).queryByText('chevron_right')).not.toBeInTheDocument()
+    const slot = container.querySelector('[aria-disabled="true"]') as HTMLElement
+    expect(slot).not.toBeNull()
+    expect(slot).toHaveTextContent(nl.wedstrijdFlow.stapAnalyse)
+    // Grijs en zonder vinkje of link.
+    expect(within(slot).queryByText('check')).not.toBeInTheDocument()
+    expect(within(slot).queryByRole('link')).not.toBeInTheDocument()
     expect(container.querySelectorAll('[aria-disabled="true"]')).toHaveLength(1)
+    // "Volgende" wijst naar de selectie, niet naar de vergrendelde analyse.
+    expect(screen.getByRole('link', { name: nl.wedstrijdFlow.volgendeSelectie })).toHaveAttribute('href', '/events/m1/squad')
   })
 
   it('AC3.1 — Engelse tekst "Available after the match"', async () => {
@@ -764,53 +768,55 @@ describe('Punt 3 — analysekaart vóór de wedstrijd (klok: 2026-08-19 10:00 lo
     const el = await EventDetailPage({ params: Promise.resolve({ id: 'm1' }) })
     render(<DictProvider dict={en}>{el}</DictProvider>)
     expect(screen.getByText('Available after the match')).toBeInTheDocument()
-    expect(screen.queryByText(en.event.analysisCta)).not.toBeInTheDocument()
+    expect(analyseLink()).toBeNull()
   })
 
   it.each([['vandaag', '2026-08-19'], ['gisteren', '2026-08-18'], ['vorige maand', '2026-07-01']])(
-    'AC3.2 — wedstrijd %s zonder analyse: de oproep (oranje CTA, link) zoals nu',
+    'AC3.2 — wedstrijd %s zonder analyse: de analysestap is een open link (geen vinkje, niet vergrendeld)',
     async (_naam, datum) => {
       gebruik(wedstrijdDb(datum))
       await renderEventDetail('m1')
-      expect(screen.getByText(nl.event.analysisCta)).toBeInTheDocument()
       expect(analyseLink()).not.toBeNull()
       expect(screen.queryByText(nl.event.analysisAfterMatch)).not.toBeInTheDocument()
-      expect(analyseLink()!.getAttribute('style')).toContain('--warning')
+      expect(within(analyseStap()).queryByText('check')).not.toBeInTheDocument()
+      expect(within(analyseStap()).getByText(nl.wedstrijdFlow.stapOpenSr)).toBeInTheDocument()
     },
   )
 
-  it('AC3.3 — bestaande analyse: kaart afgerond, ook bij een wedstrijd in de toekomst (en vandaag, en eerder)', async () => {
+  it('AC3.3 — bestaande analyse: analysestap afgerond (vinkje), ook bij een wedstrijd in de toekomst (en vandaag, en eerder)', async () => {
     for (const datum of ['2026-08-25', '2026-08-19', '2026-08-01']) {
       gebruik(wedstrijdDb(datum, { goals_for: 2, goals_against: 1 }))
       await renderEventDetail('m1')
-      expect(screen.getByText(nl.event.analysisView), datum).toBeInTheDocument()
+      expect(within(analyseStap()).getByText('check'), datum).toBeInTheDocument()
+      expect(within(analyseStap()).getByText(nl.wedstrijdFlow.stapKlaarSr), datum).toBeInTheDocument()
       expect(screen.queryByText(nl.event.analysisAfterMatch), datum).not.toBeInTheDocument()
-      expect(screen.queryByText(nl.event.analysisCta), datum).not.toBeInTheDocument()
       expect(analyseLink(), datum).not.toBeNull()
       cleanup()
     }
   })
 
-  it('AC3.4 — datum is een YYYY-MM-DD-string, vergeleken met de "vandaag"-bepaling: rond middernacht schakelt de kaart exact op de dagwissel', async () => {
+  it('AC3.4 — datum is een YYYY-MM-DD-string, vergeleken met de "vandaag"-bepaling: rond middernacht schakelt de analysestap exact op de dagwissel', async () => {
     // 23:59:59 op 19 aug: een wedstrijd op 20 aug is nog toekomst.
     vi.setSystemTime(new Date('2026-08-19T23:59:59'))
     gebruik(wedstrijdDb('2026-08-20'))
     await renderEventDetail('m1')
     expect(screen.getByText(nl.event.analysisAfterMatch)).toBeInTheDocument()
+    expect(analyseLink()).toBeNull()
     cleanup()
 
     // 00:00:01 op 20 aug: dezelfde wedstrijd is nu "vandaag" → oproep.
     vi.setSystemTime(new Date('2026-08-20T00:00:01'))
     gebruik(wedstrijdDb('2026-08-20'))
     await renderEventDetail('m1')
-    expect(screen.getByText(nl.event.analysisCta)).toBeInTheDocument()
+    expect(analyseLink()).not.toBeNull()
     expect(screen.queryByText(nl.event.analysisAfterMatch)).not.toBeInTheDocument()
     cleanup()
 
     // Wedstrijd van 19 aug om 00:00:01 op 20 aug: verleden → oproep.
     gebruik(wedstrijdDb('2026-08-19'))
     await renderEventDetail('m1')
-    expect(screen.getByText(nl.event.analysisCta)).toBeInTheDocument()
+    expect(analyseLink()).not.toBeNull()
+    expect(screen.queryByText(nl.event.analysisAfterMatch)).not.toBeInTheDocument()
   })
 
   it('AC3.5 — to-do-zichtbaarheid ongewijzigd: open analyse pas vanaf de wedstrijddag; wedstrijd morgen heeft (nog) geen analysetaak', async () => {
@@ -840,6 +846,14 @@ const lijnupRij = (formation: string, positions: Row[], eventId = 'm1', team = T
 
 describe('Punt 4 — opstelling: compleet, opslaan en wedstrijdselectie', () => {
   const lineupTaak = () => screen.getByRole('button', { name: nl.todo.taskLineup })
+  // Opstelling "gemaakt" op eventdetail = vinkje (klaar) op de opstellingsstap
+  // van de stapper; anders "nog open".
+  const opstellingStap = () => screen.getByRole('link', { name: new RegExp(nl.wedstrijdFlow.stapOpstelling) })
+  const opstellingKlaar = () => {
+    const stap = opstellingStap()
+    expect(within(stap).queryByText('check') !== null).toBe(within(stap).queryByText(nl.wedstrijdFlow.stapKlaarSr) !== null)
+    return within(stap).queryByText(nl.wedstrijdFlow.stapKlaarSr) !== null
+  }
   function wedstrijdMetLineup(lineups: Row[], extra: Record<string, Row[]> = {}): Db {
     return basisDb({
       events: [evenement('m1', '2026-08-21', { type: 'match', opponent: 'FC Test' })],
@@ -857,26 +871,26 @@ describe('Punt 4 — opstelling: compleet, opslaan en wedstrijdselectie', () => 
       const volledig = positiesVoor(f, Array.from({ length: totaal }, (_, i) => eigenId(i + 1)))
       gebruik(wedstrijdMetLineup([lijnupRij(f, volledig)]))
       await renderEventDetail('m1')
-      expect(screen.getByText(nl.event.lineupView), `${f} vol`).toBeInTheDocument()
+      expect(opstellingKlaar(), `${f} vol`).toBe(true)
       cleanup()
 
       const metGat = positiesVoor(f, Array.from({ length: totaal }, (_, i) => (i === totaal - 1 ? null : eigenId(i + 1))))
       gebruik(wedstrijdMetLineup([lijnupRij(f, metGat)]))
       await renderEventDetail('m1')
-      expect(screen.getByText(nl.event.lineupCta), `${f} met gat`).toBeInTheDocument()
+      expect(opstellingKlaar(), `${f} met gat`).toBe(false)
       cleanup()
     }
   })
 
-  it('AC4.2 — lege positie → niet "gemaakt" op dashboard (taak open), eventdetail (kaart) en de taak', async () => {
+  it('AC4.2 — lege positie → niet "gemaakt" op dashboard (taak open), eventdetail (stapper) en de taak', async () => {
     const metGat = positiesVoor('4-3-3', [...elfIds().slice(0, 10), null])
     gebruik(wedstrijdMetLineup([lijnupRij('4-3-3', metGat)]))
     await renderDashboard()
     expect(lineupTaak()).toHaveAttribute('aria-pressed', 'false')
     cleanup()
     await renderEventDetail('m1')
-    expect(screen.getByText(nl.event.lineupCta)).toBeInTheDocument()
-    expect(screen.queryByText(nl.event.lineupView)).not.toBeInTheDocument()
+    expect(opstellingKlaar()).toBe(false)
+    expect(within(opstellingStap()).getByText(nl.wedstrijdFlow.stapOpenSr)).toBeInTheDocument()
   })
 
   it('AC4.2 — dubbele speler (elf vakjes, tien spelers) en een te korte positions-lijst zijn niet "gemaakt"', async () => {
@@ -891,13 +905,13 @@ describe('Punt 4 — opstelling: compleet, opslaan en wedstrijdselectie', () => 
     expect(lineupTaak()).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('AC4.3 — alle posities gevuld → overal "gemaakt" (dashboard-taak afgevinkt, eventdetail "Bekijk opstelling")', async () => {
+  it('AC4.3 — alle posities gevuld → overal "gemaakt" (dashboard-taak afgevinkt, eventdetail: vinkje op de opstellingsstap)', async () => {
     gebruik(wedstrijdMetLineup([lijnupRij('4-3-3', positiesVoor('4-3-3', elfIds()))]))
     await renderDashboard()
     expect(lineupTaak()).toHaveAttribute('aria-pressed', 'true')
     cleanup()
     await renderEventDetail('m1')
-    expect(screen.getByText(nl.event.lineupView)).toBeInTheDocument()
+    expect(opstellingKlaar()).toBe(true)
   })
 
   it('AC4.4 — onbekende formatiesleutel (en kapotte positions) → niet compleet, geen crash/fout', async () => {
@@ -906,7 +920,7 @@ describe('Punt 4 — opstelling: compleet, opslaan en wedstrijdselectie', () => 
     expect(lineupTaak()).toHaveAttribute('aria-pressed', 'false')
     cleanup()
     await renderEventDetail('m1')
-    expect(screen.getByText(nl.event.lineupCta)).toBeInTheDocument()
+    expect(opstellingKlaar()).toBe(false)
     cleanup()
 
     gebruik(wedstrijdMetLineup([{ event_id: 'm1', team_id: TEAM, formation: '4-3-3', positions: 'kapot' }]))

@@ -10,10 +10,13 @@ import { herstelNietMogelijk, schoonCreatedAt, type HerstelWedstrijdMoment } fro
 import { assertCanEdit, requireTeamContext } from '@/lib/team-context'
 
 // Revalidate both the analysis sub-page and the event page (which shows the
-// analysis ActionCard + done-state) after every mutation.
+// analysis ActionCard + done-state) after every mutation. De stapper op de
+// selectie- en opstellingspagina toont de analysestatus ook.
 function revalidateEvent(eventId: string) {
   revalidatePath(`/events/${eventId}/analysis`)
   revalidatePath(`/events/${eventId}`)
+  revalidatePath(`/events/${eventId}/squad`)
+  revalidatePath(`/events/${eventId}/lineup`)
 }
 
 // De uitslag hoort bij Wedstrijd, maar staat als kolom op `events` — en de

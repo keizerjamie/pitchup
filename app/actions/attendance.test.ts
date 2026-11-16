@@ -211,6 +211,15 @@ describe('updateAttendance', () => {
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
   })
 
+  it('revalideert ook opstelling en analyse (bank-fallback en stapper-samenvatting)', async () => {
+    use(eigenTeam())
+
+    await updateAttendance('e1', PLAYER_A, 'absent')
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
+  })
+
   it('weigert een ongeldige status en revalideert dan niets', async () => {
     const m = eigenTeam()
     use(m)
@@ -329,6 +338,10 @@ describe('markAbsentForPeriod', () => {
     expect(revalidatePath).toHaveBeenCalledWith('/events/e2')
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
     expect(revalidatePath).toHaveBeenCalledWith('/events/e2/squad')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e2/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e2/analysis')
   })
 
   it('revalideert wél de eventpagina maar geen selectiepagina voor een training (die heeft er geen)', async () => {
@@ -339,6 +352,8 @@ describe('markAbsentForPeriod', () => {
     expect(revalidatePath).toHaveBeenCalledWith(`/players/${PLAYER_A}/absence`)
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
     expect(revalidatePath).not.toHaveBeenCalledWith('/events/e1/squad')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/events/e1/analysis')
   })
 
   it('revalideert een match-event maar één keer', async () => {
@@ -867,6 +882,10 @@ describe('revokeAbsencePeriod', () => {
     expect(revalidatePath).toHaveBeenCalledWith('/events/e2')
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
     expect(revalidatePath).not.toHaveBeenCalledWith('/events/e2/squad')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/events/e2/lineup')
+    expect(revalidatePath).not.toHaveBeenCalledWith('/events/e2/analysis')
   })
 
   it('verwijdert een periode zonder aanwezigheidsrijen zonder iets bij te werken', async () => {
@@ -1104,6 +1123,11 @@ describe('herstelAfmeldperiode', () => {
     expect(revalidatePath).toHaveBeenCalledWith(`/players/${PLAYER_A}/absence`)
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EV1}`)
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EV2}`)
+    for (const ev of [EV1, EV2]) {
+      expect(revalidatePath).toHaveBeenCalledWith(`/events/${ev}/squad`)
+      expect(revalidatePath).toHaveBeenCalledWith(`/events/${ev}/lineup`)
+      expect(revalidatePath).toHaveBeenCalledWith(`/events/${ev}/analysis`)
+    }
   })
 
   it('is idempotent: een periode die al terug is levert geen insert of update op', async () => {
@@ -1312,6 +1336,15 @@ describe('markAllPresent', () => {
     expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
   })
 
+  it('revalideert ook opstelling en analyse (bank-fallback en stapper-samenvatting)', async () => {
+    use(eigenTeam())
+
+    await markAllPresent('e1')
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
+  })
+
   it('revalideert niet bij een databasefout', async () => {
     use(eigenTeam({ attendance: { data: null, error: { code: '42501', message: 'permission denied for table attendance' } } }))
 
@@ -1335,6 +1368,19 @@ function eigenWedstrijd(extra: Record<string, TableResult> = {}) {
 }
 
 describe('saveLineup', () => {
+  it('revalideert de eigen paden, de analyse en ALLE lineup-pagina\'s (vorige opstelling van latere wedstrijden)', async () => {
+    use(eigenWedstrijd())
+
+    await saveLineup('e1', '4-3-3', [positie(PLAYER_A)])
+
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/lineup')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/squad')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/e1/analysis')
+    expect(revalidatePath).toHaveBeenCalledWith('/events/[id]/lineup', 'page')
+    expect(revalidatePath).toHaveBeenCalledWith('/')
+  })
+
   it('slaat eigen spelers op, team-gescoped', async () => {
     const m = eigenWedstrijd()
     use(m)

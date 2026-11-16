@@ -9,11 +9,24 @@ import type { KitColors } from '@/lib/club-colors'
 import { useReducedMotion } from '@/lib/use-reduced-motion'
 import { verhuisOpstelling } from '@/lib/lineup-verhuizing'
 import ChevronIcon from '@/components/icons/ChevronIcon'
+import Button from '@/components/ui/Button'
+import BottomSheet from '@/components/ui/BottomSheet'
+import BevestigBlad from '@/components/ui/BevestigBlad'
+import { useOnopgeslagenBewaking } from '@/lib/use-onopgeslagen-bewaking'
+import type { VorigeOpstelling } from '@/lib/vorige-opstelling'
+import { formatDateShort } from '@/lib/utils'
 
 // Hoe lang de inslag-state blijft staan. Moet minstens zo lang zijn als de
 // langste keyframe-animatie in app/globals.css (poppetje-schokgolf, 620ms),
 // anders verdwijnt de ring halverwege uit de DOM.
 const IMPACT_DUUR_MS = 700
+
+// Vergelijkbare vingerafdruk van een opstelling (formatie + per slot speler,
+// label en coördinaten): zo weet de onopgeslagen-bewaking of er sinds de
+// laatste save of het laden iets veranderd is.
+function opstellingSleutel(formation: string, positions: LineupPosition[]): string {
+  return JSON.stringify([formation, positions.map((p) => [p.player_id ?? null, p.position_label, p.x, p.y])])
+}
 
 function getFitScore(player: Player, preferredPos: string): number {
   const isKeeperSlot = preferredPos === 'Keeper'
@@ -57,9 +70,12 @@ interface Props {
   // feature altijd als "iedereen mag bewerken" — dat gedrag blijft de default
   // in plaats van elke bestaande aanroep te verplichten.
   canEdit?: boolean
+  // Opstelling van de vorige wedstrijd, voor "overnemen" (alleen met canEdit).
+  // Ontbreekt de prop, dan is er geen overnemen-knop (bestaande aanroepen).
+  vorigeOpstelling?: VorigeOpstelling
 }
 
-export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit = null, initialFormation = '4-3-3', initialPositions, playerForm, canEdit = true }: Props) {
+export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit = null, initialFormation = '4-3-3', initialPositions, playerForm, canEdit = true, vorigeOpstelling }: Props) {
   const t = useDict()
 
   // Eén gedeelde kwaliteitsfunctie voor ranking én auto-opstellen, zodat de
@@ -101,6 +117,11 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   // Aantal spelers dat bij de laatste formatiewissel geen vergelijkbaar slot
   // had. Alleen om het te MELDEN — nooit stilzwijgend iemand van het veld halen.
   const [naarBankCount, setNaarBankCount] = useState(0)
+  // Na "vorige opstelling overnemen": aantal slots dat leeg bleef (spelers die
+  // niet beschikbaar zijn). null = niets overgenomen / melding gewist.
+  const [overgenomenLeeg, setOvergenomenLeeg] = useState<number | null>(null)
+  const [vervangVraagOpen, setVervangVraagOpen] = useState(false)
+  const [bankOpen, setBankOpen] = useState(false)
 
   // "Inslag": het slot waar zojuist een speler in is gezet. `nonce` maakt elke
   // plaatsing uniek, zodat twee keer achter elkaar hetzelfde slot vullen de
@@ -126,6 +147,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   const eligibleIds = new Set(eligiblePlayerIds ?? players.map((p) => p.id))
 
   function wisMeldingen() {
+    setOvergenomenLeeg(null)
     setLeegMelding(null)
     setSelectieFout(false)
     setSaveError(false)
@@ -199,11 +221,42 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
   // opgeslagen opstelling mag nooit stilzwijgend leeglopen.
   const availablePlayers = players.filter((p) => eligibleIds.has(p.id) && !assignedPlayerIds.has(p.id))
 
+  // Onopgeslagen-bewaking (besluit 1): de sleutel van de laatst opgeslagen (of
+  // geladen) opstelling tegenover de huidige. Overnemen en autoFill tellen
+  // mee, want ze veranderen formatie of posities.
+  const sleutel = opstellingSleutel(formation, positions)
+  const [opgeslagenSleutel, setOpgeslagenSleutel] = useState(sleutel)
+  const dirty = canEdit && sleutel !== opgeslagenSleutel
+  const bewaking = useOnopgeslagenBewaking(dirty)
+
+  function pasVorigeToe() {
+    if (!vorigeOpstelling?.beschikbaar || !FORMATIONS[vorigeOpstelling.formation]) return
+    wisMeldingen()
+    setFormation(vorigeOpstelling.formation)
+    setPositions(vorigeOpstelling.positions.map((p) => ({ ...p })))
+    setSelectedSlot(null)
+    setNaarBankCount(0)
+    setFormationOpen(false)
+    setOvergenomenLeeg(vorigeOpstelling.leegGelaten)
+  }
+
+  function handleVorigeOvernemen() {
+    // Staat er al een speler op het veld, dan eerst bevestigen; een leeg veld
+    // wordt direct overschreven. Geen serveraanroep: opslaan blijft de
+    // bestaande "Opslaan"-knop (saveLineup hervalideert de speler-ids).
+    if (positions.some((p) => p.player_id)) setVervangVraagOpen(true)
+    else pasVorigeToe()
+  }
+
   function handleSave() {
     wisMeldingen()
+    // Leg de sleutel vast vóór de await: wijzigt de opstelling tijdens het
+    // opslaan, dan blijft hij terecht als onopgeslagen gelden.
+    const opTeSlaan = sleutel
     startTransition(async () => {
       try {
         const r = await saveLineup(eventId, formation, positions)
+        setOpgeslagenSleutel(opTeSlaan)
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
         if (r.legePosities !== null && r.legePosities > 0) setLeegMelding(r.legePosities)
@@ -225,12 +278,25 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
       <div>
         <div className="flex items-center justify-between mb-2">
           <label id="formatie-label" className="block text-[13px] font-bold text-muted">{t.lineup.formation}</label>
-          {canEdit && (
-            <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition" style={{ background: 'var(--color-accent)' }}>
-              <span className="ms text-[17px]">bolt</span>
-              {t.lineup.autoLineup}
-            </button>
-          )}
+          <div className="flex items-center gap-2 [--hit-slop-gap:8px]">
+            {/* Mobiel: de bank staat in een onderblad i.p.v. onder het veld. */}
+            {assignedPlayerIds.size > 0 && availablePlayers.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setBankOpen(true)}
+                className="sm:hidden relative hit-slop h-9 px-3 rounded-lg text-[13px] font-bold text-muted bg-surface-sunken active:scale-[0.97] transition-transform"
+                style={{ border: '1px solid var(--border-soft)' }}
+              >
+                {t.lineup.bankKnop.replace('{n}', String(availablePlayers.length))}
+              </button>
+            )}
+            {canEdit && (
+              <button onClick={autoFillLineup} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold text-white active:scale-95 transition" style={{ background: 'var(--color-accent)' }}>
+                <span className="ms text-[17px]">bolt</span>
+                {t.lineup.autoLineup}
+              </button>
+            )}
+          </div>
         </div>
         {/* Uitklapbare kiezer: met 15 formaties is een open chiprij een muur.
             Dicht toont hij alleen de actieve formatie; open het volledige
@@ -272,6 +338,27 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
                 </button>
               )
             })}
+          </div>
+        )}
+        {canEdit && vorigeOpstelling && (
+          <div className="mt-3 flex flex-col items-start gap-1 [--hit-slop-gap-y:8px]">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleVorigeOvernemen}
+              disabled={!vorigeOpstelling.beschikbaar}
+            >
+              {t.lineup.vorigeOvernemen}
+            </Button>
+            <p className="text-[12px] text-faint">
+              {vorigeOpstelling.beschikbaar
+                ? t.lineup.vorigeBron.replace('{datum}', formatDateShort(vorigeOpstelling.bronDatum, t.browserLocale))
+                : vorigeOpstelling.reden === 'geen'
+                  ? t.lineup.vorigeGeen
+                  : vorigeOpstelling.reden === 'onleesbaar'
+                    ? t.lineup.vorigeOnleesbaar
+                    : t.lineup.vorigeFout}
+            </p>
           </div>
         )}
         {naarBankCount > 0 && (
@@ -574,7 +661,7 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
 
       {/* Bench */}
       {assignedPlayerIds.size > 0 && availablePlayers.length > 0 && (
-        <div>
+        <div className="max-sm:hidden">
           <h3 className="text-[13px] font-bold text-muted mb-2">{t.lineup.bench} ({availablePlayers.length})</h3>
           <div className="flex flex-wrap gap-2">
             {availablePlayers.map((p) => (
@@ -599,6 +686,20 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
           die tegelijk met zijn tekst mount wordt door screenreaders vaak niet
           aangekondigd. */}
       <div role="status" className="flex flex-col gap-2">
+        {overgenomenLeeg !== null && (
+          <>
+            <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
+              {t.lineup.overgenomenMelding}
+            </p>
+            {overgenomenLeeg > 0 && (
+              <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
+                {overgenomenLeeg === 1
+                  ? t.lineup.overgenomenLeegOne
+                  : t.lineup.overgenomenLeegMany.replace('{n}', String(overgenomenLeeg))}
+              </p>
+            )}
+          </>
+        )}
         {leegMelding !== null && (
           <p className="text-xs text-panel-amber-ink bg-panel-amber border border-panel-amber-edge rounded-lg px-2 py-1">
             {leegMelding === 1
@@ -616,6 +717,55 @@ export default function LineupBuilder({ eventId, players, eligiblePlayerIds, kit
         <p role="alert" className="text-[13px] font-semibold text-panel-red-ink bg-panel-red border border-panel-red-edge px-3 py-2 rounded-lg">
           {t.lineup.saveError}
         </p>
+      )}
+
+      {vervangVraagOpen && (
+        <BevestigBlad
+          titel={t.lineup.vervangenVraag}
+          bevestigLabel={t.lineup.vervangenBevestig}
+          annuleerLabel={t.common.cancel}
+          onAnnuleer={() => setVervangVraagOpen(false)}
+          onBevestig={() => {
+            setVervangVraagOpen(false)
+            pasVorigeToe()
+          }}
+        />
+      )}
+
+      {bewaking.doel !== null && (
+        <BevestigBlad
+          titel={t.lineup.verlatenTitel}
+          tekst={t.lineup.verlatenTekst}
+          bevestigLabel={t.lineup.tochVerlaten}
+          annuleerLabel={t.lineup.blijven}
+          gevaar
+          nadruk="annuleer"
+          onAnnuleer={bewaking.blijf}
+          onBevestig={bewaking.verlaat}
+        />
+      )}
+
+      {bankOpen && assignedPlayerIds.size > 0 && availablePlayers.length > 0 && (
+        <BottomSheet
+          onClose={() => setBankOpen(false)}
+          titel={`${t.lineup.bench} (${availablePlayers.length})`}
+          sluitLabel={t.common.close}
+          breedte="md"
+        >
+          <ul className="px-5 py-2">
+            {availablePlayers.map((p, i) => (
+              <li
+                key={p.id}
+                className="flex items-center gap-3 py-2.5"
+                style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}
+              >
+                <span className="w-8 text-right tabular-nums text-[13px] font-bold text-faint">{p.jersey_number ?? '#'}</span>
+                <span className="min-w-0 flex-1 break-words text-[14.5px] font-bold text-ink">{p.name}</span>
+                <span className="text-[12px] text-faint">{POSITION_ABBREVIATIONS[p.position] ?? '–'}</span>
+              </li>
+            ))}
+          </ul>
+        </BottomSheet>
       )}
     </div>
   )

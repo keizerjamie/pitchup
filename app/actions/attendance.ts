@@ -82,6 +82,10 @@ export async function updateAttendance(
   // De selectiepagina filtert de selecteerbare lijst op aanwezigheid; die hangt
   // van deze rijen af en moet dus mee-revalideren.
   revalidatePath(`/events/${eventId}/squad`)
+  // De opstelling (bank-fallback op aanwezigen, overzichtskolom) en de
+  // stapper-samenvatting op opstelling en analyse lezen dezelfde rijen.
+  revalidatePath(`/events/${eventId}/lineup`)
+  revalidatePath(`/events/${eventId}/analysis`)
 }
 
 // Meldt een speler af voor een periode én LEGT die periode vast. De rij in
@@ -216,7 +220,13 @@ export async function markAbsentForPeriod(
     if (seenEventIds.has(event.id)) continue
     seenEventIds.add(event.id)
     revalidatePath(`/events/${event.id}`)
-    if (event.type === 'match') revalidatePath(`/events/${event.id}/squad`)
+    if (event.type === 'match') {
+      revalidatePath(`/events/${event.id}/squad`)
+      // Opstelling en analyse tonen dezelfde aanwezigheid (bank-fallback,
+      // stapper-samenvatting); zelfde reden als in updateAttendance.
+      revalidatePath(`/events/${event.id}/lineup`)
+      revalidatePath(`/events/${event.id}/analysis`)
+    }
   }
   return { periodId, affected: affectedEvents.length }
 }
@@ -391,6 +401,8 @@ export async function revokeAbsencePeriod(
   }
   for (const matchEventId of matchEventIds) {
     revalidatePath(`/events/${matchEventId}/squad`)
+    revalidatePath(`/events/${matchEventId}/lineup`)
+    revalidatePath(`/events/${matchEventId}/analysis`)
   }
   return {
     restored,
@@ -466,10 +478,13 @@ export async function herstelAfmeldperiode(herstel: HerstelAfmeldperiode): Promi
   const klaar = () => {
     revalidatePath(`/players/${playerId}/absence`)
     // Zelfde paden als revokeAbsencePeriod. De snapshot kent het eventtype
-    // niet; een squad-pad van een training revalideren is onschadelijk.
+    // niet; een squad-, lineup- of analysis-pad van een training revalideren
+    // is onschadelijk.
     for (const eventId of new Set([...naarStandaard, ...alleenHerkomst])) {
       revalidatePath(`/events/${eventId}`)
       revalidatePath(`/events/${eventId}/squad`)
+      revalidatePath(`/events/${eventId}/lineup`)
+      revalidatePath(`/events/${eventId}/analysis`)
     }
   }
 
@@ -596,6 +611,10 @@ export async function markAllPresent(eventId: string) {
   // De selectiepagina filtert de selecteerbare lijst op aanwezigheid; die hangt
   // van deze rijen af en moet dus mee-revalideren.
   revalidatePath(`/events/${eventId}/squad`)
+  // De opstelling (bank-fallback op aanwezigen, overzichtskolom) en de
+  // stapper-samenvatting op opstelling en analyse lezen dezelfde rijen.
+  revalidatePath(`/events/${eventId}/lineup`)
+  revalidatePath(`/events/${eventId}/analysis`)
 }
 
 export async function saveLineup(
@@ -654,6 +673,13 @@ export async function saveLineup(
   // hangen af van de opstelling en de selectie.
   revalidatePath(`/events/${eventId}`)
   revalidatePath(`/events/${eventId}/squad`)
+  // De stapper op de analysepagina toont de opstellingsstatus.
+  revalidatePath(`/events/${eventId}/analysis`)
+  // "Opstelling vorige wedstrijd overnemen" op de opstellingspagina van elke
+  // LATERE wedstrijd leest deze rij. Welke dat zijn weten we hier niet, dus
+  // alle lineup-pagina's (zelfde precedent als training-plan in
+  // app/actions/events.ts).
+  revalidatePath('/events/[id]/lineup', 'page')
   revalidatePath('/')
 
   return {

@@ -689,14 +689,22 @@ describe('AC17 — geblesseerde speler staat niet in de keuzepools', () => {
     expect(within(afwezig).getByText('Bram')).toBeInTheDocument()
   })
 
-  it('wedstrijdselectie: een geblesseerde speler staat niet in de lijst; een aanwezige speler wel', async () => {
+  // De wedstrijd als één flow: de selectiepagina toont nu ALLE actieve spelers
+  // (verdeeld over aanwezig / nog geen reactie / afwezig), dus een geblesseerde
+  // speler staat er wél — maar nooit als aanwezig.
+  it('wedstrijdselectie: een geblesseerde speler staat in de lijst, maar niet als aanwezig; een aanwezige speler ook', async () => {
     koppelDb(matchDb())
     const el = await MatchSquadPage({ params: Promise.resolve({ id: MATCH }) })
     render(<DictProvider dict={nl}>{el}</DictProvider>)
 
-    expect(screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Anna Aanwezig` })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: `${nl.matchSquad.toggleLabel}: Xander Xavier` })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: `${nl.matchSquad.toggleLabel}: Bram Afwezig` })).not.toBeInTheDocument()
+    const anna = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Anna Aanwezig`, hidden: true })
+    expect(within(anna.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.event.presentStat}$`))).toBeInTheDocument()
+    for (const naam of ['Xander Xavier', 'Bram Afwezig']) {
+      const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: ${naam}`, hidden: true })
+      expect(toggle).toHaveAttribute('aria-pressed', 'false')
+      // Statuslabel per rij: afwezig of geblesseerd, nooit aanwezig.
+      expect(within(toggle.parentElement as HTMLElement).getByText(new RegExp(` · (${nl.event.absentStat}|${nl.event.injuredStat})$`))).toBeInTheDocument()
+    }
   })
 
   it('wedstrijdselectie: een al geselecteerde speler die daarna geblesseerd raakt blijft zichtbaar met het label "niet aanwezig"', async () => {
@@ -706,7 +714,7 @@ describe('AC17 — geblesseerde speler staat niet in de keuzepools', () => {
 
     const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Xander Xavier` })
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
-    expect(within(toggle.parentElement as HTMLElement).getByText(`(${nl.matchSquad.notPresentLabel})`)).toBeInTheDocument()
+    expect(within(toggle.parentElement as HTMLElement).getByText(new RegExp(` · (${nl.event.absentStat}|${nl.event.injuredStat})$`))).toBeInTheDocument()
   })
 
   describe('trainingsplan (teamindeling + aanwezigheidsoverzicht)', () => {

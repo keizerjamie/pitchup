@@ -3,7 +3,7 @@ import { act } from 'react'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { DictProvider } from '@/lib/i18n-context'
 import { nl } from '@/messages/nl'
-import type { Player } from '@/lib/types'
+import type { AttendanceStatus, Player } from '@/lib/types'
 import MatchSquadEditor from '@/components/MatchSquadEditor'
 
 vi.mock('@/app/actions/match-squad', () => ({
@@ -41,14 +41,20 @@ const players: Player[] = [
   makePlayer({ id: 'p3', name: 'Kees Klaassen' }),
 ]
 
-function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]> = {}) {
+// presentPlayerIds is alleen fixture-invoer: de editor leidt aanwezigheid af uit statusPerSpeler.
+function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]> & { presentPlayerIds?: string[] } = {}) {
   return render(
     <DictProvider dict={nl}>
       <MatchSquadEditor
         eventId="e1"
         players={overrides.players ?? players}
         initialSelectedIds={overrides.initialSelectedIds ?? []}
-        presentPlayerIds={overrides.presentPlayerIds ?? []}
+        // Fixture-afleiding: wie in overrides.presentPlayerIds staat is aanwezig, de rest
+        // afwezig (de editor leest sinds de wedstrijdflow statusPerSpeler).
+        statusPerSpeler={overrides.statusPerSpeler ?? Object.fromEntries(
+          (overrides.players ?? players).map((p) => [p.id, (overrides.presentPlayerIds ?? []).includes(p.id) ? 'present' : 'absent']),
+        )}
+        recenteMinuten={'recenteMinuten' in overrides ? overrides.recenteMinuten ?? null : { wedstrijden: [], perSpeler: {} }}
         hasAnyActivePlayers={overrides.hasAnyActivePlayers ?? true}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
         eventDate="2026-08-09"
@@ -276,121 +282,244 @@ describe('lege staat', () => {
   })
 })
 
-describe('regressiebewaking op de bewuste eenvoud', () => {
-  it('de scherm-rij bevat geen rugnummer en geen positie-afkorting', () => {
-    renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Piet Peters', jersey_number: 9, position: 'Spits' })],
-    })
-    // Scope op het scherm-blok: het print-blok mag hier niet meetellen (er is
-    // niets geselecteerd, dus is dat sowieso leeg — maar dit blijft expliciet).
-    const screenBlock = screen.getByText(nl.matchSquad.selectedCount.replace('{n}', '0')).closest('div')?.parentElement as HTMLElement
-    expect(within(screenBlock).queryByText('#9')).not.toBeInTheDocument()
-    expect(within(screenBlock).queryByText('9')).not.toBeInTheDocument()
-    expect(within(screenBlock).queryByText('ST')).not.toBeInTheDocument()
+// Rij-element van een speler: de ouder van de toggle (naam, regel 2, minuten en
+// toggle zitten samen in één rij).
+function rijVan(naam: string): HTMLElement {
+  return screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: ${naam}` }).parentElement as HTMLElement
+}
+
+function status(...paren: [string, AttendanceStatus][]): Record<string, AttendanceStatus> {
+  return Object.fromEntries(paren)
+}
+
+describe('groepen (de wedstrijd als één flow)', () => {
+  const groepSpelers = [
+    makePlayer({ id: 'a1', name: 'Anna Aanwezig' }),
+    makePlayer({ id: 'g1', name: 'Gerrit Geenreactie' }),
+    makePlayer({ id: 'x1', name: 'Xander Afwezig' }),
+    makePlayer({ id: 'b1', name: 'Bas Blessure', injured: true }),
+    makePlayer({ id: 'i1', name: 'Ina Inactief', active: false }),
+  ]
+  const groepStatus = status(['a1', 'present'], ['g1', 'unknown'], ['x1', 'absent'], ['b1', 'injured'], ['i1', 'present'])
+
+  it('toont Aanwezig, Nog geen reactie en Afwezig of geblesseerd in deze volgorde met aantallen', () => {
+    renderEditor({ players: groepSpelers, statusPerSpeler: groepStatus })
+    const koppen = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    expect(koppen).toEqual([
+      nl.matchSquad.groepAanwezig.replace('{n}', '1'),
+      nl.matchSquad.groepGeenReactie.replace('{n}', '1'),
+    ])
+    // De afwezig-groep is een <details> met een <summary> als kop.
+    expect(screen.getByText(nl.matchSquad.groepAfwezig.replace('{n}', '3'))).toBeInTheDocument()
+  })
+
+  it('laat de groep Nog geen reactie weg als die leeg is, en de afwezig-groep ook', () => {
+    renderEditor({ players: [groepSpelers[0]], statusPerSpeler: status(['a1', 'present']) })
+    expect(screen.queryByText(/Nog geen reactie/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Afwezig of geblesseerd/)).not.toBeInTheDocument()
+  })
+
+  it('zonder aanwezigen blijft de groep Aanwezig staan met de lege regel en een link naar de aanwezigheid', () => {
+    renderEditor({ players: [groepSpelers[1]], statusPerSpeler: status(['g1', 'unknown']) })
+    expect(screen.getByText(nl.matchSquad.groepAanwezig.replace('{n}', '0'))).toBeInTheDocument()
+    expect(screen.getByText(nl.matchSquad.geenAanwezigen)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: nl.matchSquad.emptyNoAttendanceLink })).toHaveAttribute('href', '/events/e1')
+  })
+
+  it('houdt de afwezig-groep standaard dicht', () => {
+    const { container } = renderEditor({ players: groepSpelers, statusPerSpeler: groepStatus })
+    expect(container.querySelector('details')).not.toHaveAttribute('open')
+  })
+
+  it('opent de afwezig-groep automatisch met een geselecteerde speler erin, en klapt niet dicht bij deselecteren', async () => {
+    const { container } = renderEditor({ players: groepSpelers, statusPerSpeler: groepStatus, initialSelectedIds: ['x1'] })
+    const details = container.querySelector('details') as HTMLDetailsElement
+    expect(details).toHaveAttribute('open')
+    await clickToggle(`${nl.matchSquad.toggleLabel}: Xander Afwezig`)
+    expect(mockToggle).toHaveBeenCalledWith('e1', 'x1', false)
+    expect(container.querySelector('details')).toHaveAttribute('open')
+  })
+
+  it('laat een speler in elke groep selecteren (de toggle werkt ook bij Nog geen reactie)', async () => {
+    renderEditor({ players: groepSpelers, statusPerSpeler: groepStatus })
+    await clickToggle(`${nl.matchSquad.toggleLabel}: Gerrit Geenreactie`)
+    expect(mockToggle).toHaveBeenCalledWith('e1', 'g1', true)
   })
 })
 
-describe('inactieve speler', () => {
-  it('een geselecteerde inactieve speler blijft zichtbaar met het inactief-label', () => {
+describe('rij-informatie', () => {
+  it('toont positie-afkorting en statuslabel op regel 2', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Piet Peters', position: 'Spits' })],
+      statusPerSpeler: status(['p1', 'present']),
+    })
+    expect(within(rijVan('Piet Peters')).getByText(`ST · ${nl.event.presentStat}`)).toBeInTheDocument()
+  })
+
+  it('toont de statuslabels voor geen reactie, afwezig en geblesseerd', () => {
+    renderEditor({
+      players: [
+        makePlayer({ id: 'p1', name: 'Een Speler' }),
+        makePlayer({ id: 'p2', name: 'Twee Speler' }),
+        makePlayer({ id: 'p3', name: 'Drie Speler' }),
+      ],
+      statusPerSpeler: status(['p1', 'unknown'], ['p2', 'absent'], ['p3', 'injured']),
+      initialSelectedIds: ['p2', 'p3'],
+    })
+    expect(within(rijVan('Een Speler')).getByText(new RegExp(nl.matchSquad.geenReactieLabel))).toBeInTheDocument()
+    expect(within(rijVan('Twee Speler')).getByText(new RegExp(nl.event.absentStat))).toBeInTheDocument()
+    expect(within(rijVan('Drie Speler')).getByText(new RegExp(nl.event.injuredStat))).toBeInTheDocument()
+  })
+
+  it('toont "–" als de positie onbekend is', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Piet Peters', position: 'Onbekende positie' as Player['position'] })],
+      statusPerSpeler: status(['p1', 'present']),
+    })
+    expect(within(rijVan('Piet Peters')).getByText(`– · ${nl.event.presentStat}`)).toBeInTheDocument()
+  })
+
+  it('toont een blessure-chip bij players.injured, náást het statuslabel', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Piet Peters', injured: true })],
+      statusPerSpeler: status(['p1', 'present']),
+    })
+    const rij = rijVan('Piet Peters')
+    expect(within(rij).getByText(nl.players.injuredBadge)).toBeInTheDocument()
+    expect(within(rij).getByText(`ST · ${nl.event.presentStat}`)).toBeInTheDocument()
+  })
+
+  it('toont zonder blessure geen chip', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Piet Peters' })],
+      statusPerSpeler: status(['p1', 'present']),
+    })
+    expect(within(rijVan('Piet Peters')).queryByText(nl.players.injuredBadge)).not.toBeInTheDocument()
+  })
+
+  it('een inactieve speler toont het inactief-label i.p.v. de eventstatus (nooit beide)', () => {
     renderEditor({
       players: [makePlayer({ id: 'p1', name: 'Oud Gediende', active: false })],
       initialSelectedIds: ['p1'],
+      statusPerSpeler: status(['p1', 'present']),
     })
-    // Scope op de scherm-rij (naam + toggle), niet het print-blok — beide
-    // bevatten "Oud Gediende" in de DOM (jsdom past geen @media print toe).
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Oud Gediende` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).getByText('Oud Gediende')).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+    const rij = rijVan('Oud Gediende')
+    expect(within(rij).getByText(`ST · ${nl.players.inactiveLabel}`)).toBeInTheDocument()
+    expect(within(rij).queryByText(new RegExp(nl.event.presentStat))).not.toBeInTheDocument()
+  })
+
+  it('een gast toont altijd het Gast-label, naast het statuslabel', () => {
+    renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Gast Speler', type: 'guest' })],
+      statusPerSpeler: status(['p1', 'present']),
+    })
+    const rij = rijVan('Gast Speler')
+    expect(within(rij).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(rij).getByText(`ST · ${nl.event.presentStat}`)).toBeInTheDocument()
+  })
+
+  it('een reguliere speler toont geen Gast-label', () => {
+    renderEditor({ players: [makePlayer({ id: 'p1', name: 'Reguliere Speler' })], statusPerSpeler: status(['p1', 'present']) })
+    expect(within(rijVan('Reguliere Speler')).queryByText(`(${nl.players.guestBadge})`)).not.toBeInTheDocument()
+  })
+
+  it('een ontbrekende status telt als geen reactie', () => {
+    renderEditor({ players: [makePlayer({ id: 'p1', name: 'Piet Peters' })], statusPerSpeler: {} })
+    expect(screen.getByText(nl.matchSquad.groepGeenReactie.replace('{n}', '1'))).toBeInTheDocument()
   })
 })
 
-describe('niet-aanwezige, al-geselecteerde speler', () => {
-  it('een geselecteerde speler die niet in presentPlayerIds staat, toont het niet-aanwezig-label', () => {
-    renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Wim Wieling', active: true })],
-      initialSelectedIds: ['p1'],
-      presentPlayerIds: [],
-    })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Wim Wieling` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).getByText('Wim Wieling')).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.matchSquad.notPresentLabel})`)).toBeInTheDocument()
-    // Nog steeds gewoon te de-selecteren (niet uitgeschakeld).
-    expect(toggle).not.toBeDisabled()
+describe('speelminuten van de laatste wedstrijden', () => {
+  const minuten = {
+    wedstrijden: [
+      { id: 'w3', date: '2026-08-02' },
+      { id: 'w2', date: '2026-07-26' },
+      { id: 'w1', date: '2026-07-19' },
+    ],
+    perSpeler: { p1: [90, null, 0], p2: [null, null, null] },
+  }
+  const twee = [makePlayer({ id: 'p1', name: 'Piet Peters' }), makePlayer({ id: 'p2', name: 'Jan Jansen' })]
+  const aanwezig = status(['p1', 'present'], ['p2', 'present'])
+
+  it('toont de minutenkop met drie datums en per speler de waarde, "–" bij geen rij en 0 als 0', () => {
+    renderEditor({ players: twee, statusPerSpeler: aanwezig, recenteMinuten: minuten })
+    expect(screen.getByText(nl.matchSquad.minutenKop)).toBeInTheDocument()
+    // Kolomkoppen: datums, dag/maand zonder jaar, opgemaakt in UTC.
+    const datum = (iso: string) => new Intl.DateTimeFormat(nl.browserLocale, { day: 'numeric', month: 'numeric', timeZone: 'UTC' })
+      .format(new Date(`${iso}T00:00:00Z`))
+    for (const d of ['2026-08-02', '2026-07-26', '2026-07-19']) expect(screen.getByText(datum(d))).toBeInTheDocument()
+    const rij1 = rijVan('Piet Peters')
+    expect(within(rij1).getByText('90')).toBeInTheDocument()
+    expect(within(rij1).getByText('0')).toBeInTheDocument()
+    expect(within(rij1).getAllByText('–')).toHaveLength(1)
+    expect(within(rijVan('Jan Jansen')).getAllByText('–')).toHaveLength(3)
   })
 
-  it('een geselecteerde, actieve én aanwezige speler toont geen enkel label', () => {
-    renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Kees Kramer', active: true })],
-      initialSelectedIds: ['p1'],
-      presentPlayerIds: ['p1'],
-    })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Kees Kramer` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
-    expect(within(row).queryByText(`(${nl.players.inactiveLabel})`)).not.toBeInTheDocument()
+  it('geeft elke cel een schermlezer-tekst met de datum en de minuten', () => {
+    renderEditor({ players: twee, statusPerSpeler: aanwezig, recenteMinuten: minuten })
+    const datum = new Intl.DateTimeFormat(nl.browserLocale, { day: 'numeric', month: 'numeric', timeZone: 'UTC' })
+      .format(new Date('2026-08-02T00:00:00Z'))
+    expect(within(rijVan('Piet Peters')).getByText(nl.matchSquad.minutenSr.replace('{minuten}', '90').replace('{datum}', datum))).toBeInTheDocument()
+    expect(within(rijVan('Jan Jansen')).getByText(nl.matchSquad.minutenGeenSr.replace('{datum}', datum))).toBeInTheDocument()
   })
 
-  it('een speler die zowel inactief als niet-aanwezig is, toont uitsluitend het inactief-label (geen dubbel label)', () => {
-    renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Oud En Weg', active: false })],
-      initialSelectedIds: ['p1'],
-      presentPlayerIds: [],
-    })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Oud En Weg` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
-    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
+  it('toont geen kolommen en geen kop zonder eerdere wedstrijden', () => {
+    renderEditor({ players: twee, statusPerSpeler: aanwezig, recenteMinuten: { wedstrijden: [], perSpeler: {} } })
+    expect(screen.queryByText(nl.matchSquad.minutenKop)).not.toBeInTheDocument()
+    expect(screen.queryByText(nl.matchSquad.minutenFout)).not.toBeInTheDocument()
+    expect(within(rijVan('Piet Peters')).queryByText('–')).not.toBeInTheDocument()
+  })
+
+  it('toont bij null geen kolommen maar wel de foutregel, en de selectie werkt nog', async () => {
+    renderEditor({ players: twee, statusPerSpeler: aanwezig, recenteMinuten: null })
+    expect(screen.getByText(nl.matchSquad.minutenFout)).toBeInTheDocument()
+    expect(screen.queryByText(nl.matchSquad.minutenKop)).not.toBeInTheDocument()
+    await clickToggle(`${nl.matchSquad.toggleLabel}: Piet Peters`)
+    expect(mockToggle).toHaveBeenCalledWith('e1', 'p1', true)
   })
 })
 
-describe('Gast-label (besluit 24: altijd naast een eventueel statuslabel)', () => {
-  it('een aanwezige, actieve gast toont uitsluitend het Gast-label, geen statuslabel', () => {
-    renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Gast Speler', type: 'guest', active: true })],
+describe('printblok blijft onaangeroerd (AC20)', () => {
+  it('bevat geen positie-afkorting, status, blessure-chip of minuten', () => {
+    const { container } = renderEditor({
+      players: [makePlayer({ id: 'p1', name: 'Piet Peters', position: 'Spits', injured: true })],
       initialSelectedIds: ['p1'],
-      presentPlayerIds: ['p1'],
+      statusPerSpeler: status(['p1', 'present']),
+      recenteMinuten: { wedstrijden: [{ id: 'w1', date: '2026-07-19' }], perSpeler: { p1: [77] } },
     })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Gast Speler` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
-    expect(within(row).queryByText(`(${nl.players.inactiveLabel})`)).not.toBeInTheDocument()
-    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
+    const print = container.querySelector('.print-poster') as HTMLElement
+    expect(print).toBeTruthy()
+    expect(within(print).getByText('Piet Peters')).toBeInTheDocument()
+    expect(within(print).queryByText(/ST\b/)).not.toBeInTheDocument()
+    expect(within(print).queryByText(nl.event.presentStat)).not.toBeInTheDocument()
+    expect(within(print).queryByText(nl.players.injuredBadge)).not.toBeInTheDocument()
+    expect(within(print).queryByText('77')).not.toBeInTheDocument()
+    // Het schermdeel heeft ze wel, en staat in een print:hidden-blok.
+    const scherm = screen.getByText(nl.matchSquad.groepAanwezig.replace('{n}', '1')).closest('.print\\:hidden')
+    expect(scherm).toBeTruthy()
+    expect(print.closest('.print\\:hidden')).toBeNull()
   })
+})
 
-  it('een gast die ook niet-aanwezig is, toont BEIDE labels: Gast én niet-aanwezig', () => {
+describe('inactieve speler en gast (labels op regel 2)', () => {
+  it('een geselecteerde inactieve speler blijft zichtbaar, in de afwezig-groep en met het inactief-label', () => {
     renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Afwezige Gast', type: 'guest', active: true })],
+      players: [makePlayer({ id: 'p1', name: 'Oud Gediende', active: false })],
       initialSelectedIds: ['p1'],
-      presentPlayerIds: [],
+      statusPerSpeler: status(['p1', 'unknown']),
     })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Afwezige Gast` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.matchSquad.notPresentLabel})`)).toBeInTheDocument()
+    expect(screen.getByText(nl.matchSquad.groepAfwezig.replace('{n}', '1'))).toBeInTheDocument()
+    expect(within(rijVan('Oud Gediende')).getByText(new RegExp(nl.players.inactiveLabel))).toBeInTheDocument()
   })
 
   it('een inactieve gast toont BEIDE labels: Gast én inactief', () => {
     renderEditor({
       players: [makePlayer({ id: 'p1', name: 'Inactieve Gast', type: 'guest', active: false })],
       initialSelectedIds: ['p1'],
-      presentPlayerIds: [],
+      statusPerSpeler: status(['p1', 'absent']),
     })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Inactieve Gast` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
-  })
-
-  it('een reguliere speler toont geen Gast-label', () => {
-    renderEditor({
-      players: [makePlayer({ id: 'p1', name: 'Reguliere Speler', type: 'regular', active: true })],
-      initialSelectedIds: ['p1'],
-      presentPlayerIds: ['p1'],
-    })
-    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Reguliere Speler` })
-    const row = toggle.parentElement as HTMLElement
-    expect(within(row).queryByText(`(${nl.players.guestBadge})`)).not.toBeInTheDocument()
+    const rij = rijVan('Inactieve Gast')
+    expect(within(rij).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
+    expect(within(rij).getByText(new RegExp(nl.players.inactiveLabel))).toBeInTheDocument()
   })
 })

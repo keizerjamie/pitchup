@@ -14,14 +14,15 @@ import type { OverflowMenuItem } from '@/components/ui/OverflowMenu'
 import TrashIcon from '@/components/icons/TrashIcon'
 import { deleteEvent } from '@/app/actions/events'
 import { getDict } from '@/lib/i18n'
-import { analyseBestaat as computeAnalyseBestaat } from '@/lib/match-analysis.mjs'
 import { periodIdByPlayerForDate } from '@/lib/absence-periods'
 import { buildAttendanceRow } from '@/lib/attendance-rows'
 import { genericError, logError } from '@/lib/errors'
 import { isTrainingOordeel, isValidRpe } from '@/lib/training-evaluatie'
 import type { TrainingEvaluatie } from '@/lib/types'
 import { zelfreviewUitRij } from '@/lib/trainer-zelfreview'
-import { telOpstelling } from '@/lib/lineup-compleet'
+import WedstrijdStapper from '@/components/wedstrijd/WedstrijdStapper'
+import VolgendeStap from '@/components/wedstrijd/VolgendeStap'
+import { bouwStapperData, telBeschikbaarheid, wedstrijdDatumBereikt, type WedstrijdStapperData } from '@/lib/wedstrijd-stappen'
 
 interface Props {
   params: Promise<{ id: string }>
@@ -32,7 +33,7 @@ export default async function EventDetailPage({ params }: Props) {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup }, { data: meting }, { data: oefeningen }, { data: matchRatings }, { data: matchEvents }, { data: squadCheck }, { data: evaluatieRij, error: evaluatieError }, { data: zelfreviewRij, error: zelfreviewError }] = await Promise.all([
+  const [{ data: event }, { data: players }, { data: attendance }, { data: lineup, error: lineupError }, { data: meting }, { data: oefeningen }, { data: matchRatings, error: matchRatingsError }, { data: matchEvents, error: matchEventsError }, { data: squadCheck, error: squadError }, { data: evaluatieRij, error: evaluatieError }, { data: zelfreviewRij, error: zelfreviewError }] = await Promise.all([
     supabase.from('events').select('*').eq('id', id).eq('team_id', ctx.teamId).single(),
     supabase.from('players').select('*').eq('team_id', ctx.teamId).eq('active', true).order('position').order('jersey_number', { ascending: true, nullsFirst: false }).order('name'),
     supabase.from('attendance').select('*').eq('event_id', id).eq('team_id', ctx.teamId),
@@ -56,12 +57,6 @@ export default async function EventDetailPage({ params }: Props) {
   if (!event) notFound()
 
   const hasTrainingPlan = !!event.doelstelling || (oefeningen?.length ?? 0) > 0
-  const analyseBestaat = computeAnalyseBestaat({
-    goals_for: event.goals_for,
-    goals_against: event.goals_against,
-    ratingCount: (matchRatings?.length ?? 0),
-    eventCount: (matchEvents?.length ?? 0),
-  })
   const isMatch = event.type === 'match'
   const isTraining = event.type === 'training'
   const isMeting = event.type === 'meting'
@@ -207,17 +202,39 @@ export default async function EventDetailPage({ params }: Props) {
   }
   const zelfreview = zelfreviewError ? null : zelfreviewUitRij(zelfreviewRij)
   // Is de datum van het event bereikt (vandaag of eerder)? Eén expressie voor
-  // de trainingsevaluatie én de analysekaart van een wedstrijd: vóór de
-  // wedstrijddag valt er niets te analyseren. Servertijd (todayLocal), zelfde
-  // als /inzichten en de analysepagina — bewust.
-  const datumBereikt = typeof event.date === 'string' && event.date <= todayLocal()
+  // de trainingsevaluatie én (via de stapper) de analysestap van een
+  // wedstrijd: vóór de wedstrijddag valt er niets te analyseren. Servertijd (todayLocal), zelfde
+  // als /inzichten en de analysepagina — bewust. De regel zelf staat op één
+  // plek (wedstrijdDatumBereikt in lib/wedstrijd-stappen.ts), gedeeld met de
+  // stapper en de analysepagina.
+  const datumBereikt = wedstrijdDatumBereikt(event.date, todayLocal())
   const trainingGehouden = datumBereikt
-  // Opstelling "gemaakt" = elke positie van de formatie heeft een unieke
-  // speler (telOpstelling, lib/lineup-compleet.ts); dezelfde regel als de
-  // To-do op het dashboard. Geen lineups-rij → niet compleet.
-  const opstellingCompleet = telOpstelling(lineup?.formation, lineup?.positions).compleet
-
   const initialStatuses = Object.fromEntries(attendanceMap) as Record<string, AttendanceStatus>
+
+  // Wedstrijdstapper (stap 1 "beschikbaar"): na notFound() en na de backfill,
+  // zodat de samenvatting exact toont wat er is weggeschreven. Geen extra
+  // queries: de vier statusbronnen hierboven, met hun fout apart, zodat een
+  // gefaalde query 'onbekend' wordt in plaats van een vals "open" of "klaar".
+  // null bij training en meting: daar komt geen stapper.
+  let stapper: WedstrijdStapperData | null = null
+  if (isMatch) {
+    if (lineupError) logError('eventDetail.stapper.lineup', lineupError)
+    if (squadError) logError('eventDetail.stapper.selectie', squadError)
+    if (matchRatingsError) logError('eventDetail.stapper.ratings', matchRatingsError)
+    if (matchEventsError) logError('eventDetail.stapper.events', matchEventsError)
+    stapper = bouwStapperData({
+      eventId: id,
+      huidig: 'beschikbaar',
+      aanwezigheid: telBeschikbaarheid(allPlayers, (p) => attendanceMap.get(p.id) ?? 'unknown'),
+      selectieRijen: squadError ? null : (squadCheck?.length ?? 0),
+      lineup: lineupError ? undefined : (lineup ?? null),
+      uitslag: event,
+      ratingCount: matchRatingsError ? null : (matchRatings?.length ?? 0),
+      eventCount: matchEventsError ? null : (matchEvents?.length ?? 0),
+      eventDate: event.date,
+      vandaag: todayLocal(),
+    })
+  }
   const title = isMatch && event.opponent ? `vs ${event.opponent}` : t.event.training
 
   return (
@@ -242,29 +259,17 @@ export default async function EventDetailPage({ params }: Props) {
         menu={canEdit(ctx, 'agenda') ? [deleteItem] : undefined}
       />
 
+      {stapper && <WedstrijdStapper data={stapper} t={t} />}
+
       {/* Desktop: acties + notities links, aanwezigheid rechts (designronde 3;
           stond als één smalle kolom met veel lege ruimte). Mobiel: zelfde volgorde
           als voorheen. */}
       <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] lg:items-start">
         <div className="flex flex-col gap-4 min-w-0">
-          {/* Squad / lineup / training-plan action */}
-          {isMatch && (
-            <ActionCard href={`/events/${id}/squad`} done={(squadCheck?.length ?? 0) > 0} icon="groups"
-              title={t.event.squad} hint={t.event.squadHint}
-              viewLabel={t.event.squadView} viewHint={t.event.squadViewHint} cta={t.event.squadCta} />
-          )}
-          {isMatch && (
-            <ActionCard href={`/events/${id}/lineup`} done={opstellingCompleet} icon="dashboard"
-              title={t.event.lineup} hint={t.event.lineupHint}
-              viewLabel={t.event.lineupView} viewHint={t.event.lineupViewHint} cta={t.event.lineupCta} />
-          )}
-          {isMatch && (
-            <ActionCard href={`/events/${id}/analysis`} done={analyseBestaat} icon="scoreboard"
-              title={t.event.analysis} hint={t.event.analysisHint}
-              viewLabel={t.event.analysisView} viewHint={t.event.analysisViewHint} cta={t.event.analysisCta}
-              accent="var(--warning)"
-              vergrendeld={!analyseBestaat && !datumBereikt ? { hint: t.event.analysisAfterMatch } : undefined} />
-          )}
+          {/* Wedstrijd: één "Volgende: selectie" i.p.v. drie actiekaarten; de
+              stapper erboven toont de voortgang. Training en meting houden
+              hun eigen kaart. */}
+          {stapper && <VolgendeStap data={stapper} t={t} />}
           {isTraining && (
             <ActionCard href={`/events/${id}/training-plan`} done={hasTrainingPlan} icon="assignment"
               title={t.event.trainingPlan} hint={t.event.trainingPlanHint}
@@ -311,12 +316,10 @@ export default async function EventDetailPage({ params }: Props) {
 }
 
 function ActionCard({
-  href, done, icon, title, hint, viewLabel, viewHint, cta, accent, vergrendeld,
+  href, done, icon, title, hint, viewLabel, viewHint, cta,
 }: {
   href: string; done: boolean; icon: string; title: string; hint: string
-  viewLabel: string; viewHint: string; cta: string; accent?: string
-  // Nog niet beschikbaar (bv. analyse vóór de wedstrijd): geen link, geen CTA.
-  vergrendeld?: { hint: string }
+  viewLabel: string; viewHint: string; cta: string
 }) {
   if (done) {
     return (
@@ -334,29 +337,10 @@ function ActionCard({
       </Link>
     )
   }
-  if (vergrendeld) {
-    return (
-      <div aria-disabled="true" className="surface-card rounded-2xl p-4 flex items-center gap-4">
-        <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: 'var(--surface-sunken)', color: 'var(--faint)' }}>
-          <span className="ms text-[24px]" aria-hidden="true">{icon}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-bold text-muted">{title}</div>
-          <div className="text-[13px] font-semibold text-faint">{vergrendeld.hint}</div>
-        </div>
-      </div>
-    )
-  }
-  // Default groen (--primary/--brand-accent); een optioneel accent (bv. oranje
-  // voor "nog invullen") kleurt rand, icoon en CTA-balk zonder de andere kaarten
-  // te raken.
-  const borderCol = `color-mix(in srgb, ${accent ?? 'var(--primary)'} 35%, var(--border-soft))`
-  const iconBg = accent
-    ? `color-mix(in srgb, ${accent} 14%, transparent)`
-    : 'color-mix(in srgb, var(--color-brand) 12%, transparent)'
-  const iconColor = accent ?? 'var(--brand-accent)'
-  const barBg = accent ?? 'var(--primary)'
+  const borderCol = 'color-mix(in srgb, var(--primary) 35%, var(--border-soft))'
+  const iconBg = 'color-mix(in srgb, var(--color-brand) 12%, transparent)'
+  const iconColor = 'var(--brand-accent)'
+  const barBg = 'var(--primary)'
   return (
     <Link href={href} className="rounded-2xl overflow-hidden block" style={{ border: `1px solid ${borderCol}` }}>
       <div className="bg-surface flex items-center gap-4 p-4">

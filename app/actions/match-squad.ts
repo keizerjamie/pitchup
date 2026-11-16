@@ -46,4 +46,8 @@ export async function toggleSquadPlayer(
   // De detailpagina toont de 'done'-status van de selectie-actiekaart; die hangt
   // van deze rijen af en moet dus mee-revalideren.
   revalidatePath(`/events/${eventId}`)
+  // De bank op de opstellingspagina IS de selectie, en de stapper op opstelling
+  // en analyse toont de selectiestatus.
+  revalidatePath(`/events/${eventId}/lineup`)
+  revalidatePath(`/events/${eventId}/analysis`)
 }

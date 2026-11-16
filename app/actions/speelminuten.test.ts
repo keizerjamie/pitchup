@@ -160,6 +160,8 @@ describe('saveSpeelminuten', () => {
     expect(spelerSelect.eqs).toEqual([{ col: 'id', val: PLAYER }, { col: 'team_id', val: TEAM }])
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT}/analysis`)
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT}`)
+    // "Laatste 3"-minuten op de selectiepagina van latere wedstrijden.
+    expect(revalidatePath).toHaveBeenCalledWith('/events/[id]/squad', 'page')
   })
 
   it.each([[0, 0], [130, 99], [90, 0], [0, 3]])('accepteert %s minuten en %s wissels', async (minuten, wissels) => {
@@ -330,6 +332,7 @@ describe('deleteSpeelminuten', () => {
       createdAt: CREATED,
     })
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT}/analysis`)
+    expect(revalidatePath).toHaveBeenCalledWith('/events/[id]/squad', 'page')
   })
 
   it('doet BEWUST geen wedstrijd-, toekomst-, aanwezigheids- of spelercheck (O2: opruimen kan altijd)', async () => {
@@ -485,6 +488,7 @@ describe('herstelSpeelminuten', () => {
     expect(m.calls.upsert).toHaveLength(0)
     expect(m.calls.update).toHaveLength(0)
     expect(revalidatePath).toHaveBeenCalledWith(`/events/${EVENT}`)
+    expect(revalidatePath).toHaveBeenCalledWith('/events/[id]/squad', 'page')
   })
 
   it('23505 en daarna een bestaande rij in dit team → resolve', async () => {

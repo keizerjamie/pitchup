@@ -134,6 +134,8 @@ function makeSupabaseMock(opts: { lineups?: Row[] } = {}) {
     match_squad: tableFactory([]),
     settings: tableFactory([]),
     match_ratings: tableFactory([]),
+    // Wedstrijdstapper: bestaan-check op analyse (match_events, limit 1).
+    match_events: tableFactory([]),
   }
   return {
     auth: { getUser: async () => ({ data: { user: { id: TEAM } } }) },

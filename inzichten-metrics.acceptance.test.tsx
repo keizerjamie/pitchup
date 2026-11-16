@@ -1105,6 +1105,8 @@ function analyseDb(over: Partial<Db> = {}): Db {
     match_ratings: [], match_events: [],
     speelminuten: [],
     tegendoelpunten: [],
+    // Wedstrijdstapper op de analysepagina: selectie- en opstellingsstatus.
+    match_squad: [], lineups: [],
     ...over,
   }
 }

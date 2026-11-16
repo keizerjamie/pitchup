@@ -221,14 +221,20 @@ function renderPrintList(overrides: Partial<Parameters<typeof MatchSquadPrintLis
   )
 }
 
-function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]> = {}) {
+// presentPlayerIds is alleen fixture-invoer: de editor leidt aanwezigheid af uit statusPerSpeler.
+function renderEditor(overrides: Partial<Parameters<typeof MatchSquadEditor>[0]> & { presentPlayerIds?: string[] } = {}) {
   return render(
     <DictProvider dict={nl}>
       <MatchSquadEditor
         eventId="e1"
         players={overrides.players ?? mixedPlayers}
         initialSelectedIds={overrides.initialSelectedIds ?? []}
-        presentPlayerIds={overrides.presentPlayerIds ?? []}
+        // Fixture-afleiding: wie in overrides.presentPlayerIds staat is aanwezig, de rest
+        // afwezig (de editor leest sinds de wedstrijdflow statusPerSpeler).
+        statusPerSpeler={overrides.statusPerSpeler ?? Object.fromEntries(
+          (overrides.players ?? mixedPlayers).map((p) => [p.id, (overrides.presentPlayerIds ?? []).includes(p.id) ? 'present' : 'absent']),
+        )}
+        recenteMinuten={'recenteMinuten' in overrides ? overrides.recenteMinuten ?? null : { wedstrijden: [], perSpeler: {} }}
         hasAnyActivePlayers={overrides.hasAnyActivePlayers ?? true}
         opponent={'opponent' in overrides ? overrides.opponent ?? null : 'FC Rivalen'}
         eventDate="2026-08-09"
@@ -726,7 +732,7 @@ describe('AC10 — geselecteerde inactieve speler toont inactief-label; blessure
     const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Oude Getrouwe` })
     const row = toggle.parentElement as HTMLElement
     expect(within(row).getByText('Oude Getrouwe')).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+    expect(within(row).getByText(new RegExp(` · ${nl.players.inactiveLabel}$`))).toBeInTheDocument()
     // Nog steeds gewoon te de-selecteren (niet uitgeschakeld).
     expect(toggle).not.toBeDisabled()
   })
@@ -940,37 +946,44 @@ describe('Story-AC17 — identieke namen: geen crash, geen deduplicatie/lege reg
 // ═══════════════════════════════════════════════════════════════════════
 
 // ── Story-AC1 ──
-describe('Story-AC1 — event-detailpagina toont actiekaart "Wedstrijdselectie" vóór de opstelling-kaart (alleen voor wedstrijd-events)', () => {
-  it('toont de actiekaart "Wedstrijdselectie" met link naar /events/e1/squad, vóór de opstelling-kaart, voor een wedstrijd-event', async () => {
+describe('Story-AC1 — event-detailpagina toont de wedstrijdstapper en "Volgende: selectie" (alleen voor wedstrijd-events)', () => {
+  // BIJGEWERKT (de wedstrijd als één flow): de drie actiekaarten zijn vervangen
+  // door de stapper (links naar de vier bestaande paden) en één
+  // "Volgende: selectie"-knop. De semantiek is gelijk: de selectiepagina blijft
+  // bereikbaar, vóór de opstelling.
+  it('toont de stapper met links naar /events/e1/squad en /events/e1/lineup (selectie vóór opstelling) en de Volgende-link naar de selectie, voor een wedstrijd-event', async () => {
     await renderEventPage({
       events: [matchEventRow()],
       players: [playerRow()],
       attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'unknown' }],
     })
 
-    const squadTitle = screen.getByText(nl.event.squad)
-    const squadLink = squadTitle.closest('a')
-    expect(squadLink).not.toBeNull()
+    const stapper = screen.getByRole('navigation', { name: nl.wedstrijdFlow.stapperLabel })
+    const squadLink = within(stapper).getByRole('link', { name: new RegExp(nl.wedstrijdFlow.stapSelectie) })
     expect(squadLink).toHaveAttribute('href', '/events/e1/squad')
-
-    const lineupTitle = screen.getByText(nl.event.lineup)
-    const lineupLink = lineupTitle.closest('a')
-    expect(lineupLink).not.toBeNull()
+    const lineupLink = within(stapper).getByRole('link', { name: new RegExp(nl.wedstrijdFlow.stapOpstelling) })
     expect(lineupLink).toHaveAttribute('href', '/events/e1/lineup')
 
-    // "vóór": de squad-kaart komt in de DOM-volgorde eerder dan de lineup-kaart.
+    // "vóór": de selectie-stap komt in de DOM-volgorde eerder dan de opstelling-stap.
     expect(
-      squadLink!.compareDocumentPosition(lineupLink!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      squadLink.compareDocumentPosition(lineupLink) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
+
+    expect(screen.getByRole('link', { name: nl.wedstrijdFlow.volgendeSelectie })).toHaveAttribute('href', '/events/e1/squad')
+    // De oude actiekaarten zijn weg.
+    expect(screen.queryByText(nl.event.squad)).not.toBeInTheDocument()
+    expect(screen.queryByText(nl.event.lineup)).not.toBeInTheDocument()
   })
 
-  it('geen wedstrijdselectie-actiekaart op de detailpagina van een training-event', async () => {
+  it('geen wedstrijdselectie-actiekaart en geen stapper op de detailpagina van een training-event', async () => {
     await renderEventPage({
       events: [matchEventRow({ type: 'training', opponent: null, match_type: null, home_away: null })],
       players: [playerRow()],
       attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'unknown' }],
     })
     expect(screen.queryByText(nl.event.squad)).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: nl.wedstrijdFlow.stapperLabel })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: nl.wedstrijdFlow.volgendeSelectie })).not.toBeInTheDocument()
   })
 })
 
@@ -980,16 +993,22 @@ describe('Story-AC1 — event-detailpagina toont actiekaart "Wedstrijdselectie" 
 // al-geselecteerde spelers) — zie het nieuwe blok "Aanwezigheidsfilter"
 // verderop. Deze test geeft p1 daarom expliciet een present-rij mee, anders
 // zou hij (terecht) niet meer in de selecteerbare lijst staan.
+//
+// LET OP (de wedstrijd als één flow, bewust herschreven): de selectiepagina
+// leest sinds de wedstrijdstapper wél `lineups` — uitsluitend om de status van
+// de opstellingsstap te tonen (één query op dit event). De selectie zelf hangt
+// er niet van af: zonder lineups-rij werkt de pagina gewoon.
 describe('Story-AC2 — selectiepagina werkt ook zonder bestaande opstelling', () => {
-  it('rendert de selectiepagina succesvol zonder dat er ooit een lineups-rij bevraagd wordt (geen afhankelijkheid van de opstelling)', async () => {
+  it('rendert de selectiepagina succesvol zonder lineups-rij; lineups wordt alleen één keer bevraagd voor de stapperstatus', async () => {
     const { fromCalls } = await renderSquadPage({
       events: [matchEventRow()],
       players: [playerRow()],
       attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'present' }],
+      lineups: [],
     })
     expect(screen.getByRole('heading', { name: nl.matchSquad.title })).toBeInTheDocument()
     expect(screen.getByText('Piet Peters')).toBeInTheDocument()
-    expect(fromCalls).not.toContain('lineups')
+    expect(fromCalls.filter((t) => t === 'lineups')).toHaveLength(1)
   })
 })
 
@@ -1015,9 +1034,15 @@ describe('Story-AC3 — selectie los van attendance én van lineups: aantal gese
       // attendance.
       squad: [{ id: 's1', event_id: 'e1', player_id: 'p1', team_id: TEAM }],
       attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p2', team_id: TEAM, status: 'present' }],
+      // Een opstelling met ANDERE spelers dan de selectie: de teller volgt
+      // uitsluitend match_squad, de lineups-query is alleen voor de stapper.
+      lineups: [{
+        id: 'l1', event_id: 'e1', team_id: TEAM, formation: '4-3-3',
+        positions: [{ player_id: 'p2', x: 50, y: 90, position_label: 'KP' }, { player_id: 'p3', x: 50, y: 50, position_label: 'CM' }],
+      }],
     })
     expect(screen.getByText(nl.matchSquad.selectedCount.replace('{n}', '1'))).toBeInTheDocument()
-    expect(fromCalls).not.toContain('lineups')
+    expect(fromCalls.filter((t) => t === 'lineups')).toHaveLength(1)
   })
 })
 
@@ -1107,7 +1132,7 @@ describe('Story-AC20 — spelers die tussentijds inactief worden gemaakt terwijl
     const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Oude Getrouwe` })
     const row = toggle.parentElement as HTMLElement
     expect(within(row).getByText('Oude Getrouwe')).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+    expect(within(row).getByText(new RegExp(` · ${nl.players.inactiveLabel}$`))).toBeInTheDocument()
     expect(toggle).not.toBeDisabled()
 
     // Niet-geselecteerde inactieve speler hoort niet in de (unie van actief +
@@ -1173,7 +1198,7 @@ describe('AC13/AC14 (gastspelers) — een aanwezige gast is selecteerbaar, een a
     const row = toggle.parentElement as HTMLElement
     expect(within(row).getByText('Ex-Actieve Gast')).toBeInTheDocument()
     expect(within(row).getByText(`(${nl.players.guestBadge})`)).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
+    expect(within(row).getByText(new RegExp(` · ${nl.players.inactiveLabel}$`))).toBeInTheDocument()
     expect(toggle).not.toBeDisabled()
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
   })
@@ -1446,14 +1471,19 @@ describe('Validator-bevinding (Gap 3) — meer dan 5 afgeronde wedstrijden in he
 
 // ═══════════════════════════════════════════════════════════════════════
 // ── Aanwezigheidsfilter (kleine, goedgekeurde aanpassing na deze story) ──
-// De selecteerbare lijst = spelers met attendance.status === 'present' voor
-// dit event, VERENIGD met spelers die al in match_squad zitten (ongeacht hun
-// huidige aanwezigheidsstatus of active-veld). match_squad blijft ongewijzigd
-// en synchroniseert niet met attendance — dit is uitsluitend een filter op
-// wat zichtbaar/selecteerbaar is.
+// BIJGEWERKT (de wedstrijd als één flow, besluit open vraag 1): de zichtbare
+// lijst = ALLE actieve spelers (de editor deelt ze in: aanwezig / nog geen
+// reactie / afwezig), VERENIGD met spelers die al in match_squad zitten
+// (ongeacht hun aanwezigheidsstatus of active-veld). Een afwezige of
+// onbekende GAST valt weg (teltMee in lib/aanwezigheid-telling.ts). match_squad
+// blijft ongewijzigd en synchroniseert niet met attendance — dit is
+// uitsluitend een filter op wat zichtbaar/selecteerbaar is.
+//
+// De asserts hieronder lezen het statuslabel op regel 2 van de rij ("ST · Afwezig"),
+// sinds de wedstrijd als één flow in plaats van het oude label "(Niet aanwezig)".
 // ═══════════════════════════════════════════════════════════════════════
-describe('Aanwezigheidsfilter — niet-aanwezige, niet-geselecteerde speler verschijnt niet in de lijst', () => {
-  it('een actieve speler zonder present-attendance-rij en niet in match_squad wordt weggelaten uit de selecteerbare lijst', async () => {
+describe('Aanwezigheidsfilter — niet-aanwezige, niet-geselecteerde actieve speler staat in de lijst, maar niet als aanwezig', () => {
+  it('een actieve speler met een absent-rij en niet in match_squad staat in de lijst als niet aanwezig', async () => {
     const players = [
       playerRow({ id: 'p1', name: 'Piet Peters' }),
       playerRow({ id: 'p2', name: 'Jan Afwezig' }),
@@ -1467,40 +1497,53 @@ describe('Aanwezigheidsfilter — niet-aanwezige, niet-geselecteerde speler vers
       ],
     })
     expect(screen.getByText('Piet Peters')).toBeInTheDocument()
-    expect(screen.queryByText('Jan Afwezig')).not.toBeInTheDocument()
+    const jan = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Jan Afwezig`, hidden: true })
+    expect(jan).toHaveAttribute('aria-pressed', 'false')
+    expect(within(jan.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.event.absentStat}$`))).toBeInTheDocument()
   })
 
-  it('een actieve speler zonder enige attendance-rij voor dit event (geen record) wordt eveneens weggelaten', async () => {
+  it('een actieve speler zonder enige attendance-rij voor dit event (geen record) staat in de lijst (nog geen reactie)', async () => {
     const players = [playerRow({ id: 'p1', name: 'Nog Niet Gereageerd' })]
     await renderSquadPage({
       events: [matchEventRow()],
       players,
       attendance: [],
     })
-    expect(screen.queryByText('Nog Niet Gereageerd')).not.toBeInTheDocument()
-    // Validator-bevinding 1: het team heeft wél een actieve speler, alleen is
-    // niemand aanwezig gemeld — dat is de "meld eerst aanwezigheid"-lege
-    // staat, niet de "voeg eerst spelers toe"-lege staat.
-    expect(screen.getByText(nl.matchSquad.emptyNoAttendance)).toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Nog Niet Gereageerd`, hidden: true })
+    expect(within(toggle.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.matchSquad.geenReactieLabel}$`))).toBeInTheDocument()
+    // Er IS een zichtbare speler, dus geen van beide lege staten.
     expect(screen.queryByText(nl.matchSquad.emptyTeam)).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: nl.matchSquad.emptyNoAttendanceLink })).toHaveAttribute(
-      'href',
-      '/events/e1',
-    )
   })
 
-  it('een actieve speler met een EXPLICIETE attendance-rij status "unknown" (wél een record, geen "present") wordt eveneens weggelaten', async () => {
+  it('een actieve speler met een EXPLICIETE attendance-rij status "unknown" staat eveneens in de lijst', async () => {
     const players = [playerRow({ id: 'p1', name: 'Status Onbekend' })]
     await renderSquadPage({
       events: [matchEventRow()],
       players,
       attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: TEAM, status: 'unknown' }],
     })
-    expect(screen.queryByText('Status Onbekend')).not.toBeInTheDocument()
-    // Zelfde onderscheid als hierboven: team heeft een actieve speler, alleen
-    // niet als aanwezig gemeld.
-    expect(screen.getByText(nl.matchSquad.emptyNoAttendance)).toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Status Onbekend`, hidden: true })
+    expect(within(toggle.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.matchSquad.geenReactieLabel}$`))).toBeInTheDocument()
     expect(screen.queryByText(nl.matchSquad.emptyTeam)).not.toBeInTheDocument()
+  })
+
+  it('een afwezige of onbekende GAST valt weg (teltMee); een aanwezige gast staat erin', async () => {
+    const players = [
+      playerRow({ id: 'g1', name: 'Gast Aanwezig', type: 'guest' }),
+      playerRow({ id: 'g2', name: 'Gast Afgemeld', type: 'guest' }),
+      playerRow({ id: 'g3', name: 'Gast Zonder Rij', type: 'guest' }),
+    ]
+    await renderSquadPage({
+      events: [matchEventRow()],
+      players,
+      attendance: [
+        { id: 'a1', event_id: 'e1', player_id: 'g1', team_id: TEAM, status: 'present' },
+        { id: 'a2', event_id: 'e1', player_id: 'g2', team_id: TEAM, status: 'absent' },
+      ],
+    })
+    expect(screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Gast Aanwezig`, hidden: true })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: `${nl.matchSquad.toggleLabel}: Gast Afgemeld`, hidden: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: `${nl.matchSquad.toggleLabel}: Gast Zonder Rij`, hidden: true })).not.toBeInTheDocument()
   })
 })
 
@@ -1517,7 +1560,7 @@ describe('Aanwezigheidsfilter — niet-aanwezige, maar wél-geselecteerde speler
     const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Al Geselecteerd` })
     const row = toggle.parentElement as HTMLElement
     expect(within(row).getByText('Al Geselecteerd')).toBeInTheDocument()
-    expect(within(row).getByText(`(${nl.matchSquad.notPresentLabel})`)).toBeInTheDocument()
+    expect(within(row).getByText(new RegExp(` · ${nl.event.absentStat}$`))).toBeInTheDocument()
     expect(toggle).not.toBeDisabled()
 
     // De export (print-blok) bevat deze speler nog gewoon — geen stille
@@ -1540,8 +1583,8 @@ describe('Aanwezigheidsfilter — niet-aanwezige, maar wél-geselecteerde speler
     expect(within(row).getByText('Dubbel Geval')).toBeInTheDocument()
     // Inactief weegt zwaarder: uitsluitend dit label, nooit het
     // niet-aanwezig-label ernaast.
-    expect(within(row).getByText(`(${nl.players.inactiveLabel})`)).toBeInTheDocument()
-    expect(within(row).queryByText(`(${nl.matchSquad.notPresentLabel})`)).not.toBeInTheDocument()
+    expect(within(row).getByText(new RegExp(` · ${nl.players.inactiveLabel}$`))).toBeInTheDocument()
+    expect(within(row).queryByText(new RegExp(` · ${nl.event.absentStat}$`))).not.toBeInTheDocument()
     expect(toggle).not.toBeDisabled()
 
     const printBlock = getPrintBlock(container)
@@ -1561,7 +1604,9 @@ describe('Aanwezigheidsfilter — niet-aanwezige, maar wél-geselecteerde speler
 // dus deze test faalt dan ook daadwerkelijk.
 // ═══════════════════════════════════════════════════════════════════════
 describe('Aanwezigheidsfilter — tenant-isolatie: een attendance-rij van een ander team telt niet mee', () => {
-  it('een "ghost"-attendance-rij van een ander team (zelfde event_id, status "present") maakt een speler niet zichtbaar in de selecteerbare lijst', async () => {
+  // BIJGEWERKT (de wedstrijd als één flow): een actieve speler is nu altijd
+  // zichtbaar; de ghost-rij mag hem alleen niet AANWEZIG maken.
+  it('een "ghost"-attendance-rij van een ander team (zelfde event_id, status "present") maakt een speler niet aanwezig', async () => {
     const players = [playerRow({ id: 'p1', name: 'Piet Peters', active: true })]
     await renderSquadPage({
       events: [matchEventRow()],
@@ -1572,12 +1617,12 @@ describe('Aanwezigheidsfilter — tenant-isolatie: een attendance-rij van een an
       // aanwezig gemeld.
       attendance: [{ id: 'a1', event_id: 'e1', player_id: 'p1', team_id: OTHER_TEAM, status: 'present' }],
     })
-    expect(screen.queryByText('Piet Peters')).not.toBeInTheDocument()
-    // Bevestigt dat dit de "meld eerst aanwezigheid"-lege staat is (team
-    // heeft wél een actieve speler), niet de "voeg eerst spelers toe"-staat —
-    // zo sluiten we uit dat de speler om een andere reden ontbreekt.
-    expect(screen.getByText(nl.matchSquad.emptyNoAttendance)).toBeInTheDocument()
-    expect(screen.queryByText(nl.matchSquad.emptyTeam)).not.toBeInTheDocument()
+    // Zichtbaar (actief), maar met het niet-aanwezig-label: valt de
+    // team_id-filter op attendance ooit weg, dan maakt de ghost-rij hem
+    // aanwezig en verdwijnt dit label.
+    const toggle = screen.getByRole('button', { name: `${nl.matchSquad.toggleLabel}: Piet Peters`, hidden: true })
+    expect(within(toggle.parentElement as HTMLElement).getByText(new RegExp(` · ${nl.matchSquad.geenReactieLabel}$`))).toBeInTheDocument()
+    expect(within(toggle.parentElement as HTMLElement).queryByText(new RegExp(` · ${nl.event.presentStat}$`))).not.toBeInTheDocument()
   })
 })
 
