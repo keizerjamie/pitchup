@@ -4553,3 +4553,32 @@ Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-
   de trainingsvoorstel-sessie: commit via privé-index en `commit-tree` + `update-ref` met old-sha-check (pre-commit
   hook draait dan niet → handmatige secret-check gedaan).
 - **Open:** rooktest in productie door Jamie (review invullen, to-do doorgestreept, kaart na 3 reviews).
+
+## Feature: Inzichten inkorten (2026-11-16, `d79a9f5`, live)
+Snelle winst 3 uit de schermreview. Via feature-factory; ketenmap
+`~/.claude/projects/-Users-jamiekeizer--claude/ff-snelle-winst/` (f3-01 t/m f3-05). Geen backend-wijziging.
+- **Wat:** `/inzichten` = PageHeader → PeriodeFilter → KpiStrip → "Wat valt op" (bestaand `SignalenBlok` met optionele
+  prop `bijlagen`) → `ThemaGroep`-en (Team open; Wedstrijden, Spelers, Training & kwaliteit, Zelfreview dicht).
+  Gemeten (CSW 2, seizoen): desktop 13.100 → 2.986 px (alles dicht 1.904), mobiel 21.500 → 4.614 px (alles dicht
+  2.784 = 3,43 schermen; richtgetal ~3 net niet gehaald door 3 kaarten + 6 KPI's).
+- **Indeling (`lib/inzichten-indeling.ts`, puur):** 25 `KaartSleutel`s, `THEMAS` 8/6/6/5 in de oude gridvolgorde,
+  `BREDE_KAARTEN`, `SIGNAAL_KOPPELING` (spelers-onder-drempel → topWorstAanwezigheid; opkomst-* → opkomstPerMaand;
+  rating-* → ratings; doelsaldo-* → thuisUit; speler-daler/stijger → stijgersDalers; positie-zonder-fit →
+  positiedekking), `ACTIE_HREF` (spelers `/players`, kalender `/events`). `koppelSignalen` + `verdeelOverThemas`:
+  een kaart staat óf in Wat valt op óf in zijn thema (titel één keer); tweede signaal naar dezelfde kaart → regel
+  "Grafiek: zie hierboven." + actie. `bepaalSignalen`/`Signaal` ongewijzigd.
+- **page.tsx:** datablok en `SeizoensrapportPrint` byte-gelijk; render bouwt `kaartMap` (naam `kaarten` was al bezet)
+  met per kaart de fout-vlag die hij al kreeg → themakop "n onvolledig". Team-thema kan nooit onvolledig tonen
+  (fase-1-kaarten hebben geen fout-prop, bekend gat).
+- **ThemaGroep:** client alleen om bij periodewissel de standaardstand terug te zetten via `useEffect([resetSleutel])`
+  zónder remount (key zou RatingsChart/DoelpuntenChart-state wissen). Native details/summary, geen h2 (tests tellen
+  h2 als kaarttitel), geen surface-card op de kop, ChevronIcon met `group-open:rotate-180 transition-none!`.
+- **ScrollFade:** client, meet scrollLeft/scrollWidth (CSS scroll-driven kan niet: `globals.css` zet animaties uit,
+  Safari<26/Firefox), ResizeObserver met guard (jsdom heeft hem niet), randen zonder aria-hidden (tests tellen
+  aria-hidden in kaarten), `pointer-events-none`, `vasteStartkolom` voor de sticky kolom van ZelfreviewKaart.
+- **Testgotchas:** kaart in Wat valt op staat binnen `[data-conclusielaag]` → helpers lezen `[data-signaal-tekst]` /
+  `[data-signaal-teken]`; selector `details tbody tr` matchte ook het thema-details → `tbody details tbody tr`;
+  jsdom verbergt dichte `<details>` niet (toets het `open`-attribuut, geen toBeVisible).
+- **Open:** zelfreview-tabel bestaat niet in productie (PGRST205 op `trainer_zelfreviews`) → migratie
+  `supabase/trainer-zelfreview.sql` van de zelfreview-feature lijkt niet gedraaid; sticky-kolom-fade daardoor niet
+  met echte data gezien. Rooktest door Jamie.
