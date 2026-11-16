@@ -40,11 +40,10 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/',
 }))
-// Mutabel zodat een test een locale-cookie ('en') of een CSP-nonce kan zetten.
-const omgeving: { locale: string | undefined; nonce: string | null } = { locale: undefined, nonce: null }
+// Mutabel zodat een test een locale-cookie ('en') kan zetten.
+const omgeving: { locale: string | undefined } = { locale: undefined }
 vi.mock('next/headers', () => ({
   cookies: vi.fn(async () => ({ get: (naam: string) => (naam === 'locale' && omgeving.locale ? { value: omgeving.locale } : undefined) })),
-  headers: vi.fn(async () => ({ get: (naam: string) => (naam === 'x-nonce' ? omgeving.nonce : null) })),
 }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
@@ -358,7 +357,6 @@ function heroPercentage(): number {
 
 beforeEach(() => {
   omgeving.locale = undefined
-  omgeving.nonce = null
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-08-19T10:00:00'))
 })
@@ -1174,7 +1172,7 @@ describe('Punt 5 — mobiel (structuur; echte 375px-weergave is niet in jsdom te
 // ═══════════════════════════════════════════════════════════════════════
 // PUNT 6 — begroeting op apparaatijd
 // ═══════════════════════════════════════════════════════════════════════
-describe('Punt 6 — begroeting volgt de tijdzone van het apparaat', () => {
+describe('Punt 6 — begroeting volgt het Amsterdamse uur', () => {
   const labels = { morning: nl.home.greetingMorning, afternoon: nl.home.greetingAfternoon, evening: nl.home.greetingEvening }
   const origineleTz = process.env.TZ
   afterEach(() => {
@@ -1182,61 +1180,33 @@ describe('Punt 6 — begroeting volgt de tijdzone van het apparaat', () => {
     else process.env.TZ = origineleTz
   })
 
-  function voerScriptUit(container: HTMLElement) {
-    const script = container.querySelector('script') as HTMLScriptElement
-    new Function(script.textContent ?? '')()
-  }
-
-  it('AC6.2 — apparaat Europe/Amsterdam, servertijd 23:30 UTC → het uur is 00:30 lokaal en de begroeting hoort bij de ochtend (lokaalUur met instelbare tijdzone)', () => {
+  it('AC6.2 — servertijd 23:30 UTC → het uur is 00:30 in Amsterdam en de begroeting hoort bij de ochtend (lokaalUur met instelbare tijdzone)', () => {
     const nu = new Date('2026-11-04T23:30:00Z')
     expect(nu.getUTCHours()).toBe(23)
-    expect(begroetingVoorUur(nu.getUTCHours())).toBe('evening') // wat de server (UTC) zou zeggen
+    expect(begroetingVoorUur(nu.getUTCHours())).toBe('evening') // wat een UTC-klok zou zeggen
     expect(lokaalUur(nu, 'Europe/Amsterdam')).toBe(0)
     expect(begroetingVoorUur(lokaalUur(nu, 'Europe/Amsterdam'))).toBe('morning')
   })
 
-  it('AC6.1/AC6.2 — dashboardflow: server (UTC) rendert "Goedenavond", het inline script op het Amsterdamse apparaat zet het vóór de eerste paint op "Goedemorgen"', async () => {
+  it('AC6.1/AC6.2 — dashboardflow op een UTC-server: 23:30Z rendert direct "Goedemorgen", zonder inline script of nonce', async () => {
     process.env.TZ = 'UTC'
     vi.setSystemTime(new Date('2026-11-04T23:30:00Z'))
-    omgeving.nonce = 'nonce-abc'
     gebruik(basisDb({}))
     const { container } = await renderDashboard()
-    const span = container.querySelector('h1 span, span[id]') as HTMLElement
-    const script = span.nextElementSibling as HTMLScriptElement
-    // Servertijd (UTC 23:30) → avond.
-    expect(span.textContent).toBe(nl.home.greetingEvening)
-    // Het script staat direct na de span en draagt de CSP-nonce.
-    expect(script.tagName).toBe('SCRIPT')
-    expect(script.getAttribute('nonce')).toBe('nonce-abc')
-
-    // Het apparaat staat in Amsterdam: 00:30 lokaal.
-    process.env.TZ = 'Europe/Amsterdam'
-    expect(new Date().getHours()).toBe(0) // voorwaarde: tijdzone-omschakeling werkt in deze omgeving
-    new Function(script.textContent ?? '')()
+    const span = container.querySelector('h1 span') as HTMLElement
     expect(span.textContent).toBe(nl.home.greetingMorning)
+    expect(container.querySelector('h1 script')).toBeNull()
   })
 
   it.each([
     [0, 'morning'], [5, 'morning'], [11, 'morning'], [12, 'afternoon'], [17, 'afternoon'], [18, 'evening'], [23, 'evening'],
-  ] as const)('AC6.3 — grens: om %s:30 lokaal is het %s (client-render én inline script)', (uur, dagdeel) => {
-    process.env.TZ = 'Europe/Amsterdam'
-    vi.setSystemTime(new Date(2026, 10, 4, uur, 30)) // lokale constructor
+  ] as const)('AC6.3 — grens: om %s:30 in Amsterdam is het %s', (uur, dagdeel) => {
+    process.env.TZ = 'UTC' // het apparaat/de server doet er niet toe
+    // 4 nov 2026 is wintertijd: Amsterdam = UTC+1.
+    vi.setSystemTime(new Date(Date.UTC(2026, 10, 4, uur - 1, 30)))
     const { container } = render(<Begroeting labels={labels} />)
     expect(container.querySelector('span')!.textContent).toBe(labels[dagdeel])
-    // Script (zoals bij de eerste paint): eerst wissen, dan uitvoeren.
-    container.querySelector('span')!.textContent = ''
-    voerScriptUit(container)
-    expect(container.querySelector('span')!.textContent).toBe(labels[dagdeel])
-  })
-
-  it('AC6.4 (deels) — na laden toont de begroeting de lokale periode; het script staat direct na de span (vóór de eerste paint uitvoerbaar)', () => {
-    process.env.TZ = 'Europe/Amsterdam'
-    vi.setSystemTime(new Date('2026-11-04T23:30:00Z'))
-    const { container } = render(<Begroeting labels={labels} nonce="n1" />)
-    const span = container.querySelector('span')!
-    expect(span.textContent).toBe(labels.morning)
-    expect(span.nextElementSibling?.tagName).toBe('SCRIPT')
-    expect(span.nextElementSibling?.getAttribute('nonce')).toBe('n1')
+    expect(container.querySelector('script')).toBeNull()
   })
 
   it.todo('AC6.4 — het "geen zichtbare flits"-deel is NIET NETJES TE DEKKEN IN JSDOM (geen echte paint/hydratie): browserverificatie door orkestrator (TZ=UTC dev, browser Europe/Amsterdam, geen hydration-warning)')

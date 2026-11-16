@@ -23,10 +23,10 @@ function item(overrides: Partial<TodoItem> = {}): TodoItem {
   }
 }
 
-function view(items: TodoItem[], canEditTask = ALLE) {
+function view(items: TodoItem[], canEditTask = ALLE, vandaag = '2026-11-16') {
   return (
     <DictProvider dict={nl}>
-      <TodoList items={items} canEditTask={canEditTask} />
+      <TodoList items={items} canEditTask={canEditTask} vandaag={vandaag} />
     </DictProvider>
   )
 }
@@ -39,6 +39,30 @@ beforeEach(() => {
 })
 
 describe('TodoList', () => {
+  describe('"Te laat" volgt de vandaag-prop', () => {
+    it('deadline gisteren (t.o.v. vandaag) is te laat', () => {
+      render(view([item({ deadline: '2026-11-15' })]))
+      expect(screen.getByText(nl.todo.overdue)).toBeInTheDocument()
+    })
+
+    it('deadline vandaag is niet te laat', () => {
+      render(view([item({ deadline: '2026-11-16' })]))
+      expect(screen.queryByText(nl.todo.overdue)).not.toBeInTheDocument()
+    })
+
+    it('dezelfde taak is wel te laat zodra vandaag een dag opschuift (middernacht Amsterdam)', () => {
+      const { rerender } = render(view([item({ deadline: '2026-11-16' })], ALLE, '2026-11-16'))
+      expect(screen.queryByText(nl.todo.overdue)).not.toBeInTheDocument()
+      rerender(view([item({ deadline: '2026-11-16' })], ALLE, '2026-11-17'))
+      expect(screen.getByText(nl.todo.overdue)).toBeInTheDocument()
+    })
+
+    it('een afgevinkte taak met verstreken deadline is niet te laat', () => {
+      render(view([item({ deadline: '2026-11-01', auto: true })]))
+      expect(screen.queryByText(nl.todo.overdue)).not.toBeInTheDocument()
+    })
+  })
+
   it('toont de lege staat zonder taken', () => {
     render(view([]))
     expect(screen.getByText(nl.todo.empty)).toBeInTheDocument()

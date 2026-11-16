@@ -28,13 +28,12 @@ function renderHero() {
   return render(
     <DashboardHero
       event={event}
-      kind="training"
-      title="Training"
+      vandaag="2099-01-09"
+      eyebrow={nl.vandaag.eyebrowTodo}
+      tone="normaal"
+      title="Training morgen"
       t={nl}
-      present={9}
-      absent={2}
-      injured={0}
-      squadSize={14}
+      telling={{ present: 9, absent: 2, injured: 0, squadSize: 14 }}
       primaryHref="/events/ev1/training-plan"
       primaryLabel={nl.home.makeTrainingPlan}
       primaryIcon="assignment"

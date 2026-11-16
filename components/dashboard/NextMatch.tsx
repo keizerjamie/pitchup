@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import type { Dict } from '@/messages/nl'
 import { FootballEvent } from '@/lib/types'
-import { daysUntil, formatDate, formatTime } from '@/lib/utils'
+import { dagenTussen } from '@/lib/amsterdam-dag'
+import { formatDate, formatTime } from '@/lib/utils'
 
 // Compact "next match" tile — sits in the stat-card row and links to the match.
-export default function NextMatch({ match, t }: { match: FootballEvent | null; t: Dict }) {
-  const diff = match ? daysUntil(match.date) : null
+export default function NextMatch({ match, t, vandaag }: { match: FootballEvent | null; t: Dict; vandaag: string }) {
+  const diff = match ? dagenTussen(vandaag, match.date) : null
   const rel = match && diff !== null
     ? (diff === 0 ? t.dashboard.today
       : diff === 1 ? t.dashboard.tomorrow

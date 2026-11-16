@@ -8,14 +8,21 @@ const event = {
   id: 'ev1', team_id: 'team1', type: 'training', date: '2099-01-10', time: '19:30', location: 'Sportpark Noord',
 } as unknown as FootballEvent
 
-function renderHero(o: { present: number; absent: number; injured: number; squadSize: number }) {
+type Telling = { present: number; absent: number; injured: number; squadSize: number }
+
+function renderHero(
+  telling: Telling | null,
+  o: { vandaag?: string; tone?: 'normaal' | 'probleem' | 'klaar'; eyebrow?: string; ev?: FootballEvent } = {},
+) {
   return render(
     <DashboardHero
-      event={event}
-      kind="training"
-      title="Training"
+      event={o.ev ?? event}
+      vandaag={o.vandaag ?? '2099-01-09'}
+      eyebrow={o.eyebrow ?? nl.vandaag.eyebrowTodo}
+      tone={o.tone ?? 'normaal'}
+      title="Training morgen"
       t={nl}
-      {...o}
+      telling={telling}
       primaryHref="/events/ev1/training-plan"
       primaryLabel={nl.home.makeTrainingPlan}
       primaryIcon="assignment"
@@ -72,5 +79,56 @@ describe('DashboardHero — legenda met geblesseerden', () => {
     const { container } = renderHero({ present: 0, absent: 1, injured: 1, squadSize: 0 })
     expect(legenda(nl.home.noResponse)).toBe(`0 ${nl.home.noResponse}`)
     expect(container.textContent).not.toContain('NaN')
+  })
+})
+
+describe('DashboardHero — hoofdkaart', () => {
+  it('rel komt uit de vandaag-prop: dag erna = Morgen, dezelfde dag = Vandaag, gisteren = Gisteren', () => {
+    const { unmount } = renderHero({ present: 1, absent: 0, injured: 0, squadSize: 2 }, { vandaag: '2099-01-09' })
+    expect(screen.getAllByText(nl.dashboard.tomorrow).length).toBeGreaterThan(0)
+    unmount()
+    const b = renderHero({ present: 1, absent: 0, injured: 0, squadSize: 2 }, { vandaag: '2099-01-10' })
+    expect(screen.getAllByText(nl.dashboard.today).length).toBeGreaterThan(0)
+    b.unmount()
+    renderHero({ present: 1, absent: 0, injured: 0, squadSize: 2 }, { vandaag: '2099-01-11' })
+    expect(screen.getAllByText(nl.vandaag.whenYesterdayCap).length).toBeGreaterThan(0)
+  })
+
+  it('zonder telling: geen ring, geen "x/y aanwezig", geen aanmeldblok; knop blijft', () => {
+    const { container } = renderHero(null)
+    expect(screen.queryByText(new RegExp(`^\\d+/\\d+ ${nl.home.present}$`))).not.toBeInTheDocument()
+    expect(screen.queryByText(nl.home.signups)).not.toBeInTheDocument()
+    expect(container.querySelector('[style*="conic-gradient"]')).toBeNull()
+    expect(container.textContent).not.toContain('NaN')
+    expect(screen.getAllByRole('link', { name: new RegExp(nl.home.makeTrainingPlan) })).toHaveLength(2)
+  })
+
+  it('mobiele regel blijft exact "x/y aanwezig"; onbekend staat in een losse span en alleen bij > 0', () => {
+    const { unmount } = renderHero({ present: 19, absent: 0, injured: 0, squadSize: 21 })
+    expect(screen.getByText(`19/21 ${nl.home.present}`)).toBeInTheDocument()
+    expect(screen.getByText(`· ${nl.vandaag.unknownCount.replace('{n}', '2')}`)).toBeInTheDocument()
+    unmount()
+    renderHero({ present: 21, absent: 0, injured: 0, squadSize: 21 })
+    expect(screen.getByText(`21/21 ${nl.home.present}`)).toBeInTheDocument()
+    expect(screen.queryByText(/onbekend/)).not.toBeInTheDocument()
+  })
+
+  it('eyebrow-chip: normaal groen, probleem oranje, klaar met check-icoon', () => {
+    const { unmount } = renderHero(null, { tone: 'normaal' })
+    const normaal = screen.getAllByText(nl.vandaag.eyebrowTodo)[0]
+    expect(normaal).toHaveStyle({ color: '#4ade80' })
+    unmount()
+    const p = renderHero(null, { tone: 'probleem', eyebrow: 'Opstelling mist 2 posities' })
+    expect(screen.getAllByText('Opstelling mist 2 posities')[0]).toHaveStyle({ color: '#fdba74' })
+    p.unmount()
+    renderHero(null, { tone: 'klaar', eyebrow: nl.vandaag.eyebrowAllDone })
+    const klaar = screen.getAllByText(nl.vandaag.eyebrowAllDone)[0]
+    expect(klaar.querySelector('.ms')?.textContent).toBe('check')
+    expect(klaar.querySelector('.ms')).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('toont de titel van de pagina', () => {
+    renderHero(null)
+    expect(screen.getAllByText('Training morgen').length).toBeGreaterThan(0)
   })
 })

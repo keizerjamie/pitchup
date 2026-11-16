@@ -5,7 +5,8 @@ import { useState } from 'react'
 import { markTaskDone, reopenTask } from '@/app/actions/todos'
 import { useDict } from '@/lib/i18n-context'
 import { useRijOpslag } from '@/lib/use-rij-opslag'
-import { daysUntil, formatDate } from '@/lib/utils'
+import { dagenTussen } from '@/lib/amsterdam-dag'
+import { formatDate } from '@/lib/utils'
 
 export type TaskType = 'squad' | 'lineup' | 'analysis' | 'training_plan' | 'self_review'
 
@@ -48,7 +49,7 @@ const taakHref = (item: TodoItem) =>
 // Zonder het bijbehorende recht blijft de taak zichtbaar en aanklikbaar (de
 // link naar de onderliggende pagina blijft werken), alleen het vinkje zelf
 // wordt uitgeschakeld.
-export default function TodoList({ items, canEditTask }: { items: TodoItem[]; canEditTask: Record<TaskType, boolean> }) {
+export default function TodoList({ items, canEditTask, vandaag }: { items: TodoItem[]; canEditTask: Record<TaskType, boolean>; vandaag: string }) {
   const t = useDict()
   const [saveError, setSaveError] = useState(false)
   const { waarden: manual, zet, synchroniseer } = useRijOpslag<boolean>({
@@ -121,7 +122,7 @@ export default function TodoList({ items, canEditTask }: { items: TodoItem[]; ca
           const checked = item.auto || manual[key]
           const isReview = item.taskType === 'self_review'
           // Geen "Te laat" bij de zelfreview: het item verdwijnt vanzelf bij de volgende training.
-          const overdue = !isReview && !checked && daysUntil(item.deadline) < 0
+          const overdue = !isReview && !checked && dagenTussen(vandaag, item.deadline) < 0
           const context = item.opponent ? `${t.lineup.vsLabel} ${item.opponent}` : t.event.training
 
           return (

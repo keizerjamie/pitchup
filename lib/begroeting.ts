@@ -1,17 +1,13 @@
 // Begroeting op het dashboard ("Goedemorgen/Goedemiddag/Goedenavond"). Pure
-// helpers, geen 'use client' en geen 'use server': de server rendert een
-// eerste begroeting, en een inline script (begroetingScript) corrigeert die
-// vóór de eerste paint op basis van de klok van het APPARAAT. De server draait
-// in UTC, dus zonder die correctie zei het dashboard tussen 00:00 en 01:00
-// Nederlandse tijd "Goedenavond". Patroon: Next-docs "Preventing flash before
-// hydration" (inline script + suppressHydrationWarning).
+// helpers, geen 'use client' en geen 'use server'. De component rekent het uur
+// in Europe/Amsterdam (lokaalUur met TIJDZONE_STARTSCHERM), op server én
+// client dezelfde klok-definitie als de datumregel en de kaarten.
 
 export type Dagdeel = 'morning' | 'afternoon' | 'evening'
 
 export type BegroetingLabels = Record<Dagdeel, string>
 
-// Vanaf dit uur is het middag, vanaf GRENS_AVOND avond. Eén bron voor zowel
-// begroetingVoorUur als het inline script (dat ze als getal inbakt).
+// Vanaf dit uur is het middag, vanaf GRENS_AVOND avond.
 export const GRENS_MIDDAG = 12
 export const GRENS_AVOND = 18
 
@@ -34,28 +30,4 @@ export function lokaalUur(date: Date, timeZone?: string): number {
   } catch {
     return date.getHours()
   }
-}
-
-// JSON.stringify escapet aanhalingstekens en backslashes, maar niet `<`: een
-// label met "</script>" zou het script-element voortijdig sluiten. De escape
-// \u003c is binnen een JS-string gelijkwaardig aan `<`. Idem U+2028/U+2029
-// (regelscheidingstekens die oudere JS-parsers in een string weigeren).
-function veiligJson(waarde: unknown): string {
-  return JSON.stringify(waarde)
-    .replace(/</g, '\\u003c')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029')
-}
-
-// De broncode van het inline script: zet de tekst van het element met dit id
-// op de begroeting van het uur van het apparaat. Zelfde grenzen als
-// begroetingVoorUur (GRENS_MIDDAG/GRENS_AVOND). Doet niets als het element
-// ontbreekt. Id en labels gaan via veiligJson het script in, nooit rauw.
-export function begroetingScript(id: string, labels: BegroetingLabels): string {
-  const l = { morning: labels.morning, afternoon: labels.afternoon, evening: labels.evening }
-  return (
-    `{var n=document.getElementById(${veiligJson(id)});` +
-    `if(n){var h=new Date().getHours(),l=${veiligJson(l)};` +
-    `n.textContent=h<${GRENS_MIDDAG}?l.morning:h<${GRENS_AVOND}?l.afternoon:l.evening}}`
-  )
 }

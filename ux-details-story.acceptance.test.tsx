@@ -176,7 +176,7 @@ function todoItem(o: Partial<TodoItem> = {}): TodoItem {
 function renderTodo(items: TodoItem[], canEditTask = ALLE_TAKEN) {
   return render(
     <DictProvider dict={nl}>
-      <TodoList items={items} canEditTask={canEditTask} />
+      <TodoList items={items} canEditTask={canEditTask} vandaag="2026-11-16" />
     </DictProvider>,
   )
 }

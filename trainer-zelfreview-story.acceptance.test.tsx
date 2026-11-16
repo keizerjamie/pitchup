@@ -738,11 +738,14 @@ describe('Inzichten', () => {
       'app/page.tsx',
       'components/TrainerZelfreviewSectie.tsx',
       'components/dashboard/TodoList.tsx',
+      'components/dashboard/WeekRegels.tsx',
+      'components/dashboard/vandaag-teksten.ts',
       'components/inzichten/ZelfreviewKaart.tsx',
       'lib/inzichten.ts',
       'lib/team-opruimen.ts',
       'lib/todos.mjs',
       'lib/trainer-zelfreview.ts',
+      'lib/vandaag-scherm.ts',
     ])
     // Het rapport zelf (SeizoensrapportPrint) en de PDF-route weten van niets
     expect(verwijzers.some((p) => /Seizoensrapport|pdf/i.test(p))).toBe(false)

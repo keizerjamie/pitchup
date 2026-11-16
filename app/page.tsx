@@ -1,11 +1,13 @@
-import { headers } from 'next/headers'
 import PageHeader from '@/components/ui/PageHeader'
 import { LinkButton } from '@/components/ui/Button'
 import { createClient } from '@/lib/supabase/server'
 import { canEdit, requireTeamContextOrLogin } from '@/lib/team-context'
 import { FootballEvent, AttendanceStatus, POSITION_ABBREVIATIONS, PERIODIZATION_CATEGORIES, CategorieMeting } from '@/lib/types'
 import { actueleMetingen, onderdeelStatus, getTrainingLog, computeCurrentSteps } from '@/lib/periodization'
-import { addDays, daysUntil, todayLocal } from '@/lib/utils'
+import { addDays } from '@/lib/utils'
+import { TIJDZONE_STARTSCHERM, dagenTussen, vandaagIn } from '@/lib/amsterdam-dag'
+import { bepaalVandaag, type KaartEvent, type KaartSoort, type VandaagModel } from '@/lib/vandaag-scherm'
+import { haalStatussenPerEvent } from '@/lib/dashboard-aanwezigheid'
 import { getDict } from '@/lib/i18n'
 import { logError } from '@/lib/errors'
 import DashboardHero from '@/components/dashboard/DashboardHero'
@@ -21,8 +23,10 @@ import { FORWARD, analysisDeadline, effectiveDone, hasTrainingPlanDone, isSelfRe
 import { analyseBestaat, matchResult } from '@/lib/match-analysis.mjs'
 import { OPKOMST_DOEL, berekenAanwezigheidPercentage, periodeVenster, seizoensVenster, verledenSeizoensVenster, type AanwezigheidRij } from '@/lib/inzichten'
 import { teltMee, telAanwezigheid, vasteTelling } from '@/lib/aanwezigheid-telling'
-import { telOpstelling } from '@/lib/lineup-compleet'
+import { telOpstelling, type OpstellingTelling } from '@/lib/lineup-compleet'
 import Begroeting from '@/components/dashboard/Begroeting'
+import WeekRegels from '@/components/dashboard/WeekRegels'
+import { hoofdkaartTeksten } from '@/components/dashboard/vandaag-teksten'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
 // AANNAME A1 (goedgekeurd): backward-fetchhorizon voor To-do kandidaat-events —
@@ -40,7 +44,10 @@ export default async function DashboardPage() {
   const [supabase, t] = await Promise.all([createClient(), getDict()])
   const ctx = await requireTeamContextOrLogin()
 
-  const today = todayLocal()
+  // Eén "vandaag" voor het hele startscherm: de kalenderdag in Europe/
+  // Amsterdam, niet de klok van het serverproces (lib/amsterdam-dag.ts).
+  // Alle datumlogica hieronder rekent vanuit deze string.
+  const today = vandaagIn(TIJDZONE_STARTSCHERM)
   const windowEnd = addDays(today, FORWARD)
   const fetchStart = addDays(today, -FETCH_HORIZON_DAYS)
 
@@ -119,17 +126,16 @@ export default async function DashboardPage() {
   const recentForm: FormStripItem[] =
     (recentMatchRows ?? []).map((m) => ({ id: m.id, result: matchResult(m) }))
 
-  // Hero = the chronologically next activity (training or match). The upcoming
-  // list is already sorted ascending by date. The next match gets its own card.
+  // Het chronologisch eerstvolgende event (training of wedstrijd); upcoming is
+  // oplopend op datum. Voedt de Beschikbaarheid-tegel en, als er geen open
+  // taak is, de hoofdkaart (AC14). De eerstvolgende wedstrijd krijgt daarnaast
+  // zijn eigen tegel.
   const nextMatch = upcoming.find((e) => e.type === 'match') ?? null
-  const heroEvent = upcoming[0] ?? null
+  const volgendEvent: FootballEvent | null = upcoming[0] ?? null
 
   // ── Greeting + date line ──
-  // Servertijd-begroeting; op het apparaat corrigeert het inline script van
-  // de Begroeting-component dit vóór de eerste paint (lib/begroeting.ts).
+  // De Begroeting-component rekent zelf met het Amsterdamse uur.
   const begroetingLabels = { morning: t.home.greetingMorning, afternoon: t.home.greetingAfternoon, evening: t.home.greetingEvening }
-  // Nonce voor het inline script van <Begroeting> (CSP; zie app/layout.tsx).
-  const nonce = (await headers()).get('x-nonce') ?? undefined
   const dateLine = (() => {
     const d = new Date(today + 'T00:00:00').toLocaleDateString(t.browserLocale, { weekday: 'long', day: 'numeric', month: 'long' })
     return d.charAt(0).toUpperCase() + d.slice(1)
@@ -146,11 +152,30 @@ export default async function DashboardPage() {
   // zonder recht gaat er geen query uit.
   const magZelfreviewen = canEdit(ctx, 'training')
   const zelfreviewKandidaatIds = magZelfreviewen
-    ? todoCandidates.filter((e) => e.type === 'training' && daysUntil(e.date) <= 0).map((e) => e.id)
+    ? todoCandidates.filter((e) => e.type === 'training' && dagenTussen(today, e.date) <= 0).map((e) => e.id)
     : []
 
+  // Selectie/opstelling ook voor het eerstvolgende event als dat een
+  // wedstrijd ná het To-do-venster is: de hoofdkaart (AC14) kiest daarmee
+  // tussen "Selectie maken" en "Opstelling maken/bekijken". De takenloop
+  // hieronder blijft over todoCandidates lopen.
+  const selectieIds = [...new Set([
+    ...matchCandidateIds,
+    ...(volgendEvent?.type === 'match' ? [volgendEvent.id] : []),
+  ])]
+  // Events die een kaart met aanwezigheidstelling kunnen worden: trainingen
+  // en wedstrijden van vandaag t/m het einde van het venster, plus het
+  // eerstvolgende event (Beschikbaarheid-tegel en AC14-kaart).
+  const tellingIds = [...new Set([
+    ...todoCandidates
+      .filter((e) => (e.type === 'training' || e.type === 'match') && e.date >= today && e.date <= windowEnd)
+      .map((e) => e.id),
+    ...(volgendEvent ? [volgendEvent.id] : []),
+  ])]
+  const actieveSpelerIds = players.map((p) => p.id)
+
   const [
-    { data: heroAttendanceRows },
+    statusPerEvent,
     aanwezigheid4wResult,
     { data: squadRows },
     { data: lineupRows },
@@ -161,20 +186,20 @@ export default async function DashboardPage() {
     trainingLogResult,
     zelfreviewResult,
   ] = await Promise.all([
-    // Alleen de rijen van het hero-event: de KPI-tegel rekent niet meer op
-    // attendance-rijen van de komende events (die komt uit de RPC hieronder).
-    heroEvent
-      ? supabase.from('attendance').select('player_id, status').eq('team_id', ctx.teamId).eq('event_id', heroEvent.id)
-      : Promise.resolve({ data: [] }),
+    // Aanwezigheid van de events die een kaart met telling kunnen worden,
+    // gebatcht onder de PostgREST-grens van 1000 rijen, team-gescoped en
+    // alleen actieve spelers. Gewoonlijk één query; 0 ids of 0 spelers → geen.
+    // De KPI-tegel rekent hier niet op (die komt uit de RPC hieronder).
+    haalStatussenPerEvent(supabase, ctx.teamId, tellingIds, actieveSpelerIds),
     // p_team_id uit de teamcontext; de RPC doet zelf een lidmaatschapscheck.
     aanwezigheid4w
       ? supabase.rpc('inzichten_aanwezigheid', { p_team_id: ctx.teamId, p_start: aanwezigheid4w.start, p_end: aanwezigheid4w.end })
       : Promise.resolve({ data: null, error: null }),
-    matchCandidateIds.length > 0
-      ? supabase.from('match_squad').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
+    selectieIds.length > 0
+      ? supabase.from('match_squad').select('event_id').eq('team_id', ctx.teamId).in('event_id', selectieIds)
       : Promise.resolve({ data: [] }),
-    matchCandidateIds.length > 0
-      ? supabase.from('lineups').select('event_id, formation, positions').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
+    selectieIds.length > 0
+      ? supabase.from('lineups').select('event_id, formation, positions').eq('team_id', ctx.teamId).in('event_id', selectieIds)
       : Promise.resolve({ data: [] }),
     matchCandidateIds.length > 0
       ? supabase.from('match_ratings').select('event_id').eq('team_id', ctx.teamId).in('event_id', matchCandidateIds)
@@ -222,10 +247,14 @@ export default async function DashboardPage() {
   // unieke speler heeft (telOpstelling, lib/lineup-compleet.ts) — een
   // opgeslagen opstelling met lege posities laat de taak open. Dezelfde regel
   // als de opstelling-ActionCard op de event-detailpagina.
+  // opstellingPerEvent bewaart dezelfde telling voor de probleemkaart
+  // "opstelling onvolledig" (AC9) — één telOpstelling-aanroep per rij.
+  const opstellingPerEvent = new Map<string, OpstellingTelling>()
+  for (const r of (lineupRows ?? []) as { event_id: string; formation: unknown; positions: unknown }[]) {
+    opstellingPerEvent.set(r.event_id, telOpstelling(r.formation, r.positions))
+  }
   const lineupSet = new Set<string>(
-    ((lineupRows ?? []) as { event_id: string; formation: unknown; positions: unknown }[])
-      .filter((r) => telOpstelling(r.formation, r.positions).compleet)
-      .map((r) => r.event_id),
+    [...opstellingPerEvent].filter(([, telling]) => telling.compleet).map(([eventId]) => eventId),
   )
   const manualSet = new Set<string>(
     (overrideRows ?? []).map((r: { event_id: string; task_type: string }) => `${r.event_id}:${r.task_type}`)
@@ -266,7 +295,7 @@ export default async function DashboardPage() {
       const squadAuto = squadSet.has(e.id)
       const squadManual = manualSet.has(`${e.id}:squad`)
       const squadEffective = effectiveDone(squadAuto, squadManual)
-      if (isTaskVisible({ taskType: 'squad', done: squadEffective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: 0 })) {
+      if (isTaskVisible({ taskType: 'squad', done: squadEffective, daysUntilEvent: dagenTussen(today, e.date), daysUntilDeadline: 0 })) {
         rawTasks.push({
           eventId: e.id, taskType: 'squad', opponent: e.opponent, deadline: e.date, eventDate: e.date,
           auto: squadAuto, manual: squadManual, effective: squadEffective,
@@ -276,7 +305,7 @@ export default async function DashboardPage() {
       const lineupAuto = lineupSet.has(e.id)
       const lineupManual = manualSet.has(`${e.id}:lineup`)
       const lineupEffective = effectiveDone(lineupAuto, lineupManual)
-      if (isTaskVisible({ taskType: 'lineup', done: lineupEffective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: 0 })) {
+      if (isTaskVisible({ taskType: 'lineup', done: lineupEffective, daysUntilEvent: dagenTussen(today, e.date), daysUntilDeadline: 0 })) {
         rawTasks.push({
           eventId: e.id, taskType: 'lineup', opponent: e.opponent, deadline: e.date, eventDate: e.date,
           auto: lineupAuto, manual: lineupManual, effective: lineupEffective,
@@ -292,7 +321,7 @@ export default async function DashboardPage() {
       const analysisManual = manualSet.has(`${e.id}:analysis`)
       const analysisEffective = effectiveDone(analysisAuto, analysisManual)
       const deadline = analysisDeadline(e.date, trainingDates)
-      if (isTaskVisible({ taskType: 'analysis', done: analysisEffective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: daysUntil(deadline) })) {
+      if (isTaskVisible({ taskType: 'analysis', done: analysisEffective, daysUntilEvent: dagenTussen(today, e.date), daysUntilDeadline: dagenTussen(today, deadline) })) {
         rawTasks.push({
           eventId: e.id, taskType: 'analysis', opponent: e.opponent, deadline, eventDate: e.date,
           auto: analysisAuto, manual: analysisManual, effective: analysisEffective,
@@ -302,7 +331,7 @@ export default async function DashboardPage() {
       const auto = hasTrainingPlanDone(e.doelstelling, oefCountMap.get(e.id) ?? 0)
       const manual = manualSet.has(`${e.id}:training_plan`)
       const effective = effectiveDone(auto, manual)
-      if (isTaskVisible({ taskType: 'training_plan', done: effective, daysUntilEvent: daysUntil(e.date), daysUntilDeadline: 0 })) {
+      if (isTaskVisible({ taskType: 'training_plan', done: effective, daysUntilEvent: dagenTussen(today, e.date), daysUntilDeadline: 0 })) {
         rawTasks.push({
           eventId: e.id, taskType: 'training_plan', opponent: null, deadline: e.date, eventDate: e.date,
           auto, manual, effective,
@@ -316,8 +345,8 @@ export default async function DashboardPage() {
       if (magZelfreviewen && !zelfreviewFout) {
         const volgendeTraining = selfReviewNextTraining(e.date, trainingDates)
         if (isSelfReviewVisible({
-          daysUntilEvent: daysUntil(e.date),
-          daysUntilNextTraining: volgendeTraining === null ? null : daysUntil(volgendeTraining),
+          daysUntilEvent: dagenTussen(today, e.date),
+          daysUntilNextTraining: volgendeTraining === null ? null : dagenTussen(today, volgendeTraining),
         })) {
           const reviewAuto = reviewSet.has(e.id)
           rawTasks.push({
@@ -339,26 +368,70 @@ export default async function DashboardPage() {
     manual: task.manual,
   }))
 
-  // ── Availability for the next event ──
-  // Alleen rijen van ACTIEVE spelers bestaan voor de telling: `players` is al
-  // op active = true gefilterd en we tellen over die lijst. Een inactieve
-  // speler met nog een 'present'-rij telt dus niet mee.
-  const heroAttendance = new Map<string, AttendanceStatus>()
-  for (const a of (heroAttendanceRows ?? []) as { player_id: string; status: AttendanceStatus }[]) {
-    if (a.player_id) heroAttendance.set(a.player_id, a.status)
+  // ── Vandaag-model: hoofdkaart + weekregels ──
+  // Selectie/opstelling "klaar" = effectief klaar (automatisch OF handmatig
+  // afgevinkt), dezelfde regel als de To-do. Voor een event buiten het
+  // To-do-venster zijn geen overrides opgehaald; daar telt alleen automatisch.
+  const selectieKlaarIds = new Set<string>(
+    selectieIds.filter((id) => effectiveDone(squadSet.has(id), manualSet.has(`${id}:squad`))),
+  )
+  const opstellingKlaarIds = new Set<string>(
+    selectieIds.filter((id) => effectiveDone(lineupSet.has(id), manualSet.has(`${id}:lineup`))),
+  )
+  function naarKaartEvent(e: FootballEvent): KaartEvent | null {
+    if (e.type !== 'training' && e.type !== 'match') return null
+    return { id: e.id, type: e.type, date: e.date, time: e.time, opponent: e.opponent, home_away: e.home_away }
   }
+  const eventPerId = new Map<string, FootballEvent>()
+  for (const e of [...todoCandidates, ...upcoming]) eventPerId.set(e.id, e)
+  const kaartEvents = new Map<string, KaartEvent>()
+  for (const e of eventPerId.values()) {
+    const k = naarKaartEvent(e)
+    if (k) kaartEvents.set(e.id, k)
+  }
+  const vandaagModel: VandaagModel = bepaalVandaag({
+    vandaag: today,
+    taken: rawTasks,
+    events: kaartEvents,
+    volgendEvent: volgendEvent ? naarKaartEvent(volgendEvent) : null,
+    opstellingPerEvent,
+    selectieKlaarIds,
+    opstellingKlaarIds,
+  })
+  const hoofdkaartEvent: FootballEvent | null = vandaagModel.hoofdkaart
+    ? eventPerId.get(vandaagModel.hoofdkaart.event.id) ?? null
+    : null
+
+  // ── Aanwezigheidstellingen ──
   // Eén telling per event, dezelfde als de kalender (app/events/page.tsx):
-  // telAanwezigheid over de actieve spelers, zonder rij = 'unknown'. Teller en
-  // noemer gaan UITSLUITEND over vaste spelers (vasteTelling); een aanwezige
-  // gast verhoogt "x/y" dus niet. Geblesseerd staat apart in de legenda.
-  const heroTelling = telAanwezigheid(players, (p) => heroAttendance.get(p.id) ?? 'unknown')
-  const heroVast = vasteTelling(heroTelling)
-  const hero = {
-    present: heroVast.aanwezig,
-    absent: heroTelling.afwezig,
-    injured: heroTelling.geblesseerd,
-    squadSize: heroVast.noemer,
+  // telAanwezigheid over de ACTIEVE spelers (`players` is al op active = true
+  // gefilterd), zonder rij = 'unknown'. Teller en noemer gaan UITSLUITEND over
+  // vaste spelers (vasteTelling); een aanwezige gast verhoogt "x/y" dus niet.
+  // Geblesseerd staat apart in de legenda. Event zonder entry in
+  // statusPerEvent (batch gefaald of niet opgehaald) → null: geen getallen.
+  type Telling = { present: number; absent: number; injured: number; squadSize: number }
+  function tellingVoor(eventId: string): Telling | null {
+    const statussen = statusPerEvent.get(eventId)
+    if (!statussen) return null
+    const telling = telAanwezigheid(players, (p) => statussen.get(p.id) ?? 'unknown')
+    const vast = vasteTelling(telling)
+    return { present: vast.aanwezig, absent: telling.afwezig, injured: telling.geblesseerd, squadSize: vast.noemer }
   }
+  // Alleen kaarten over een aankomend event tonen een telling; analyse en
+  // zelfreview gaan over een gespeeld/gehouden event.
+  const SOORTEN_MET_TELLING: ReadonlySet<KaartSoort> = new Set<KaartSoort>([
+    'training_plan', 'squad', 'lineup', 'lineup_onvolledig', 'volgend_event',
+  ])
+  const hoofdkaartTelling: Telling | null =
+    vandaagModel.hoofdkaart && SOORTEN_MET_TELLING.has(vandaagModel.hoofdkaart.soort)
+      ? tellingVoor(vandaagModel.hoofdkaart.event.id)
+      : null
+
+  // ── Availability for the next event ──
+  // Statussen uit dezelfde map; een gefaalde batch geeft een lege map (alle
+  // spelers 'unknown'), net als voorheen bij een gefaalde hero-query.
+  const heroAttendance: ReadonlyMap<string, AttendanceStatus> =
+    (volgendEvent ? statusPerEvent.get(volgendEvent.id) : undefined) ?? new Map<string, AttendanceStatus>()
 
   // Een afwezige of onbekende gast hoort niet in de Beschikbaarheid-tegel, die
   // er anders een chip "Afwezig"/"nog niet gereageerd" aan hangt. Filteren VÓÓR
@@ -378,10 +451,11 @@ export default async function DashboardPage() {
       injured: p.injured,
     }))
 
-  const heroIsMatch = heroEvent?.type === 'match'
-  const heroTitle = !heroEvent ? '' : heroIsMatch
-    ? `${teamName ? `${teamName} ` : ''}${t.lineup.vsLabel} ${heroEvent.opponent ?? '?'}`
-    : t.event.training
+  // Teksten voor de hoofdkaart (eyebrow, titel, knop) uit het model.
+  const hoofdkaart = vandaagModel.hoofdkaart
+  const hoofdkaartTekst = hoofdkaart
+    ? hoofdkaartTeksten(hoofdkaart, today, opstellingKlaarIds.has(hoofdkaart.event.id), t)
+    : null
 
   return (
     <div className="max-w-2xl lg:max-w-6xl mx-auto px-4 lg:px-8 py-6 lg:py-8 flex flex-col gap-5">
@@ -394,36 +468,40 @@ export default async function DashboardPage() {
           staat alleen vanaf md: op mobiel neemt de contextuele FAB hem over. */}
       <PageHeader
         eyebrow={dateLine}
-        title={<><Begroeting labels={begroetingLabels} nonce={nonce} /> 👋</>}
+        title={<><Begroeting labels={begroetingLabels} /> 👋</>}
         actions={canEdit(ctx, 'agenda') ? (
           <LinkButton href="/events/new" icon="add" className="max-md:hidden">{t.home.newEvent}</LinkButton>
         ) : undefined}
       />
 
-      {heroEvent ? (
-        <DashboardHero
-          event={heroEvent}
-          kind={heroIsMatch ? 'match' : 'training'}
-          title={heroTitle}
-          t={t}
-          present={hero.present}
-          absent={hero.absent}
-          injured={hero.injured}
-          squadSize={hero.squadSize}
-          primaryHref={heroIsMatch ? `/events/${heroEvent.id}/lineup` : `/events/${heroEvent.id}/training-plan`}
-          primaryLabel={heroIsMatch ? t.home.makeLineup : t.home.makeTrainingPlan}
-          primaryIcon={heroIsMatch ? 'sports' : 'assignment'}
-          secondaryHref={`/events/${heroEvent.id}`}
-          secondaryLabel={t.home.viewEvent}
-        />
-      ) : (
-        <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
-          <span className="ms text-[40px] text-faint">calendar_month</span>
-          <p className="text-ink font-bold">{t.home.empty}</p>
-          <p className="text-faint text-sm">{t.home.emptyHint}</p>
-          <LinkButton href="/events/new" icon="add" className="mt-1">{t.home.newEvent}</LinkButton>
-        </div>
-      )}
+      {/* Vandaag-rij: hoofdkaart (of de lege staat) met rechts, vanaf lg, de
+          weekregels. Zelfde DOM-volgorde op mobiel en desktop. */}
+      <div className={`grid grid-cols-1 gap-4 items-start ${vandaagModel.regels.length > 0 ? 'lg:grid-cols-[1.6fr_1fr]' : ''}`}>
+        {hoofdkaart && hoofdkaartEvent && hoofdkaartTekst ? (
+          <DashboardHero
+            event={hoofdkaartEvent}
+            vandaag={today}
+            eyebrow={hoofdkaartTekst.eyebrow}
+            tone={hoofdkaartTekst.tone}
+            title={hoofdkaartTekst.title}
+            t={t}
+            telling={hoofdkaartTelling}
+            primaryHref={hoofdkaart.href}
+            primaryLabel={hoofdkaartTekst.primaryLabel}
+            primaryIcon={hoofdkaartTekst.primaryIcon}
+            secondaryHref={`/events/${hoofdkaart.event.id}`}
+            secondaryLabel={t.home.viewEvent}
+          />
+        ) : (
+          <div className="surface-card p-10 text-center flex flex-col items-center gap-3">
+            <span className="ms text-[40px] text-faint">calendar_month</span>
+            <p className="text-ink font-bold">{t.home.empty}</p>
+            <p className="text-faint text-sm">{t.home.emptyHint}</p>
+            <LinkButton href="/events/new" icon="add" className="mt-1">{t.home.newEvent}</LinkButton>
+          </div>
+        )}
+        <WeekRegels regels={vandaagModel.regels} vandaag={today} t={t} />
+      </div>
 
       {/* Beslissing-eerst-volgorde (mobiel én desktop dezelfde DOM-volgorde):
           eerst de open taken, dan pas de kengetallen — het dashboard is een
@@ -434,6 +512,7 @@ export default async function DashboardPage() {
         <div className="flex flex-col gap-4 min-w-0">
           <TodoList
             items={todoItems}
+            vandaag={today}
             canEditTask={{
               training_plan: canEdit(ctx, 'training'),
               self_review: canEdit(ctx, 'training'),
@@ -499,7 +578,7 @@ export default async function DashboardPage() {
                 ? <FormStrip items={recentForm} t={t} />
                 : <span className="text-[13px] font-semibold text-faint">{t.home.formEmpty}</span>
             } />
-            <NextMatch match={nextMatch} t={t} />
+            <NextMatch match={nextMatch} t={t} vandaag={today} />
           </div>
         </div>
 
