@@ -1355,6 +1355,12 @@ describe('6.7 — dubbel indienen', () => {
     expect(document.body.textContent).not.toContain('RAW_DB_DETAIL')
     expect(db.tegendoelpunten).toEqual([])
     kapot = false
+    // De foutmelding wordt binnen de transitie gezet en kan dus al zichtbaar
+    // zijn terwijl de knop nog disabled is (isPending). Een gebruiker kan dan
+    // niet klikken; de test wacht daarom, net als de gebruiker, tot de knop
+    // weer bruikbaar is. Zonder deze wachtstap viel de retry-klik soms op een
+    // disabled knop en faalde de test willekeurig.
+    await waitFor(() => expect(toevoegKnop()).toBeEnabled())
     fireEvent.click(toevoegKnop())
     await waitFor(() => expect(rijenIn(db)).toHaveLength(1))
     expect(h.inserts).toHaveLength(2)

@@ -446,23 +446,31 @@ function sheetNotesInput(): HTMLTextAreaElement {
 // inzichten.acceptance.test.tsx:1148/1645/1795): tijdelijk naar echte timers,
 // en na afloop de vaste testklok (TODAY) herstellen zodat een eventuele
 // VOLGENDE render weer dezelfde vaste "vandaag" gebruikt.
-async function saveSheetAndWaitFor(check: () => void) {
+//
+// Alleen de TIMERS worden echt; Date blijft op TODAY staan (metEchteTimers).
+// Met een volledig echte klok ziet een server action tijdens het wachten de
+// échte datum van de testrun — precies de tijdbom waardoor de
+// cyclusweek-correctie-acceptatietest na zijn bouwweek altijd rood werd.
+async function metEchteTimers(fn: () => void, check: () => void) {
   vi.useRealTimers()
-  fireEvent.click(screen.getByText(nl.periodization.save))
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
+  fn()
   await waitFor(check)
+  vi.useRealTimers()
   vi.useFakeTimers()
   vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
+}
+
+async function saveSheetAndWaitFor(check: () => void) {
+  await metEchteTimers(() => fireEvent.click(screen.getByText(nl.periodization.save)), check)
 }
 
 // Generieke variant van saveSheetAndWaitFor hierboven, voor elke klik buiten
 // de sheet (bv. de verwijderknop in de geschiedenis) die op een server-actie
 // wacht. Zelfde reden voor de tijdelijke overstap naar echte timers.
 async function clickAndWaitFor(el: HTMLElement, check: () => void) {
-  vi.useRealTimers()
-  fireEvent.click(el)
-  await waitFor(check)
-  vi.useFakeTimers()
-  vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
+  await metEchteTimers(() => fireEvent.click(el), check)
 }
 
 // ═══════════════════════════════════════════════════════════════════════

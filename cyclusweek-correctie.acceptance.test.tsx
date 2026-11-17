@@ -321,12 +321,19 @@ function sheetStepInput(): HTMLInputElement {
 }
 
 // RTL's waitFor-polling werkt niet betrouwbaar onder vi.useFakeTimers()
-// (zelfde reden als nulmeting-per-onderdeel.acceptance.test.tsx:400-410):
-// tijdelijk naar echte timers, en na afloop de vaste testklok herstellen.
+// (zelfde reden als de nulmeting-per-onderdeel-acceptatietest): tijdelijk
+// echte timers. Maar ALLEEN de timers: Date blijft op de vaste testdag staan.
+// Met een volledig echte klok sloeg de server action de correctie op met de
+// échte datum van de testrun (correctiedatum ná TODAY), waardoor de correctie
+// bij het herladen niet meetelde — deze test slaagde daardoor alleen in de
+// dagen rond TODAY en faalde daarna altijd.
 async function withRealTimers(fn: () => void, check: () => void) {
   vi.useRealTimers()
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
   fn()
   await waitFor(check)
+  vi.useRealTimers()
   vi.useFakeTimers()
   vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
 }
