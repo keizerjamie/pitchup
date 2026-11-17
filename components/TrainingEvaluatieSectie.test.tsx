@@ -83,16 +83,16 @@ describe('TrainingEvaluatieSectie', () => {
   it('vijf ankerlabels staan in de juiste cellen en zitten in de aria-label', () => {
     renderSectie()
     const ankers = e.rpeAnkers as Record<string, string>
-    for (const n of [1, 3, 5, 7, 10]) {
+    for (const n of [1, 3, 6, 8, 10]) {
       const knop = rpeKnop(n)
       expect(knop).toHaveAttribute('aria-label', `RPE ${n} – ${ankers[String(n)]}`)
       expect(knop.parentElement).toHaveTextContent(ankers[String(n)])
     }
-    for (const n of [2, 4, 6, 8, 9]) {
+    for (const n of [2, 4, 5, 7, 9]) {
       expect(rpeKnop(n)).toHaveAttribute('aria-label', `RPE ${n}`)
       expect(rpeKnop(n).parentElement!.querySelector('span')).toBeNull()
     }
-    expect(Object.keys(ankers)).toEqual(['1', '3', '5', '7', '10'])
+    expect(Object.keys(ankers)).toEqual(['1', '3', '6', '8', '10'])
   })
 
   it('een tik op 7 roept saveTrainingRpe(id, 7) aan, selecteert en toont "saved"', async () => {
@@ -228,9 +228,9 @@ describe('TrainingEvaluatieSectie', () => {
   })
 
   it('canEdit=false: alleen tekst, geen knoppen (R.6/O.5)', () => {
-    renderSectie({ canEdit: false, initial: { rpe: 7, oordeel: 'nee' } })
+    renderSectie({ canEdit: false, initial: { rpe: 8, oordeel: 'nee' } })
     expect(screen.queryAllByRole('button')).toHaveLength(0)
-    expect(screen.getByText(`RPE 7 · ${(e.rpeAnkers as Record<string, string>)['7']}`)).toBeInTheDocument()
+    expect(screen.getByText(`RPE 8 · ${(e.rpeAnkers as Record<string, string>)['8']}`)).toBeInTheDocument()
     expect(screen.getByText(e.oordeelNee)).toBeInTheDocument()
   })
 

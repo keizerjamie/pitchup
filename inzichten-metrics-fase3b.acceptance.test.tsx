@@ -791,10 +791,10 @@ describe('AC-R.6 / AC-O.5 (R4) — zonder recht "training" alleen lezen; assiste
   const ZONDER_TRAINING = assistent({ mag_spelers_bewerken: true, mag_aanwezigheid_bewerken: true, mag_agenda_bewerken: true })
 
   it('AC-R.6 / O.5: lezer ziet RPE en oordeel als tekst, zonder knoppen of velden', async () => {
-    const db = eventDb({ team_members: ZONDER_TRAINING as Row[], training_evaluaties: [stamEv(EV.past, 7, 'deels')] })
+    const db = eventDb({ team_members: ZONDER_TRAINING as Row[], training_evaluaties: [stamEv(EV.past, 8, 'deels')] })
     setup(db, { userId: 'user-a' })
     await openEvent(EV.past)
-    expect(SEC().getByText(`${e.rpeWaarde.replace('{n}', '7')} · ${(e.rpeAnkers as Record<string, string>)['7']}`)).toBeInTheDocument()
+    expect(SEC().getByText(`${e.rpeWaarde.replace('{n}', '8')} · ${(e.rpeAnkers as Record<string, string>)['8']}`)).toBeInTheDocument()
     expect(SEC().getByText(e.oordeelDeels)).toBeInTheDocument()
     expect(SEC().queryAllByRole('button')).toHaveLength(0)
     expect(SEC().queryAllByRole('textbox')).toHaveLength(0)
@@ -1338,19 +1338,19 @@ describe('AC-A13 — zonder migratie: trainingspagina bruikbaar, alleen de nieuw
   })
 })
 
-describe('AC-A6 / R.12 — teksten in 5 talen; ankerlabels bij 1, 3, 5, 7 en 10', () => {
+describe('AC-A6 / R.12 — teksten in 5 talen; ankerlabels bij 1, 3, 6, 8 en 10', () => {
   const ANKERS: Record<string, string[]> = {
-    nl: ['zeer licht', 'gemiddeld', 'zwaar', 'zeer zwaar', 'maximaal'],
-    en: ['very light', 'moderate', 'hard', 'very hard', 'maximal'],
-    de: ['sehr leicht', 'mittel', 'schwer', 'sehr schwer', 'maximal'],
-    es: ['muy ligero', 'moderado', 'duro', 'muy duro', 'máximo'],
-    fr: ['très léger', 'modéré', 'difficile', 'très difficile', 'maximal'],
+    nl: ['zeer licht', 'licht', 'gemiddeld', 'zwaar', 'extreem'],
+    en: ['very light', 'light', 'moderate', 'hard', 'extreme'],
+    de: ['sehr leicht', 'leicht', 'mittel', 'schwer', 'extrem'],
+    es: ['muy ligero', 'ligero', 'moderado', 'duro', 'extremo'],
+    fr: ['très léger', 'léger', 'modéré', 'difficile', 'extrême'],
   }
-  it.each(Object.keys(ANKERS))('R.12 (%s): precies vijf ankerlabels (1, 3, 5, 7, 10) in de juiste cellen; de aria-label van de knop bevat het anker', async (taal) => {
+  it.each(Object.keys(ANKERS))('R.12 (%s): precies vijf ankerlabels (1, 3, 6, 8, 10) in de juiste cellen; de aria-label van de knop bevat het anker', async (taal) => {
     setup(eventDb())
     await openEvent(EV.past, taal)
     const d = dicts[taal]
-    const ankerNummers = [1, 3, 5, 7, 10]
+    const ankerNummers = [1, 3, 6, 8, 10]
     ankerNummers.forEach((n, idx) => {
       const knop = rpeKnop(n, d)
       expect(knop).toHaveAttribute('aria-label', `${d.event.rpeWaarde.replace('{n}', String(n))} – ${ANKERS[taal][idx]}`)
@@ -1359,7 +1359,7 @@ describe('AC-A6 / R.12 — teksten in 5 talen; ankerlabels bij 1, 3, 5, 7 en 10'
       expect(within(cel).getByText(ANKERS[taal][idx])).toBeInTheDocument()
       expect(within(cel).getByText(ANKERS[taal][idx])).toHaveAttribute('aria-hidden', 'true')
     })
-    for (const n of [2, 4, 6, 8, 9]) {
+    for (const n of [2, 4, 5, 7, 9]) {
       expect(rpeKnop(n, d)).toHaveAttribute('aria-label', d.event.rpeWaarde.replace('{n}', String(n)))
       expect(rpeKnop(n, d).parentElement!.querySelectorAll('span')).toHaveLength(0)
     }
@@ -1404,7 +1404,7 @@ describe('AC-A6 / R.12 — teksten in 5 talen; ankerlabels bij 1, 3, 5, 7 en 10'
       // Ja/Deels/Nee: bewust gelijk aan kolomJa/Deels/Nee (afwijking 2), maar wel gevuld en onderling verschillend.
       expect(new Set([d.event.oordeelJa, d.event.oordeelDeels, d.event.oordeelNee]).size).toBe(3)
       expect([d.event.oordeelJa, d.event.oordeelDeels, d.event.oordeelNee]).toEqual([d.insights.kolomJa, d.insights.kolomDeels, d.insights.kolomNee])
-      expect(Object.keys(d.event.rpeAnkers as object).sort()).toEqual(['1', '10', '3', '5', '7'])
+      expect(Object.keys(d.event.rpeAnkers as object).sort()).toEqual(['1', '10', '3', '6', '8'])
     }
   })
 

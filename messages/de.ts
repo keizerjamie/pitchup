@@ -179,7 +179,7 @@ export const de: Dict = {
     evaluatieUitleg: 'Halte fest, wie anstrengend das Training war und ob das Ziel erreicht wurde. Ab morgen in Einblicke sichtbar.',
     rpeLabel: 'Empfundene Anstrengung (RPE)',
     rpeUitleg: 'Deine Einschätzung für die Gruppe, von 1 bis 10.',
-    rpeAnkers: { '1': 'sehr leicht', '3': 'mittel', '5': 'schwer', '7': 'sehr schwer', '10': 'maximal' },
+    rpeAnkers: { '1': 'sehr leicht', '3': 'leicht', '6': 'mittel', '8': 'schwer', '10': 'extrem' },
     rpeWaarde: 'RPE {n}',
     rpeNietIngevuld: 'Noch kein RPE',
     rpeWissen: 'RPE löschen',

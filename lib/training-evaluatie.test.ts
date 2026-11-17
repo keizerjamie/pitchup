@@ -12,7 +12,7 @@ import {
 describe('constanten', () => {
   it('schaal 1..10 met vijf ankers (R7) en drie oordelen', () => {
     expect([RPE_MIN, RPE_MAX]).toEqual([1, 10])
-    expect([...RPE_ANKERS]).toEqual([1, 3, 5, 7, 10])
+    expect([...RPE_ANKERS]).toEqual([1, 3, 6, 8, 10])
     expect([...TRAINING_OORDELEN]).toEqual(['ja', 'deels', 'nee'])
     for (const anker of RPE_ANKERS) expect(isValidRpe(anker)).toBe(true)
   })

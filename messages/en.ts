@@ -222,7 +222,7 @@ export const en: Dict = {
     evaluatieUitleg: 'Record how hard the session felt and whether the goal was met. It shows on Insights from tomorrow.',
     rpeLabel: 'Perceived exertion (RPE)',
     rpeUitleg: 'Your estimate for the group, from 1 to 10.',
-    rpeAnkers: { '1': 'very light', '3': 'moderate', '5': 'hard', '7': 'very hard', '10': 'maximal' },
+    rpeAnkers: { '1': 'very light', '3': 'light', '6': 'moderate', '8': 'hard', '10': 'extreme' },
     rpeWaarde: 'RPE {n}',
     rpeNietIngevuld: 'No RPE yet',
     rpeWissen: 'Clear RPE',

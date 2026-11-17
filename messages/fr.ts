@@ -180,7 +180,7 @@ export const fr: Dict = {
     evaluatieUitleg: 'Note la difficulté ressentie et si l\'objectif est atteint. Visible dans Statistiques dès demain.',
     rpeLabel: 'Effort perçu (RPE)',
     rpeUitleg: 'Ton estimation pour le groupe, de 1 à 10.',
-    rpeAnkers: { '1': 'très léger', '3': 'modéré', '5': 'difficile', '7': 'très difficile', '10': 'maximal' },
+    rpeAnkers: { '1': 'très léger', '3': 'léger', '6': 'modéré', '8': 'difficile', '10': 'extrême' },
     rpeWaarde: 'RPE {n}',
     rpeNietIngevuld: 'Pas encore de RPE',
     rpeWissen: 'Effacer le RPE',

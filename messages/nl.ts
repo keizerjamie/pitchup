@@ -222,7 +222,7 @@ export const nl = {
     evaluatieUitleg: 'Leg vast hoe zwaar de training voelde en of de doelstelling is behaald. Je ziet het vanaf morgen terug op Inzichten.',
     rpeLabel: 'Ervaren inspanning (RPE)',
     rpeUitleg: 'Jouw inschatting voor de groep, van 1 tot 10.',
-    rpeAnkers: { '1': 'zeer licht', '3': 'gemiddeld', '5': 'zwaar', '7': 'zeer zwaar', '10': 'maximaal' },
+    rpeAnkers: { '1': 'zeer licht', '3': 'licht', '6': 'gemiddeld', '8': 'zwaar', '10': 'extreem' },
     rpeWaarde: 'RPE {n}',
     rpeNietIngevuld: 'Nog geen RPE',
     rpeWissen: 'RPE wissen',
