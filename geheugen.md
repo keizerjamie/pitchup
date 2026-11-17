@@ -4685,3 +4685,9 @@ Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-
   `aanwezigheid-volgorde.acceptance.test.tsx` (33, AC1–AC14). Eindrun 7763 groen; rood alleen cyclusweek AC1/AC12 (ook op schone
   main) + flaky inzichten-metrics AC-6.7 / TrainerZelfreviewSectie serverfout (los groen).
 - **Open:** niet in de browser gecontroleerd; iPhone-rooktest door Jamie (met en zonder gasten).
+
+## Wijziging: RPE-ankerlabels (2026-11-17, `d5b5e17`, live)
+- `RPE_ANKERS` (`lib/training-evaluatie.ts`) = `[1, 3, 6, 8, 10]` met labels zeer licht / licht / gemiddeld / zwaar / extreem
+  (`event.rpeAnkers`, 5 talen). 2/4/5/7/9 zonder label. Keuze Jamie; wijkt bewust af van Borg CR-10 (3 = gemiddeld, 5 = zwaar).
+- Alleen weergave: opgeslagen RPE-waarden en sRPE ongewijzigd. Tests die ankers vastleggen: `lib/training-evaluatie.test.ts`,
+  `components/TrainingEvaluatieSectie.test.tsx`, `inzichten-metrics-fase3b.acceptance.test.tsx` (R.12 + keys-check).
