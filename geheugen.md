@@ -4705,3 +4705,17 @@ Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-
   "Account aanmaken" in de HTML, maar `DictProvider` (`app/layout.tsx`) zet het hele woordenboek in de RSC-payload. Scherm toont
   alleen de neutrale melding. Check moet op gerenderde DOM i.p.v. ruwe HTML.
 - **Checks bij de update:** typecheck/lint/build groen; suite 7763 groen, rood alleen bekende cyclusweek AC1/AC12 + flaky AC-6.7.
+
+## Onderhoud: rode tests opgelost (2026-11-17, `ed1bd6f`, live)
+- **cyclusweek-correctie AC1/AC12 was een tijdbom in de test, geen appfout.** `withRealTimers` zette tijdens het opslaan een
+  volledig echte klok aan; de server action sloeg de correctie op met de échte datum van de testrun (ná TODAY), waardoor hij bij
+  herladen niet meetelde. Rood sinds de bouwweek, ook op `22bf804`. Fix: `vi.useFakeTimers({ toFake: ['Date'] })` +
+  `setSystemTime(TODAY)` tijdens het wachten, dus alleen timers echt. Zelfde patroon preventief in `nulmeting-per-onderdeel`
+  (`metEchteTimers`).
+- **Regel voor nieuwe tests:** nooit een kale `vi.useRealTimers()` midden in een test waarin daarna nog een server action of
+  render een datum gebruikt; altijd Date vast laten staan.
+- **inzichten-metrics AC-6.7 was een race in de test.** De foutmelding van `TegendoelpuntenSectie` wordt binnen de transitie gezet
+  en kan zichtbaar zijn terwijl `isPending` de knop nog uitschakelt; de directe retry-klik viel dan soms op een disabled knop.
+  Fix: `await waitFor(() => expect(toevoegKnop()).toBeEnabled())` vóór de retry. Daarna 15/15 groen.
+- **Stand:** volledige suite 3× achter elkaar 272/272 bestanden, 8115 tests groen (gemeten mét de toen nog ongecommitte privacy-akkoord-feature in de werkboom). "Bekend rood" bestaat niet meer: elke rode
+  test is vanaf nu een echte regressie.
