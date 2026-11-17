@@ -4664,3 +4664,24 @@ Via feature-factory; ketenmap `~/.claude/projects/-Users-jamiekeizer--claude/ff-
   ingeklapte `<details>` vergt `hidden: true`. (5) messages-wijziging → dev-server herstarten (weer gecrasht: `stapBeschikbaar`).
 - **Browsergeverifieerd** (CSW 2, 1440×900 + 375×812, niets opgeslagen). **Open:** iPhone-rooktest door Jamie (bank-sheet,
   verlaten-blad, minutenkolommen), dark mode visueel.
+
+## Feature: Volgorde aanwezigheidslijst — eerst spelers, dan gasten, vaste positievolgorde (2026-11-17, `5a0c623`, live)
+- **Wat:** `TrainingAttendance` (event-pagina, training én wedstrijd = stap Beschikbaar) toont twee blokken: kop "Spelers"
+  (`t.players.title`, hergebruikt) en "Gastspelers" (`t.event.attendanceGuestsHeading`, nieuw in 5 talen). Kop van een leeg blok
+  verschijnt nooit (ook "Spelers" niet bij alleen gasten). Koppen zijn `<h3>` met de PlayerList-kopklassen; geen telling.
+- **Sortering:** pure helper `lib/aanwezigheid-volgorde.ts` → `sorteerAanwezigheidslijst(players, locale)` geeft `{ vast, gasten }`
+  (`type === 'guest'` → gasten). Comparator: index in `AANWEZIGHEID_POSITIE_VOLGORDE` (Keeper, Rechtsachter, Centrale verdediger,
+  Linksachter, Defensieve mid, Centrale mid, Aanvallende mid, Rechtsmiddenvelder, Linksmiddenvelder, Rechtsbuiten, Spits,
+  Linksbuiten) → `name.localeCompare(locale)` → `id`. Onbekende positie achteraan. Alleen `position`; `secondary_positions` en
+  `jersey_number` tellen niet. In de component via `useMemo` op `[players, t.browserLocale]` — **nooit op status**, anders
+  springen rijen bij aanvinken (`useRijOpslag`).
+- **Bewust niet:** `POSITIONS` (`lib/types.ts`) niet gewijzigd — andere volgorde, gebruikt door Inzichten-positiedekking. Andere
+  lijsten (selectie, spelerslijst, trainingsplan-printlijst, PDF, opstelling, dashboard) houden hun volgorde. Query in
+  `app/events/[id]/page.tsx` ongewijzigd (incl. `.order('position')`, nu niet meer leidend). Geen gast-badge in de rij.
+- **Testcontract:** rij-DOM ongewijzigd (`attendanceRowFor` klimt 2 niveaus, `rijVan` zoekt `div.flex.items-center.gap-3`) →
+  kop-wrapper gebruikt `gap-2`, nooit `gap-3`. AC13-test in `aanwezigheid-volgorde.acceptance.test.tsx` leunt op de DB-volgorde
+  van de trainingsplan-printlijst; verandert die bewust, dan test mee.
+- **Tests:** `lib/aanwezigheid-volgorde.test.ts` (16), 7 nieuwe in `components/TrainingAttendance.test.tsx`,
+  `aanwezigheid-volgorde.acceptance.test.tsx` (33, AC1–AC14). Eindrun 7763 groen; rood alleen cyclusweek AC1/AC12 (ook op schone
+  main) + flaky inzichten-metrics AC-6.7 / TrainerZelfreviewSectie serverfout (los groen).
+- **Open:** niet in de browser gecontroleerd; iPhone-rooktest door Jamie (met en zonder gasten).
