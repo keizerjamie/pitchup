@@ -227,7 +227,7 @@ export const es: Dict = {
     analysis: 'Análisis del partido', analysisHint: 'Resultado, valoraciones y eventos', analysisCta: '¡Rellenar análisis!',
     analysisAfterMatch: 'Disponible después del partido',
     analysisView: 'Ver análisis del partido', analysisViewHint: 'El análisis está completo',
-    attendance: 'Asistencia', markAllPresent: 'Todos presentes', attendanceSaveError: "No se pudo guardar la asistencia. Inténtalo de nuevo.", deleteEvent: 'Eliminar evento',
+    attendance: 'Asistencia', markAllPresent: 'Todos presentes', attendanceSaveError: "No se pudo guardar la asistencia. Inténtalo de nuevo.", attendanceGuestsHeading: "Jugadores invitados", deleteEvent: 'Eliminar evento',
     editEvent: 'Editar',
     editTitleTraining: 'Editar entrenamiento',
     editTitleMatch: 'Editar partido',

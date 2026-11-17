@@ -227,7 +227,7 @@ export const fr: Dict = {
     analysis: 'Analyse du match', analysisHint: 'Résultat, évaluations et événements', analysisCta: "Remplir l'analyse !",
     analysisAfterMatch: 'Disponible après le match',
     analysisView: "Voir l'analyse du match", analysisViewHint: "L'analyse est remplie",
-    attendance: 'Présences', markAllPresent: 'Tous présents', attendanceSaveError: "L'enregistrement de la présence a échoué. Veuillez réessayer.", deleteEvent: "Supprimer l'événement",
+    attendance: 'Présences', markAllPresent: 'Tous présents', attendanceSaveError: "L'enregistrement de la présence a échoué. Veuillez réessayer.", attendanceGuestsHeading: "Joueurs invités", deleteEvent: "Supprimer l'événement",
     editEvent: 'Modifier',
     editTitleTraining: "Modifier l'entraînement",
     editTitleMatch: 'Modifier le match',

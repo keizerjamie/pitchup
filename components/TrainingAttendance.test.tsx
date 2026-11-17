@@ -388,3 +388,67 @@ describe('TrainingAttendance — lange spelersnaam', () => {
     expect(attendanceRowFor(naam).lastElementChild?.className).toContain('flex-shrink-0')
   })
 })
+
+// Volgorde in twee blokken (Spelers / Gastspelers): positie → naam, los van status.
+describe('TrainingAttendance — volgorde en blokken', () => {
+  const namenInDom = () =>
+    screen.getAllByText(/^(Keeper|Back|Spits|Gast) /).map((el) => el.textContent)
+  const koppen = () => screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
+
+  const mix = () => [
+    makePlayer('s1', 'regular', { name: 'Spits Zed', position: 'Spits' }),
+    makePlayer('g1', 'guest', { name: 'Gast B', position: 'Keeper' }),
+    makePlayer('k1', 'regular', { name: 'Keeper Bo', position: 'Keeper' }),
+    makePlayer('k2', 'regular', { name: 'Keeper Al', position: 'Keeper', jersey_number: 99 }),
+    makePlayer('b1', 'regular', { name: 'Back Cor', position: 'Rechtsachter' }),
+    makePlayer('g2', 'guest', { name: 'Gast A', position: 'Spits' }),
+  ]
+
+  it('toont eerst vaste spelers (positie, dan naam), daarna gasten, met koppen in die volgorde', () => {
+    renderAttendance(mix(), {})
+    expect(namenInDom()).toEqual(['Keeper Al', 'Keeper Bo', 'Back Cor', 'Spits Zed', 'Gast B', 'Gast A'])
+    expect(koppen()).toEqual([nl.players.title, nl.event.attendanceGuestsHeading])
+  })
+
+  it('zonder gasten geen gastkop', () => {
+    renderAttendance(mix().filter((p) => p.type === 'regular'), {})
+    expect(koppen()).toEqual([nl.players.title])
+  })
+
+  it('alleen gasten: geen spelerskop', () => {
+    renderAttendance(mix().filter((p) => p.type === 'guest'), {})
+    expect(koppen()).toEqual([nl.event.attendanceGuestsHeading])
+  })
+
+  it('een afwezige gast blijft zichtbaar onder de gastkop', () => {
+    renderAttendance(mix(), { g1: 'absent' })
+    expect(screen.getByText('Gast B')).toBeInTheDocument()
+  })
+
+  it('volgorde blijft gelijk na een statusklik en na "Iedereen aanwezig"', () => {
+    renderAttendance(mix(), {})
+    const voor = namenInDom()
+    fireEvent.click(within(attendanceRowFor('Spits Zed')).getAllByRole('button')[1])
+    expect(namenInDom()).toEqual(voor)
+    fireEvent.click(screen.getByRole('button', { name: nl.event.markAllPresent }))
+    expect(namenInDom()).toEqual(voor)
+  })
+
+  it('"Iedereen aanwezig" telt beide blokken mee', () => {
+    renderAttendance(mix(), {})
+    fireEvent.click(screen.getByRole('button', { name: nl.event.markAllPresent }))
+    expect(statValue(nl.event.presentStat)).toBe('6')
+    expect(statValue(nl.event.unknownStat)).toBe('0')
+  })
+
+  it('rerender met nieuwe initialStatuses geeft dezelfde volgorde', () => {
+    const players = mix()
+    const view = (s: Record<string, AttendanceStatus>) => (
+      <DictProvider dict={nl}><TrainingAttendance eventId="e1" players={players} initialStatuses={s} canEdit /></DictProvider>
+    )
+    const { rerender } = render(view({}))
+    const voor = namenInDom()
+    rerender(view({ s1: 'present', g2: 'absent', k1: 'injured' }))
+    expect(namenInDom()).toEqual(voor)
+  })
+})

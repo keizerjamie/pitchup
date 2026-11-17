@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { updateAttendance, markAllPresent } from '@/app/actions/attendance'
 import { AttendanceStatus, Player, POSITION_ABBREVIATIONS } from '@/lib/types'
 import { useDict } from '@/lib/i18n-context'
 import { telAanwezigheid } from '@/lib/aanwezigheid-telling'
+import { sorteerAanwezigheidslijst } from '@/lib/aanwezigheid-volgorde'
 import { useRijOpslag } from '@/lib/use-rij-opslag'
 
 const AVATAR_BG = ['#16a34a', '#14655c', '#0d3d38', '#1a6b63', '#0f766e', '#15803d']
@@ -44,6 +45,12 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
     synchroniseer(initialStatuses)
   }
 
+  // Vaste volgorde per blok (positie → naam → id), los van de statussen.
+  const { vast, gasten } = useMemo(
+    () => sorteerAanwezigheidslijst(players, t.browserLocale),
+    [players, t.browserLocale],
+  )
+
   function setStatus(playerId: string, status: AttendanceStatus) {
     // Clicking the active button again clears back to "unknown".
     const next: AttendanceStatus = (statuses[playerId] ?? 'unknown') === status ? 'unknown' : status
@@ -66,6 +73,62 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
         <p className="text-faint text-sm">
           <Link href="/players/new" className="text-brand-accent font-bold">{t.players.add}</Link>
         </p>
+      </div>
+    )
+  }
+
+  function renderBlok(kop: string, blok: Player[]) {
+    if (blok.length === 0) return null
+    return (
+      <div className="flex flex-col gap-2.5">
+        <div className="flex items-center gap-2 px-1">
+          <h3 className="text-[11.5px] font-extrabold uppercase tracking-wider text-faint">{kop}</h3>
+        </div>
+        <div className="surface-card overflow-hidden">
+          {blok.map((player, i) => {
+            const s = statuses[player.id] ?? 'unknown'
+            return (
+              <div key={player.id} className="flex items-center gap-3 px-4 py-2.5"
+                style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[13px] font-bold font-display flex-shrink-0"
+                  style={{ background: avatarBg(player.name) }} aria-hidden="true">
+                  {initialsOf(player.name)}
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col leading-tight">
+                  <span className="text-[14.5px] font-bold text-ink break-words [overflow-wrap:anywhere]">{player.name}</span>
+                  <span className="text-[12px] font-semibold text-faint">
+                    {player.jersey_number != null ? `#${player.jersey_number} · ` : ''}
+                    {POSITION_ABBREVIATIONS[player.position] ?? player.position}
+                  </span>
+                </div>
+                <div className="flex gap-2 [--hit-slop-gap:8px] flex-shrink-0">
+                  {canEdit ? (
+                    <>
+                      <StatusButton
+                        active={s === 'present'} onClick={() => setStatus(player.id, 'present')} disabled={bulkOnderweg}
+                        icon="check" label={t.event.presentStat} activeBg="var(--primary)" />
+                      <StatusButton
+                        active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={bulkOnderweg}
+                        icon="close" label={t.event.absentStat} activeBg="#dc2626" />
+                      <StatusButton
+                        active={s === 'injured'} onClick={() => setStatus(player.id, 'injured')} disabled={bulkOnderweg}
+                        icon="healing" label={t.event.injuredStat} activeBg="var(--danger)" />
+                    </>
+                  ) : (
+                    // Read-only: alleen de huidige status als badge, geen
+                    // klikbare knoppen zonder Aanwezigheid-recht.
+                    <span
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                      style={{ background: s === 'present' ? 'var(--primary)' : s === 'absent' ? '#dc2626' : s === 'injured' ? 'var(--danger)' : 'var(--faint)' }}
+                    >
+                      {s === 'present' ? t.event.presentStat : s === 'absent' ? t.event.absentStat : s === 'injured' ? t.event.injuredStat : t.event.unknownStat}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     )
   }
@@ -135,51 +198,8 @@ export default function TrainingAttendance({ eventId, players, initialStatuses, 
       )}
 
       {/* Player rows */}
-      <div className="surface-card overflow-hidden">
-        {players.map((player, i) => {
-          const s = statuses[player.id] ?? 'unknown'
-          return (
-            <div key={player.id} className="flex items-center gap-3 px-4 py-2.5"
-              style={i > 0 ? { borderTop: '1px solid var(--border-soft)' } : undefined}>
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-[13px] font-bold font-display flex-shrink-0"
-                style={{ background: avatarBg(player.name) }} aria-hidden="true">
-                {initialsOf(player.name)}
-              </div>
-              <div className="flex-1 min-w-0 flex flex-col leading-tight">
-                <span className="text-[14.5px] font-bold text-ink break-words [overflow-wrap:anywhere]">{player.name}</span>
-                <span className="text-[12px] font-semibold text-faint">
-                  {player.jersey_number != null ? `#${player.jersey_number} · ` : ''}
-                  {POSITION_ABBREVIATIONS[player.position] ?? player.position}
-                </span>
-              </div>
-              <div className="flex gap-2 [--hit-slop-gap:8px] flex-shrink-0">
-                {canEdit ? (
-                  <>
-                    <StatusButton
-                      active={s === 'present'} onClick={() => setStatus(player.id, 'present')} disabled={bulkOnderweg}
-                      icon="check" label={t.event.presentStat} activeBg="var(--primary)" />
-                    <StatusButton
-                      active={s === 'absent'} onClick={() => setStatus(player.id, 'absent')} disabled={bulkOnderweg}
-                      icon="close" label={t.event.absentStat} activeBg="#dc2626" />
-                    <StatusButton
-                      active={s === 'injured'} onClick={() => setStatus(player.id, 'injured')} disabled={bulkOnderweg}
-                      icon="healing" label={t.event.injuredStat} activeBg="var(--danger)" />
-                  </>
-                ) : (
-                  // Read-only: alleen de huidige status als badge, geen
-                  // klikbare knoppen zonder Aanwezigheid-recht.
-                  <span
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                    style={{ background: s === 'present' ? 'var(--primary)' : s === 'absent' ? '#dc2626' : s === 'injured' ? 'var(--danger)' : 'var(--faint)' }}
-                  >
-                    {s === 'present' ? t.event.presentStat : s === 'absent' ? t.event.absentStat : s === 'injured' ? t.event.injuredStat : t.event.unknownStat}
-                  </span>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      {renderBlok(t.players.title, vast)}
+      {renderBlok(t.event.attendanceGuestsHeading, gasten)}
     </div>
   )
 }

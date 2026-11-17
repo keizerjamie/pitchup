@@ -226,7 +226,7 @@ export const de: Dict = {
     analysis: 'Spielanalyse', analysisHint: 'Ergebnis, Bewertungen und Ereignisse', analysisCta: 'Analyse ausfüllen!',
     analysisAfterMatch: 'Verfügbar nach dem Spiel',
     analysisView: 'Spielanalyse ansehen', analysisViewHint: 'Analyse ist ausgefüllt',
-    attendance: 'Anwesenheit', markAllPresent: 'Alle anwesend', attendanceSaveError: "Speichern der Anwesenheit fehlgeschlagen. Bitte erneut versuchen.", deleteEvent: 'Event löschen',
+    attendance: 'Anwesenheit', markAllPresent: 'Alle anwesend', attendanceSaveError: "Speichern der Anwesenheit fehlgeschlagen. Bitte erneut versuchen.", attendanceGuestsHeading: "Gastspieler", deleteEvent: 'Event löschen',
     editEvent: 'Bearbeiten',
     editTitleTraining: 'Training bearbeiten',
     editTitleMatch: 'Spiel bearbeiten',

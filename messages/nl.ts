@@ -280,7 +280,7 @@ export const nl = {
     analysisViewHint: 'Analyse is ingevuld',
     attendance: 'Aanwezigheid',
     markAllPresent: 'Iedereen aanwezig',
-    attendanceSaveError: "Opslaan van de aanwezigheid is mislukt. Probeer het opnieuw.",
+    attendanceSaveError: "Opslaan van de aanwezigheid is mislukt. Probeer het opnieuw.", attendanceGuestsHeading: "Gastspelers",
     deleteEvent: 'Event verwijderen',
     editEvent: 'Bewerken',
     editTitleTraining: 'Training bewerken',

@@ -280,7 +280,7 @@ export const en: Dict = {
     analysisViewHint: 'Analysis is filled in',
     attendance: 'Attendance',
     markAllPresent: 'Everyone present',
-    attendanceSaveError: "Saving attendance failed. Please try again.",
+    attendanceSaveError: "Saving attendance failed. Please try again.", attendanceGuestsHeading: "Guest players",
     deleteEvent: 'Delete event',
     editEvent: 'Edit',
     editTitleTraining: 'Edit training',
